@@ -1,11 +1,16 @@
 //! Test-only extractor over a tiny line format; keeps engine tests independent of real languages.
 #![allow(dead_code)]
 
+use camino::{Utf8Path, Utf8PathBuf};
+use katalogr_engine::registry::ExtensionRegistry;
+use katalogr_engine::{Consistency, Engine, EventKind, NewEvent, QueryOptions, Scope};
 use katalogr_model::{
     ArtifactName, Confidence, Export, ExportKey, ExtractError, ExtractInput, Extractor, Fragment,
     Id, Link, LinkKind, Name, OutRef, Provenance, RelPath, Segment, Span, SymbolName, SymbolNode,
 };
+use katalogr_store::{Kindex, ProjectConfig, ProjectName, RepoConfig};
 use std::collections::BTreeMap;
+use std::time::{Duration, Instant};
 
 pub struct TestExtractor;
 
@@ -122,4 +127,64 @@ impl Extractor for TestExtractor {
             exports,
         })
     }
+}
+
+/// Create a kindex at `kx` holding project `p` with one repository `r`.
+pub fn init_project(kx: &Utf8Path) {
+    Kindex::init(kx)
+        .unwrap()
+        .create_project(
+            &ProjectName::new("p").unwrap(),
+            ProjectConfig {
+                repos: vec![RepoConfig::new("r")],
+                ..Default::default()
+            },
+        )
+        .unwrap();
+}
+
+/// Open project `p` of the kindex at `kx`, with the test extractor and repository `r` rooted
+/// at `work`.
+pub fn open_engine(kx: &Utf8Path, work: &Utf8Path) -> Engine {
+    let dir = Kindex::open(kx)
+        .unwrap()
+        .project(&ProjectName::new("p").unwrap())
+        .unwrap();
+    let mut reg = ExtensionRegistry::new();
+    reg.register(Box::new(TestExtractor));
+    let roots = BTreeMap::from([("r".to_string(), work.to_path_buf())]);
+    Engine::open(dir, reg, roots, Instant::now() + Duration::from_secs(10)).unwrap()
+}
+
+/// Drain the queue (wait-all) and return the canonical graph.
+pub fn drained_graph(e: &Engine) -> String {
+    let o = QueryOptions {
+        consistency: Consistency::WaitAll,
+        timeout: Duration::from_secs(30),
+        scope: Scope::Project,
+    };
+    let a = e
+        .with_consistency(&o, |tx| katalogr_engine::canonical_graph(tx))
+        .unwrap();
+    assert!(!a.stale, "queue drained");
+    a.value
+}
+
+/// Index everything under the repository root from scratch: a rescan event, then wait-all.
+pub fn full_index(e: &Engine) -> String {
+    e.inbox().append(&NewEvent::rescan("r")).unwrap();
+    drained_graph(e)
+}
+
+/// A fresh kindex under `tmp/<name>`, indexed fully from `work`.
+pub fn fresh_index(tmp: &Utf8Path, name: &str, work: &Utf8Path) -> (Utf8PathBuf, String) {
+    let kx = tmp.join(name);
+    init_project(&kx);
+    let e = open_engine(&kx, work);
+    let g = full_index(&e);
+    (kx, g)
+}
+
+pub fn file_event(path: &str) -> NewEvent {
+    NewEvent::file("r", &RelPath::new(path).unwrap(), EventKind::Changed)
 }

@@ -7,6 +7,10 @@ license.workspace = true
 repository.workspace = true
 rust-version.workspace = true
 
+[features]
+# Test-only crash injection (FEAT-047 section 8).
+failpoints = ["katalogr-store/failpoints"]
+
 [dependencies]
 katalogr-model.workspace = true
 katalogr-store.workspace = true
@@ -20,3 +24,4 @@ sha2.workspace = true
 tempfile.workspace = true
 
 [dev-dependencies]
+proptest.workspace = true

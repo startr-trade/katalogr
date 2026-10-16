@@ -2,6 +2,7 @@
 
 use super::{ChangeEvent, Context, EventKind, NewEvent};
 use crate::error::EngineError;
+use crate::failpoint::fail;
 use camino::{Utf8Path, Utf8PathBuf};
 use katalogr_model::RelPath;
 use katalogr_store::ProjectDir;
@@ -64,6 +65,7 @@ impl Inbox {
         tmp.as_file().sync_all().map_err(io)?;
         tmp.persist(&target)
             .map_err(|e| EngineError::io(&target, e.error))?;
+        fail!("after_inbox_rename");
         sync_dir(&self.dir)?;
         Ok(id)
     }
@@ -112,6 +114,7 @@ impl Inbox {
 
     /// Delete entry files (already ingested). A missing file is fine.
     pub fn remove(&self, files: &[Utf8PathBuf]) -> Result<(), EngineError> {
+        fail!("before_inbox_delete");
         for f in files {
             match std::fs::remove_file(f) {
                 Ok(()) => {}

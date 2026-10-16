@@ -5,6 +5,7 @@
 use super::{ChangeEvent, Context, EventKind, Inbox, Seq};
 use crate::consistency::{Engine, Scope};
 use crate::error::EngineError;
+use crate::failpoint::fail;
 use camino::{Utf8Path, Utf8PathBuf};
 use fs4::FileExt;
 use katalogr_model::{ArtifactName, ExtractInput, Fragment, RelPath};
@@ -124,6 +125,7 @@ impl<'a> Processor<'a> {
             done.push(file);
         }
         tx.commit()?;
+        fail!("after_ingest_commit");
         inbox.remove(&done)?;
         for f in bad {
             inbox.set_aside(&f)?;
@@ -274,6 +276,7 @@ impl<'a> Processor<'a> {
         tx.set_publish_journal(&journal)?;
         let wm = tx.watermark(Context::WORKTREE)?;
         tx.commit()?;
+        fail!("after_publish_commit");
         Ok(Seq(wm))
     }
 

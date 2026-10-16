@@ -43,6 +43,9 @@ jobs:
           toolchain: stable
       - name: cargo test
         run: cargo test --workspace --locked
+      - name: cargo test (failpoints, crash suite)
+        if: matrix.os == 'ubuntu-latest'
+        run: cargo test -p katalogr-engine --features failpoints --locked
 
   no-c:
     # Requirement R-6. Test: ci::builds_without_c_compiler

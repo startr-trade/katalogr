@@ -3,6 +3,8 @@
 pub mod blob;
 pub mod cache;
 pub mod error;
+#[cfg(feature = "failpoints")]
+pub mod failpoint;
 pub mod guard;
 pub mod kindex;
 pub mod marker;

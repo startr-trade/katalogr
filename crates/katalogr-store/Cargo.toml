@@ -7,6 +7,10 @@ license.workspace = true
 repository.workspace = true
 rust-version.workspace = true
 
+[features]
+# Test-only crash injection (FEAT-047 section 8); forwarded from katalogr-engine.
+failpoints = []
+
 [dependencies]
 katalogr-model.workspace = true
 camino.workspace = true

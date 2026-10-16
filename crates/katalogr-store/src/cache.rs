@@ -905,7 +905,8 @@ impl Cache {
         if entries.is_empty() {
             return Ok(0);
         }
-        for (tmp, fin) in &entries {
+        #[cfg_attr(not(feature = "failpoints"), allow(unused_variables))]
+        for (i, (tmp, fin)) in entries.iter().enumerate() {
             let to = dir.root().join(fin);
             if tmp.is_empty() {
                 match std::fs::remove_file(&to) {
@@ -929,7 +930,13 @@ impl Cache {
                     .and_then(|f| f.sync_all())
                     .map_err(|e| StoreError::io(parent, e))?;
             }
+            #[cfg(feature = "failpoints")]
+            if i == 0 {
+                crate::failpoint::hit("mid_renames");
+            }
         }
+        #[cfg(feature = "failpoints")]
+        crate::failpoint::hit("before_journal_clear");
         let mut tx = self.write()?;
         tx.set_publish_journal(&[])?;
         tx.commit()?;
