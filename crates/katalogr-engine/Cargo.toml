@@ -10,3 +10,8 @@ rust-version.workspace = true
 [dependencies]
 katalogr-model.workspace = true
 katalogr-store.workspace = true
+gix = { version = "0.89", default-features = false, features = ["sha1", "revision", "blob-diff"] }
+thiserror = "2.0"
+
+[dev-dependencies]
+tempfile = "3.27"
