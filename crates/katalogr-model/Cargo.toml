@@ -11,3 +11,7 @@ rust-version.workspace = true
 serde.workspace = true
 sha2.workspace = true
 thiserror.workspace = true
+
+[dev-dependencies]
+proptest = "1.12"
+serde_json.workspace = true
