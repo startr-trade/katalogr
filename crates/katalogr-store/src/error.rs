@@ -44,6 +44,14 @@ pub enum StoreError {
     Git(String),
     #[error(transparent)]
     Name(#[from] NameError),
+    #[error("cache is busy: another process holds the database")]
+    Busy,
+    #[error("cache database: {0}")]
+    Db(String),
+    #[error("cache row: {0}")]
+    Row(String),
+    #[error("stitch: {0}")]
+    Stitch(String),
 }
 
 impl StoreError {
