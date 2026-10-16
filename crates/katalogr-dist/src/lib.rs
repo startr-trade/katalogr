@@ -1,18 +1,300 @@
 //! Composition root: the Katalogr facade with extensions registered (ADR-0011).
+//!
+//! All behaviour of the command-line wrapper lives here; the wrapper parses, calls and renders.
 
-/// The katalogr facade. Extensions are registered here; the CLI and other
-/// wrappers talk to the core only through this type.
-pub struct Katalogr;
+mod error;
+mod roots;
+mod setup;
 
-impl Katalogr {
-    /// Creates a facade with no extensions registered yet.
-    pub fn new() -> Self {
-        Katalogr
+pub use error::DistError;
+pub use setup::{ProjectCreated, kindex_init, project_init};
+
+use camino::{Utf8Path, Utf8PathBuf};
+use katalogr_engine::scan::{PathChange, changed_paths};
+use katalogr_engine::{
+    Consistency as EngineConsistency, Engine, EventKind, NewEvent, QueryOptions, Scope,
+    registry::ExtensionRegistry,
+};
+use katalogr_model::RelPath;
+use katalogr_store::marker::{self, Overrides as StoreOverrides};
+use katalogr_store::{Kindex, ProjectDir, ProjectName};
+use std::collections::BTreeMap;
+use std::path::Path;
+use std::time::{Duration, Instant};
+
+/// Seconds to wait for a fresh index when `--timeout` is not given (provisional).
+pub const DEFAULT_TIMEOUT_SECS: f64 = 30.0;
+
+/// Freshness requirement for a read; the wrapper's flag maps onto this.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Consistency {
+    Wait,
+    WaitAll,
+    StaleOk,
+}
+
+impl From<Consistency> for EngineConsistency {
+    fn from(c: Consistency) -> Self {
+        match c {
+            Consistency::Wait => EngineConsistency::Wait,
+            Consistency::WaitAll => EngineConsistency::WaitAll,
+            Consistency::StaleOk => EngineConsistency::StaleOk,
+        }
     }
 }
 
-impl Default for Katalogr {
-    fn default() -> Self {
-        Self::new()
+/// Flag and environment overrides for resolving the kindex and project.
+#[derive(Debug, Clone, Default)]
+pub struct Overrides {
+    pub kindex: Option<String>,
+    pub project: Option<String>,
+}
+
+/// Options for reads. `None` means the command's default.
+#[derive(Debug, Clone, Default)]
+pub struct Options {
+    pub consistency: Option<Consistency>,
+    /// Seconds; may be fractional.
+    pub timeout: Option<f64>,
+}
+
+impl Options {
+    fn timeout(&self) -> Result<Duration, DistError> {
+        let s = self.timeout.unwrap_or(DEFAULT_TIMEOUT_SECS);
+        Duration::try_from_secs_f64(s)
+            .map_err(|_| DistError::usage(format!("invalid --timeout {s}")))
     }
+}
+
+/// What a read saw.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Report {
+    pub watermark: u64,
+    pub pending: u64,
+    pub stale: bool,
+    /// True when the answer is stale although the caller asked to wait (the timeout elapsed).
+    pub timed_out: bool,
+    /// Events appended by this call.
+    pub queued: usize,
+    /// Non-fatal notices (repos skipped because their root is unknown).
+    pub warnings: Vec<String>,
+}
+
+impl Report {
+    /// `{watermark, pending, stale}`.
+    pub fn to_json(&self) -> serde_json::Value {
+        serde_json::json!({
+            "watermark": self.watermark,
+            "pending": self.pending,
+            "stale": self.stale,
+        })
+    }
+}
+
+/// The katalogr facade for one resolved project.
+pub struct Katalogr {
+    project: ProjectDir,
+    /// The repo of the nearest marker, if any.
+    repo: Option<String>,
+    /// Repo name to root on this machine: `roots.yaml`, overridden by the marker for its repo.
+    roots: BTreeMap<String, Utf8PathBuf>,
+}
+
+/// Extension registration point. Register extractors here as they are written; none exist yet.
+fn build_registry() -> ExtensionRegistry {
+    ExtensionRegistry::new()
+}
+
+impl Katalogr {
+    /// Resolve the kindex and project from flags, environment and the nearest `.katalogr`
+    /// marker found walking up from `start_dir`.
+    pub fn resolve(start_dir: &Path, overrides: &Overrides) -> Result<Katalogr, DistError> {
+        let start = setup::absolute(start_dir)?;
+        let kindex = overrides
+            .kindex
+            .as_deref()
+            .map(|k| setup::absolute(Path::new(k)))
+            .transpose()?;
+        let project = overrides
+            .project
+            .as_deref()
+            .map(ProjectName::new)
+            .transpose()?;
+        let r = marker::resolve(&start, &StoreOverrides { kindex, project })?;
+        let project = Kindex::open(&r.kindex)?.project(&r.project)?;
+        let mut roots = roots::read(&project.cache_dir())?;
+        if let (Some(repo), Some(root)) = (&r.repo, &r.repo_root) {
+            roots.insert(repo.clone(), root.clone());
+        }
+        Ok(Katalogr {
+            project,
+            repo: r.repo,
+            roots,
+        })
+    }
+
+    pub fn project(&self) -> &ProjectDir {
+        &self.project
+    }
+
+    /// Record (or replace) the machine-local root of a repo of this project.
+    pub fn add_root(&self, name: &str, path: &Path) -> Result<(), DistError> {
+        if !self.project.config().repos.iter().any(|r| r.name == name) {
+            return Err(DistError::usage(format!(
+                "repo {name} is not part of project {}",
+                self.project.root().file_name().unwrap_or("")
+            )));
+        }
+        let root = setup::absolute(path)?;
+        if !root.is_dir() {
+            return Err(DistError::usage(format!("{root} is not a directory")));
+        }
+        let root = Utf8PathBuf::from_path_buf(
+            std::fs::canonicalize(&root).map_err(|e| DistError::io(&root, e))?,
+        )
+        .map_err(|p| DistError::usage(format!("{}: path is not UTF-8", p.display())))?;
+        let cache = self.project.cache_dir();
+        let mut stored = roots::read(&cache)?;
+        stored.insert(name.to_string(), root);
+        roots::write(&cache, &stored)
+    }
+
+    fn engine(&self, deadline: Instant) -> Result<Engine, DistError> {
+        Ok(Engine::open(
+            self.project.clone(),
+            build_registry(),
+            self.roots.clone(),
+            deadline,
+        )?)
+    }
+
+    fn current(&self) -> Result<(&str, &Utf8Path), DistError> {
+        let repo = self.repo.as_deref().ok_or_else(|| {
+            DistError::usage(
+                "not inside a marked repository: run from a directory with a .katalogr marker",
+            )
+        })?;
+        let root = self.roots.get(repo).ok_or_else(|| unknown_root(repo))?;
+        Ok((repo, root))
+    }
+
+    /// Append one `Changed` (or `Deleted`) event per path to the inbox. Paths are relative to
+    /// the current repo root (absolute paths inside it are accepted). Returns the number queued.
+    pub fn notify(&self, paths: &[String], deleted: bool) -> Result<usize, DistError> {
+        let (repo, root) = self.current()?;
+        let kind = if deleted {
+            EventKind::Deleted
+        } else {
+            EventKind::Changed
+        };
+        let rels = paths
+            .iter()
+            .map(|p| rel_to_root(root, p))
+            .collect::<Result<Vec<_>, _>>()?;
+        let inbox = katalogr_engine::queue::Inbox::new(&self.project);
+        for rel in &rels {
+            inbox.append(&NewEvent::file(repo, rel, kind))?;
+        }
+        Ok(rels.len())
+    }
+
+    /// Read the queue state without ingesting or processing (stale-ok).
+    pub fn status(&self, opts: &Options) -> Result<Report, DistError> {
+        let timeout = opts.timeout()?;
+        let engine = self.engine(Instant::now() + timeout)?;
+        self.read(&engine, Consistency::StaleOk, timeout, 0, Vec::new())
+    }
+
+    /// Queue what changed (a revision range, every repo with `full`, else a rescan of the current
+    /// repo), then bring the index to the requested consistency (default: wait-all).
+    pub fn index(
+        &self,
+        range: Option<String>,
+        full: bool,
+        opts: &Options,
+    ) -> Result<Report, DistError> {
+        let timeout = opts.timeout()?;
+        let engine = self.engine(Instant::now() + timeout)?;
+        let mut warnings = Vec::new();
+        let mut events = Vec::new();
+        if full {
+            for r in &self.project.config().repos {
+                if self.roots.contains_key(&r.name) {
+                    events.push(NewEvent::rescan(&r.name));
+                } else {
+                    warnings.push(unknown_root(&r.name).to_string());
+                }
+            }
+        } else if let Some(range) = range {
+            let (repo, root) = self.current()?;
+            for change in changed_paths(root.as_std_path(), &range)? {
+                match change {
+                    PathChange::Added(p) | PathChange::Modified(p) => {
+                        events.push(NewEvent::file(repo, &p, EventKind::Changed));
+                    }
+                    PathChange::Deleted(p) => {
+                        events.push(NewEvent::file(repo, &p, EventKind::Deleted));
+                    }
+                    PathChange::Renamed { from, to } => {
+                        events.push(NewEvent::file(repo, &from, EventKind::Deleted));
+                        events.push(NewEvent::file(repo, &to, EventKind::Changed));
+                    }
+                }
+            }
+        } else {
+            let (repo, _) = self.current()?;
+            events.push(NewEvent::rescan(repo));
+        }
+        let inbox = engine.inbox();
+        for ev in &events {
+            inbox.append(ev)?;
+        }
+        let consistency = opts.consistency.unwrap_or(Consistency::WaitAll);
+        self.read(&engine, consistency, timeout, events.len(), warnings)
+    }
+
+    fn read(
+        &self,
+        engine: &Engine,
+        consistency: Consistency,
+        timeout: Duration,
+        queued: usize,
+        warnings: Vec<String>,
+    ) -> Result<Report, DistError> {
+        let a = engine.with_consistency(
+            &QueryOptions {
+                consistency: consistency.into(),
+                timeout,
+                scope: Scope::Project,
+            },
+            |_| (),
+        )?;
+        Ok(Report {
+            watermark: a.watermark.0,
+            pending: a.pending,
+            stale: a.stale,
+            timed_out: a.stale && consistency != Consistency::StaleOk,
+            queued,
+            warnings,
+        })
+    }
+}
+
+fn unknown_root(repo: &str) -> DistError {
+    DistError::usage(format!(
+        "{repo}: root unknown on this machine: run `katalogr project add-root {repo} <path>`"
+    ))
+}
+
+fn rel_to_root(root: &Utf8Path, p: &str) -> Result<RelPath, DistError> {
+    let given = Utf8Path::new(p);
+    let rel = if given.is_absolute() {
+        given
+            .strip_prefix(root)
+            .map_err(|_| DistError::usage(format!("{p}: not inside the repo root")))?
+            .as_str()
+    } else {
+        p.strip_prefix("./").unwrap_or(p)
+    };
+    RelPath::new(rel).map_err(|e| DistError::usage(e.to_string()))
 }

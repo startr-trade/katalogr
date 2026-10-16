@@ -1452,8 +1452,10 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
+ "fs4",
  "katalogr-dist",
  "serde_json",
+ "tempfile",
 ]
 
 [[package]]
@@ -1469,7 +1471,14 @@ dependencies = [
 name = "katalogr-dist"
 version = "0.1.0"
 dependencies = [
+ "camino",
  "katalogr-engine",
+ "katalogr-model",
+ "katalogr-store",
+ "serde_json",
+ "serde_yaml_ng",
+ "tempfile",
+ "thiserror",
 ]
 
 [[package]]
@@ -1481,6 +1490,7 @@ dependencies = [
  "gix",
  "katalogr-model",
  "katalogr-store",
+ "proptest",
  "serde",
  "serde_json",
  "sha2",
