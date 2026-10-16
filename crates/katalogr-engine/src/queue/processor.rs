@@ -4,13 +4,14 @@
 
 use super::{ChangeEvent, Context, EventKind, Inbox, Seq};
 use crate::consistency::{Engine, Scope};
+use crate::context;
 use crate::error::EngineError;
 use crate::failpoint::fail;
 use camino::{Utf8Path, Utf8PathBuf};
 use fs4::FileExt;
 use katalogr_model::{ArtifactName, ExtractInput, Fragment, RelPath};
 use katalogr_store::blob::git_blob_id;
-use katalogr_store::{ErrorRow, JournalEntry, PendingKey, Reader};
+use katalogr_store::{ErrorRow, JournalEntry, PendingKey, ReadTx, Reader};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeSet;
 use std::fs::File;
@@ -176,7 +177,9 @@ impl<'a> Processor<'a> {
     ) -> Result<Seq, EngineError> {
         let engine = self.engine;
         let dir = engine.dir();
-        let pending = engine.cache().read()?.pending_entries(None)?;
+        self.refresh_contexts()?;
+        let snap = engine.cache().read()?;
+        let pending = snap.pending_entries(None)?;
         let (mut first, rest): (Vec<_>, Vec<_>) = pending
             .into_iter()
             .partition(|(k, _)| scope.contains(&k.repo, &k.path));
@@ -188,7 +191,7 @@ impl<'a> Processor<'a> {
             if Instant::now() >= deadline && !planned.is_empty() {
                 break;
             }
-            let action = self.plan(&key, seq)?;
+            let action = self.plan(&snap, &key, seq)?;
             planned.push(Planned { key, seq, action });
         }
         if planned.is_empty() {
@@ -280,8 +283,84 @@ impl<'a> Processor<'a> {
         Ok(Seq(wm))
     }
 
+    /// Rebuild the context of every (repo, extension) pair that a queued path touches: the path
+    /// is one of the extension's context files, or the extension handles it and has no stored
+    /// context yet. A changed context is stored, and a rescan of the repo is queued in the same
+    /// transaction, so every handled file is extracted again against it.
+    fn refresh_contexts(&mut self) -> Result<(), EngineError> {
+        let engine = self.engine;
+        let snap = engine.cache().read()?;
+        let mut due: BTreeSet<(String, &'static str)> = BTreeSet::new();
+        for (key, _) in snap.pending_entries(None)? {
+            if !engine.roots().contains_key(&key.repo) {
+                continue;
+            }
+            for ext in engine.registry().extractors() {
+                if !ext.context_files().is_empty() && context::is_context_file(ext, &key.path) {
+                    due.insert((key.repo.clone(), ext.id()));
+                }
+            }
+            if let Some(ext) = engine.registry().for_path(&key.path)
+                && !ext.context_files().is_empty()
+                && snap.ext_context(&key.repo, ext.id())?.is_none()
+            {
+                due.insert((key.repo.clone(), ext.id()));
+            }
+        }
+        if due.is_empty() {
+            return Ok(());
+        }
+        let mut tx = engine.cache().write()?;
+        let mut changed = false;
+        for (repo, id) in due {
+            let Some(ext) = engine.registry().extractors().find(|e| e.id() == id) else {
+                continue;
+            };
+            let Some(bytes) = context::build(engine, &repo, ext)? else {
+                continue;
+            };
+            let new = context::hash(&bytes);
+            let stored = tx.ext_context(&repo, id)?;
+            if stored.as_ref().is_some_and(|(h, _)| *h == new) {
+                continue;
+            }
+            let old = stored.map_or_else(|| context::hash(&[]), |(h, _)| h);
+            tx.put_ext_context(&repo, id, &new, &bytes)?;
+            changed = true;
+            if old != new {
+                let ctx = Context::WORKTREE;
+                let seq = tx.last_seq(ctx)? + 1;
+                tx.set_last_seq(ctx, seq)?;
+                let ev = ChangeEvent {
+                    id: format!("context-{id}-{seq}"),
+                    context: Context::worktree(),
+                    repo: repo.clone(),
+                    path: None,
+                    kind: EventKind::Rescan,
+                };
+                let json =
+                    serde_json::to_vec(&ev).map_err(|e| EngineError::Queue(e.to_string()))?;
+                tx.put_event(ctx, seq, &json)?;
+                for path in self.expand_rescan(&tx, &ev)? {
+                    tx.put_pending(
+                        &PendingKey {
+                            context: ctx.to_string(),
+                            repo: repo.clone(),
+                            path,
+                        },
+                        seq,
+                    )?;
+                }
+            }
+        }
+        if changed {
+            tx.commit()?;
+        }
+        Ok(())
+    }
+
     /// Decide what one queued path needs, from the file's current content.
-    fn plan(&self, key: &PendingKey, seq: u64) -> Result<Action, EngineError> {
+    fn plan(&self, snap: &ReadTx, key: &PendingKey, seq: u64) -> Result<Action, EngineError> {
         let engine = self.engine;
         let dir = engine.dir();
         let Some(root) = engine.roots().get(&key.repo) else {
@@ -301,18 +380,23 @@ impl<'a> Processor<'a> {
                 fin: has_shard.then_some(fin),
             });
         };
-        let revision = git_blob_id(&content);
-        if existing.is_some_and(|f| f.provenance.revision == revision) {
-            return Ok(Action::Skip);
-        }
         let Some(extractor) = engine.registry().for_path(&key.path) else {
             return Ok(Action::Skip);
         };
+        let ctx = snap
+            .ext_context(&key.repo, extractor.id())?
+            .map(|(_, bytes)| bytes)
+            .unwrap_or_default();
+        let revision = context::revision(&git_blob_id(&content), &ctx);
+        if existing.is_some_and(|f| f.provenance.revision == revision) {
+            return Ok(Action::Skip);
+        }
         match extractor.extract(&ExtractInput {
             repo: &key.repo,
             path: &key.path,
             revision: &revision,
             content: &content,
+            context: &ctx,
         }) {
             Ok(fragment) => {
                 let leaf = Utf8Path::new(&fin).file_name().unwrap_or("shard");

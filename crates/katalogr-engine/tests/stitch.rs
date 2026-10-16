@@ -48,6 +48,7 @@ fn extract(path: &str, text: &str) -> Fragment {
             path: &path,
             revision: "ce013625030ba8dba906f756967f9e9ca394464a",
             content: text.as_bytes(),
+            context: &[],
         })
         .unwrap()
 }

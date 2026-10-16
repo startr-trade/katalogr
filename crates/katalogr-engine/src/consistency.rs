@@ -7,7 +7,7 @@ use crate::registry::ExtensionRegistry;
 use crate::stitch::Stitcher;
 use camino::Utf8PathBuf;
 use katalogr_model::RelPath;
-use katalogr_store::{Cache, ProjectDir, ReadTx, Reader};
+use katalogr_store::{Cache, ProjectDir, ReadTx, Reader, RepoConfig};
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::{Duration, Instant};
 
@@ -69,6 +69,8 @@ pub struct Engine {
     registry: ExtensionRegistry,
     stitcher: Stitcher,
     roots: BTreeMap<String, Utf8PathBuf>,
+    /// Per repo `(include, exclude)` globs; a repo not listed uses the defaults.
+    filters: BTreeMap<String, (Vec<String>, Vec<String>)>,
 }
 
 impl Engine {
@@ -88,6 +90,21 @@ impl Engine {
             registry,
             stitcher,
             roots,
+            filters: BTreeMap::new(),
+        })
+    }
+
+    /// Set the include and exclude globs used to list a repo's files (default: those of
+    /// `RepoConfig::new`).
+    pub fn set_repo_filters(&mut self, repo: &str, include: Vec<String>, exclude: Vec<String>) {
+        self.filters.insert(repo.to_string(), (include, exclude));
+    }
+
+    /// The `(include, exclude)` globs of a repo.
+    pub fn repo_filters(&self, repo: &str) -> (Vec<String>, Vec<String>) {
+        self.filters.get(repo).cloned().unwrap_or_else(|| {
+            let d = RepoConfig::new(repo);
+            (d.include, d.exclude)
         })
     }
 

@@ -15,7 +15,8 @@ pub struct Span {
     pub end_col: u32,
 }
 
-/// Where a datum came from. `revision` is a git blob id.
+/// Where a datum came from. `revision` is a git blob id, followed by `+<hex>` when the
+/// extension has a project context.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Provenance {

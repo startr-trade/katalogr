@@ -131,6 +131,13 @@ fn path_key(repo: &str, path: &RelPath) -> Vec<u8> {
     k
 }
 
+fn ext_context_key(repo: &str, extension: &str) -> Vec<u8> {
+    let mut k = Vec::new();
+    lp(&mut k, repo);
+    k.extend_from_slice(extension.as_bytes());
+    k
+}
+
 fn split_lp(b: &[u8]) -> Result<(&str, &[u8]), StoreError> {
     let bad = || StoreError::Row("malformed key".into());
     let len = u32::from_be_bytes(b.get(..4).ok_or_else(bad)?.try_into().unwrap()) as usize;
@@ -260,6 +267,8 @@ fn db<E: Into<redb::Error>>(e: E) -> StoreError {
 
 /// Raw `(key, value)` rows of a table scan.
 pub type RawRows = Vec<(Vec<u8>, Vec<u8>)>;
+/// The SHA-256 and the bytes of an extension context.
+pub type ExtContextRow = ([u8; 32], Vec<u8>);
 /// `(repo, path)` of a shard.
 pub type ShardKey = (String, RelPath);
 
@@ -283,10 +292,11 @@ pub enum TableId {
     Pending,
     Watermark,
     Journal,
+    ExtContext,
 }
 
 impl TableId {
-    const ALL: [TableId; 16] = [
+    const ALL: [TableId; 17] = [
         TableId::Meta,
         TableId::ShardHashes,
         TableId::Artifacts,
@@ -303,6 +313,7 @@ impl TableId {
         TableId::Pending,
         TableId::Watermark,
         TableId::Journal,
+        TableId::ExtContext,
     ];
 
     /// The graph tables, in the order `dump_graph` reports them.
@@ -335,6 +346,7 @@ impl TableId {
             TableId::Pending => "pending",
             TableId::Watermark => "watermark",
             TableId::Journal => "journal",
+            TableId::ExtContext => "ext_context",
         }
     }
 
@@ -590,6 +602,22 @@ pub trait Reader {
             .unwrap_or_default())
     }
 
+    /// The extension context of `(repo, extension id)`: its SHA-256 and its bytes.
+    fn ext_context(
+        &self,
+        repo: &str,
+        extension: &str,
+    ) -> Result<Option<ExtContextRow>, StoreError> {
+        let Some(v) = self.raw_get(TableId::ExtContext, &ext_context_key(repo, extension))? else {
+            return Ok(None);
+        };
+        if v.len() < 32 {
+            return Err(StoreError::Row("bad ext_context row".into()));
+        }
+        let (h, bytes) = v.split_at(32);
+        Ok(Some((h.try_into().expect("32 bytes"), bytes.to_vec())))
+    }
+
     /// Every graph table as raw `(key, value)` rows, in a fixed table order. Two caches built
     /// from the same shards give equal dumps.
     fn dump_graph(&self) -> Result<Vec<(&'static str, RawRows)>, StoreError> {
@@ -787,6 +815,19 @@ impl WriteTx<'_> {
         } else {
             self.put(TableId::Journal, &[], &ser(&entries)?)
         }
+    }
+
+    /// Stores the context of `(repo, extension id)` with its SHA-256.
+    pub fn put_ext_context(
+        &mut self,
+        repo: &str,
+        extension: &str,
+        hash: &[u8; 32],
+        bytes: &[u8],
+    ) -> Result<(), StoreError> {
+        let mut v = hash.to_vec();
+        v.extend_from_slice(bytes);
+        self.put(TableId::ExtContext, &ext_context_key(repo, extension), &v)
     }
 
     pub fn commit(self) -> Result<(), StoreError> {

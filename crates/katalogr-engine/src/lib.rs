@@ -1,5 +1,6 @@
 //! Registry, stitcher, diff-range scanning, change queue and consistency modes (FEAT-001, FEAT-047).
 pub mod consistency;
+pub mod context;
 pub mod error;
 pub mod export;
 pub(crate) mod failpoint;

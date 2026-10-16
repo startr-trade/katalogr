@@ -20,6 +20,8 @@ pub enum EngineError {
         path: String,
         source: std::io::Error,
     },
+    #[error(transparent)]
+    Scan(#[from] crate::scan::ScanError),
     #[error("queue: {0}")]
     Queue(String),
 }

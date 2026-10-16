@@ -25,6 +25,11 @@ impl ExtensionRegistry {
             .map(|e| e.as_ref())
     }
 
+    /// Registered extractors in registration order.
+    pub fn extractors(&self) -> impl Iterator<Item = &dyn Extractor> {
+        self.extractors.iter().map(|e| e.as_ref())
+    }
+
     /// Extension ids in registration order.
     pub fn ids(&self) -> Vec<&'static str> {
         self.extractors.iter().map(|e| e.id()).collect()

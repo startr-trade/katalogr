@@ -35,6 +35,10 @@ pub enum ScanError {
     Diff(String),
     #[error("path `{path}` in the diff is not a valid repo-relative path: {message}")]
     BadPath { path: String, message: String },
+    #[error("cannot read {path}: {message}")]
+    Io { path: String, message: String },
+    #[error("bad glob `{glob}`: {message}")]
+    BadGlob { glob: String, message: String },
 }
 
 /// Paths changed in `range`: either `a..b`, or a single `<rev>` meaning `<rev>..HEAD`.
@@ -132,4 +136,68 @@ fn tree_of<'r>(repo: &'r gix::Repository, rev: &str) -> Result<gix::Tree<'r>, Sc
         .peel_to_commit()
         .map_err(|e| bad(&e))?;
     commit.tree().map_err(|e| bad(&e))
+}
+
+/// Every regular file under `repo_root` (the `.git` directory is never entered, symbolic links
+/// are skipped) whose repo-relative path matches an `include` glob and no `exclude` glob.
+/// Paths that are not UTF-8 or not valid [`RelPath`]s are skipped. Output is sorted by path.
+pub fn list_files(
+    repo_root: &std::path::Path,
+    include: &[String],
+    exclude: &[String],
+) -> Result<Vec<RelPath>, ScanError> {
+    let include = glob_set(include)?;
+    let exclude = glob_set(exclude)?;
+    let mut out = Vec::new();
+    walk(repo_root, "", &include, &exclude, &mut out)?;
+    out.sort();
+    Ok(out)
+}
+
+fn glob_set(globs: &[String]) -> Result<globset::GlobSet, ScanError> {
+    let bad = |glob: &str, e: globset::Error| ScanError::BadGlob {
+        glob: glob.to_string(),
+        message: e.to_string(),
+    };
+    let mut b = globset::GlobSetBuilder::new();
+    for g in globs {
+        b.add(globset::Glob::new(g).map_err(|e| bad(g, e))?);
+    }
+    b.build().map_err(|e| bad("", e))
+}
+
+/// A name no real file is likely to have; used to ask whether a glob excludes a whole directory.
+const DIR_PROBE: &str = "__katalogr_dir_probe__";
+
+fn walk(
+    dir: &std::path::Path,
+    prefix: &str,
+    include: &globset::GlobSet,
+    exclude: &globset::GlobSet,
+    out: &mut Vec<RelPath>,
+) -> Result<(), ScanError> {
+    let io = |e: std::io::Error| ScanError::Io {
+        path: dir.display().to_string(),
+        message: e.to_string(),
+    };
+    for entry in std::fs::read_dir(dir).map_err(io)? {
+        let entry = entry.map_err(io)?;
+        let Some(name) = entry.file_name().to_str().map(str::to_string) else {
+            continue;
+        };
+        let ft = entry.file_type().map_err(io)?;
+        let rel = format!("{prefix}{name}");
+        if ft.is_dir() {
+            if name != ".git" && !exclude.is_match(format!("{rel}/{DIR_PROBE}")) {
+                walk(&entry.path(), &format!("{rel}/"), include, exclude, out)?;
+            }
+        } else if ft.is_file()
+            && include.is_match(&rel)
+            && !exclude.is_match(&rel)
+            && let Ok(p) = RelPath::new(&rel)
+        {
+            out.push(p);
+        }
+    }
+    Ok(())
 }

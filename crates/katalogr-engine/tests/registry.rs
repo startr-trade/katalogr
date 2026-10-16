@@ -44,6 +44,7 @@ mod registry {
             path: &path,
             revision: "rev1",
             content: src.as_bytes(),
+            context: &[],
         };
         assert!(TestExtractor.handles(&path));
         let f = TestExtractor.extract(&input).unwrap();
