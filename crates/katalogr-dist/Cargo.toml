@@ -1,0 +1,11 @@
+[package]
+name = "katalogr-dist"
+description = "Composition root: the Katalogr facade with extensions registered."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+katalogr-engine.workspace = true

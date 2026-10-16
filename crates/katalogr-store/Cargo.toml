@@ -1,0 +1,11 @@
+[package]
+name = "katalogr-store"
+description = "kindex repository, shard codec, path guard and redb cache."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+katalogr-model.workspace = true
