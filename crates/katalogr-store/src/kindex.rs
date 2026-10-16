@@ -313,6 +313,11 @@ impl ProjectDir {
         Ok(p)
     }
 
+    /// The shard bytes `write_shard` would write, with the same guards.
+    pub fn encode_shard(&self, f: &Fragment) -> Result<Vec<u8>, StoreError> {
+        shard::encode_with_root(f, Some(&self.kindex_root))
+    }
+
     /// Sorted `(repo, path)` of every shard on disk.
     pub fn list_shards(&self) -> Result<Vec<(String, RelPath)>, StoreError> {
         let base = self.root.join("shards");

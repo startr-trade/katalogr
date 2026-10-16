@@ -93,6 +93,18 @@ pub struct ErrorRow {
     pub message: String,
 }
 
+/// A queued path: the key of the `pending` table (FEAT-047 section 5).
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct PendingKey {
+    pub context: String,
+    pub repo: String,
+    pub path: RelPath,
+}
+
+/// One publish rename: `(temp, final)`, both relative to the project directory. An empty temp
+/// name means "remove the final file".
+pub type JournalEntry = (String, String);
+
 // ---------------------------------------------------------------- keys
 
 fn lp(out: &mut Vec<u8>, s: &str) {
@@ -130,6 +142,42 @@ fn decode_path_key(b: &[u8]) -> Result<(String, RelPath), StoreError> {
     let (repo, rest) = split_lp(b)?;
     let path = std::str::from_utf8(rest).map_err(|_| StoreError::Row("malformed key".into()))?;
     Ok((repo.to_string(), RelPath::new(path)?))
+}
+
+fn pending_prefix(context: &str) -> Vec<u8> {
+    let mut k = Vec::new();
+    lp(&mut k, context);
+    k
+}
+
+fn pending_key(k: &PendingKey) -> Vec<u8> {
+    let mut out = pending_prefix(&k.context);
+    lp(&mut out, &k.repo);
+    out.extend_from_slice(k.path.as_str().as_bytes());
+    out
+}
+
+fn decode_pending_key(b: &[u8]) -> Result<PendingKey, StoreError> {
+    let (context, rest) = split_lp(b)?;
+    let (repo, rest) = split_lp(rest)?;
+    let path = std::str::from_utf8(rest).map_err(|_| StoreError::Row("malformed key".into()))?;
+    Ok(PendingKey {
+        context: context.to_string(),
+        repo: repo.to_string(),
+        path: RelPath::new(path)?,
+    })
+}
+
+fn event_key(context: &str, seq: u64) -> Vec<u8> {
+    let mut k = pending_prefix(context);
+    k.extend_from_slice(&seq.to_be_bytes());
+    k
+}
+
+fn u64_value(v: Vec<u8>) -> Result<u64, StoreError> {
+    Ok(u64::from_le_bytes(v.try_into().map_err(|_| {
+        StoreError::Row("bad counter value".into())
+    })?))
 }
 
 fn link_prefix(from: Id, kind: &LinkKind) -> Vec<u8> {
@@ -229,10 +277,16 @@ pub enum TableId {
     RefsByKey,
     RefsUnresolved,
     IndexErrors,
+    Seq,
+    Seen,
+    Events,
+    Pending,
+    Watermark,
+    Journal,
 }
 
 impl TableId {
-    const ALL: [TableId; 10] = [
+    const ALL: [TableId; 16] = [
         TableId::Meta,
         TableId::ShardHashes,
         TableId::Artifacts,
@@ -243,6 +297,12 @@ impl TableId {
         TableId::RefsByKey,
         TableId::RefsUnresolved,
         TableId::IndexErrors,
+        TableId::Seq,
+        TableId::Seen,
+        TableId::Events,
+        TableId::Pending,
+        TableId::Watermark,
+        TableId::Journal,
     ];
 
     /// The graph tables, in the order `dump_graph` reports them.
@@ -269,6 +329,12 @@ impl TableId {
             TableId::RefsByKey => "refs_by_key",
             TableId::RefsUnresolved => "refs_unresolved",
             TableId::IndexErrors => "index_errors",
+            TableId::Seq => "seq",
+            TableId::Seen => "seen",
+            TableId::Events => "events",
+            TableId::Pending => "pending",
+            TableId::Watermark => "watermark",
+            TableId::Journal => "journal",
         }
     }
 
@@ -466,6 +532,64 @@ pub trait Reader {
             .unwrap_or_default())
     }
 
+    /// Last sequence number assigned in `context` (0 when none).
+    fn last_seq(&self, context: &str) -> Result<u64, StoreError> {
+        self.raw_get(TableId::Seq, context.as_bytes())?
+            .map_or(Ok(0), u64_value)
+    }
+
+    /// The sequence number an event id was ingested under.
+    fn seen_seq(&self, id: &str) -> Result<Option<u64>, StoreError> {
+        self.raw_get(TableId::Seen, id.as_bytes())?
+            .map(u64_value)
+            .transpose()
+    }
+
+    /// The stored bytes of event `(context, seq)`.
+    fn event_bytes(&self, context: &str, seq: u64) -> Result<Option<Vec<u8>>, StoreError> {
+        self.raw_get(TableId::Events, &event_key(context, seq))
+    }
+
+    /// Number of stored events of one context.
+    fn event_count(&self, context: &str) -> Result<usize, StoreError> {
+        Ok(self
+            .raw_scan(TableId::Events, &pending_prefix(context))?
+            .len())
+    }
+
+    /// The latest sequence number queued for one path.
+    fn pending_seq(&self, key: &PendingKey) -> Result<Option<u64>, StoreError> {
+        self.raw_get(TableId::Pending, &pending_key(key))?
+            .map(u64_value)
+            .transpose()
+    }
+
+    /// Queued paths of one context (`Some`) or of all (`None`), sorted by key, with the latest
+    /// sequence number of each.
+    fn pending_entries(&self, context: Option<&str>) -> Result<Vec<(PendingKey, u64)>, StoreError> {
+        let prefix = context.map(pending_prefix).unwrap_or_default();
+        self.raw_scan(TableId::Pending, &prefix)?
+            .into_iter()
+            .map(|(k, v)| Ok((decode_pending_key(&k)?, u64_value(v)?)))
+            .collect()
+    }
+
+    /// Everything with a sequence number up to this is reflected in the published results
+    /// (0 when nothing was published).
+    fn watermark(&self, context: &str) -> Result<u64, StoreError> {
+        self.raw_get(TableId::Watermark, context.as_bytes())?
+            .map_or(Ok(0), u64_value)
+    }
+
+    /// The renames of a publish that has committed but not yet finished.
+    fn publish_journal(&self) -> Result<Vec<JournalEntry>, StoreError> {
+        Ok(self
+            .raw_get(TableId::Journal, &[])?
+            .map(|v| de(&v))
+            .transpose()?
+            .unwrap_or_default())
+    }
+
     /// Every graph table as raw `(key, value)` rows, in a fixed table order. Two caches built
     /// from the same shards give equal dumps.
     fn dump_graph(&self) -> Result<Vec<(&'static str, RawRows)>, StoreError> {
@@ -616,6 +740,55 @@ impl WriteTx<'_> {
         }
     }
 
+    pub fn set_last_seq(&mut self, context: &str, seq: u64) -> Result<(), StoreError> {
+        self.put(TableId::Seq, context.as_bytes(), &seq.to_le_bytes())
+    }
+
+    pub fn put_seen(&mut self, id: &str, seq: u64) -> Result<(), StoreError> {
+        self.put(TableId::Seen, id.as_bytes(), &seq.to_le_bytes())
+    }
+
+    pub fn put_event(&mut self, context: &str, seq: u64, bytes: &[u8]) -> Result<(), StoreError> {
+        self.put(TableId::Events, &event_key(context, seq), bytes)
+    }
+
+    /// Removes the events of `context` whose sequence number is at or below `upto`.
+    pub fn prune_events(&mut self, context: &str, upto: u64) -> Result<(), StoreError> {
+        let prefix = pending_prefix(context);
+        for (k, _) in self.raw_scan(TableId::Events, &prefix)? {
+            let seq = u64::from_be_bytes(
+                k[prefix.len()..]
+                    .try_into()
+                    .map_err(|_| StoreError::Row("malformed key".into()))?,
+            );
+            if seq <= upto {
+                self.del(TableId::Events, &k)?;
+            }
+        }
+        Ok(())
+    }
+
+    pub fn put_pending(&mut self, key: &PendingKey, seq: u64) -> Result<(), StoreError> {
+        self.put(TableId::Pending, &pending_key(key), &seq.to_le_bytes())
+    }
+
+    pub fn remove_pending(&mut self, key: &PendingKey) -> Result<(), StoreError> {
+        self.del(TableId::Pending, &pending_key(key))
+    }
+
+    pub fn set_watermark(&mut self, context: &str, seq: u64) -> Result<(), StoreError> {
+        self.put(TableId::Watermark, context.as_bytes(), &seq.to_le_bytes())
+    }
+
+    /// An empty list clears the journal.
+    pub fn set_publish_journal(&mut self, entries: &[JournalEntry]) -> Result<(), StoreError> {
+        if entries.is_empty() {
+            self.del(TableId::Journal, &[])
+        } else {
+            self.put(TableId::Journal, &[], &ser(&entries)?)
+        }
+    }
+
     pub fn commit(self) -> Result<(), StoreError> {
         self.txn.commit().map_err(db)
     }
@@ -704,6 +877,8 @@ impl Cache {
             db: database,
             report: SyncReport::default(),
         };
+        // An interrupted publish is finished before the shards are compared with the hashes.
+        cache.replay_journal(dir)?;
         cache.report = cache.sync(dir, stitch, deadline)?;
         Ok(cache)
     }
@@ -720,6 +895,45 @@ impl Cache {
             txn: self.db.begin_write().map_err(db)?,
             _cache: PhantomData,
         })
+    }
+
+    /// Finish an interrupted publish (FEAT-047, ADR-0014): for each journal entry, rename the
+    /// temp file onto the final name when the temp file still exists (an empty temp name removes
+    /// the final file), fsync, then clear the journal. Idempotent. Returns the entries handled.
+    pub fn replay_journal(&self, dir: &ProjectDir) -> Result<usize, StoreError> {
+        let entries = self.read()?.publish_journal()?;
+        if entries.is_empty() {
+            return Ok(0);
+        }
+        for (tmp, fin) in &entries {
+            let to = dir.root().join(fin);
+            if tmp.is_empty() {
+                match std::fs::remove_file(&to) {
+                    Ok(()) => {}
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(e) => return Err(StoreError::io(&to, e)),
+                }
+            } else {
+                let from = dir.root().join(tmp);
+                if from.exists() {
+                    std::fs::File::open(&from)
+                        .and_then(|f| f.sync_all())
+                        .map_err(|e| StoreError::io(&from, e))?;
+                    std::fs::rename(&from, &to).map_err(|e| StoreError::io(&from, e))?;
+                }
+            }
+            if let Some(parent) = to.parent()
+                && parent.is_dir()
+            {
+                std::fs::File::open(parent)
+                    .and_then(|f| f.sync_all())
+                    .map_err(|e| StoreError::io(parent, e))?;
+            }
+        }
+        let mut tx = self.write()?;
+        tx.set_publish_journal(&[])?;
+        tx.commit()?;
+        Ok(entries.len())
     }
 
     /// What the last `open_or_rebuild` did.

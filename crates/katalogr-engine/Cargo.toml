@@ -12,7 +12,11 @@ katalogr-model.workspace = true
 katalogr-store.workspace = true
 gix = { version = "0.89", default-features = false, features = ["sha1", "revision", "blob-diff"] }
 thiserror = "2.0"
+camino.workspace = true
+fs4.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+tempfile.workspace = true
 
 [dev-dependencies]
-camino.workspace = true
-tempfile = "3.27"

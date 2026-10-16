@@ -15,4 +15,20 @@ pub enum EngineError {
         existing: String,
         new: String,
     },
+    #[error("{path}: {source}")]
+    Io {
+        path: String,
+        source: std::io::Error,
+    },
+    #[error("queue: {0}")]
+    Queue(String),
+}
+
+impl EngineError {
+    pub(crate) fn io(path: impl std::fmt::Display, source: std::io::Error) -> EngineError {
+        EngineError::Io {
+            path: path.to_string(),
+            source,
+        }
+    }
 }
