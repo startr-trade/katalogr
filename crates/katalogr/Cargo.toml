@@ -6,6 +6,7 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 rust-version.workspace = true
+build = "build.rs"
 
 [[bin]]
 name = "katalogr"
@@ -13,3 +14,6 @@ path = "src/main.rs"
 
 [dependencies]
 katalogr-dist.workspace = true
+anyhow.workspace = true
+clap.workspace = true
+serde_json.workspace = true
