@@ -1,0 +1,3 @@
+# kanbanr: this folder's project and where its board lives (relative to this file)
+project: katalogr
+data_dir: ../katalogr.kanbanr
