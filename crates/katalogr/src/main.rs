@@ -3,6 +3,7 @@
 mod cli;
 mod cmd;
 mod exit;
+mod render;
 
 use clap::{CommandFactory, Parser};
 use katalogr_dist::DistError;
@@ -18,6 +19,11 @@ fn run(cli: &Cli) -> Result<ExitCode, DistError> {
         Some(Command::Index { since, range, full }) => {
             cmd::index::run(cli, since.as_ref(), range.as_ref(), *full)
         }
+        Some(Command::Find { text }) => cmd::find::run(cli, text),
+        Some(Command::Refs { text }) => cmd::refs::run(cli, text),
+        Some(Command::Callers { text, depth }) => cmd::callers::run(cli, text, *depth),
+        Some(Command::Why { location }) => cmd::why::run(cli, location),
+        Some(Command::Map) => cmd::map::run(cli),
         None => {
             // `--version` and `--help` are handled by clap and exit 0 before this.
             Cli::command().print_help().expect("write help to stdout");

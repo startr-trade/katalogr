@@ -19,5 +19,7 @@ clap.workspace = true
 serde_json.workspace = true
 
 [dev-dependencies]
+# The `.tx` test extractor gives integration tests symbols to query.
+katalogr-dist = { workspace = true, features = ["test-extractor"] }
 tempfile.workspace = true
 fs4.workspace = true

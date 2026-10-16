@@ -46,6 +46,10 @@ pub struct Cli {
     #[arg(long, global = true, value_name = "SECONDS")]
     pub timeout: Option<f64>,
 
+    /// Limit query output to about this many tokens (estimated as characters / 4).
+    #[arg(long, global = true, value_name = "TOKENS")]
+    pub budget: Option<u64>,
+
     #[command(subcommand)]
     pub command: Option<Command>,
 }
@@ -71,6 +75,31 @@ pub enum Command {
         #[arg(required = true)]
         paths: Vec<String>,
     },
+    /// List symbols whose name matches the text.
+    Find {
+        /// Canonical name, or part of a plain name.
+        text: String,
+    },
+    /// List what references a symbol, including through re-exports.
+    Refs {
+        /// Canonical name or plain name.
+        text: String,
+    },
+    /// List the callers of a symbol.
+    Callers {
+        /// Canonical name or plain name.
+        text: String,
+        /// How many call hops to follow.
+        #[arg(long, default_value_t = 1, value_name = "N")]
+        depth: u32,
+    },
+    /// Show the symbol at a line and the rationale linked to it.
+    Why {
+        /// `FILE:LINE`, with FILE relative to the repository root.
+        location: String,
+    },
+    /// Outline the project: symbols by how often they are referenced.
+    Map,
     /// Queue changes and bring the index up to date.
     Index {
         /// Index changes since this revision (up to HEAD).
