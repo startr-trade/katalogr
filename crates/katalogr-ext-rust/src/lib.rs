@@ -1,7 +1,13 @@
 //! Rust extension (FEAT-005, ADR-0015): syntax level plus module and import resolution, with
 //! the workspace structure taken from the repository's `Cargo.toml` files.
 
+pub mod bindings;
+pub mod calls;
 pub mod context;
+pub mod extract;
+pub mod impls;
+pub mod items;
+pub mod lines;
 pub mod manifest;
 pub mod ownership;
 
@@ -22,7 +28,7 @@ impl Extractor for RustExtractor {
     }
 
     fn context_files(&self) -> &'static [&'static str] {
-        &[context::MANIFEST]
+        &[context::MANIFEST, context::LIB_FILE, context::MAIN_FILE]
     }
 
     fn patterns(&self) -> &'static [&'static str] {
@@ -48,9 +54,7 @@ impl Extractor for RustExtractor {
         if input.path.as_str().rsplit('/').next() == Some(context::MANIFEST) {
             manifest::extract(input)
         } else {
-            Err(ExtractError::Unsupported(
-                "Rust source extraction is not implemented yet".to_string(),
-            ))
+            extract::extract(input)
         }
     }
 }

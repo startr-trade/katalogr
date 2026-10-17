@@ -93,12 +93,41 @@ pub fn owner_of<'a>(ctx: &'a WorkspaceContext, path: &RelPath) -> Owner<'a> {
             };
         }
     }
-    // 3. The directory of a target root (`src/` for lib and main): the longest one wins, and
-    //    on a tie the first target (the lib).
+    // 3. A non-root file under `src/` (amendment 1, the exact rule): lib if `src/lib.rs`
+    //    exists, else bin if `src/main.rs` exists, else an orphan.
+    if let Some(inside) = under(rel, "src") {
+        let pick = |kind: TargetKind, root: &str, fallback: &str| {
+            let name = krate
+                .targets
+                .iter()
+                .find(|t| t.kind == kind && t.root == root)
+                .map_or(fallback, |t| t.name.as_str());
+            target(kind, name)
+        };
+        let found = if krate.has_lib {
+            Some(pick(TargetKind::Lib, "src/lib.rs", &krate.lib_name))
+        } else if krate.has_main {
+            Some(pick(TargetKind::Bin, "src/main.rs", &krate.name))
+        } else {
+            None
+        };
+        if let Some(t) = found {
+            return Owner {
+                krate: Some(krate),
+                target: t,
+                module: module_of(inside),
+                orphan: false,
+            };
+        }
+        return orphan(Some(krate), full);
+    }
+    // 4. Beside a target root declared outside `src/` (`[lib] path`, `[[bin]] path`): the
+    //    longest such root directory wins, and on a tie the first target (the lib).
     let mut best: Option<(&str, &crate::context::Target)> = None;
     for t in &krate.targets {
         let root_dir = parent_dir(&t.root);
         if !root_dir.is_empty()
+            && root_dir != "src"
             && under(rel, root_dir).is_some()
             && best.is_none_or(|(d, _)| root_dir.len() > d.len())
         {
@@ -144,6 +173,20 @@ path = "src/cli.rs"
 "#;
         let sub = "[package]\nname = \"sub\"\n";
         context::build(&[
+            (RelPath::new("src/lib.rs").unwrap(), Vec::new()),
+            (RelPath::new("crates/sub/src/lib.rs").unwrap(), Vec::new()),
+            (
+                RelPath::new("crates/bin-only/src/main.rs").unwrap(),
+                Vec::new(),
+            ),
+            (
+                RelPath::new("crates/bin-only/Cargo.toml").unwrap(),
+                b"[package]\nname = \"bin-only\"\n".to_vec(),
+            ),
+            (
+                RelPath::new("crates/none/Cargo.toml").unwrap(),
+                b"[package]\nname = \"none\"\n".to_vec(),
+            ),
             (
                 RelPath::new("Cargo.toml").unwrap(),
                 root.as_bytes().to_vec(),
@@ -274,6 +317,20 @@ path = "src/cli.rs"
                 "x::y".into(),
                 false
             )
+        );
+        // the exact rule: no lib.rs but a main.rs -> bin; neither -> orphan
+        assert_eq!(
+            own(&c, "crates/bin-only/src/x.rs"),
+            (
+                Some("crates/bin-only".into()),
+                t(TargetKind::Bin, "bin-only"),
+                "x".into(),
+                false
+            )
+        );
+        assert_eq!(
+            own(&c, "crates/none/src/x.rs"),
+            (Some("crates/none".into()), None, "x".into(), true)
         );
         // orphans: outside every target, and outside every crate
         assert_eq!(

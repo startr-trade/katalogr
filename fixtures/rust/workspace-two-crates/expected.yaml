@@ -1,0 +1,9 @@
+mode: exact
+symbols:
+  - "fx:crates/app/Cargo.toml#crate:app"
+  - "fx:crates/app/src/main.rs#fn:main"
+  - "fx:crates/core-lib/Cargo.toml#crate:core-lib"
+  - "fx:crates/core-lib/src/lib.rs#fn:greeting"
+links:
+  - { from: "fx:crates/app/Cargo.toml#crate:app", kind: depends-on, to: "fx:crates/core-lib/Cargo.toml#crate:core-lib", confidence: extracted }
+  - { from: "fx:crates/app/src/main.rs#fn:main", kind: calls, to: "fx:crates/core-lib/src/lib.rs#fn:greeting", confidence: extracted }

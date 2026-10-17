@@ -79,6 +79,13 @@ pub fn extract(input: &ExtractInput) -> Result<Fragment, ExtractError> {
             },
             target: id,
         });
+        exports.push(Export {
+            key: ExportKey {
+                namespace: NS_PACKAGE.to_string(),
+                key: info.name.clone(),
+            },
+            target: id,
+        });
         for dep in &info.deps {
             let candidate = match &dep.path {
                 Some(p) => ExportKey {

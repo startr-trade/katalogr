@@ -1,0 +1,35 @@
+mode: exact
+symbols:
+  - "fx:Cargo.toml#crate:impls"
+  - "fx:src/lib.rs#impl:Circle"
+  - "fx:src/lib.rs#impl:Circle/fn:new"
+  - "fx:src/lib.rs#impl:Shape%20for%20Circle"
+  - "fx:src/lib.rs#impl:Shape%20for%20Circle/fn:area"
+  - "fx:src/lib.rs#impl:Shape%20for%20Wrapper<T>"
+  - "fx:src/lib.rs#impl:Shape%20for%20Wrapper<T>/fn:area"
+  - "fx:src/lib.rs#impl:crate%3A%3Atraits%3A%3ANamed%20for%20Circle"
+  - "fx:src/lib.rs#impl:fmt%3A%3ADisplay%20for%20Circle"
+  - "fx:src/lib.rs#impl:fmt%3A%3ADisplay%20for%20Circle/fn:fmt"
+  - "fx:src/lib.rs#mod:traits"
+  - "fx:src/lib.rs#struct:Circle"
+  - "fx:src/lib.rs#struct:Wrapper"
+  - "fx:src/traits.rs#trait:Named"
+  - "fx:src/traits.rs#trait:Named/fn:label"
+  - "fx:src/traits.rs#trait:Shape"
+  - "fx:src/traits.rs#trait:Shape/fn:area"
+links:
+  - { from: "fx:src/lib.rs#impl:Circle", kind: contains, to: "fx:src/lib.rs#impl:Circle/fn:new", confidence: extracted }
+  - { from: "fx:src/lib.rs#impl:Circle", kind: implements-for, to: "fx:src/lib.rs#struct:Circle", confidence: extracted }
+  - { from: "fx:src/lib.rs#impl:Shape%20for%20Circle", kind: contains, to: "fx:src/lib.rs#impl:Shape%20for%20Circle/fn:area", confidence: extracted }
+  - { from: "fx:src/lib.rs#impl:Shape%20for%20Circle", kind: implements, to: "fx:src/traits.rs#trait:Shape", confidence: extracted }
+  - { from: "fx:src/lib.rs#impl:Shape%20for%20Circle", kind: implements-for, to: "fx:src/lib.rs#struct:Circle", confidence: extracted }
+  - { from: "fx:src/lib.rs#impl:Shape%20for%20Wrapper<T>", kind: contains, to: "fx:src/lib.rs#impl:Shape%20for%20Wrapper<T>/fn:area", confidence: extracted }
+  - { from: "fx:src/lib.rs#impl:Shape%20for%20Wrapper<T>", kind: implements, to: "fx:src/traits.rs#trait:Shape", confidence: extracted }
+  - { from: "fx:src/lib.rs#impl:Shape%20for%20Wrapper<T>", kind: implements-for, to: "fx:src/lib.rs#struct:Wrapper", confidence: extracted }
+  - { from: "fx:src/lib.rs#impl:crate%3A%3Atraits%3A%3ANamed%20for%20Circle", kind: implements, to: "fx:src/traits.rs#trait:Named", confidence: extracted }
+  - { from: "fx:src/lib.rs#impl:crate%3A%3Atraits%3A%3ANamed%20for%20Circle", kind: implements-for, to: "fx:src/lib.rs#struct:Circle", confidence: extracted }
+  - { from: "fx:src/lib.rs#impl:fmt%3A%3ADisplay%20for%20Circle", kind: contains, to: "fx:src/lib.rs#impl:fmt%3A%3ADisplay%20for%20Circle/fn:fmt", confidence: extracted }
+  - { from: "fx:src/lib.rs#impl:fmt%3A%3ADisplay%20for%20Circle", kind: implements-for, to: "fx:src/lib.rs#struct:Circle", confidence: extracted }
+  - { from: "fx:src/lib.rs#mod:traits", kind: declares, to: "fx:src/traits.rs", confidence: extracted }
+  - { from: "fx:src/traits.rs#trait:Named", kind: contains, to: "fx:src/traits.rs#trait:Named/fn:label", confidence: extracted }
+  - { from: "fx:src/traits.rs#trait:Shape", kind: contains, to: "fx:src/traits.rs#trait:Shape/fn:area", confidence: extracted }

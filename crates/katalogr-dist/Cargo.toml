@@ -9,6 +9,7 @@ rust-version.workspace = true
 
 [dependencies]
 katalogr-engine.workspace = true
+katalogr-ext-rust.workspace = true
 katalogr-model.workspace = true
 katalogr-store.workspace = true
 camino.workspace = true

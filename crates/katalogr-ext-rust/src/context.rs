@@ -8,6 +8,9 @@ use toml::{Table, Value};
 
 /// File name of a manifest.
 pub const MANIFEST: &str = "Cargo.toml";
+/// File names whose existence (not content) shapes the target rule.
+pub const LIB_FILE: &str = "lib.rs";
+pub const MAIN_FILE: &str = "main.rs";
 
 /// All crates of a repository. Serialised as compact JSON with sorted keys and sorted vectors,
 /// so equal workspaces give equal bytes.
@@ -24,6 +27,10 @@ pub struct CrateInfo {
     pub deps: Vec<Dep>,
     /// Repo-relative, `/`-separated; empty for a crate at the repository root.
     pub dir: String,
+    /// True when `<dir>/src/lib.rs` exists (existence only; its content is not part of the context).
+    pub has_lib: bool,
+    /// True when `<dir>/src/main.rs` exists.
+    pub has_main: bool,
     /// `[lib] name`, else the package name with `-` replaced by `_`.
     pub lib_name: String,
     /// The package name.
@@ -141,6 +148,7 @@ pub fn join_norm(base: &str, rel: &str) -> Option<String> {
 /// skipped, so one broken manifest never hides the others.
 pub fn build(files: &[(RelPath, Vec<u8>)]) -> WorkspaceContext {
     let mut manifests: BTreeMap<String, Table> = BTreeMap::new();
+    let present: std::collections::BTreeSet<&str> = files.iter().map(|(p, _)| p.as_str()).collect();
     for (path, bytes) in files {
         let p = path.as_str();
         if p.rsplit('/').next() != Some(MANIFEST) {
@@ -157,7 +165,10 @@ pub fn build(files: &[(RelPath, Vec<u8>)]) -> WorkspaceContext {
     let mut crates = Vec::new();
     for (dir, doc) in &manifests {
         let ws = workspace_for(dir, &manifests);
-        if let Some(c) = crate_from(dir, doc, ws) {
+        if let Some(mut c) = crate_from(dir, doc, ws) {
+            let at = |f: &str| join_norm(dir, &format!("src/{f}")).unwrap_or_default();
+            c.has_lib = present.contains(at(LIB_FILE).as_str());
+            c.has_main = present.contains(at(MAIN_FILE).as_str());
             crates.push(c);
         }
     }
@@ -230,6 +241,8 @@ pub fn crate_from(dir: &str, doc: &Table, ws: Option<(&str, Option<&Table>)>) ->
     Some(CrateInfo {
         deps: deps_of(dir, doc, ws),
         dir: dir.to_string(),
+        has_lib: false,
+        has_main: false,
         lib_name,
         name,
         targets,

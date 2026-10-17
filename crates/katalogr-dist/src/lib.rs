@@ -100,9 +100,11 @@ pub struct Katalogr {
     roots: BTreeMap<String, Utf8PathBuf>,
 }
 
-/// Extension registration point. Register extractors here as they are written; none exist yet.
+/// Extension registration point. Register extractors here as they are written.
 fn build_registry() -> ExtensionRegistry {
-    ExtensionRegistry::new()
+    let mut registry = ExtensionRegistry::new();
+    registry.register(Box::new(katalogr_ext_rust::RustExtractor));
+    registry
 }
 
 impl Katalogr {
@@ -160,12 +162,16 @@ impl Katalogr {
     }
 
     fn engine(&self, deadline: Instant) -> Result<Engine, DistError> {
-        Ok(Engine::open(
+        let mut engine = Engine::open(
             self.project.clone(),
             build_registry(),
             self.roots.clone(),
             deadline,
-        )?)
+        )?;
+        for repo in &self.project.config().repos {
+            engine.set_repo_filters(&repo.name, repo.include.clone(), repo.exclude.clone());
+        }
+        Ok(engine)
     }
 
     fn current(&self) -> Result<(&str, &Utf8Path), DistError> {
