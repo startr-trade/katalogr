@@ -1520,11 +1520,13 @@ dependencies = [
 name = "katalogr-query"
 version = "0.1.0"
 dependencies = [
+ "camino",
  "katalogr-model",
  "katalogr-store",
  "schemars",
  "serde",
  "serde_json",
+ "tempfile",
 ]
 
 [[package]]

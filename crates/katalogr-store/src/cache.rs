@@ -457,6 +457,20 @@ pub trait Reader {
             .collect()
     }
 
+    /// Number of links arriving at each target, all kinds, from one scan of `links_in`. A symbol
+    /// with no incoming link is absent.
+    fn in_degrees(&self) -> Result<BTreeMap<Id, u64>, StoreError> {
+        let mut out: BTreeMap<Id, u64> = BTreeMap::new();
+        for (key, _) in self.raw_scan(TableId::LinksIn, &[])? {
+            let target: [u8; 16] = key
+                .get(..16)
+                .and_then(|b| b.try_into().ok())
+                .ok_or_else(|| StoreError::Row("malformed key".into()))?;
+            *out.entry(Id(target)).or_default() += 1;
+        }
+        Ok(out)
+    }
+
     /// Keys of the links arriving at `to` (each is a `from -> to` link, reported in link direction).
     fn links_in(&self, to: Id) -> Result<Vec<LinkKey>, StoreError> {
         self.raw_scan(TableId::LinksIn, &to.0)?
