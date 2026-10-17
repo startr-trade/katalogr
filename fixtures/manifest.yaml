@@ -1,0 +1,10 @@
+technologies:
+  test:
+    refs-ambiguous:
+      - test/refs-ambiguous
+    refs-resolve:
+      - test/refs-resolve
+    refs-unresolved:
+      - test/refs-unresolved
+    symbols:
+      - test/symbols

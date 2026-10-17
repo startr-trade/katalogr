@@ -1481,6 +1481,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "katalogr-acceptance"
+version = "0.1.0"
+dependencies = [
+ "camino",
+ "katalogr-engine",
+ "katalogr-model",
+ "katalogr-store",
+ "serde",
+ "serde_json",
+ "serde_yaml_ng",
+ "sha2",
+ "tempfile",
+ "thiserror",
+]
+
+[[package]]
 name = "katalogr-archtest"
 version = "0.1.0"
 dependencies = [

@@ -1,0 +1,7 @@
+mode: exact
+symbols:
+  - "fx:lib.tx#fn:alpha"
+  - "fx:lib.tx#fn:alpha~2"
+  - "fx:lib.tx#struct:Widget"
+links:
+  - { from: "fx:lib.tx#struct:Widget", kind: contains, to: "fx:lib.tx#fn:alpha", confidence: Extracted }
