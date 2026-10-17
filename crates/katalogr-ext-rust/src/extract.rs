@@ -1,0 +1,404 @@
+//! Source-file extraction (FEAT-005 sections 4 and 8): one pass over the syntax tree builds a
+//! [`Fragment`]. A syntax error never fails the file: the tree keeps what parsed.
+
+use crate::context::{self, CrateInfo, WorkspaceContext};
+use crate::lines::LineIndex;
+use crate::ownership::owner_of;
+use katalogr_model::{
+    ArtifactName, ArtifactNode, Confidence, Export, ExportKey, ExtractError, ExtractInput, Fact,
+    Fragment, Id, Link, LinkKind, Name, OutRef, Provenance, Segment, Span, SymbolName, SymbolNode,
+};
+use ra_ap_syntax::{
+    AstNode, Edition, SourceFile, SyntaxElement, SyntaxKind, SyntaxNode,
+    ast::{self, HasAttrs, HasModuleItem},
+};
+use std::collections::BTreeMap;
+
+pub const NS_ITEM: &str = "rs-item";
+pub const NS_FILE: &str = "rs-file";
+pub const NS_METHOD: &str = "rs-method";
+pub const NS_MACRO: &str = "rs-macro";
+pub use crate::manifest::NS_PACKAGE;
+
+/// The name a path resolves to: an item of a crate in this repository, or a package.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum Target {
+    /// Crate directory as it appears in keys, and the path below the crate root.
+    Crate(String, Vec<String>),
+    Package(String),
+}
+
+impl Target {
+    pub(crate) fn key(&self) -> ExportKey {
+        match self {
+            Target::Crate(dir, segs) => item_key(dir, segs),
+            Target::Package(p) => ExportKey {
+                namespace: NS_PACKAGE.to_string(),
+                key: p.clone(),
+            },
+        }
+    }
+
+    pub(crate) fn extended(&self, rest: &[String]) -> Target {
+        match self {
+            Target::Crate(d, s) => {
+                Target::Crate(d.clone(), s.iter().chain(rest).cloned().collect())
+            }
+            p @ Target::Package(_) => p.clone(),
+        }
+    }
+}
+
+/// `("rs-item", "<crate dir>::<module path>::<name>")`.
+pub(crate) fn item_key(dir: &str, segs: &[String]) -> ExportKey {
+    let mut key = dir.to_string();
+    for s in segs {
+        key.push_str("::");
+        key.push_str(s);
+    }
+    ExportKey {
+        namespace: NS_ITEM.to_string(),
+        key,
+    }
+}
+
+/// The names bound in one module (by its own `use` items) and its glob imports.
+pub(crate) struct Scope {
+    pub path: Vec<String>,
+    /// Names of the inline modules below the file's own directory, for `mod x;` files.
+    pub fs: Vec<String>,
+    pub bindings: BTreeMap<String, Target>,
+    pub globs: Vec<Target>,
+}
+
+pub(crate) struct Builder<'a> {
+    pub artifact: ArtifactName,
+    pub provenance: Provenance,
+    pub lines: LineIndex<'a>,
+    pub krate: Option<&'a CrateInfo>,
+    /// The owning crate's directory, as written in keys.
+    pub own: Option<String>,
+    /// Directory in which this file's `mod x;` children are looked up.
+    pub child_dir: String,
+    pub symbols: Vec<SymbolNode>,
+    pub links: Vec<Link>,
+    pub refs: Vec<OutRef>,
+    pub exports: Vec<Export>,
+    ordinals: BTreeMap<Vec<Segment>, u32>,
+    pub segs: Vec<Segment>,
+    pub ids: Vec<Id>,
+    pub scopes: Vec<Scope>,
+    /// Last path segment of the current impl's self type, or the trait name inside a trait.
+    pub self_ident: Option<String>,
+}
+
+pub fn extract(input: &ExtractInput) -> Result<Fragment, ExtractError> {
+    extract_with_errors(input).map(|(fragment, _)| fragment)
+}
+
+/// The fragment plus one [`ExtractError::Parse`] (with span) per syntax error in the file.
+pub fn extract_with_errors(
+    input: &ExtractInput,
+) -> Result<(Fragment, Vec<ExtractError>), ExtractError> {
+    let text = std::str::from_utf8(input.content).map_err(|e| ExtractError::Parse {
+        span: None,
+        message: format!("not utf-8: {e}"),
+    })?;
+    let ctx = WorkspaceContext::from_bytes(input.context)?;
+    let owner = owner_of(&ctx, input.path);
+    let artifact = ArtifactName {
+        repo: input.repo.to_string(),
+        path: input.path.clone(),
+    };
+    let provenance = Provenance {
+        repo: input.repo.to_string(),
+        path: input.path.clone(),
+        revision: input.revision.to_string(),
+    };
+
+    let path = input.path.as_str();
+    let file_dir = context::parent_dir(path);
+    let stem = path
+        .rsplit('/')
+        .next()
+        .and_then(|f| f.strip_suffix(".rs"))
+        .unwrap_or("");
+    let child_dir = if owner.module.is_empty() || stem == "mod" {
+        file_dir.to_string()
+    } else {
+        context::join_norm(file_dir, stem).unwrap_or_default()
+    };
+
+    let mut b = Builder {
+        artifact: artifact.clone(),
+        provenance: provenance.clone(),
+        lines: LineIndex::new(text),
+        krate: owner.krate,
+        own: owner.krate.map(|c| context::key_dir(&c.dir)),
+        child_dir,
+        symbols: Vec::new(),
+        links: Vec::new(),
+        refs: Vec::new(),
+        exports: Vec::new(),
+        ordinals: BTreeMap::new(),
+        segs: Vec::new(),
+        ids: Vec::new(),
+        scopes: vec![Scope {
+            path: owner.module.clone(),
+            fs: Vec::new(),
+            bindings: BTreeMap::new(),
+            globs: Vec::new(),
+        }],
+        self_ident: None,
+    };
+
+    let mut facts: BTreeMap<String, Fact> = BTreeMap::new();
+    if let Some(t) = &owner.target {
+        facts.insert(
+            "target".to_string(),
+            Fact::Str(format!("{}:{}", t.kind.as_str(), t.name)),
+        );
+    }
+    if owner.orphan {
+        facts.insert("orphan".to_string(), Fact::Bool(true));
+    }
+
+    // Syntax errors do not stop the walk; `ra_ap_syntax` keeps the tree it could build.
+    let parse = SourceFile::parse(text, Edition::Edition2021);
+    let tree = parse.tree();
+    let inner = attr_texts(tree.attrs());
+    if !inner.is_empty() {
+        facts.insert("attrs".to_string(), Fact::List(inner));
+    }
+    b.export(
+        ExportKey {
+            namespace: NS_FILE.to_string(),
+            key: path.to_string(),
+        },
+        artifact.id(),
+    );
+    b.items(tree.items().collect());
+    let errors = parse
+        .errors()
+        .iter()
+        .map(|e| {
+            let r = e.range();
+            ExtractError::Parse {
+                span: Some(b.lines.span(r.start().into(), r.end().into())),
+                message: e.to_string(),
+            }
+        })
+        .collect();
+
+    Ok((
+        Fragment {
+            provenance,
+            extension: "rust".to_string(),
+            artifact: ArtifactNode {
+                name: artifact,
+                facts,
+            },
+            symbols: b.symbols,
+            links: b.links,
+            refs: b.refs,
+            exports: b.exports,
+        },
+        errors,
+    ))
+}
+
+impl Builder<'_> {
+    pub(crate) fn scope(&self) -> &Scope {
+        self.scopes
+            .last()
+            .expect("a file always has its module scope")
+    }
+
+    pub(crate) fn module_path(&self) -> Vec<String> {
+        self.scope().path.clone()
+    }
+
+    pub(crate) fn export(&mut self, key: ExportKey, target: Id) {
+        self.exports.push(Export { key, target });
+    }
+
+    /// Export `("rs-item", ...)` for a name below the current module.
+    pub(crate) fn export_item(&mut self, below_module: &[&str], target: Id) {
+        let Some(own) = self.own.clone() else {
+            return;
+        };
+        let mut segs = self.module_path();
+        segs.extend(below_module.iter().map(|s| s.to_string()));
+        self.export(item_key(&own, &segs), target);
+    }
+
+    pub(crate) fn span_of(&self, node: &SyntaxNode) -> Span {
+        let (s, e) = trimmed(node);
+        self.lines.span(s, e)
+    }
+
+    pub(crate) fn add_ref(
+        &mut self,
+        from: Id,
+        kind: &str,
+        span: Span,
+        candidates: Vec<ExportKey>,
+        confidence: Confidence,
+    ) {
+        let mut seen = Vec::new();
+        for c in candidates {
+            if !seen.contains(&c) {
+                seen.push(c);
+            }
+        }
+        if seen.is_empty() {
+            return;
+        }
+        self.refs.push(OutRef {
+            from,
+            kind: LinkKind(kind.to_string()),
+            span: Some(span),
+            candidates: seen,
+            confidence,
+        });
+    }
+
+    /// Record a symbol below the current nesting; links it from its parent with `contains`.
+    pub(crate) fn add_symbol(
+        &mut self,
+        kind: &str,
+        name: &str,
+        node: &SyntaxNode,
+        facts: BTreeMap<String, Fact>,
+    ) -> Id {
+        let segment = Segment {
+            kind: kind.to_string(),
+            name: name.to_string(),
+        };
+        let mut segments = self.segs.clone();
+        segments.push(segment);
+        let n = self.ordinals.entry(segments.clone()).or_insert(0);
+        *n += 1;
+        let sym = SymbolName {
+            artifact: self.artifact.clone(),
+            segments,
+            ordinal: *n,
+        };
+        let id = sym.id();
+        let span = self.span_of(node);
+        if let Some(&parent) = self.ids.last() {
+            self.links.push(Link {
+                from: parent,
+                to: id,
+                kind: LinkKind("contains".to_string()),
+                confidence: Confidence::Extracted,
+                span: Some(span),
+                provenance: self.provenance.clone(),
+            });
+        }
+        self.symbols.push(SymbolNode {
+            name: sym,
+            kind: kind.to_string(),
+            span,
+            facts,
+        });
+        id
+    }
+
+    pub(crate) fn enter(&mut self, kind: &str, name: &str, id: Id) {
+        self.segs.push(Segment {
+            kind: kind.to_string(),
+            name: name.to_string(),
+        });
+        self.ids.push(id);
+    }
+
+    pub(crate) fn leave(&mut self) {
+        self.segs.pop();
+        self.ids.pop();
+    }
+
+    /// Facts every item carries: `vis`, `attrs` (when any) and `signature`.
+    pub(crate) fn facts(
+        &self,
+        vis: Option<ast::Visibility>,
+        attrs: ast::AstChildren<ast::Attr>,
+        node: &SyntaxNode,
+    ) -> BTreeMap<String, Fact> {
+        let mut f = BTreeMap::new();
+        let vis = vis.map_or_else(
+            || "private".to_string(),
+            |v| {
+                v.syntax()
+                    .text()
+                    .to_string()
+                    .split_whitespace()
+                    .collect::<String>()
+            },
+        );
+        f.insert("vis".to_string(), Fact::Str(vis));
+        let attrs = attr_texts(attrs);
+        if !attrs.is_empty() {
+            f.insert("attrs".to_string(), Fact::List(attrs));
+        }
+        f.insert("signature".to_string(), Fact::Str(signature(node)));
+        f
+    }
+}
+
+/// Attribute texts without the `#[` `]` wrapper, whitespace normalised.
+pub(crate) fn attr_texts(attrs: ast::AstChildren<ast::Attr>) -> Vec<Fact> {
+    attrs
+        .filter_map(|a| a.meta().map(|m| normalise(&m.syntax().text().to_string())))
+        .map(Fact::Str)
+        .collect()
+}
+
+pub(crate) fn normalise(s: &str) -> String {
+    s.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn is_trivia(e: &SyntaxElement) -> bool {
+    matches!(e.kind(), SyntaxKind::WHITESPACE | SyntaxKind::COMMENT)
+}
+
+/// The byte range of a node without leading and trailing whitespace and comments.
+pub(crate) fn trimmed(node: &SyntaxNode) -> (usize, usize) {
+    let range = node.text_range();
+    let mut start: usize = range.start().into();
+    let mut end: usize = range.end().into();
+    let elems: Vec<SyntaxElement> = node.children_with_tokens().collect();
+    if let Some(first) = elems.iter().find(|e| !is_trivia(e)) {
+        start = first.text_range().start().into();
+    }
+    if let Some(last) = elems.iter().rev().find(|e| !is_trivia(e)) {
+        end = last.text_range().end().into();
+    }
+    (start, end)
+}
+
+/// One-line header of an item: everything before its body, `=` or `;`, without attributes.
+pub(crate) fn signature(node: &SyntaxNode) -> String {
+    let mut out = String::new();
+    for e in node.children_with_tokens() {
+        if matches!(e.kind(), SyntaxKind::COMMENT | SyntaxKind::ATTR) {
+            continue;
+        }
+        if matches!(
+            e.kind(),
+            SyntaxKind::BLOCK_EXPR
+                | SyntaxKind::RECORD_FIELD_LIST
+                | SyntaxKind::VARIANT_LIST
+                | SyntaxKind::ASSOC_ITEM_LIST
+                | SyntaxKind::ITEM_LIST
+                | SyntaxKind::TOKEN_TREE
+                | SyntaxKind::SEMICOLON
+                | SyntaxKind::L_CURLY
+                | SyntaxKind::EQ
+        ) {
+            break;
+        }
+        out.push_str(&e.to_string());
+    }
+    normalise(&out)
+}

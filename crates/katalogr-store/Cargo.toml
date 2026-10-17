@@ -1,0 +1,28 @@
+[package]
+name = "katalogr-store"
+description = "kindex repository, shard codec, path guard and redb cache."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[features]
+# Test-only crash injection (FEAT-047 section 8); forwarded from katalogr-engine.
+failpoints = []
+
+[dependencies]
+katalogr-model.workspace = true
+camino.workspace = true
+gix = { workspace = true, features = ["sha1"] }
+serde.workspace = true
+serde_json.workspace = true
+serde_yaml_ng.workspace = true
+sha1.workspace = true
+sha2.workspace = true
+redb.workspace = true
+thiserror.workspace = true
+tempfile.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

@@ -1,0 +1,28 @@
+[package]
+name = "katalogr-engine"
+description = "Registry, stitcher, diff-range scanning, change queue and consistency modes."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[features]
+# Test-only crash injection (FEAT-047 section 8).
+failpoints = ["katalogr-store/failpoints"]
+
+[dependencies]
+katalogr-model.workspace = true
+katalogr-store.workspace = true
+gix = { version = "0.89", default-features = false, features = ["sha1", "revision", "blob-diff"] }
+thiserror = "2.0"
+camino.workspace = true
+fs4.workspace = true
+globset.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+tempfile.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true

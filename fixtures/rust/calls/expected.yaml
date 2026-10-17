@@ -1,0 +1,27 @@
+mode: exact
+symbols:
+  - "fx:Cargo.toml#crate:calls"
+  - "fx:src/lib.rs#fn:local"
+  - "fx:src/lib.rs#impl:Counter"
+  - "fx:src/lib.rs#impl:Counter/fn:bump"
+  - "fx:src/lib.rs#impl:Counter/fn:new"
+  - "fx:src/lib.rs#impl:Counter/fn:run"
+  - "fx:src/lib.rs#macro:trace"
+  - "fx:src/lib.rs#mod:math"
+  - "fx:src/lib.rs#struct:Counter"
+  - "fx:src/math.rs#fn:cube"
+  - "fx:src/math.rs#fn:square"
+links:
+  - { from: "fx:src/lib.rs#fn:local", kind: calls, to: "fx:src/math.rs#fn:square", confidence: extracted }
+  - { from: "fx:src/lib.rs#impl:Counter", kind: contains, to: "fx:src/lib.rs#impl:Counter/fn:bump", confidence: extracted }
+  - { from: "fx:src/lib.rs#impl:Counter", kind: contains, to: "fx:src/lib.rs#impl:Counter/fn:new", confidence: extracted }
+  - { from: "fx:src/lib.rs#impl:Counter", kind: contains, to: "fx:src/lib.rs#impl:Counter/fn:run", confidence: extracted }
+  - { from: "fx:src/lib.rs#impl:Counter", kind: implements-for, to: "fx:src/lib.rs#struct:Counter", confidence: extracted }
+  - { from: "fx:src/lib.rs#impl:Counter/fn:run", kind: calls, to: "fx:src/lib.rs#fn:local", confidence: extracted }
+  - { from: "fx:src/lib.rs#impl:Counter/fn:run", kind: calls, to: "fx:src/lib.rs#impl:Counter/fn:bump", confidence: inferred }
+  - { from: "fx:src/lib.rs#impl:Counter/fn:run", kind: calls, to: "fx:src/lib.rs#impl:Counter/fn:new", confidence: extracted }
+  - { from: "fx:src/lib.rs#impl:Counter/fn:run", kind: calls, to: "fx:src/lib.rs#macro:trace", confidence: inferred }
+  - { from: "fx:src/lib.rs#impl:Counter/fn:run", kind: calls, to: "fx:src/math.rs#fn:cube", confidence: extracted }
+  - { from: "fx:src/lib.rs#impl:Counter/fn:run", kind: calls, to: "fx:src/math.rs#fn:square", confidence: extracted }
+  - { from: "fx:src/lib.rs#mod:math", kind: declares, to: "fx:src/math.rs", confidence: extracted }
+  - { from: "fx:src/math.rs#fn:cube", kind: calls, to: "fx:src/math.rs#fn:square", confidence: extracted }

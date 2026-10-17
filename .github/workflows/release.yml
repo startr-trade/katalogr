@@ -1,0 +1,129 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  verify-tag:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+      - name: tag commit is on main
+        run: |
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "Tag $GITHUB_REF_NAME ($GITHUB_SHA) is not an ancestor of origin/main; refusing to release."
+            exit 1
+          fi
+
+  build:
+    needs: verify-tag
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-latest
+            runnable: true
+          - target: aarch64-unknown-linux-musl
+            os: ubuntu-latest
+            runnable: false
+          - target: x86_64-apple-darwin
+            os: macos-13
+            runnable: true
+          - target: aarch64-apple-darwin
+            os: macos-14
+            runnable: true
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            runnable: true
+    runs-on: ${{ matrix.os }}
+    env:
+      KATALOGR_GIT_SHA: ${{ github.sha }}
+      TARGET: ${{ matrix.target }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: stable
+      - name: add target
+        shell: bash
+        run: rustup target add "$TARGET"
+      - name: build
+        shell: bash
+        run: cargo build --release --locked -p katalogr --target "$TARGET"
+      - name: check --version names the commit
+        if: matrix.runnable
+        shell: bash
+        run: |
+          ext=""
+          if [ "$RUNNER_OS" = "Windows" ]; then ext=".exe"; fi
+          out="$("./target/$TARGET/release/katalogr$ext" --version)"
+          echo "$out"
+          case "$out" in
+            *"${GITHUB_SHA:0:12}"*) ;;
+            *)
+              echo "--version does not contain ${GITHUB_SHA:0:12}"
+              exit 1
+              ;;
+          esac
+      - name: package (unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          mkdir -p dist
+          tar -czf "dist/katalogr-${GITHUB_REF_NAME}-${TARGET}.tar.gz" -C "target/$TARGET/release" katalogr
+      - name: package (windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          Compress-Archive -Path "target/$env:TARGET/release/katalogr.exe" -DestinationPath "dist/katalogr-$env:GITHUB_REF_NAME-$env:TARGET.zip"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: katalogr-${{ matrix.target }}
+          path: dist/*
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          path: artifacts
+          merge-multiple: true
+      - name: SHA256SUMS
+        shell: bash
+        run: |
+          cd artifacts
+          sha256sum -- * > SHA256SUMS
+      - name: release::artifacts_published
+        shell: bash
+        run: |
+          cd artifacts
+          sha256sum -c SHA256SUMS
+          # The asset list must match the target matrix exactly (FEAT-022 §13).
+          for t in x86_64-unknown-linux-musl aarch64-unknown-linux-musl x86_64-apple-darwin aarch64-apple-darwin; do
+            test -f "katalogr-${GITHUB_REF_NAME}-${t}.tar.gz" || { echo "missing archive for $t"; exit 1; }
+          done
+          test -f "katalogr-${GITHUB_REF_NAME}-x86_64-pc-windows-msvc.zip" || { echo "missing archive for windows"; exit 1; }
+          test "$(ls katalogr-* | wc -l)" -eq 5 || { echo "unexpected extra archives"; exit 1; }
+      - name: create draft release
+        shell: bash
+        run: |
+          gh release create "$GITHUB_REF_NAME" --draft --verify-tag \
+            artifacts/* \
+            scripts/install.sh scripts/install.ps1

@@ -1,0 +1,15 @@
+mode: exact
+symbols:
+  - "fx:Cargo.toml#crate:attributes"
+  - "fx:src/lib.rs#enum:Mode"
+  - "fx:src/lib.rs#enum:Mode/variant:Fast"
+  - "fx:src/lib.rs#enum:Mode/variant:Slow"
+  - "fx:src/lib.rs#fn:compute"
+  - "fx:src/lib.rs#fn:health"
+  - "fx:src/lib.rs#mod:tests"
+  - "fx:src/lib.rs#mod:tests/fn:works"
+  - "fx:src/lib.rs#struct:Config"
+links:
+  - { from: "fx:src/lib.rs#enum:Mode", kind: contains, to: "fx:src/lib.rs#enum:Mode/variant:Fast", confidence: extracted }
+  - { from: "fx:src/lib.rs#enum:Mode", kind: contains, to: "fx:src/lib.rs#enum:Mode/variant:Slow", confidence: extracted }
+  - { from: "fx:src/lib.rs#mod:tests", kind: contains, to: "fx:src/lib.rs#mod:tests/fn:works", confidence: extracted }

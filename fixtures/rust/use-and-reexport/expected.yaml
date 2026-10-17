@@ -1,0 +1,33 @@
+mode: exact
+symbols:
+  - "fx:Cargo.toml#crate:reexport"
+  - "fx:src/extra.rs#fn:run"
+  - "fx:src/lib.rs#mod:extra"
+  - "fx:src/lib.rs#mod:shapes"
+  - "fx:src/lib.rs#mod:util"
+  - "fx:src/lib.rs#use:Circle"
+  - "fx:src/lib.rs#use:Serialize"
+  - "fx:src/lib.rs#use:assist"
+  - "fx:src/lib.rs#use:util%3A%3Ainner%3A%3A*"
+  - "fx:src/shapes.rs#fn:draw"
+  - "fx:src/shapes.rs#struct:Circle"
+  - "fx:src/util/inner.rs#fn:helper"
+  - "fx:src/util/inner.rs#fn:other"
+  - "fx:src/util/mod.rs#impl:Marker"
+  - "fx:src/util/mod.rs#impl:Marker/fn:mark"
+  - "fx:src/util/mod.rs#mod:inner"
+  - "fx:src/util/mod.rs#struct:Marker"
+links:
+  - { from: "fx:src/extra.rs#fn:run", kind: calls, to: "fx:src/util/inner.rs#fn:other", confidence: extracted }
+  - { from: "fx:src/lib.rs#mod:extra", kind: declares, to: "fx:src/extra.rs", confidence: extracted }
+  - { from: "fx:src/lib.rs#mod:shapes", kind: declares, to: "fx:src/shapes.rs", confidence: extracted }
+  - { from: "fx:src/lib.rs#mod:util", kind: declares, to: "fx:src/util/mod.rs", confidence: extracted }
+  - { from: "fx:src/lib.rs#use:Circle", kind: reexports, to: "fx:src/shapes.rs#struct:Circle", confidence: extracted }
+  - { from: "fx:src/lib.rs#use:assist", kind: reexports, to: "fx:src/util/inner.rs#fn:helper", confidence: extracted }
+  - { from: "fx:src/lib.rs#use:util%3A%3Ainner%3A%3A*", kind: reexports, to: "fx:src/util/mod.rs#mod:inner", confidence: extracted }
+  - { from: "fx:src/shapes.rs#fn:draw", kind: calls, to: "fx:src/util/inner.rs#fn:helper", confidence: extracted }
+  - { from: "fx:src/shapes.rs#fn:draw", kind: calls, to: "fx:src/util/inner.rs#fn:other", confidence: extracted }
+  - { from: "fx:src/shapes.rs#fn:draw", kind: calls, to: "fx:src/util/mod.rs#impl:Marker/fn:mark", confidence: extracted }
+  - { from: "fx:src/util/mod.rs#impl:Marker", kind: contains, to: "fx:src/util/mod.rs#impl:Marker/fn:mark", confidence: extracted }
+  - { from: "fx:src/util/mod.rs#impl:Marker", kind: implements-for, to: "fx:src/util/mod.rs#struct:Marker", confidence: extracted }
+  - { from: "fx:src/util/mod.rs#mod:inner", kind: declares, to: "fx:src/util/inner.rs", confidence: extracted }

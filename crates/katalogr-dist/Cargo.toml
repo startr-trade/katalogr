@@ -1,0 +1,22 @@
+[package]
+name = "katalogr-dist"
+description = "Composition root: the Katalogr facade with extensions registered."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+katalogr-engine.workspace = true
+katalogr-ext-rust.workspace = true
+katalogr-model.workspace = true
+katalogr-store.workspace = true
+camino.workspace = true
+serde_json.workspace = true
+serde_yaml_ng.workspace = true
+tempfile.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
