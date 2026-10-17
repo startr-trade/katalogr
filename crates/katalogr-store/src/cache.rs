@@ -23,7 +23,7 @@ use std::ops::Bound;
 use std::time::{Duration, Instant};
 
 /// Stored in `meta`; a different number rebuilds the cache from the shards.
-pub const CACHE_SCHEMA: u32 = 1;
+pub const CACHE_SCHEMA: u32 = 2;
 
 // ---------------------------------------------------------------- rows
 
@@ -401,10 +401,16 @@ pub trait Reader {
 
     fn shard_hash(&self, repo: &str, path: &RelPath) -> Result<Option<[u8; 32]>, StoreError> {
         match self.raw_get(TableId::ShardHashes, &path_key(repo, path))? {
-            Some(v) => Ok(Some(
-                v.try_into()
-                    .map_err(|_| StoreError::Row("bad shard hash".into()))?,
-            )),
+            Some(v) => Ok(Some(split_hash_value(&v)?.0)),
+            None => Ok(None),
+        }
+    }
+
+    /// The `(size, mtime)` of the shard file when its hash was last recorded; `None` when no
+    /// hash is stored or it was stored without them.
+    fn shard_stat(&self, repo: &str, path: &RelPath) -> Result<Option<ShardStat>, StoreError> {
+        match self.raw_get(TableId::ShardHashes, &path_key(repo, path))? {
+            Some(v) => Ok(split_hash_value(&v)?.1),
             None => Ok(None),
         }
     }
@@ -413,10 +419,7 @@ pub trait Reader {
     fn shard_hashes(&self) -> Result<Vec<(ShardKey, [u8; 32])>, StoreError> {
         let mut out = Vec::new();
         for (k, v) in self.raw_scan(TableId::ShardHashes, &[])? {
-            let h = v
-                .try_into()
-                .map_err(|_| StoreError::Row("bad shard hash".into()))?;
-            out.push((decode_path_key(&k)?, h));
+            out.push((decode_path_key(&k)?, split_hash_value(&v)?.0));
         }
         Ok(out)
     }
@@ -696,6 +699,23 @@ impl WriteTx<'_> {
         self.put(TableId::ShardHashes, &path_key(repo, path), hash)
     }
 
+    /// Like [`WriteTx::put_shard_hash`], also recording the shard file's `(size, mtime)` so a
+    /// later open can skip hashing it while they are unchanged.
+    pub fn put_shard_hash_stat(
+        &mut self,
+        repo: &str,
+        path: &RelPath,
+        hash: &[u8; 32],
+        stat: ShardStat,
+    ) -> Result<(), StoreError> {
+        let mut v = Vec::with_capacity(52);
+        v.extend_from_slice(hash);
+        v.extend_from_slice(&stat.size.to_le_bytes());
+        v.extend_from_slice(&stat.mtime_secs.to_le_bytes());
+        v.extend_from_slice(&stat.mtime_nanos.to_le_bytes());
+        self.put(TableId::ShardHashes, &path_key(repo, path), &v)
+    }
+
     pub fn remove_shard_hash(&mut self, repo: &str, path: &RelPath) -> Result<(), StoreError> {
         self.del(TableId::ShardHashes, &path_key(repo, path))
     }
@@ -844,11 +864,58 @@ pub trait Restitch {
     fn remove_artifact(&self, tx: &mut WriteTx, a: &ArtifactName) -> Result<(), StoreError>;
 }
 
+/// Size and modification time of a shard file, recorded next to its hash.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ShardStat {
+    pub size: u64,
+    pub mtime_secs: u64,
+    pub mtime_nanos: u32,
+}
+
+impl ShardStat {
+    fn of(meta: &std::fs::Metadata) -> Option<ShardStat> {
+        let d = meta
+            .modified()
+            .ok()?
+            .duration_since(std::time::UNIX_EPOCH)
+            .ok()?;
+        Some(ShardStat {
+            size: meta.len(),
+            mtime_secs: d.as_secs(),
+            mtime_nanos: d.subsec_nanos(),
+        })
+    }
+}
+
+/// A `shard_hashes` value: the 32-byte hash, optionally followed by size (u64), mtime seconds
+/// (u64) and mtime nanoseconds (u32), all little-endian.
+fn split_hash_value(v: &[u8]) -> Result<([u8; 32], Option<ShardStat>), StoreError> {
+    let bad = || StoreError::Row("bad shard hash".into());
+    let hash: [u8; 32] = v.get(..32).ok_or_else(bad)?.try_into().map_err(|_| bad())?;
+    match v.len() {
+        32 => Ok((hash, None)),
+        52 => {
+            let u64_at = |i: usize| u64::from_le_bytes(v[i..i + 8].try_into().expect("8 bytes"));
+            Ok((
+                hash,
+                Some(ShardStat {
+                    size: u64_at(32),
+                    mtime_secs: u64_at(40),
+                    mtime_nanos: u32::from_le_bytes(v[48..52].try_into().expect("4 bytes")),
+                }),
+            ))
+        }
+        _ => Err(bad()),
+    }
+}
+
 /// What `open_or_rebuild` did.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct SyncReport {
     pub replaced: usize,
     pub removed: usize,
+    /// Shards whose bytes were read and hashed (those with an unchanged size and mtime are not).
+    pub hashed: usize,
     /// Shards that failed to decode and were moved to `.cache/quarantine/`.
     pub quarantined: Vec<(String, RelPath)>,
     /// The deadline passed before every shard was handled; the next open continues.
@@ -1008,19 +1075,37 @@ impl Cache {
                 break;
             }
             let file = dir.shard_path(repo, path);
+            // The stat is taken before the read, so a write in between is seen at the next open.
+            let stat = match std::fs::metadata(&file) {
+                Ok(m) => ShardStat::of(&m),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+                Err(e) => return Err(StoreError::io(&file, e)),
+            };
+            let stored = tx.shard_hash(repo, path)?;
+            if stored.is_some() && stat.is_some() && tx.shard_stat(repo, path)? == stat {
+                continue;
+            }
             let bytes = match std::fs::read(&file) {
                 Ok(b) => b,
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
                 Err(e) => return Err(StoreError::io(&file, e)),
             };
+            report.hashed += 1;
             let hash: [u8; 32] = Sha256::digest(&bytes).into();
-            if tx.shard_hash(repo, path)? == Some(hash) {
+            let record = |tx: &mut WriteTx| match stat {
+                Some(st) => tx.put_shard_hash_stat(repo, path, &hash, st),
+                None => tx.put_shard_hash(repo, path, &hash),
+            };
+            if stored == Some(hash) {
+                if tx.shard_stat(repo, path)? != stat {
+                    record(&mut tx)?;
+                }
                 continue;
             }
             match crate::shard::decode(&bytes) {
                 Ok(fragment) => {
                     stitch.replace_fragment(&mut tx, fragment)?;
-                    tx.put_shard_hash(repo, path, &hash)?;
+                    record(&mut tx)?;
                     tx.put_index_errors(repo, path, &[])?;
                     report.replaced += 1;
                 }

@@ -7,7 +7,7 @@ use katalogr_engine::registry::ExtensionRegistry;
 use katalogr_engine::{Consistency, Engine, NewEvent, QueryOptions, Scope};
 use katalogr_ext_rust::{RustExtractor, TargetKind, WorkspaceContext};
 use katalogr_model::{ExtractInput, Extractor, Name, RelPath};
-use katalogr_store::{Kindex, ProjectConfig, ProjectName, RepoConfig};
+use katalogr_store::{ErrorRow, Kindex, ProjectConfig, ProjectName, Reader, RepoConfig};
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::{Duration, Instant};
@@ -22,6 +22,8 @@ struct Graph {
     links: BTreeSet<(String, String, String, String)>,
     artifacts: BTreeMap<String, Value>,
     text: String,
+    /// Index-error rows by repo-relative path (only paths that have rows).
+    errors: BTreeMap<String, Vec<ErrorRow>>,
 }
 
 impl Graph {
@@ -114,14 +116,28 @@ fn index_case(case: &str) -> Graph {
         scope: Scope::Project,
     };
     let answer = engine
-        .with_consistency(&opts, |tx| katalogr_engine::canonical_graph(tx))
+        .with_consistency(&opts, |tx| {
+            let graph = katalogr_engine::canonical_graph(tx);
+            let mut errors = BTreeMap::new();
+            for ((repo, path), _) in tx.shard_hashes().unwrap() {
+                let rows = tx.index_errors(&repo, &path).unwrap();
+                if !rows.is_empty() {
+                    errors.insert(path.as_str().to_string(), rows);
+                }
+            }
+            (graph, errors)
+        })
         .unwrap();
     assert!(!answer.stale, "queue drained");
-    parse_graph(answer.value)
+    let (text, errors) = answer.value;
+    let mut g = parse_graph(text);
+    g.errors = errors;
+    g
 }
 
 fn parse_graph(text: String) -> Graph {
     let mut g = Graph {
+        errors: BTreeMap::new(),
         symbols: BTreeMap::new(),
         links: BTreeSet::new(),
         artifacts: BTreeMap::new(),
@@ -633,5 +649,13 @@ mod rust {
         }
         assert_eq!(span(g.sym("src/lib.rs#fn:last")), (13, 1, 13, 16));
         assert!(g.text.contains("src/lib.rs"));
+        // The syntax errors are recorded for the file, with spans.
+        let rows = g.errors.get("src/lib.rs").expect("index_errors rows");
+        assert!(!rows.is_empty());
+        assert!(
+            rows.iter()
+                .all(|r| r.span.is_some() && !r.message.is_empty())
+        );
+        assert!(!g.errors.contains_key("Cargo.toml"));
     }
 }

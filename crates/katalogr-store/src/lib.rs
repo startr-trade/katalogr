@@ -12,7 +12,8 @@ pub mod shard;
 
 pub use cache::{
     ArtifactRow, CACHE_SCHEMA, Cache, ErrorRow, JournalEntry, LinkEntry, LinkKey, LinkOrigin,
-    LinkRow, PendingKey, ReadTx, Reader, RefId, Restitch, Snapshot, SymbolRow, SyncReport, WriteTx,
+    LinkRow, PendingKey, ReadTx, Reader, RefId, Restitch, ShardStat, Snapshot, SymbolRow,
+    SyncReport, WriteTx,
 };
 pub use error::StoreError;
 pub use guard::{GuardError, scan_for_absolute};

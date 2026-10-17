@@ -57,4 +57,15 @@ impl Extractor for RustExtractor {
             extract::extract(input)
         }
     }
+
+    fn extract_with_errors(
+        &self,
+        input: &ExtractInput,
+    ) -> Result<(Fragment, Vec<ExtractError>), ExtractError> {
+        if input.path.as_str().rsplit('/').next() == Some(context::MANIFEST) {
+            manifest::extract(input).map(|f| (f, Vec::new()))
+        } else {
+            extract::extract_with_errors(input)
+        }
+    }
 }

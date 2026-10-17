@@ -219,6 +219,35 @@ mod queue {
     }
 
     #[test]
+    fn rescan_respects_filters() {
+        let f = fixture();
+        let e = f.engine();
+        f.write("a.tx", "sym fn A\n");
+        std::fs::create_dir_all(f.work.join("target")).unwrap();
+        f.write("target/b.tx", "sym fn B\n");
+        e.inbox().append(&NewEvent::rescan("r")).unwrap();
+        let mut p = Processor::try_acquire(&e).unwrap().unwrap();
+        p.ingest().unwrap();
+        p.process(&Scope::Project, 256, soon()).unwrap();
+        let r = e.cache().read().unwrap();
+        assert_eq!(artifact_count(&r), 1);
+        assert!(!e.dir().shard_path("r", &rel("target/b.tx")).exists());
+    }
+
+    #[test]
+    fn recover_removes_orphan_temp_files() {
+        let f = fixture();
+        let e = f.engine();
+        let shards = e.dir().root().join("shards/r");
+        std::fs::create_dir_all(&shards).unwrap();
+        let orphan = shards.join(".tmp-7-a.tx.kshard.json");
+        std::fs::write(&orphan, b"junk").unwrap();
+        let mut p = Processor::try_acquire(&e).unwrap().unwrap();
+        p.recover().unwrap();
+        assert!(!orphan.exists());
+    }
+
+    #[test]
     fn results_and_watermark_atomic() {
         let f = fixture();
         let e = f.engine();

@@ -7,9 +7,10 @@ use crate::consistency::{Engine, Scope};
 use crate::context;
 use crate::error::EngineError;
 use crate::failpoint::fail;
+use crate::scan;
 use camino::{Utf8Path, Utf8PathBuf};
 use fs4::FileExt;
-use katalogr_model::{ArtifactName, ExtractInput, Fragment, RelPath};
+use katalogr_model::{ArtifactName, ExtractError, ExtractInput, Fragment, RelPath};
 use katalogr_store::blob::git_blob_id;
 use katalogr_store::{ErrorRow, JournalEntry, PendingKey, ReadTx, Reader};
 use sha2::{Digest, Sha256};
@@ -29,6 +30,7 @@ enum Action {
     Skip,
     Replace {
         fragment: Box<Fragment>,
+        errors: Vec<ErrorRow>,
         tmp: String,
         fin: String,
     },
@@ -69,8 +71,11 @@ impl<'a> Processor<'a> {
     /// Replay a non-empty publish journal (idempotent): rename each temp file that still
     /// exists onto its final name, then clear the journal.
     pub fn recover(&mut self) -> Result<(), EngineError> {
-        self.engine.cache().replay_journal(self.engine.dir())?;
-        Ok(())
+        let dir = self.engine.dir();
+        self.engine.cache().replay_journal(dir)?;
+        // The journal is empty now, so any `.tmp-*` shard file left is an orphan of a crash
+        // before the publish commit.
+        remove_orphan_temps(&dir.root().join("shards"))
     }
 
     /// R-2/R-3. One write transaction: skip ids already in `seen`, assign the next sequence
@@ -134,7 +139,8 @@ impl<'a> Processor<'a> {
         Ok(ingested)
     }
 
-    /// Paths of a rescanned repository: every file the registry handles under its root, and
+    /// Paths of a rescanned repository: every file the registry handles under its root that the
+    /// repo's include and exclude globs admit, and
     /// every path that has a shard (so vanished files are removed).
     fn expand_rescan(
         &self,
@@ -143,7 +149,12 @@ impl<'a> Processor<'a> {
     ) -> Result<BTreeSet<RelPath>, EngineError> {
         let mut out = BTreeSet::new();
         if let Some(root) = self.engine.roots().get(&ev.repo) {
-            walk(root, "", self.engine, &mut out)?;
+            let (include, exclude) = self.engine.repo_filters(&ev.repo);
+            for p in scan::list_files(root.as_std_path(), &include, &exclude)? {
+                if self.engine.registry().for_path(&p).is_some() {
+                    out.insert(p);
+                }
+            }
         }
         for ((repo, path), _) in tx.shard_hashes()? {
             if repo == ev.repo {
@@ -227,11 +238,13 @@ impl<'a> Processor<'a> {
             let Planned { key, seq, action } = p;
             match action {
                 Action::Skip => {}
-                Action::Replace { fragment, .. } => {
+                Action::Replace {
+                    fragment, errors, ..
+                } => {
                     let hash = hash_iter.next().expect("one hash per written shard");
                     engine.stitcher().replace_fragment(&mut tx, *fragment)?;
                     tx.put_shard_hash(&key.repo, &key.path, &hash)?;
-                    tx.put_index_errors(&key.repo, &key.path, &[])?;
+                    tx.put_index_errors(&key.repo, &key.path, &errors)?;
                 }
                 Action::Delete { .. } => {
                     engine.stitcher().remove_artifact(
@@ -391,18 +404,29 @@ impl<'a> Processor<'a> {
         if existing.is_some_and(|f| f.provenance.revision == revision) {
             return Ok(Action::Skip);
         }
-        match extractor.extract(&ExtractInput {
+        match extractor.extract_with_errors(&ExtractInput {
             repo: &key.repo,
             path: &key.path,
             revision: &revision,
             content: &content,
             context: &ctx,
         }) {
-            Ok(fragment) => {
+            Ok((fragment, errors)) => {
+                let errors = errors
+                    .into_iter()
+                    .map(|e| ErrorRow {
+                        span: match &e {
+                            ExtractError::Parse { span, .. } => *span,
+                            ExtractError::Unsupported(_) => None,
+                        },
+                        message: e.to_string(),
+                    })
+                    .collect();
                 let leaf = Utf8Path::new(&fin).file_name().unwrap_or("shard");
                 let parent = Utf8Path::new(&fin).parent().unwrap_or(Utf8Path::new(""));
                 Ok(Action::Replace {
                     fragment: Box::new(fragment),
+                    errors,
                     tmp: parent.join(format!(".tmp-{seq}-{leaf}")).to_string(),
                     fin,
                 })
@@ -427,29 +451,24 @@ fn write_synced(path: &Utf8Path, bytes: &[u8]) -> Result<(), EngineError> {
     f.sync_all().map_err(io)
 }
 
-fn walk(
-    dir: &Utf8Path,
-    prefix: &str,
-    engine: &Engine,
-    out: &mut BTreeSet<RelPath>,
-) -> Result<(), EngineError> {
-    let rd = std::fs::read_dir(dir).map_err(|e| EngineError::io(dir, e))?;
+/// Delete every `.tmp-*` file under `dir`, recursively.
+fn remove_orphan_temps(dir: &Utf8Path) -> Result<(), EngineError> {
+    let rd = match std::fs::read_dir(dir) {
+        Ok(rd) => rd,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => return Err(EngineError::io(dir, e)),
+    };
     for e in rd {
         let e = e.map_err(|e| EngineError::io(dir, e))?;
         let Some(name) = e.file_name().to_str().map(str::to_string) else {
             continue;
         };
+        let path = dir.join(&name);
         let ft = e.file_type().map_err(|e| EngineError::io(dir, e))?;
-        let rel = format!("{prefix}{name}");
         if ft.is_dir() {
-            if name != ".git" {
-                walk(&dir.join(&name), &format!("{rel}/"), engine, out)?;
-            }
-        } else if ft.is_file()
-            && let Ok(p) = RelPath::new(&rel)
-            && engine.registry().for_path(&p).is_some()
-        {
-            out.insert(p);
+            remove_orphan_temps(&path)?;
+        } else if ft.is_file() && name.starts_with(".tmp-") {
+            std::fs::remove_file(&path).map_err(|e| EngineError::io(&path, e))?;
         }
     }
     Ok(())

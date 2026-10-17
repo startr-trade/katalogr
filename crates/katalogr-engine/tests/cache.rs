@@ -104,6 +104,29 @@ mod cache {
     use katalogr_store::StoreError;
 
     #[test]
+    fn warm_open_skips_unchanged() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = project(&tmp);
+        for (p, t) in [("a.tx", "sym fn A\n"), ("b.tx", "sym fn B\n")] {
+            dir.write_shard(&extract(p, t)).unwrap();
+        }
+        let cache = Cache::open_or_rebuild(&dir, &Stitcher::new(), soon()).unwrap();
+        assert_eq!(cache.report().hashed, 2);
+        drop(cache);
+
+        let cache = Cache::open_or_rebuild(&dir, &Stitcher::new(), soon()).unwrap();
+        assert_eq!(cache.report().hashed, 0);
+        assert_eq!(cache.report().replaced, 0);
+        drop(cache);
+
+        dir.write_shard(&extract("a.tx", "sym fn A\nsym fn A2\n"))
+            .unwrap();
+        let cache = Cache::open_or_rebuild(&dir, &Stitcher::new(), soon()).unwrap();
+        assert_eq!(cache.report().hashed, 1);
+        assert_eq!(cache.report().replaced, 1);
+    }
+
+    #[test]
     fn busy_retries_until_deadline() {
         let tmp = tempfile::tempdir().unwrap();
         let dir = project(&tmp);

@@ -93,6 +93,13 @@ pub(crate) struct Builder<'a> {
 }
 
 pub fn extract(input: &ExtractInput) -> Result<Fragment, ExtractError> {
+    extract_with_errors(input).map(|(fragment, _)| fragment)
+}
+
+/// The fragment plus one [`ExtractError::Parse`] (with span) per syntax error in the file.
+pub fn extract_with_errors(
+    input: &ExtractInput,
+) -> Result<(Fragment, Vec<ExtractError>), ExtractError> {
     let text = std::str::from_utf8(input.content).map_err(|e| ExtractError::Parse {
         span: None,
         message: format!("not utf-8: {e}"),
@@ -171,19 +178,33 @@ pub fn extract(input: &ExtractInput) -> Result<Fragment, ExtractError> {
         artifact.id(),
     );
     b.items(tree.items().collect());
+    let errors = parse
+        .errors()
+        .iter()
+        .map(|e| {
+            let r = e.range();
+            ExtractError::Parse {
+                span: Some(b.lines.span(r.start().into(), r.end().into())),
+                message: e.to_string(),
+            }
+        })
+        .collect();
 
-    Ok(Fragment {
-        provenance,
-        extension: "rust".to_string(),
-        artifact: ArtifactNode {
-            name: artifact,
-            facts,
+    Ok((
+        Fragment {
+            provenance,
+            extension: "rust".to_string(),
+            artifact: ArtifactNode {
+                name: artifact,
+                facts,
+            },
+            symbols: b.symbols,
+            links: b.links,
+            refs: b.refs,
+            exports: b.exports,
         },
-        symbols: b.symbols,
-        links: b.links,
-        refs: b.refs,
-        exports: b.exports,
-    })
+        errors,
+    ))
 }
 
 impl Builder<'_> {

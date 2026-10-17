@@ -11,6 +11,14 @@ pub trait Extractor: Send + Sync {
     /// By file name / extension.
     fn handles(&self, path: &RelPath) -> bool;
     fn extract(&self, input: &ExtractInput) -> Result<Fragment, ExtractError>;
+    /// Like [`Extractor::extract`], also returning recoverable errors (such as syntax errors)
+    /// found in a file whose fragment is still published. Default: no errors.
+    fn extract_with_errors(
+        &self,
+        input: &ExtractInput,
+    ) -> Result<(Fragment, Vec<ExtractError>), ExtractError> {
+        self.extract(input).map(|f| (f, Vec::new()))
+    }
     /// The link patterns this extension produces, for the fixture coverage check (FEAT-023).
     fn patterns(&self) -> &'static [&'static str] {
         &[]
