@@ -1,0 +1,10 @@
+{
+  // path aliases, JSON with comments
+  "compilerOptions": {
+    "baseUrl": "./src",
+    "paths": {
+      "@app/*": ["app/*"],
+      "@utils": ["utils/index.ts"], /* trailing comma follows */
+    },
+  },
+}

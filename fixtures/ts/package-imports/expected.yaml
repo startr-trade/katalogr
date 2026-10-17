@@ -1,0 +1,28 @@
+mode: exact
+symbols:
+- fx:package.json#package:fx-root
+- fx:packages/built/package.json#package:@fx%2Fbuilt
+- fx:packages/util/package.json#package:@fx%2Futil
+- fx:packages/util/src/extra.ts#fn:extra
+- fx:packages/util/src/main.ts#fn:util
+links:
+- from: fx:app.ts
+  kind: imports
+  to: fx:packages/built/package.json#package:@fx%2Fbuilt
+  confidence: Extracted
+- from: fx:app.ts
+  kind: imports
+  to: fx:packages/util/src/extra.ts
+  confidence: Extracted
+- from: fx:app.ts
+  kind: imports
+  to: fx:packages/util/src/extra.ts#fn:extra
+  confidence: Extracted
+- from: fx:app.ts
+  kind: imports
+  to: fx:packages/util/src/main.ts
+  confidence: Extracted
+- from: fx:app.ts
+  kind: imports
+  to: fx:packages/util/src/main.ts#fn:util
+  confidence: Extracted

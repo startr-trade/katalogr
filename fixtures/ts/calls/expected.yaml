@@ -1,0 +1,82 @@
+mode: exact
+symbols:
+- fx:a.ts#class:Svc
+- fx:a.ts#class:Svc/method:helper
+- fx:a.ts#class:Svc/method:run
+- fx:a.ts#fn:entry
+- fx:a.ts#fn:local
+- fx:b.ts#class:Other
+- fx:b.ts#class:Other/method:run
+- fx:b.ts#fn:def
+- fx:b.ts#fn:ns
+- fx:b.ts#fn:other
+- fx:b.ts#fn:remote
+links:
+- from: fx:a.ts
+  kind: calls
+  to: fx:a.ts#fn:local
+  confidence: Extracted
+- from: fx:a.ts
+  kind: imports
+  to: fx:b.ts
+  confidence: Extracted
+- from: fx:a.ts
+  kind: imports
+  to: fx:b.ts#fn:def
+  confidence: Extracted
+- from: fx:a.ts
+  kind: imports
+  to: fx:b.ts#fn:other
+  confidence: Extracted
+- from: fx:a.ts
+  kind: imports
+  to: fx:b.ts#fn:remote
+  confidence: Extracted
+- from: fx:a.ts#class:Svc
+  kind: contains
+  to: fx:a.ts#class:Svc/method:helper
+  confidence: Extracted
+- from: fx:a.ts#class:Svc
+  kind: contains
+  to: fx:a.ts#class:Svc/method:run
+  confidence: Extracted
+- from: fx:a.ts#class:Svc/method:run
+  kind: calls
+  to: fx:a.ts#class:Svc/method:helper
+  confidence: Inferred
+- from: fx:a.ts#class:Svc/method:run
+  kind: calls
+  to: fx:a.ts#fn:local
+  confidence: Extracted
+- from: fx:a.ts#class:Svc/method:run
+  kind: calls
+  to: fx:b.ts#fn:ns
+  confidence: Extracted
+- from: fx:a.ts#class:Svc/method:run
+  kind: calls
+  to: fx:b.ts#fn:remote
+  confidence: Extracted
+- from: fx:a.ts#fn:entry
+  kind: calls
+  to: fx:a.ts#class:Svc/method:run
+  confidence: Inferred
+- from: fx:a.ts#fn:entry
+  kind: calls
+  to: fx:a.ts#fn:local
+  confidence: Extracted
+- from: fx:a.ts#fn:entry
+  kind: calls
+  to: fx:b.ts#class:Other/method:run
+  confidence: Inferred
+- from: fx:a.ts#fn:entry
+  kind: calls
+  to: fx:b.ts#fn:def
+  confidence: Extracted
+- from: fx:a.ts#fn:entry
+  kind: calls
+  to: fx:b.ts#fn:other
+  confidence: Extracted
+- from: fx:b.ts#class:Other
+  kind: contains
+  to: fx:b.ts#class:Other/method:run
+  confidence: Extracted

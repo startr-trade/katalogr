@@ -1,0 +1,39 @@
+mode: exact
+symbols:
+- fx:src/items.ts#class:Widget
+- fx:src/items.ts#class:Widget/method:constructor
+- fx:src/items.ts#class:Widget/method:make
+- fx:src/items.ts#class:Widget/method:render
+- fx:src/items.ts#class:Widget/method:size
+- fx:src/items.ts#const:arrow
+- fx:src/items.ts#const:expr
+- fx:src/items.ts#enum:Color
+- fx:src/items.ts#fn:default
+- fx:src/items.ts#fn:hidden
+- fx:src/items.ts#fn:later
+- fx:src/items.ts#fn:overload
+- fx:src/items.ts#fn:overload~2
+- fx:src/items.ts#fn:plain
+- fx:src/items.ts#interface:Shape
+- fx:src/items.ts#type:Id
+links:
+- from: fx:src/items.ts#class:Widget
+  kind: contains
+  to: fx:src/items.ts#class:Widget/method:constructor
+  confidence: Extracted
+- from: fx:src/items.ts#class:Widget
+  kind: contains
+  to: fx:src/items.ts#class:Widget/method:make
+  confidence: Extracted
+- from: fx:src/items.ts#class:Widget
+  kind: contains
+  to: fx:src/items.ts#class:Widget/method:render
+  confidence: Extracted
+- from: fx:src/items.ts#class:Widget
+  kind: contains
+  to: fx:src/items.ts#class:Widget/method:size
+  confidence: Extracted
+- from: fx:src/items.ts#class:Widget/method:render
+  kind: calls
+  to: fx:src/items.ts#fn:hidden
+  confidence: Extracted
