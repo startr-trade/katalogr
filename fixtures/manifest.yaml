@@ -18,6 +18,7 @@ technologies:
     dangling-links:
       - md/dangling-links
     links:
+      - md/emails
       - md/sections-links
     sections:
       - md/sections-links
