@@ -7,7 +7,12 @@ license.workspace = true
 repository.workspace = true
 rust-version.workspace = true
 
+[features]
+# Registers the `.tx` test extractor; for integration tests only.
+test-extractor = []
+
 [dependencies]
+katalogr-query.workspace = true
 katalogr-engine.workspace = true
 katalogr-ext-rust.workspace = true
 katalogr-model.workspace = true

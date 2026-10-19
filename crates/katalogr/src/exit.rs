@@ -3,7 +3,6 @@
 use katalogr_dist::DistError;
 
 /// Exit codes returned by the katalogr CLI.
-#[allow(dead_code)] // Ambiguous and NoMatch are produced by query commands added later
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ExitCode {
     /// Success.
