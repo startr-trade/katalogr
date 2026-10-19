@@ -1,6 +1,7 @@
 //! The TS/JS project context: every `tsconfig.json`, `jsconfig.json` and `package.json` of a
 //! repository, reduced to what specifier resolution needs (FEAT-006 sections 3 and 4).
 
+use katalogr_ext_wasm::WasmPackages;
 use katalogr_model::{ExtractError, RelPath};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -9,12 +10,17 @@ use std::collections::BTreeMap;
 pub const TSCONFIG: &str = "tsconfig.json";
 pub const JSCONFIG: &str = "jsconfig.json";
 pub const PACKAGE_JSON: &str = "package.json";
+pub use katalogr_ext_wasm::CARGO_TOML;
 
 /// Serialised as compact JSON with sorted keys and vectors, so equal repositories give equal bytes.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TsContext {
     /// Sorted by `dir`.
     pub projects: Vec<TsProject>,
+    /// The wasm packages of the repository (FEAT-016), from its `Cargo.toml` and
+    /// `package.json` files. Absent in contexts written before the bridge existed.
+    #[serde(default)]
+    pub wasm: WasmPackages,
 }
 
 /// Fields are declared in key order so the JSON has sorted keys.
@@ -285,11 +291,23 @@ fn entry_of(doc: &Value) -> Option<String> {
 pub fn build(files: &[(RelPath, Vec<u8>)]) -> TsContext {
     let mut configs: BTreeMap<String, Value> = BTreeMap::new();
     let mut packages: BTreeMap<String, Value> = BTreeMap::new();
+    let mut cargo: Vec<(String, String)> = Vec::new();
+    let mut package_texts: Vec<(String, String)> = Vec::new();
     for (p, bytes) in files {
+        if let Ok(text) = std::str::from_utf8(bytes) {
+            match file_name(p.as_str()) {
+                CARGO_TOML => cargo.push((p.as_str().to_string(), text.to_string())),
+                PACKAGE_JSON => package_texts.push((p.as_str().to_string(), text.to_string())),
+                _ => {}
+            }
+        }
         let Some(doc) = parse_jsonc(bytes) else {
             continue;
         };
         let name = file_name(p.as_str());
+        if name == CARGO_TOML {
+            continue;
+        }
         if is_config_name(name) {
             configs.insert(p.as_str().to_string(), doc);
         } else if name == PACKAGE_JSON {
@@ -340,8 +358,11 @@ pub fn build(files: &[(RelPath, Vec<u8>)]) -> TsContext {
         project.package_name = doc.get("name").and_then(Value::as_str).map(str::to_string);
         project.entry = entry_of(doc).and_then(|e| join_norm(dir, &e));
     }
+    cargo.sort();
+    package_texts.sort();
     TsContext {
         projects: dirs.into_values().collect(),
+        wasm: WasmPackages::build(&cargo, &package_texts),
     }
 }
 
@@ -425,6 +446,43 @@ mod tests {
         assert_eq!(ctx.alias_project("app/x/y.ts").unwrap().dir, "app");
         assert!(ctx.alias_project("other/y.ts").is_none());
         assert_eq!(ctx.workspace_package("@fx/pkg").unwrap().dir, "pkg");
+    }
+
+    #[test]
+    fn cargo_toml_not_handled() {
+        use crate::TsExtractor;
+        use katalogr_model::Extractor;
+        let cargo = RelPath::new("crates/x/Cargo.toml").unwrap();
+        assert!(!TsExtractor.handles(&cargo));
+        assert!(TsExtractor.is_context_file(&cargo));
+        assert!(TsExtractor.handles(&RelPath::new("web/package.json").unwrap()));
+        assert!(TsExtractor.handles(&RelPath::new("tsconfig.base.json").unwrap()));
+        assert!(TsExtractor.handles(&RelPath::new("a.ts").unwrap()));
+    }
+
+    #[test]
+    fn wasm_in_context_bytes() {
+        let files = vec![
+            file(
+                "Cargo.toml",
+                "[package]\nname = \"demo-wasm\"\n[dependencies]\nwasm-bindgen = \"0.2\"\n",
+            ),
+            file(
+                "web/package.json",
+                r#"{ "dependencies": { "demo-wasm": "file:../pkg" } }"#,
+            ),
+        ];
+        let ctx = build(&files);
+        assert_eq!(ctx.wasm.packages.len(), 1);
+        assert_eq!(ctx.wasm.packages[0].key, "demo_wasm");
+        let mut rev = files.clone();
+        rev.reverse();
+        assert_eq!(ctx.to_bytes(), build(&rev).to_bytes());
+        let json = String::from_utf8(ctx.to_bytes()).unwrap();
+        assert!(json.starts_with(r#"{"projects":["#) && json.contains(r#""wasm":{"packages":["#));
+        // Contexts written before the bridge read with no wasm packages.
+        let old = TsContext::from_bytes(br#"{"projects":[]}"#).unwrap();
+        assert!(old.wasm.is_empty());
     }
 
     #[test]

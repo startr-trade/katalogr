@@ -191,22 +191,30 @@ pub fn extract_with_errors(
         })
         .collect();
 
-    Ok((
-        Fragment {
-            provenance,
-            extension: "rust".to_string(),
-            artifact: ArtifactNode {
-                name: artifact,
-                facts,
-            },
-            symbols: b.symbols,
-            links: b.links,
-            refs: b.refs,
-            exports: b.exports,
-            bindings: Vec::new(),
+    let mut fragment = Fragment {
+        provenance,
+        extension: "rust".to_string(),
+        artifact: ArtifactNode {
+            name: artifact,
+            facts,
         },
-        errors,
-    ))
+        symbols: b.symbols,
+        links: b.links,
+        refs: b.refs,
+        exports: b.exports,
+        bindings: Vec::new(),
+    };
+    // FEAT-016: wasm-bindgen exports and extern imports (the convention lives in the bridge crate).
+    if katalogr_ext_wasm::rust::mentions_wasm_bindgen(&fragment) {
+        katalogr_ext_wasm::rust::apply(
+            &mut fragment,
+            owner.krate.map(|c| katalogr_ext_wasm::rust::CrateRef {
+                name: &c.name,
+                dir: &c.dir,
+            }),
+        );
+    }
+    Ok((fragment, errors))
 }
 
 impl Builder<'_> {

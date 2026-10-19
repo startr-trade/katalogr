@@ -65,6 +65,13 @@ pub struct Builder<'s> {
     ordinals: HashMap<Vec<Segment>, u32>,
     /// `export { local as exported }` without a source, resolved after the declarations.
     export_locals: Vec<(String, String, Span)>,
+    /// Locals imported from a wasm package (FEAT-016).
+    pub(crate) wasm_imports: HashMap<String, crate::wasm::WasmImport>,
+    /// `const x = new C()` locals of a wasm class, per pending item: name to (package key, class).
+    pub(crate) wasm_instances: HashMap<String, (String, String)>,
+    pub(crate) bindings: Vec<katalogr_model::Binding>,
+    /// The package key when this file is generated wasm glue.
+    pub(crate) glue: Option<String>,
 }
 
 fn is_function(e: &Expression<'_>) -> bool {
@@ -108,6 +115,10 @@ impl<'s> Builder<'s> {
             declared: HashMap::new(),
             ordinals: HashMap::new(),
             export_locals: Vec::new(),
+            wasm_imports: HashMap::new(),
+            wasm_instances: HashMap::new(),
+            bindings: Vec::new(),
+            glue: ctx.wasm.glue_of(path.as_str()).map(|p| p.key.clone()),
         }
     }
 

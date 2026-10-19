@@ -1,0 +1,354 @@
+mode: subset
+symbols:
+- fx:Cargo.toml#crate:demo-wasm
+- fx:app.ts#fn:main
+- fx:package.json#package:demo-app
+- fx:pkg/demo_wasm.d.ts#class:Counter
+- fx:pkg/demo_wasm.d.ts#class:Counter/method:constructor
+- fx:pkg/demo_wasm.d.ts#class:Counter/method:free
+- fx:pkg/demo_wasm.d.ts#class:Counter/method:increment
+- fx:pkg/demo_wasm.d.ts#enum:Color
+- fx:pkg/demo_wasm.d.ts#fn:__wbg_init
+- fx:pkg/demo_wasm.d.ts#fn:greet
+- fx:pkg/demo_wasm.d.ts#fn:initSync
+- fx:pkg/demo_wasm.d.ts#fn:sayHi
+- fx:pkg/demo_wasm.d.ts#fn:tick
+- fx:pkg/demo_wasm.d.ts#fn:unused_export
+- fx:pkg/demo_wasm.d.ts#interface:InitOutput
+- fx:pkg/demo_wasm.d.ts#type:InitInput
+- fx:pkg/demo_wasm.js#class:Counter
+- fx:pkg/demo_wasm.js#class:Counter/method:constructor
+- fx:pkg/demo_wasm.js#class:Counter/method:free
+- fx:pkg/demo_wasm.js#class:Counter/method:increment
+- fx:pkg/demo_wasm.js#class:Counter/method:value
+- fx:pkg/demo_wasm.js#class:Counter/method:value~2
+- fx:pkg/demo_wasm.js#fn:__wbg_init
+- fx:pkg/demo_wasm.js#fn:greet
+- fx:pkg/demo_wasm.js#fn:initSync
+- fx:pkg/demo_wasm.js#fn:sayHi
+- fx:pkg/demo_wasm.js#fn:tick
+- fx:pkg/demo_wasm.js#fn:unused_export
+- fx:pkg/demo_wasm_bg.js#fn:__wbg_log_1a2b
+- fx:pkg/demo_wasm_bg.js#fn:__wbindgen_throw
+- fx:pkg/demo_wasm_bg.js#fn:greet
+- fx:pkg/demo_wasm_bg.js#fn:sayHi
+- fx:pkg/demo_wasm_bg.js#fn:tick
+- fx:pkg/demo_wasm_bg.js#fn:unused_export
+- fx:pkg/package.json#package:demo-wasm
+- fx:src/lib.rs#enum:Color
+- fx:src/lib.rs#enum:Color/variant:Green
+- fx:src/lib.rs#enum:Color/variant:Red
+- fx:src/lib.rs#fn:boot
+- fx:src/lib.rs#fn:greet
+- fx:src/lib.rs#fn:say_hi
+- fx:src/lib.rs#fn:tick
+- fx:src/lib.rs#fn:unused_export
+- fx:src/lib.rs#impl:Counter
+- fx:src/lib.rs#impl:Counter/fn:helper
+- fx:src/lib.rs#impl:Counter/fn:increment
+- fx:src/lib.rs#impl:Counter/fn:new
+- fx:src/lib.rs#impl:Counter/fn:set_value
+- fx:src/lib.rs#impl:Counter/fn:value
+- fx:src/lib.rs#impl:Default%20for%20Counter
+- fx:src/lib.rs#impl:Default%20for%20Counter/fn:default
+- fx:src/lib.rs#struct:Counter
+contracts:
+- contract:wasm_export:demo_wasm%2FColor
+- contract:wasm_export:demo_wasm%2FColor.Green
+- contract:wasm_export:demo_wasm%2FColor.Red
+- contract:wasm_export:demo_wasm%2FCounter
+- contract:wasm_export:demo_wasm%2FCounter.increment
+- contract:wasm_export:demo_wasm%2FCounter.value
+- contract:wasm_export:demo_wasm%2Fgreet
+- contract:wasm_export:demo_wasm%2FsayHi
+- contract:wasm_export:demo_wasm%2Ftick
+- contract:wasm_export:demo_wasm%2Funused_export
+links:
+- from: fx:app.ts
+  kind: consumes
+  to: contract:wasm_export:demo_wasm%2FCounter
+  confidence: Extracted
+- from: fx:app.ts
+  kind: consumes
+  to: contract:wasm_export:demo_wasm%2Fgreet
+  confidence: Extracted
+- from: fx:app.ts
+  kind: imports
+  to: fx:pkg/demo_wasm.js
+  confidence: Extracted
+- from: fx:app.ts
+  kind: imports
+  to: fx:pkg/demo_wasm.js#class:Counter
+  confidence: Extracted
+- from: fx:app.ts
+  kind: imports
+  to: fx:pkg/demo_wasm.js#fn:__wbg_init
+  confidence: Extracted
+- from: fx:app.ts
+  kind: imports
+  to: fx:pkg/demo_wasm.js#fn:greet
+  confidence: Extracted
+- from: fx:app.ts#fn:main
+  kind: calls
+  to: fx:pkg/demo_wasm.d.ts#class:Counter/method:increment
+  confidence: Inferred
+- from: fx:app.ts#fn:main
+  kind: calls
+  to: fx:pkg/demo_wasm.js#class:Counter
+  confidence: Extracted
+- from: fx:app.ts#fn:main
+  kind: calls
+  to: fx:pkg/demo_wasm.js#class:Counter/method:increment
+  confidence: Inferred
+- from: fx:app.ts#fn:main
+  kind: calls
+  to: fx:pkg/demo_wasm.js#fn:__wbg_init
+  confidence: Extracted
+- from: fx:app.ts#fn:main
+  kind: calls
+  to: fx:pkg/demo_wasm.js#fn:greet
+  confidence: Extracted
+- from: fx:app.ts#fn:main
+  kind: consumes
+  to: contract:wasm_export:demo_wasm%2FCounter
+  confidence: Extracted
+- from: fx:app.ts#fn:main
+  kind: consumes
+  to: contract:wasm_export:demo_wasm%2FCounter.increment
+  confidence: Inferred
+- from: fx:app.ts#fn:main
+  kind: consumes
+  to: contract:wasm_export:demo_wasm%2FCounter.value
+  confidence: Inferred
+- from: fx:app.ts#fn:main
+  kind: consumes
+  to: contract:wasm_export:demo_wasm%2Fgreet
+  confidence: Extracted
+- from: fx:pkg/demo_wasm.d.ts#class:Counter
+  kind: contains
+  to: fx:pkg/demo_wasm.d.ts#class:Counter/method:constructor
+  confidence: Extracted
+- from: fx:pkg/demo_wasm.d.ts#class:Counter
+  kind: contains
+  to: fx:pkg/demo_wasm.d.ts#class:Counter/method:free
+  confidence: Extracted
+- from: fx:pkg/demo_wasm.d.ts#class:Counter
+  kind: contains
+  to: fx:pkg/demo_wasm.d.ts#class:Counter/method:increment
+  confidence: Extracted
+- from: fx:pkg/demo_wasm.d.ts#class:Counter
+  kind: declares
+  to: contract:wasm_export:demo_wasm%2FCounter
+  confidence: Extracted
+- from: fx:pkg/demo_wasm.d.ts#class:Counter/method:constructor
+  kind: declares
+  to: contract:wasm_export:demo_wasm%2FCounter
+  confidence: Extracted
+- from: fx:pkg/demo_wasm.d.ts#class:Counter/method:increment
+  kind: declares
+  to: contract:wasm_export:demo_wasm%2FCounter.increment
+  confidence: Extracted
+- from: fx:pkg/demo_wasm.d.ts#enum:Color
+  kind: declares
+  to: contract:wasm_export:demo_wasm%2FColor
+  confidence: Extracted
+- from: fx:pkg/demo_wasm.d.ts#fn:greet
+  kind: declares
+  to: contract:wasm_export:demo_wasm%2Fgreet
+  confidence: Extracted
+- from: fx:pkg/demo_wasm.d.ts#fn:sayHi
+  kind: declares
+  to: contract:wasm_export:demo_wasm%2FsayHi
+  confidence: Extracted
+- from: fx:pkg/demo_wasm.d.ts#fn:tick
+  kind: declares
+  to: contract:wasm_export:demo_wasm%2Ftick
+  confidence: Extracted
+- from: fx:pkg/demo_wasm.d.ts#fn:unused_export
+  kind: declares
+  to: contract:wasm_export:demo_wasm%2Funused_export
+  confidence: Extracted
+- from: fx:pkg/demo_wasm.js
+  kind: imports
+  to: fx:pkg/demo_wasm_bg.js
+  confidence: Extracted
+- from: fx:pkg/demo_wasm.js#class:Counter
+  kind: contains
+  to: fx:pkg/demo_wasm.js#class:Counter/method:constructor
+  confidence: Extracted
+- from: fx:pkg/demo_wasm.js#class:Counter
+  kind: contains
+  to: fx:pkg/demo_wasm.js#class:Counter/method:free
+  confidence: Extracted
+- from: fx:pkg/demo_wasm.js#class:Counter
+  kind: contains
+  to: fx:pkg/demo_wasm.js#class:Counter/method:increment
+  confidence: Extracted
+- from: fx:pkg/demo_wasm.js#class:Counter
+  kind: contains
+  to: fx:pkg/demo_wasm.js#class:Counter/method:value
+  confidence: Extracted
+- from: fx:pkg/demo_wasm.js#class:Counter
+  kind: contains
+  to: fx:pkg/demo_wasm.js#class:Counter/method:value~2
+  confidence: Extracted
+- from: fx:pkg/demo_wasm.js#class:Counter
+  kind: declares
+  to: contract:wasm_export:demo_wasm%2FCounter
+  confidence: Extracted
+- from: fx:pkg/demo_wasm.js#class:Counter/method:constructor
+  kind: declares
+  to: contract:wasm_export:demo_wasm%2FCounter
+  confidence: Extracted
+- from: fx:pkg/demo_wasm.js#class:Counter/method:increment
+  kind: declares
+  to: contract:wasm_export:demo_wasm%2FCounter.increment
+  confidence: Extracted
+- from: fx:pkg/demo_wasm.js#class:Counter/method:value
+  kind: declares
+  to: contract:wasm_export:demo_wasm%2FCounter.value
+  confidence: Extracted
+- from: fx:pkg/demo_wasm.js#class:Counter/method:value~2
+  kind: declares
+  to: contract:wasm_export:demo_wasm%2FCounter.value
+  confidence: Extracted
+- from: fx:pkg/demo_wasm.js#fn:greet
+  kind: calls
+  to: fx:pkg/demo_wasm_bg.js#fn:greet
+  confidence: Extracted
+- from: fx:pkg/demo_wasm.js#fn:greet
+  kind: declares
+  to: contract:wasm_export:demo_wasm%2Fgreet
+  confidence: Extracted
+- from: fx:pkg/demo_wasm.js#fn:sayHi
+  kind: calls
+  to: fx:pkg/demo_wasm_bg.js#fn:sayHi
+  confidence: Extracted
+- from: fx:pkg/demo_wasm.js#fn:sayHi
+  kind: declares
+  to: contract:wasm_export:demo_wasm%2FsayHi
+  confidence: Extracted
+- from: fx:pkg/demo_wasm.js#fn:tick
+  kind: calls
+  to: fx:pkg/demo_wasm_bg.js#fn:tick
+  confidence: Extracted
+- from: fx:pkg/demo_wasm.js#fn:tick
+  kind: declares
+  to: contract:wasm_export:demo_wasm%2Ftick
+  confidence: Extracted
+- from: fx:pkg/demo_wasm.js#fn:unused_export
+  kind: calls
+  to: fx:pkg/demo_wasm_bg.js#fn:unused_export
+  confidence: Extracted
+- from: fx:pkg/demo_wasm.js#fn:unused_export
+  kind: declares
+  to: contract:wasm_export:demo_wasm%2Funused_export
+  confidence: Extracted
+- from: fx:pkg/demo_wasm_bg.js#fn:greet
+  kind: declares
+  to: contract:wasm_export:demo_wasm%2Fgreet
+  confidence: Extracted
+- from: fx:pkg/demo_wasm_bg.js#fn:sayHi
+  kind: declares
+  to: contract:wasm_export:demo_wasm%2FsayHi
+  confidence: Extracted
+- from: fx:pkg/demo_wasm_bg.js#fn:tick
+  kind: declares
+  to: contract:wasm_export:demo_wasm%2Ftick
+  confidence: Extracted
+- from: fx:pkg/demo_wasm_bg.js#fn:unused_export
+  kind: declares
+  to: contract:wasm_export:demo_wasm%2Funused_export
+  confidence: Extracted
+- from: fx:src/lib.rs#enum:Color
+  kind: contains
+  to: fx:src/lib.rs#enum:Color/variant:Green
+  confidence: Extracted
+- from: fx:src/lib.rs#enum:Color
+  kind: contains
+  to: fx:src/lib.rs#enum:Color/variant:Red
+  confidence: Extracted
+- from: fx:src/lib.rs#enum:Color
+  kind: provides
+  to: contract:wasm_export:demo_wasm%2FColor
+  confidence: Extracted
+- from: fx:src/lib.rs#enum:Color/variant:Green
+  kind: provides
+  to: contract:wasm_export:demo_wasm%2FColor.Green
+  confidence: Extracted
+- from: fx:src/lib.rs#enum:Color/variant:Red
+  kind: provides
+  to: contract:wasm_export:demo_wasm%2FColor.Red
+  confidence: Extracted
+- from: fx:src/lib.rs#fn:greet
+  kind: provides
+  to: contract:wasm_export:demo_wasm%2Fgreet
+  confidence: Extracted
+- from: fx:src/lib.rs#fn:say_hi
+  kind: provides
+  to: contract:wasm_export:demo_wasm%2FsayHi
+  confidence: Extracted
+- from: fx:src/lib.rs#fn:tick
+  kind: provides
+  to: contract:wasm_export:demo_wasm%2Ftick
+  confidence: Extracted
+- from: fx:src/lib.rs#fn:unused_export
+  kind: provides
+  to: contract:wasm_export:demo_wasm%2Funused_export
+  confidence: Extracted
+- from: fx:src/lib.rs#impl:Counter
+  kind: contains
+  to: fx:src/lib.rs#impl:Counter/fn:helper
+  confidence: Extracted
+- from: fx:src/lib.rs#impl:Counter
+  kind: contains
+  to: fx:src/lib.rs#impl:Counter/fn:increment
+  confidence: Extracted
+- from: fx:src/lib.rs#impl:Counter
+  kind: contains
+  to: fx:src/lib.rs#impl:Counter/fn:new
+  confidence: Extracted
+- from: fx:src/lib.rs#impl:Counter
+  kind: contains
+  to: fx:src/lib.rs#impl:Counter/fn:set_value
+  confidence: Extracted
+- from: fx:src/lib.rs#impl:Counter
+  kind: contains
+  to: fx:src/lib.rs#impl:Counter/fn:value
+  confidence: Extracted
+- from: fx:src/lib.rs#impl:Counter
+  kind: implements-for
+  to: fx:src/lib.rs#struct:Counter
+  confidence: Extracted
+- from: fx:src/lib.rs#impl:Counter/fn:increment
+  kind: provides
+  to: contract:wasm_export:demo_wasm%2FCounter.increment
+  confidence: Extracted
+- from: fx:src/lib.rs#impl:Counter/fn:new
+  kind: provides
+  to: contract:wasm_export:demo_wasm%2FCounter
+  confidence: Extracted
+- from: fx:src/lib.rs#impl:Counter/fn:set_value
+  kind: provides
+  to: contract:wasm_export:demo_wasm%2FCounter.value
+  confidence: Extracted
+- from: fx:src/lib.rs#impl:Counter/fn:value
+  kind: provides
+  to: contract:wasm_export:demo_wasm%2FCounter.value
+  confidence: Extracted
+- from: fx:src/lib.rs#impl:Default%20for%20Counter
+  kind: contains
+  to: fx:src/lib.rs#impl:Default%20for%20Counter/fn:default
+  confidence: Extracted
+- from: fx:src/lib.rs#impl:Default%20for%20Counter
+  kind: implements-for
+  to: fx:src/lib.rs#struct:Counter
+  confidence: Extracted
+- from: fx:src/lib.rs#impl:Default%20for%20Counter/fn:default
+  kind: calls
+  to: fx:src/lib.rs#impl:Counter/fn:new
+  confidence: Extracted
+- from: fx:src/lib.rs#struct:Counter
+  kind: provides
+  to: contract:wasm_export:demo_wasm%2FCounter
+  confidence: Extracted

@@ -34,6 +34,8 @@ technologies:
       - rust/calls
     crate-deps:
       - rust/workspace-two-crates
+    extern-items:
+      - rust/extern-items
     impl-links:
       - rust/impls
     items:
@@ -44,6 +46,11 @@ technologies:
       - rust/use-and-reexport
     use-resolution:
       - rust/use-and-reexport
+    wasm-export:
+      - wasm/exports-uncommitted
+      - wasm/scripts-out-dir
+    wasm-extern:
+      - wasm/extern-imports
   test:
     contracts:
       - test/contracts-bind
@@ -86,3 +93,8 @@ technologies:
       - ts/reexports
     require:
       - ts/require
+    wasm-glue:
+      - wasm/glue-committed
+    wasm-import:
+      - wasm/exports-uncommitted
+      - wasm/scripts-out-dir

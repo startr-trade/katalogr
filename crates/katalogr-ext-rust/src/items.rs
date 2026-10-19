@@ -76,8 +76,53 @@ impl Builder<'_> {
                 ast::Item::Enum(e) => self.enumeration(&e),
                 ast::Item::Trait(t) => self.tr(&t),
                 ast::Item::Impl(i) => self.imp(&i),
-                // Macro invocations, extern blocks and `extern crate` define no symbol.
+                ast::Item::ExternBlock(b) => self.extern_block(&b),
+                // Macro invocations and `extern crate` define no symbol.
                 _ => {}
+            }
+        }
+    }
+
+    /// `extern "<abi>" { ... }` (FEAT-016): each foreign `fn`, `static` and `type` becomes a
+    /// symbol in the current module, exported as `("rs-item", ...)` like any item, with the
+    /// usual facts plus `abi` (`"C"` when omitted) and `extern_attrs` (the block's attribute
+    /// texts, when any). Foreign items have no body, so no calls are collected.
+    fn extern_block(&mut self, b: &ast::ExternBlock) {
+        let abi = b.abi().and_then(|a| a.string_token()).map_or_else(
+            || "C".to_string(),
+            |t| t.text().trim_matches('"').to_string(),
+        );
+        let block_attrs = crate::extract::attr_texts(b.attrs());
+        let Some(list) = b.extern_item_list() else {
+            return;
+        };
+        for item in list.extern_items() {
+            let before = self.symbols.len();
+            match item {
+                ast::ExternItem::Fn(f) => self.func(&f, None),
+                ast::ExternItem::Static(s) => {
+                    if let Some(name) = s.name() {
+                        let mut facts = self.facts(s.visibility(), s.attrs(), s.syntax());
+                        if s.unsafe_token().is_some() {
+                            facts.insert("unsafe".to_string(), Fact::Bool(true));
+                        }
+                        self.simple("static", name.text(), s.syntax(), facts);
+                    }
+                }
+                ast::ExternItem::TypeAlias(t) => {
+                    if let Some(name) = t.name() {
+                        let facts = self.facts(t.visibility(), t.attrs(), t.syntax());
+                        self.simple("type", name.text(), t.syntax(), facts);
+                    }
+                }
+                ast::ExternItem::MacroCall(_) => {}
+            }
+            if let Some(sym) = self.symbols.get_mut(before) {
+                sym.facts.insert("abi".to_string(), Fact::Str(abi.clone()));
+                if !block_attrs.is_empty() {
+                    sym.facts
+                        .insert("extern_attrs".to_string(), Fact::List(block_attrs.clone()));
+                }
             }
         }
     }

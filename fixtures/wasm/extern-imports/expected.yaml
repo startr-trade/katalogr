@@ -1,0 +1,43 @@
+mode: subset
+symbols:
+- fx:Cargo.toml#crate:demo-wasm
+- fx:js/host.js#class:Clock
+- fx:js/host.js#class:Clock/method:tick
+- fx:js/host.js#fn:now
+- fx:src/lib.rs#fn:alert
+- fx:src/lib.rs#fn:log
+- fx:src/lib.rs#fn:now
+- fx:src/lib.rs#fn:report
+- fx:src/lib.rs#fn:tick
+- fx:src/lib.rs#type:Clock
+contracts:
+- contract:wasm_export:demo_wasm%2Freport
+links:
+- from: fx:js/host.js#class:Clock
+  kind: contains
+  to: fx:js/host.js#class:Clock/method:tick
+  confidence: Extracted
+- from: fx:src/lib.rs#fn:now
+  kind: calls
+  to: fx:js/host.js#fn:now
+  confidence: Extracted
+- from: fx:src/lib.rs#fn:report
+  kind: calls
+  to: fx:src/lib.rs#fn:alert
+  confidence: Extracted
+- from: fx:src/lib.rs#fn:report
+  kind: calls
+  to: fx:src/lib.rs#fn:log
+  confidence: Extracted
+- from: fx:src/lib.rs#fn:report
+  kind: provides
+  to: contract:wasm_export:demo_wasm%2Freport
+  confidence: Extracted
+- from: fx:src/lib.rs#fn:tick
+  kind: calls
+  to: fx:js/host.js#class:Clock
+  confidence: Extracted
+- from: fx:src/lib.rs#type:Clock
+  kind: references
+  to: fx:js/host.js#class:Clock
+  confidence: Extracted
