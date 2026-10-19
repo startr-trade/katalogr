@@ -94,6 +94,7 @@ fn envelope<T>(
         truncated,
         result,
         next,
+        diagnostic: None,
     }
 }
 

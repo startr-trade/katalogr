@@ -7,6 +7,7 @@
 pub mod budget;
 mod callers;
 mod dangling;
+pub mod diagnostic;
 mod explain;
 mod find;
 mod hints;
@@ -23,6 +24,11 @@ mod why;
 
 pub use callers::callers;
 pub use dangling::{CONTRACT_KIND as DANGLING_CONTRACT, DEFAULT_KINDS as DANGLING_KINDS, dangling};
+pub use diagnostic::{
+    DIAG_PACK, DIAG_REFS, DIAG_TERMS, DIAG_TOP, DIAG_WEIGHTS, Diagnostic, ExpandedTerm, PackEntry,
+    PackTrace, PartTrace, PrefixTrace, RankSource, RankTrace, RoutingTrace, TermTrace, Trace,
+    WeightTrace,
+};
 pub use explain::explain;
 pub use find::find;
 pub use hints::{HintSource, hints};

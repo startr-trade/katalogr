@@ -1,5 +1,6 @@
 //! Result types. Their serialised form is the stable JSON contract (`schema/v1`).
 
+use crate::diagnostic::Trace;
 use katalogr_model::{Confidence, Span};
 use schemars::JsonSchema;
 use serde::Serialize;
@@ -209,7 +210,7 @@ pub struct Truncation {
 }
 
 /// What `--json` prints.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]
 pub struct Envelope<T> {
     pub schema: u32,
     pub watermark: u64,
@@ -220,4 +221,7 @@ pub struct Envelope<T> {
     /// Suggested follow-up commands, at most three.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub next: Vec<String>,
+    /// The trace of the query, present only with `--diagnostic` (FEAT-065).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub diagnostic: Option<Trace>,
 }
