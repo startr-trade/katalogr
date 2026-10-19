@@ -514,6 +514,12 @@ impl<'a> Processor<'a> {
         if let Some(h) = profiles.hash_for(extractor.id()) {
             keyed.extend_from_slice(&h);
         }
+        // An extension that changes what it extracts from unchanged input bumps its salt.
+        let salt = extractor.revision_salt();
+        if !salt.is_empty() {
+            keyed.extend_from_slice(b"salt:");
+            keyed.extend_from_slice(salt.as_bytes());
+        }
         let revision = context::revision(&git_blob_id(&content), &keyed);
         if existing.is_some_and(|f| f.provenance.revision == revision) {
             return Ok(Action::Skip);

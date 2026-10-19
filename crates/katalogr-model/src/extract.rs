@@ -40,6 +40,13 @@ pub trait Extractor: Send + Sync {
         let _ = files;
         Ok(Vec::new())
     }
+    /// Bumped by an extension whose output changes for unchanged input (new facts, new symbol
+    /// kinds). It is mixed into the shard revision, so `index --full` re-extracts that
+    /// extension's files once. Default: empty, which leaves every revision unchanged
+    /// (ADR-0018; shared by FEAT-030 and FEAT-016).
+    fn revision_salt(&self) -> &'static str {
+        ""
+    }
 }
 
 /// Borrowed input; not serialisable.

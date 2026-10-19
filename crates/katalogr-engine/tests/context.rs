@@ -7,8 +7,9 @@ use katalogr_engine::{Engine, scan};
 use katalogr_model::{ExtractError, ExtractInput, Extractor, Fact, Fragment, RelPath};
 use katalogr_store::{Kindex, ProjectName};
 use std::collections::BTreeMap;
+use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
-use support::{TestExtractor, drained_graph, file_event, init_project};
+use support::{SALT, SaltedExtractor, TestExtractor, drained_graph, file_event, init_project};
 
 /// The test format, with `ctx.tx` as the context file. The context is the concatenated text of
 /// every `ctx.tx` in the repo, and each artifact records it in the fact `ctx`.
@@ -154,5 +155,65 @@ mod context {
         let rs = scan::list_files(w, &s(&["**/*.rs"]), &s(&["src/b.rs"])).unwrap();
         let rs: Vec<_> = rs.iter().map(|p| p.as_str()).collect();
         assert_eq!(rs, ["src/a.rs", "target/x/y.rs"]);
+    }
+
+    #[test]
+    fn extractor_salt_forces_reextract() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = Utf8PathBuf::from_path_buf(tmp.path().to_path_buf()).unwrap();
+        let work = root.join("work");
+        std::fs::create_dir_all(&work).unwrap();
+        std::fs::write(work.join("a.salt"), "one\ntwo\n").unwrap();
+        let kx = root.join("kx");
+        init_project(&kx);
+        let dir = Kindex::open(&kx)
+            .unwrap()
+            .project(&ProjectName::new("p").unwrap())
+            .unwrap();
+        let mut reg = ExtensionRegistry::new();
+        reg.register(Box::new(SaltedExtractor));
+        let roots = BTreeMap::from([("r".to_string(), work.clone())]);
+        let e = Engine::open(dir, reg, roots, Instant::now() + Duration::from_secs(10)).unwrap();
+        let revision = |e: &Engine| {
+            let shard = e
+                .dir()
+                .read_shard("r", &RelPath::new("a.salt").unwrap())
+                .unwrap()
+                .expect("shard");
+            shard.provenance.revision
+        };
+
+        SALT.store(0, Ordering::SeqCst);
+        e.inbox()
+            .append(&katalogr_engine::NewEvent::rescan("r"))
+            .unwrap();
+        drained_graph(&e);
+        let r0 = revision(&e);
+        let shard_file = e.dir().shard_path("r", &RelPath::new("a.salt").unwrap());
+        let m0 = std::fs::metadata(&shard_file).unwrap().modified().unwrap();
+
+        // Nothing changed: the rescan skips the shard.
+        std::thread::sleep(Duration::from_millis(20));
+        e.inbox()
+            .append(&katalogr_engine::NewEvent::rescan("r"))
+            .unwrap();
+        drained_graph(&e);
+        assert_eq!(revision(&e), r0);
+        assert_eq!(
+            std::fs::metadata(&shard_file).unwrap().modified().unwrap(),
+            m0
+        );
+
+        // The extractor bumps its salt: a full rescan rewrites the shard under a new revision.
+        SALT.store(1, Ordering::SeqCst);
+        std::thread::sleep(Duration::from_millis(20));
+        e.inbox()
+            .append(&katalogr_engine::NewEvent::rescan("r"))
+            .unwrap();
+        drained_graph(&e);
+        let r1 = revision(&e);
+        SALT.store(0, Ordering::SeqCst);
+        assert_ne!(r1, r0, "the salt is part of the revision");
+        assert!(std::fs::metadata(&shard_file).unwrap().modified().unwrap() > m0);
     }
 }

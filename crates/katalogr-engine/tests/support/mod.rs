@@ -11,9 +11,91 @@ use katalogr_model::{
 };
 use katalogr_store::{Kindex, ProjectConfig, ProjectName, RepoConfig};
 use std::collections::BTreeMap;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 pub struct TestExtractor;
+
+/// Index into [`SALTS`] returned by [`SaltedExtractor::revision_salt`].
+pub static SALT: AtomicUsize = AtomicUsize::new(0);
+pub const SALTS: [&str; 2] = ["", "v2"];
+
+/// Handles `*.salt`: one `fn` symbol per non-empty line. Its revision salt is switchable.
+pub struct SaltedExtractor;
+
+impl Extractor for SaltedExtractor {
+    fn id(&self) -> &'static str {
+        "salted"
+    }
+
+    fn handles(&self, path: &RelPath) -> bool {
+        path.as_str().ends_with(".salt")
+    }
+
+    fn revision_salt(&self) -> &'static str {
+        SALTS[SALT.load(Ordering::SeqCst)]
+    }
+
+    fn extract(&self, input: &ExtractInput) -> Result<Fragment, ExtractError> {
+        let text = std::str::from_utf8(input.content).map_err(|e| ExtractError::Parse {
+            span: None,
+            message: format!("not utf-8: {e}"),
+        })?;
+        let artifact = ArtifactName {
+            repo: input.repo.to_string(),
+            path: input.path.clone(),
+        };
+        let mut symbols: Vec<SymbolNode> = Vec::new();
+        for (idx, line) in text.lines().enumerate() {
+            let name = line.trim();
+            if name.is_empty() {
+                continue;
+            }
+            let line_no = idx as u32 + 1;
+            let segments = vec![Segment {
+                kind: "fn".to_string(),
+                name: name.to_string(),
+            }];
+            let ordinal = symbols
+                .iter()
+                .filter(|s| s.name.segments == segments)
+                .count() as u32
+                + 1;
+            symbols.push(SymbolNode {
+                name: SymbolName {
+                    artifact: artifact.clone(),
+                    segments,
+                    ordinal,
+                },
+                kind: "fn".to_string(),
+                span: Span {
+                    start_line: line_no,
+                    start_col: 1,
+                    end_line: line_no,
+                    end_col: name.chars().count().max(1) as u32,
+                },
+                facts: BTreeMap::new(),
+            });
+        }
+        Ok(Fragment {
+            provenance: Provenance {
+                repo: input.repo.to_string(),
+                path: input.path.clone(),
+                revision: input.revision.to_string(),
+            },
+            extension: self.id().to_string(),
+            artifact: katalogr_model::ArtifactNode {
+                name: artifact,
+                facts: BTreeMap::new(),
+            },
+            symbols,
+            links: Vec::new(),
+            refs: Vec::new(),
+            exports: Vec::new(),
+            bindings: Vec::new(),
+        })
+    }
+}
 
 impl Extractor for TestExtractor {
     fn id(&self) -> &'static str {
