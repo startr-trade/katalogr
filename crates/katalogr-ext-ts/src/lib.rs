@@ -8,11 +8,12 @@ pub mod context;
 pub mod extract;
 pub mod items;
 pub mod lines;
+pub mod literals;
 pub mod modules;
 
 pub use context::{TsContext, TsProject};
 
-use katalogr_model::{ExtractError, ExtractInput, Extractor, Fragment, RelPath};
+use katalogr_model::{ExtractError, ExtractInput, Extraction, Extractor, Fragment, RelPath};
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct TsExtractor;
@@ -55,6 +56,7 @@ impl Extractor for TsExtractor {
             "require",
             "annotations",
             "parse-error",
+            "embedded-literals",
         ]
     }
 
@@ -72,5 +74,13 @@ impl Extractor for TsExtractor {
         input: &ExtractInput,
     ) -> Result<(Fragment, Vec<ExtractError>), ExtractError> {
         extract::extract_with_errors(input)
+    }
+
+    fn embeds(&self) -> bool {
+        true
+    }
+
+    fn extract_full(&self, input: &ExtractInput) -> Result<Extraction, ExtractError> {
+        extract::extract_full(input)
     }
 }

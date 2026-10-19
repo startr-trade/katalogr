@@ -1,0 +1,48 @@
+mode: subset
+symbols:
+- fx:Cargo.toml#crate:shop
+- fx:migrations/V1__init.sql#table:public.orders
+- fx:migrations/V1__init.sql#table:public.orders/column:customer_id
+- fx:migrations/V1__init.sql#table:public.orders/column:id
+- fx:migrations/V1__init.sql#table:public.orders/column:total
+- fx:src/lib.rs#fn:greeting
+- fx:src/lib.rs#fn:load_orders
+- fx:src/lib.rs#fn:orders_url
+- fx:src/lib.rs#fn:purge
+links:
+- from: fx:migrations/V1__init.sql#table:public.orders
+  kind: contains
+  to: fx:migrations/V1__init.sql#table:public.orders/column:customer_id
+  confidence: Extracted
+- from: fx:migrations/V1__init.sql#table:public.orders
+  kind: contains
+  to: fx:migrations/V1__init.sql#table:public.orders/column:id
+  confidence: Extracted
+- from: fx:migrations/V1__init.sql#table:public.orders
+  kind: contains
+  to: fx:migrations/V1__init.sql#table:public.orders/column:total
+  confidence: Extracted
+- from: fx:migrations/V1__init.sql#table:public.orders
+  kind: provides
+  to: e71321af6d8f5770318bedc9ac5ff4b1
+  confidence: Extracted
+- from: fx:migrations/V1__init.sql#table:public.orders/column:customer_id
+  kind: provides
+  to: 502ba5fc2801bca1a658a67b6e27d743
+  confidence: Extracted
+- from: fx:migrations/V1__init.sql#table:public.orders/column:id
+  kind: provides
+  to: db368348325213dfe7b2e311b703e399
+  confidence: Extracted
+- from: fx:migrations/V1__init.sql#table:public.orders/column:total
+  kind: provides
+  to: 1129d29644bfd1714c65196e8f83d814
+  confidence: Extracted
+- from: fx:src/lib.rs#fn:load_orders
+  kind: consumes
+  to: e71321af6d8f5770318bedc9ac5ff4b1
+  confidence: Inferred
+- from: fx:src/lib.rs#fn:purge
+  kind: consumes
+  to: 81a09ec6a4e6602af1252e37b46842db
+  confidence: Inferred

@@ -33,6 +33,8 @@ technologies:
       - rust/calls
     crate-deps:
       - rust/workspace-two-crates
+    embedded-literals:
+      - rust/embedded-sql
     impl-links:
       - rust/impls
     items:
@@ -94,6 +96,8 @@ technologies:
       - ts/commonjs
     constructor-call:
       - ts/new-calls
+    embedded-literals:
+      - ts/embedded-sql
     esm-js-specifier:
       - ts/esm-js-specifiers
     extends-any-name:

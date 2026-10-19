@@ -6,8 +6,8 @@ use crate::context::{self, PACKAGE_JSON, TsContext};
 use crate::items::Builder;
 use crate::modules::{NS_FILE, NS_PACKAGE, key};
 use katalogr_model::{
-    ArtifactName, ArtifactNode, Export, ExtractError, ExtractInput, Fact, Fragment, Name,
-    Provenance, Segment, Span, SymbolName, SymbolNode,
+    ArtifactName, ArtifactNode, Export, ExtractError, ExtractInput, Extraction, Fact, Fragment,
+    Name, Provenance, Segment, Span, SymbolName, SymbolNode,
 };
 use oxc_allocator::Allocator;
 use oxc_parser::Parser;
@@ -23,6 +23,11 @@ pub fn extract(input: &ExtractInput) -> Result<Fragment, ExtractError> {
 pub fn extract_with_errors(
     input: &ExtractInput,
 ) -> Result<(Fragment, Vec<ExtractError>), ExtractError> {
+    extract_full(input).map(|x| (x.fragment, x.errors))
+}
+
+/// The fragment, the syntax errors, and the literals offered to guest extensions.
+pub fn extract_full(input: &ExtractInput) -> Result<Extraction, ExtractError> {
     let text = std::str::from_utf8(input.content).map_err(|e| ExtractError::Parse {
         span: None,
         message: format!("not utf-8: {e}"),
@@ -30,7 +35,12 @@ pub fn extract_with_errors(
     let ctx = TsContext::from_bytes(input.context)?;
     let name = context::file_name(input.path.as_str());
     if name == PACKAGE_JSON || context::is_config_name(name) {
-        Ok(config_fragment(input, text))
+        let (fragment, errors) = config_fragment(input, text);
+        Ok(Extraction {
+            fragment,
+            errors,
+            embedded: Vec::new(),
+        })
     } else {
         source_fragment(input, text, &ctx)
     }
@@ -40,7 +50,7 @@ fn source_fragment(
     input: &ExtractInput,
     text: &str,
     ctx: &TsContext,
-) -> Result<(Fragment, Vec<ExtractError>), ExtractError> {
+) -> Result<Extraction, ExtractError> {
     let source_type = SourceType::from_path(Path::new(input.path.as_str()))
         .map_err(|_| ExtractError::Unsupported(format!("file kind of {}", input.path)))?;
     let allocator = Allocator::default();
@@ -91,6 +101,7 @@ fn source_fragment(
 
     let mut symbols = std::mem::take(&mut b.symbols);
     symbols.sort_by_key(|s| s.name.canonical());
+    let embedded = crate::literals::collect(&ret.program, &b.lines, &symbols, b.artifact.id());
     let fragment = Fragment {
         provenance: b.provenance.clone(),
         extension: "ts".to_string(),
@@ -104,7 +115,11 @@ fn source_fragment(
         exports: std::mem::take(&mut b.exports),
         bindings: Vec::new(),
     };
-    Ok((fragment, errors))
+    Ok(Extraction {
+        fragment,
+        errors,
+        embedded,
+    })
 }
 
 /// `tsconfig.json`, `jsconfig.json`, `package.json`: an artifact; `package.json` also a
