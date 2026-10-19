@@ -1,0 +1,15 @@
+[package]
+name = "katalogr-ext-text"
+description = "Text fallback: unclaimed files as searchable chunks."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+katalogr-model.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
+katalogr-store.workspace = true

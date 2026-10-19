@@ -1,0 +1,7 @@
+mode: exact
+symbols:
+- fx:docs/guide.adoc#chunk:l1
+- fx:docs/guide.adoc#chunk:l12
+- fx:docs/guide.adoc#chunk:l16
+- fx:docs/guide.adoc#chunk:l3
+links: []

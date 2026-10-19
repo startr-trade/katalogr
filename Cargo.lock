@@ -1599,6 +1599,7 @@ dependencies = [
  "katalogr-ext-rust",
  "katalogr-ext-schema",
  "katalogr-ext-sql",
+ "katalogr-ext-text",
  "katalogr-ext-ts",
  "katalogr-model",
  "katalogr-query",
@@ -1648,6 +1649,7 @@ dependencies = [
  "katalogr-ext-rust",
  "katalogr-ext-schema",
  "katalogr-ext-sql",
+ "katalogr-ext-text",
  "katalogr-ext-ts",
  "katalogr-model",
  "katalogr-query",
@@ -1758,6 +1760,15 @@ dependencies = [
  "sqlparser",
  "tempfile",
  "toml",
+]
+
+[[package]]
+name = "katalogr-ext-text"
+version = "0.1.0"
+dependencies = [
+ "katalogr-model",
+ "katalogr-store",
+ "proptest",
 ]
 
 [[package]]

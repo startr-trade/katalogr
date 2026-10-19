@@ -1,0 +1,5 @@
+mode: exact
+symbols:
+- fx:old/menu.txt#chunk:l1
+- fx:old/menu.txt#chunk:l3
+links: []

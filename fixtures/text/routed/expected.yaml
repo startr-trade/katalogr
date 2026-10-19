@@ -1,0 +1,5 @@
+mode: exact
+symbols:
+- fx:notes/notes.txt#chunk:l1
+- fx:notes/notes.txt#chunk:l5
+links: []

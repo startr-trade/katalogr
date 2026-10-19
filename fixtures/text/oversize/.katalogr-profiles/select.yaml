@@ -1,0 +1,5 @@
+profile: select-text
+version: 2
+select:
+  - { extension: text, path: 'big/*.txt' }
+rules: []
