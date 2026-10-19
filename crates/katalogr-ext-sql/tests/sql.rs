@@ -1379,4 +1379,131 @@ mod sql {
             st("auto")
         );
     }
+
+    fn embedded_tables(text: &str, holes: &[u32], ctx: &[u8]) -> Vec<String> {
+        let ext = SqlExtractor;
+        assert!(ext.accepts_embedded(text), "accepts {text:?}");
+        let path = RelPath::new("src/a.rs").unwrap();
+        let span = katalogr_model::Span {
+            start_line: 1,
+            start_col: 1,
+            end_line: 1,
+            end_col: 5,
+        };
+        let input = katalogr_model::EmbeddedInput {
+            repo: "r",
+            host_path: &path,
+            host_extension: "rs",
+            owner: Id::of("owner"),
+            span,
+            text,
+            holes,
+            call: None,
+            context: ctx,
+        };
+        let out = ext.extract_embedded(&input);
+        for b in &out {
+            assert_eq!(b.symbol, Id::of("owner"));
+            assert_eq!(b.role, katalogr_model::ContractRole::Consumes);
+            assert_eq!(b.confidence, katalogr_model::Confidence::Inferred);
+            assert_eq!(b.span, Some(span));
+        }
+        out.iter().map(|b| b.contract.canonical()).collect()
+    }
+
+    #[test]
+    fn embedded_query_refs() {
+        let t = |text: &str| embedded_tables(text, &[], &[]);
+        assert_eq!(
+            t("SELECT o.id FROM orders o JOIN app.customers c ON c.id = o.customer_id"),
+            vec![
+                "contract:sql_table:app.customers",
+                "contract:sql_table:public.orders"
+            ]
+        );
+        assert_eq!(
+            t("WITH x AS (SELECT * FROM a) INSERT INTO b SELECT * FROM x"),
+            vec!["contract:sql_table:public.a", "contract:sql_table:public.b"]
+        );
+        assert!(t("SELECT * FROM {table} WHERE id = {}").is_empty());
+        assert_eq!(
+            t("SELECT * FROM orders WHERE id = {id}"),
+            vec!["contract:sql_table:public.orders"]
+        );
+        assert_eq!(
+            t("CALL app.purge()"),
+            vec!["contract:sql_routine:app.purge"]
+        );
+        // holes inside `WHERE id = ` parse
+        let text = "SELECT * FROM orders WHERE id = ";
+        assert_eq!(
+            embedded_tables(text, &[text.len() as u32], &[]),
+            vec!["contract:sql_table:public.orders"]
+        );
+        // a table named by a hole gives nothing for that part
+        let text = "SELECT * FROM  WHERE id = 1";
+        assert!(embedded_tables(&format!("{text} /* SELECT FROM */"), &[14], &[]).is_empty());
+        // positional parameters
+        assert_eq!(
+            t("UPDATE orders SET total = $1 WHERE id = $2"),
+            vec!["contract:sql_table:public.orders"]
+        );
+        assert_eq!(
+            t("INSERT INTO audit (note) VALUES (?)"),
+            vec!["contract:sql_table:public.audit"]
+        );
+        // the configured schema (R-20, R-23)
+        assert_eq!(
+            t("SELECT * FROM orders"),
+            vec!["contract:sql_table:public.orders"]
+        );
+        assert_eq!(
+            embedded_tables("SELECT * FROM orders", &[], b"app"),
+            vec!["contract:sql_table:app.orders"]
+        );
+        assert_eq!(
+            embedded_tables("SELECT * FROM public.orders", &[], b"app"),
+            vec!["contract:sql_table:public.orders"]
+        );
+        // the embedded context is the schema only
+        let cfg = files(&[("flyway.conf", "flyway.defaultSchema=app\n")]);
+        let bytes = SqlExtractor.build_context(&cfg).unwrap();
+        assert_eq!(SqlExtractor.embedded_context(&bytes), b"app");
+        let dialect_only = files(&[("flyway.conf", "flyway.url=jdbc:mysql://h/db\n")]);
+        let bytes = SqlExtractor.build_context(&dialect_only).unwrap();
+        assert!(SqlExtractor.embedded_context(&bytes).is_empty());
+        assert!(SqlExtractor.embedded_context(&[]).is_empty());
+        assert_eq!(SqlExtractor.embedded_version(), Some("1"));
+    }
+
+    #[test]
+    fn non_sql_literals_ignored() {
+        let ext = SqlExtractor;
+        for prose in [
+            "select an option from the list",
+            "Please select a file",
+            "update your settings",
+            "delete from cart",
+            "Select one (or more) from the list.",
+            "/orders",
+            "",
+            "   ",
+            "hello world",
+        ] {
+            assert!(!ext.accepts_embedded(prose), "{prose:?}");
+        }
+        for q in [
+            "select * from cart",
+            "SELECT id FROM orders",
+            "  -- c\n (SELECT 1 FROM t)",
+        ] {
+            assert!(ext.accepts_embedded(q), "{q:?}");
+        }
+        assert_eq!(
+            embedded_tables("select * from cart", &[], &[]),
+            vec!["contract:sql_table:public.cart"]
+        );
+        // an accepted text with no relation gives no binding
+        assert!(embedded_tables("SELECT 1 + 1 FROM dual", &[], &[]).is_empty());
+    }
 }

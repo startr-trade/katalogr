@@ -4,6 +4,7 @@
 pub mod context;
 mod ddl;
 pub mod dialect;
+pub mod embedded;
 mod extract;
 mod lines;
 pub mod migration;
@@ -14,6 +15,7 @@ pub mod split;
 
 pub use context::{DialectDir, SchemaChoice, SqlContext, is_test_resource, schema_from_embedded};
 pub use dialect::{Dialect, DialectSource, chain, resolve};
+pub use embedded::embedded_refs;
 pub use migration::{MigrationName, MigrationScheme, parse_migration_name};
 pub use names::{
     column_key, fold_schema, is_system_relation, normalise_ident, routine_key, table_key,
@@ -30,7 +32,9 @@ pub const CONTRACT_ROUTINE: &str = "sql_routine";
 /// The fallback default schema when no configuration names one.
 pub const DEFAULT_SCHEMA: &str = "public";
 
-use katalogr_model::{ExtractError, ExtractInput, Extractor, Fragment, RelPath};
+use katalogr_model::{
+    Binding, EmbeddedInput, ExtractError, ExtractInput, Extractor, Fragment, RelPath,
+};
 
 /// The SQL extension: host of `.sql` files and guest of embedded SQL text.
 #[derive(Clone, Copy, Debug, Default)]
@@ -97,5 +101,21 @@ impl Extractor for SqlExtractor {
         input: &ExtractInput,
     ) -> Result<(Fragment, Vec<ExtractError>), ExtractError> {
         Ok(extract::extract(input))
+    }
+
+    fn embedded_version(&self) -> Option<&'static str> {
+        Some("1")
+    }
+
+    fn accepts_embedded(&self, text: &str) -> bool {
+        embedded::accepts(text)
+    }
+
+    fn extract_embedded(&self, input: &EmbeddedInput) -> Vec<Binding> {
+        embedded::extract(input)
+    }
+
+    fn embedded_context(&self, context: &[u8]) -> Vec<u8> {
+        SqlContext::from_bytes(context).embedded_bytes()
     }
 }
