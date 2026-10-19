@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" targetNamespace="urn:example:main">
+  <xs:import namespace="urn:example:common" schemaLocation="common/common.xsd"/>
+  <xs:include schemaLocation="parts/./part.xsd"/>
+  <xs:include schemaLocation="../schemas/parts/other.xsd"/>
+  <xs:import namespace="urn:example:remote" schemaLocation="http://example.test/remote.xsd"/>
+  <xs:include schemaLocation="../../../outside.xsd"/>
+  <xs:element name="root" type="xs:string"/>
+</xs:schema>

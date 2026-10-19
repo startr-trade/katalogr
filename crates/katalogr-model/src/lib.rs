@@ -8,6 +8,7 @@ pub mod graph;
 pub mod lexicon;
 pub mod name;
 pub mod relpath;
+pub mod structure;
 
 pub use embed::{
     CALL_CALLEE_MAX, CallContext, EMBED_MAX_LEN, EMBED_MAX_PER_FILE, EMBED_MIN_LEN, EmbeddedInput,

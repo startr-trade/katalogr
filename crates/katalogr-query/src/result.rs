@@ -107,6 +107,38 @@ pub struct DanglingRef {
     pub wanted: Vec<String>,
 }
 
+/// The structural facts of one field of a type that is declared more than once.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
+pub struct FieldShape {
+    pub field_type: Option<String>,
+    pub required: Option<bool>,
+    pub many: Option<bool>,
+}
+
+/// One difference between two copies of a field.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
+pub struct FieldDiff {
+    /// Normalised field path, `a/b` for nested fields.
+    pub field: String,
+    /// `missing-left`, `missing-right`, `type`, `required` or `many`.
+    pub what: String,
+    pub left: Option<FieldShape>,
+    pub right: Option<FieldShape>,
+}
+
+/// Two declarers of one contract and how their fields differ.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
+pub struct MirrorDrift {
+    /// `contract:<kind>:<key>`.
+    pub contract: String,
+    /// The reference declarer: the first by canonical name.
+    pub left: SymbolHit,
+    pub right: SymbolHit,
+    /// False when either side has no structural fields; then `differences` is empty.
+    pub comparable: bool,
+    pub differences: Vec<FieldDiff>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]
 pub struct MapEntry {
     pub symbol: SymbolHit,

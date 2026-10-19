@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+           xmlns:o="urn:example:orders"
+           targetNamespace="urn:example:orders"
+           elementFormDefault="qualified">
+  <xs:annotation>
+    <xs:documentation>Orders for the example shop.</xs:documentation>
+  </xs:annotation>
+
+  <xs:simpleType name="Status">
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="new"/>
+      <xs:enumeration value="paid"/>
+      <xs:enumeration value="shipped"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <xs:simpleType name="Code">
+    <xs:restriction base="xs:token"/>
+  </xs:simpleType>
+
+  <xs:group name="OrderIds">
+    <xs:sequence>
+      <xs:element name="id" type="xs:string"/>
+    </xs:sequence>
+  </xs:group>
+
+  <xs:attributeGroup name="Audit">
+    <xs:attribute name="createdBy" type="xs:string"/>
+  </xs:attributeGroup>
+
+  <xs:complexType name="Order">
+    <xs:annotation>
+      <xs:documentation>An order placed by a customer.
+
+        Second paragraph, not kept.</xs:documentation>
+    </xs:annotation>
+    <xs:sequence>
+      <xs:group ref="o:OrderIds"/>
+      <xs:element name="total" type="xs:decimal" minOccurs="0"/>
+      <xs:element name="status" type="o:Status"/>
+      <xs:element name="tag" type="xs:string" minOccurs="0" maxOccurs="unbounded"/>
+      <xs:element name="placed" type="xs:dateTime"/>
+      <xs:choice>
+        <xs:element name="coupon" type="xs:string"/>
+        <xs:element name="gift" type="xs:boolean"/>
+      </xs:choice>
+      <xs:any minOccurs="0"/>
+    </xs:sequence>
+    <xs:attribute name="version" type="xs:int" use="required"/>
+    <xs:attribute name="lang" type="xs:language"/>
+    <xs:attributeGroup ref="o:Audit"/>
+  </xs:complexType>
+
+  <xs:complexType name="RushOrder">
+    <xs:complexContent>
+      <xs:extension base="o:Order">
+        <xs:sequence>
+          <xs:element name="priority" type="xs:integer"/>
+        </xs:sequence>
+      </xs:extension>
+    </xs:complexContent>
+  </xs:complexType>
+
+  <xs:element name="order" type="o:Order"/>
+  <xs:element name="status" type="o:Status"/>
+</xs:schema>

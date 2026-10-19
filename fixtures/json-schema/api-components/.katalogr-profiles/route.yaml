@@ -1,0 +1,6 @@
+profile: route-api-documents
+version: 2
+select:
+  - { extension: json-schema, path: 'api/*.yaml' }
+  - { extension: json-schema, path: 'api/*.json' }
+rules: []

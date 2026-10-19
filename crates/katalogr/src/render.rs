@@ -4,9 +4,9 @@
 //! `kind  name  path:line  [confidence]`. JSON is the versioned envelope.
 
 use katalogr_dist::query::{
-    CallerHit, DanglingRef, Direction, Envelope, Explain, HintSource, MapEntry, PathStep,
-    RESULT_SCHEMA_VERSION, RefHit, ReplaceResult, SearchHit, Serialize, ShowResult, SymbolHit,
-    Truncation, WhyResult, budget, hints,
+    CallerHit, DanglingRef, Direction, Envelope, Explain, FieldShape, HintSource, MapEntry,
+    MirrorDrift, PathStep, RESULT_SCHEMA_VERSION, RefHit, ReplaceResult, SearchHit, Serialize,
+    ShowResult, SymbolHit, Truncation, WhyResult, budget, hints,
 };
 use katalogr_dist::{Outcome, Reply, Report};
 
@@ -216,6 +216,62 @@ pub fn dangling(cli: &Cli, reply: Reply<Vec<DanglingRef>>) -> ExitCode {
     let any = matches!(&reply.outcome, Outcome::Found(v) if !v.is_empty());
     match reply.outcome {
         Outcome::Found(items) => print_list(cli, &reply.report, items, dangling_line, ""),
+        other => other_outcomes(cli, &reply.report, other),
+    }
+    if code == ExitCode::Ok && any {
+        ExitCode::Error
+    } else {
+        code
+    }
+}
+
+fn shape_text(s: Option<&FieldShape>) -> String {
+    let Some(s) = s else {
+        return "-".to_string();
+    };
+    let mut parts: Vec<String> = Vec::new();
+    parts.extend(s.field_type.clone());
+    parts.extend(
+        s.required
+            .map(|r| if r { "required" } else { "optional" }.to_string()),
+    );
+    parts.extend(
+        s.many
+            .map(|m| if m { "many" } else { "single" }.to_string()),
+    );
+    if parts.is_empty() {
+        "?".to_string()
+    } else {
+        parts.join(" ")
+    }
+}
+
+/// One block per drift: the contract, `left -> right`, then one line per difference. A pair
+/// that cannot be compared is a note.
+pub fn mirror_block(d: &MirrorDrift) -> String {
+    let mut out = format!("{}\n  {} -> {}", d.contract, d.left.name, d.right.name);
+    if !d.comparable {
+        out.push_str("\n  note: not compared, a side has no structural fields");
+    }
+    for f in &d.differences {
+        out.push_str(&format!(
+            "\n  {}  {}  left: {}  right: {}",
+            f.what,
+            f.field,
+            shape_text(f.left.as_ref()),
+            shape_text(f.right.as_ref())
+        ));
+    }
+    out
+}
+
+/// Render `mirrors`: exit 1 when a comparable pair differs, so CI can gate on it. Pairs that
+/// cannot be compared are notes and leave the exit code alone.
+pub fn mirrors(cli: &Cli, reply: Reply<Vec<MirrorDrift>>) -> ExitCode {
+    let code = exit_for(&reply);
+    let any = matches!(&reply.outcome, Outcome::Found(v) if v.iter().any(|d| d.comparable));
+    match reply.outcome {
+        Outcome::Found(items) => print_list(cli, &reply.report, items, mirror_block, ""),
         other => other_outcomes(cli, &reply.report, other),
     }
     if code == ExitCode::Ok && any {

@@ -1,0 +1,6 @@
+{
+  "title": "Broken",
+  "type": "object",
+  "properties": {
+    "a": { "type": "string" },
+    "b": { "type": "number",

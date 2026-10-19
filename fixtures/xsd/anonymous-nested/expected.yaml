@@ -1,0 +1,62 @@
+mode: exact
+symbols:
+- fx:schemas/shipment.xsd#element:shipment
+- fx:schemas/shipment.xsd#element:shipment/field:address
+- fx:schemas/shipment.xsd#element:shipment/field:address/field:city
+- fx:schemas/shipment.xsd#element:shipment/field:address/field:kind
+- fx:schemas/shipment.xsd#element:shipment/field:address/field:street
+- fx:schemas/shipment.xsd#element:shipment/field:parcel
+- fx:schemas/shipment.xsd#element:shipment/field:parcel/field:weight
+- fx:schemas/shipment.xsd#element:shipment/field:ref
+- fx:schemas/shipment.xsd#schema:shipment
+- fx:schemas/shipment.xsd#type:Route
+- fx:schemas/shipment.xsd#type:Route/field:stop
+- fx:schemas/shipment.xsd#type:Route/field:stop/field:place
+contracts:
+- contract:schema_element:{urn%3Aexample%3Ashipping}shipment
+- contract:schema_type:{urn%3Aexample%3Ashipping}Route
+links:
+- from: fx:schemas/shipment.xsd#element:shipment
+  kind: contains
+  to: fx:schemas/shipment.xsd#element:shipment/field:address
+  confidence: Extracted
+- from: fx:schemas/shipment.xsd#element:shipment
+  kind: contains
+  to: fx:schemas/shipment.xsd#element:shipment/field:parcel
+  confidence: Extracted
+- from: fx:schemas/shipment.xsd#element:shipment
+  kind: contains
+  to: fx:schemas/shipment.xsd#element:shipment/field:ref
+  confidence: Extracted
+- from: fx:schemas/shipment.xsd#element:shipment
+  kind: declares
+  to: contract:schema_element:{urn%3Aexample%3Ashipping}shipment
+  confidence: Extracted
+- from: fx:schemas/shipment.xsd#element:shipment/field:address
+  kind: contains
+  to: fx:schemas/shipment.xsd#element:shipment/field:address/field:city
+  confidence: Extracted
+- from: fx:schemas/shipment.xsd#element:shipment/field:address
+  kind: contains
+  to: fx:schemas/shipment.xsd#element:shipment/field:address/field:kind
+  confidence: Extracted
+- from: fx:schemas/shipment.xsd#element:shipment/field:address
+  kind: contains
+  to: fx:schemas/shipment.xsd#element:shipment/field:address/field:street
+  confidence: Extracted
+- from: fx:schemas/shipment.xsd#element:shipment/field:parcel
+  kind: contains
+  to: fx:schemas/shipment.xsd#element:shipment/field:parcel/field:weight
+  confidence: Extracted
+- from: fx:schemas/shipment.xsd#type:Route
+  kind: contains
+  to: fx:schemas/shipment.xsd#type:Route/field:stop
+  confidence: Extracted
+- from: fx:schemas/shipment.xsd#type:Route
+  kind: declares
+  to: contract:schema_type:{urn%3Aexample%3Ashipping}Route
+  confidence: Extracted
+- from: fx:schemas/shipment.xsd#type:Route/field:stop
+  kind: contains
+  to: fx:schemas/shipment.xsd#type:Route/field:stop/field:place
+  confidence: Extracted

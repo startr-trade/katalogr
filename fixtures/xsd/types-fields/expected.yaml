@@ -1,0 +1,122 @@
+mode: exact
+symbols:
+- fx:schemas/order.xsd#element:order
+- fx:schemas/order.xsd#element:status
+- fx:schemas/order.xsd#group:Audit
+- fx:schemas/order.xsd#group:Audit/field:createdBy
+- fx:schemas/order.xsd#group:OrderIds
+- fx:schemas/order.xsd#group:OrderIds/field:id
+- fx:schemas/order.xsd#schema:order
+- fx:schemas/order.xsd#type:Code
+- fx:schemas/order.xsd#type:Order
+- fx:schemas/order.xsd#type:Order/field:coupon
+- fx:schemas/order.xsd#type:Order/field:gift
+- fx:schemas/order.xsd#type:Order/field:lang
+- fx:schemas/order.xsd#type:Order/field:placed
+- fx:schemas/order.xsd#type:Order/field:status
+- fx:schemas/order.xsd#type:Order/field:tag
+- fx:schemas/order.xsd#type:Order/field:total
+- fx:schemas/order.xsd#type:Order/field:version
+- fx:schemas/order.xsd#type:RushOrder
+- fx:schemas/order.xsd#type:RushOrder/field:priority
+- fx:schemas/order.xsd#type:Status
+contracts:
+- contract:schema_element:{urn%3Aexample%3Aorders}order
+- contract:schema_element:{urn%3Aexample%3Aorders}status
+- contract:schema_type:{urn%3Aexample%3Aorders}Code
+- contract:schema_type:{urn%3Aexample%3Aorders}Order
+- contract:schema_type:{urn%3Aexample%3Aorders}RushOrder
+- contract:schema_type:{urn%3Aexample%3Aorders}Status
+links:
+- from: fx:schemas/order.xsd#element:order
+  kind: declares
+  to: contract:schema_element:{urn%3Aexample%3Aorders}order
+  confidence: Extracted
+- from: fx:schemas/order.xsd#element:order
+  kind: uses-type
+  to: fx:schemas/order.xsd#type:Order
+  confidence: Extracted
+- from: fx:schemas/order.xsd#element:status
+  kind: declares
+  to: contract:schema_element:{urn%3Aexample%3Aorders}status
+  confidence: Extracted
+- from: fx:schemas/order.xsd#element:status
+  kind: uses-type
+  to: fx:schemas/order.xsd#type:Status
+  confidence: Extracted
+- from: fx:schemas/order.xsd#group:Audit
+  kind: contains
+  to: fx:schemas/order.xsd#group:Audit/field:createdBy
+  confidence: Extracted
+- from: fx:schemas/order.xsd#group:OrderIds
+  kind: contains
+  to: fx:schemas/order.xsd#group:OrderIds/field:id
+  confidence: Extracted
+- from: fx:schemas/order.xsd#type:Code
+  kind: declares
+  to: contract:schema_type:{urn%3Aexample%3Aorders}Code
+  confidence: Extracted
+- from: fx:schemas/order.xsd#type:Order
+  kind: contains
+  to: fx:schemas/order.xsd#type:Order/field:coupon
+  confidence: Extracted
+- from: fx:schemas/order.xsd#type:Order
+  kind: contains
+  to: fx:schemas/order.xsd#type:Order/field:gift
+  confidence: Extracted
+- from: fx:schemas/order.xsd#type:Order
+  kind: contains
+  to: fx:schemas/order.xsd#type:Order/field:lang
+  confidence: Extracted
+- from: fx:schemas/order.xsd#type:Order
+  kind: contains
+  to: fx:schemas/order.xsd#type:Order/field:placed
+  confidence: Extracted
+- from: fx:schemas/order.xsd#type:Order
+  kind: contains
+  to: fx:schemas/order.xsd#type:Order/field:status
+  confidence: Extracted
+- from: fx:schemas/order.xsd#type:Order
+  kind: contains
+  to: fx:schemas/order.xsd#type:Order/field:tag
+  confidence: Extracted
+- from: fx:schemas/order.xsd#type:Order
+  kind: contains
+  to: fx:schemas/order.xsd#type:Order/field:total
+  confidence: Extracted
+- from: fx:schemas/order.xsd#type:Order
+  kind: contains
+  to: fx:schemas/order.xsd#type:Order/field:version
+  confidence: Extracted
+- from: fx:schemas/order.xsd#type:Order
+  kind: declares
+  to: contract:schema_type:{urn%3Aexample%3Aorders}Order
+  confidence: Extracted
+- from: fx:schemas/order.xsd#type:Order
+  kind: uses-group
+  to: fx:schemas/order.xsd#group:Audit
+  confidence: Extracted
+- from: fx:schemas/order.xsd#type:Order
+  kind: uses-group
+  to: fx:schemas/order.xsd#group:OrderIds
+  confidence: Extracted
+- from: fx:schemas/order.xsd#type:Order/field:status
+  kind: uses-type
+  to: fx:schemas/order.xsd#type:Status
+  confidence: Extracted
+- from: fx:schemas/order.xsd#type:RushOrder
+  kind: contains
+  to: fx:schemas/order.xsd#type:RushOrder/field:priority
+  confidence: Extracted
+- from: fx:schemas/order.xsd#type:RushOrder
+  kind: declares
+  to: contract:schema_type:{urn%3Aexample%3Aorders}RushOrder
+  confidence: Extracted
+- from: fx:schemas/order.xsd#type:RushOrder
+  kind: extends
+  to: fx:schemas/order.xsd#type:Order
+  confidence: Extracted
+- from: fx:schemas/order.xsd#type:Status
+  kind: declares
+  to: contract:schema_type:{urn%3Aexample%3Aorders}Status
+  confidence: Extracted

@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:o="urn:example:orders" targetNamespace="urn:example:orders">
+  <xs:complexType name="Order">
+    <xs:sequence>
+      <xs:element name="id" type="xs:string"/>
+      <xs:element name="total" type="xs:decimal"/>
+      <xs:element name="lines">
+        <xs:complexType>
+          <xs:sequence>
+            <xs:element name="sku" type="xs:string" maxOccurs="unbounded"/>
+          </xs:sequence>
+        </xs:complexType>
+      </xs:element>
+    </xs:sequence>
+  </xs:complexType>
+</xs:schema>

@@ -247,7 +247,15 @@ impl TestExtractor {
             let find = |name: &str| -> Result<Id, ExtractError> {
                 symbols
                     .iter()
-                    .find(|s| s.name.segments[0].name == name)
+                    .find(|s| {
+                        s.name
+                            .segments
+                            .iter()
+                            .map(|g| g.name.as_str())
+                            .collect::<Vec<_>>()
+                            .join("/")
+                            == name
+                    })
                     .map(|s| s.name.id())
                     .ok_or_else(|| bad(Some(span), format!("undeclared symbol {name:?}")))
             };
@@ -297,6 +305,61 @@ impl TestExtractor {
                         span,
                         facts: BTreeMap::new(),
                     });
+                }
+                // A symbol nested below an existing one, named by the parent's path.
+                ["sub", parent, kind, name] => {
+                    let parent_sym = symbols
+                        .iter()
+                        .find(|s| {
+                            s.name
+                                .segments
+                                .iter()
+                                .map(|g| g.name.as_str())
+                                .collect::<Vec<_>>()
+                                .join("/")
+                                == *parent
+                        })
+                        .ok_or_else(|| bad(Some(span), format!("undeclared symbol {parent:?}")))?;
+                    let mut segments = parent_sym.name.segments.clone();
+                    let parent_id = parent_sym.name.id();
+                    segments.push(Segment {
+                        kind: kind.to_string(),
+                        name: name.to_string(),
+                    });
+                    let ordinal = symbols
+                        .iter()
+                        .filter(|s| s.name.segments == segments)
+                        .count() as u32
+                        + 1;
+                    let sym = SymbolName {
+                        artifact: artifact.clone(),
+                        segments,
+                        ordinal,
+                    };
+                    links.push(Link {
+                        from: parent_id,
+                        to: sym.id(),
+                        kind: LinkKind("contains".to_string()),
+                        confidence: Confidence::Extracted,
+                        span: Some(span),
+                        provenance: provenance.clone(),
+                    });
+                    symbols.push(SymbolNode {
+                        name: sym,
+                        kind: kind.to_string(),
+                        span,
+                        facts: BTreeMap::new(),
+                    });
+                }
+                // A string fact on a symbol named by its path.
+                ["fact", path, key, text] => {
+                    let id = find(path)?;
+                    let sym = symbols
+                        .iter_mut()
+                        .find(|s| s.name.id() == id)
+                        .expect("found");
+                    sym.facts
+                        .insert(key.to_string(), katalogr_model::Fact::Str(text.to_string()));
                 }
                 ["ref", from, kind, target] => refs.push(OutRef {
                     from: find(from)?,
@@ -378,6 +441,79 @@ impl TestExtractor {
     }
 }
 
+/// A second extractor that no path selects by itself (`handles` is false): a profile `select`
+/// routes files to it. Every first word of a line becomes a symbol `alt:<word>`.
+pub struct TestAltExtractor;
+
+impl Extractor for TestAltExtractor {
+    fn id(&self) -> &'static str {
+        "test-alt"
+    }
+
+    fn handles(&self, _: &RelPath) -> bool {
+        false
+    }
+
+    fn extract(&self, input: &ExtractInput) -> Result<Fragment, ExtractError> {
+        let text = std::str::from_utf8(input.content).map_err(|e| ExtractError::Parse {
+            span: None,
+            message: format!("not utf-8: {e}"),
+        })?;
+        let artifact = ArtifactName {
+            repo: input.repo.to_string(),
+            path: input.path.clone(),
+        };
+        let mut symbols: Vec<SymbolNode> = Vec::new();
+        for (idx, line) in text.lines().enumerate() {
+            let Some(word) = line.split_whitespace().next() else {
+                continue;
+            };
+            let segments = vec![Segment {
+                kind: "alt".into(),
+                name: word.to_string(),
+            }];
+            let ordinal = symbols
+                .iter()
+                .filter(|s| s.name.segments == segments)
+                .count() as u32
+                + 1;
+            let n = idx as u32 + 1;
+            symbols.push(SymbolNode {
+                name: SymbolName {
+                    artifact: artifact.clone(),
+                    segments,
+                    ordinal,
+                },
+                kind: "alt".into(),
+                span: Span {
+                    start_line: n,
+                    start_col: 1,
+                    end_line: n,
+                    end_col: line.chars().count().max(1) as u32,
+                },
+                facts: BTreeMap::new(),
+            });
+        }
+        Ok(Fragment {
+            provenance: Provenance {
+                repo: input.repo.to_string(),
+                path: input.path.clone(),
+                revision: input.revision.to_string(),
+            },
+            extension: self.id().to_string(),
+            artifact: katalogr_model::ArtifactNode {
+                name: artifact,
+                facts: BTreeMap::new(),
+            },
+            symbols,
+            links: Vec::new(),
+            refs: Vec::new(),
+            exports: Vec::new(),
+            bindings: Vec::new(),
+        })
+    }
+}
+
 /// Create a kindex at `kx` holding project `p` with one repository `r`.
 pub fn init_project(kx: &Utf8Path) {
     Kindex::init(kx)
@@ -397,6 +533,7 @@ pub fn init_project(kx: &Utf8Path) {
 pub fn open_engine(kx: &Utf8Path, work: &Utf8Path) -> Engine {
     let mut reg = ExtensionRegistry::new();
     reg.register(Box::new(TestExtractor));
+    reg.register(Box::new(TestAltExtractor));
     reg.register(Box::new(TestGuest("1")));
     open_engine_with(kx, work, reg)
 }

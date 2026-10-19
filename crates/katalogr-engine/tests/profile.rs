@@ -29,6 +29,10 @@ fn env(files: &[(&str, &str)]) -> Env {
 }
 
 impl Env {
+    fn work(&self) -> camino::Utf8PathBuf {
+        camino::Utf8PathBuf::from_path_buf(self._tmp.path().join("work")).unwrap()
+    }
+
     fn write_profile(&self, file: &str, text: &str) {
         let dir = self.engine.dir().root().join(profiles::PROFILES_DIR);
         std::fs::create_dir_all(&dir).unwrap();
@@ -268,7 +272,7 @@ mod profile {
         // A YAML syntax error and a wrong version.
         let (line, _) = refused("profile: p\nversion: 1\nrules: [\n  - id: a\n");
         assert!(line >= 3);
-        let (line, why) = refused("profile: p\nversion: 2\nrules: []\n");
+        let (line, why) = refused("profile: p\nversion: 3\nrules: []\n");
         assert_eq!(line, 2, "{why}");
         assert!(why.contains("version"), "{why}");
         let (line, why) = refused(
@@ -304,5 +308,203 @@ mod profile {
         e.write_profile("example.yaml", EXAMPLE);
         drained_graph(&e.engine);
         assert!(profiles::stored_errors(&e.engine.cache().read().unwrap()).is_empty());
+    }
+
+    const ROUTE: &str = "\
+profile: route
+version: 2
+select:
+  - { extension: test-alt, path: 'notes.txt' }
+  - { extension: test, path: 'notes.txt' }
+";
+
+    #[test]
+    fn select_routes_file_to_extension() {
+        let e = env(&[("app.tx", APP), ("notes.txt", "alpha one\nbeta two\n")]);
+        let graph = full_index(&e.engine);
+        assert!(!graph.contains("notes.txt"), "no route, no shard:\n{graph}");
+
+        // An entry that names an unregistered extension routes nothing.
+        e.write_profile(
+            "ghost.yaml",
+            "profile: ghost\nversion: 2\nselect:\n  - { extension: nothing-registered, path: 'notes.txt' }\n",
+        );
+        let graph = drained_graph(&e.engine);
+        assert!(!graph.contains("notes.txt"), "{graph}");
+        std::fs::remove_file(e.engine.dir().root().join("profiles/ghost.yaml")).unwrap();
+
+        // The first entry that matches wins. A profile change reaches files already seen.
+        e.write_profile("route.yaml", ROUTE);
+        let graph = drained_graph(&e.engine);
+        assert!(
+            graph.contains("r:notes.txt#alt:alpha") && graph.contains("r:notes.txt#alt:beta"),
+            "{graph}"
+        );
+        assert!(graph.contains("r:app.tx#fn:handle_orders"), "{graph}");
+
+        // The router sees the entries.
+        let r = ProfileSet::load(e.engine.dir().root(), &[]);
+        assert_eq!(
+            r.set
+                .route(&katalogr_model::RelPath::new("notes.txt").unwrap()),
+            Some("test-alt")
+        );
+        assert_eq!(
+            r.set
+                .route(&katalogr_model::RelPath::new("other.txt").unwrap()),
+            None
+        );
+        assert_eq!(r.set.selects().count(), 2);
+
+        // A file event for a routed path is processed with the routed extension.
+        std::fs::write(e.work().join("notes.txt"), "gamma three\n").unwrap();
+        e.engine
+            .inbox()
+            .append(&support::file_event("notes.txt"))
+            .unwrap();
+        let graph = drained_graph(&e.engine);
+        assert!(
+            graph.contains("r:notes.txt#alt:gamma") && !graph.contains("r:notes.txt#alt:alpha"),
+            "{graph}"
+        );
+    }
+
+    #[test]
+    fn deselect_removes_shard() {
+        let e = env(&[("app.tx", APP), ("notes.txt", "alpha one\n")]);
+        e.write_profile("route.yaml", ROUTE);
+        let graph = full_index(&e.engine);
+        assert!(graph.contains("r:notes.txt#alt:alpha"), "{graph}");
+        let shard = e
+            .engine
+            .dir()
+            .shard_path("r", &katalogr_model::RelPath::new("notes.txt").unwrap());
+        assert!(shard.exists());
+
+        // Removing the entry leaves no extractor for the path: its shard and symbols go.
+        e.write_profile("route.yaml", "profile: route\nversion: 2\nrules: []\n");
+        let graph = drained_graph(&e.engine);
+        assert!(!graph.contains("notes.txt"), "{graph}");
+        assert!(!shard.exists(), "the stale shard file is removed");
+        assert!(graph.contains("r:app.tx#fn:handle_orders"), "{graph}");
+    }
+
+    const SCOPES: &str = "sym doc d\nsub d key schema\nsub d/schema key type\nfact d/schema/type value Order\nsub d key fields\nsub d/fields key id\nfact d/fields/id value orderId\nsub d/fields key sku\nfact d/fields/sku value sku\nsub d/fields key odd\nfact d/fields/odd shape round\n";
+
+    const SCOPE_RULES: &str = "\
+profile: scopes
+version: 2
+rules:
+  - id: doc-provides
+    when: { extension: test, kind: doc }
+    emit:
+      bind: { contract: { kind: codec, key: '${scope:schema/type}' }, role: provides }
+  - id: id-maps
+    when: { extension: test, kind: key, name: '^id$' }
+    emit:
+      ref: { kind: maps-to, candidates: [ { ns: member, key: '${scope:schema/type}/${fact:value}' } ] }
+      fact: { mapped: '${fact:value}', price: '$$5' }
+  - id: sku-no-fact
+    when: { extension: test, kind: key, name: '^sku$' }
+    emit:
+      ref: { kind: maps-to, candidates: [ { ns: member, key: '${fact:nothing}' } ] }
+  - id: sku-no-scope
+    when: { extension: test, kind: key, name: '^sku$' }
+    emit:
+      bind: { contract: { kind: codec, key: '${scope:nope/there}' }, role: consumes }
+  - id: odd-not-string
+    when: { extension: test, kind: key, name: '^odd$' }
+    emit:
+      fact: { shape_copy: '${fact:shape}', missing: '${scope:fields}' }
+";
+
+    #[test]
+    fn fact_and_scope_templates() {
+        let e = env(&[("m.tx", SCOPES)]);
+        e.write_profile("scopes.yaml", SCOPE_RULES);
+        full_index(&e.engine);
+
+        // The nearest enclosing path wins: from `d` the scope is its own descendant.
+        let c = e
+            .contract("codec", "Order")
+            .expect("bound through ${scope:..}");
+        assert_eq!((c.providers, c.consumers), (1, 0));
+        // `sku` found no value for either template: its rules did nothing, not even partly.
+        assert!(e.contract("codec", "nope").is_none());
+
+        let snap = e.engine.cache().read().unwrap();
+        let refs: Vec<_> = snap.unresolved_refs(None).unwrap();
+        assert_eq!(refs.len(), 1, "{refs:?}");
+        let (_, r) = &refs[0];
+        assert_eq!(r.kind.0, "maps-to");
+        assert_eq!(r.candidates[0].namespace, "member");
+        assert_eq!(r.candidates[0].key, "Order/orderId");
+
+        let sym = |name: &str| {
+            snap.symbols()
+                .unwrap()
+                .into_iter()
+                .find(|(_, s)| s.name.canonical() == format!("r:m.tx#{name}"))
+                .unwrap()
+                .1
+        };
+        let id = sym("doc:d/key:fields/key:id");
+        assert_eq!(
+            id.facts.get("mapped"),
+            Some(&katalogr_model::Fact::Str("orderId".into()))
+        );
+        assert_eq!(
+            id.facts.get("price"),
+            Some(&katalogr_model::Fact::Str("$5".into()))
+        );
+        // `${fact:shape}` is a string fact; `${scope:fields}` has no `value`: no partial emit.
+        let odd = sym("doc:d/key:fields/key:odd");
+        assert!(!odd.facts.contains_key("shape_copy") && !odd.facts.contains_key("missing"));
+    }
+
+    #[test]
+    fn v2_syntax_refused_in_v1() {
+        let (line, why) = refused(
+            "profile: p\nversion: 1\nselect:\n  - { extension: test, path: '*.x' }\nrules: []\n",
+        );
+        assert_eq!(line, 3, "{why}");
+        assert!(
+            why.contains("select") && why.contains("version: 2"),
+            "{why}"
+        );
+
+        let rule = |t: &str| {
+            format!(
+                "profile: p\nversion: 1\nrules:\n  - id: a\n    emit:\n      fact: {{ x: '{t}' }}\n"
+            )
+        };
+        let (line, why) = refused(&rule("${fact:y}"));
+        assert_eq!(line, 6, "{why}");
+        assert!(
+            why.contains("${fact:}") && why.contains("version: 2"),
+            "{why}"
+        );
+        let (line, why) = refused(&rule("${scope:a/b}"));
+        assert_eq!(line, 6, "{why}");
+        assert!(
+            why.contains("${scope:}") && why.contains("version: 2"),
+            "{why}"
+        );
+
+        // The same text is fine in version 2; an unknown variable and an unclosed one are not.
+        assert!(
+            profiles::parse(
+                "p.yaml",
+                &rule("${fact:y}").replace("version: 1", "version: 2")
+            )
+            .is_ok()
+        );
+        let (_, why) = refused(&rule("${kind:y}").replace("version: 1", "version: 2"));
+        assert!(why.contains("unknown template variable"), "{why}");
+        let (_, why) = refused(&rule("${fact:y").replace("version: 1", "version: 2"));
+        assert!(why.contains("not closed"), "{why}");
+        // Version 1 files without the new syntax are unchanged.
+        assert!(profiles::parse("p.yaml", BASE).is_ok());
+        assert!(profiles::parse("p.yaml", EXAMPLE).is_ok());
     }
 }

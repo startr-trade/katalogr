@@ -1,0 +1,142 @@
+mode: exact
+symbols:
+- fx:docs/order.xml#doc:order
+- fx:docs/order.xml#doc:order/key:order
+- fx:docs/order.xml#doc:order/key:order/key:@id
+- fx:docs/order.xml#doc:order/key:order/key:@p
+- fx:docs/order.xml#doc:order/key:order/key:line
+- fx:docs/order.xml#doc:order/key:order/key:line/key:%23text
+- fx:docs/order.xml#doc:order/key:order/key:line/key:@sku
+- fx:docs/order.xml#doc:order/key:order/key:line/key:@sku~2
+- fx:docs/order.xml#doc:order/key:order/key:line~2
+- fx:docs/orders.json#doc:orders
+- fx:docs/orders.json#doc:orders/key:active
+- fx:docs/orders.json#doc:orders/key:count
+- fx:docs/orders.json#doc:orders/key:name
+- fx:docs/orders.json#doc:orders/key:nested
+- fx:docs/orders.json#doc:orders/key:nested/key:a%2Fb
+- fx:docs/orders.json#doc:orders/key:nested/key:x
+- fx:docs/orders.json#doc:orders/key:tags
+- fx:docs/orders.json#doc:orders/key:tags/item:0
+- fx:docs/orders.json#doc:orders/key:tags/item:1
+- fx:docs/shapes.yaml#doc:shapes
+- fx:docs/shapes.yaml#doc:shapes/key:base
+- fx:docs/shapes.yaml#doc:shapes/key:base/key:size
+- fx:docs/shapes.yaml#doc:shapes/key:copy
+- fx:docs/shapes.yaml#doc:shapes/key:copy/key:<<
+- fx:docs/shapes.yaml#doc:shapes/key:items
+- fx:docs/shapes.yaml#doc:shapes/key:items/item:0
+- fx:docs/shapes.yaml#doc:shapes/key:items/item:0/key:id
+- fx:docs/shapes.yaml#doc:shapes/key:items/item:0/key:label
+- fx:docs/shapes.yaml#doc:shapes/key:second
+- fx:docs/shapes.yaml#doc:shapes/key:title
+- fx:docs/shapes.yaml#doc:shapes~2
+links:
+- from: fx:docs/order.xml#doc:order
+  kind: contains
+  to: fx:docs/order.xml#doc:order/key:order
+  confidence: Extracted
+- from: fx:docs/order.xml#doc:order/key:order
+  kind: contains
+  to: fx:docs/order.xml#doc:order/key:order/key:@id
+  confidence: Extracted
+- from: fx:docs/order.xml#doc:order/key:order
+  kind: contains
+  to: fx:docs/order.xml#doc:order/key:order/key:@p
+  confidence: Extracted
+- from: fx:docs/order.xml#doc:order/key:order
+  kind: contains
+  to: fx:docs/order.xml#doc:order/key:order/key:line
+  confidence: Extracted
+- from: fx:docs/order.xml#doc:order/key:order
+  kind: contains
+  to: fx:docs/order.xml#doc:order/key:order/key:line~2
+  confidence: Extracted
+- from: fx:docs/order.xml#doc:order/key:order/key:line
+  kind: contains
+  to: fx:docs/order.xml#doc:order/key:order/key:line/key:%23text
+  confidence: Extracted
+- from: fx:docs/order.xml#doc:order/key:order/key:line
+  kind: contains
+  to: fx:docs/order.xml#doc:order/key:order/key:line/key:@sku
+  confidence: Extracted
+- from: fx:docs/order.xml#doc:order/key:order/key:line~2
+  kind: contains
+  to: fx:docs/order.xml#doc:order/key:order/key:line/key:@sku~2
+  confidence: Extracted
+- from: fx:docs/orders.json#doc:orders
+  kind: contains
+  to: fx:docs/orders.json#doc:orders/key:active
+  confidence: Extracted
+- from: fx:docs/orders.json#doc:orders
+  kind: contains
+  to: fx:docs/orders.json#doc:orders/key:count
+  confidence: Extracted
+- from: fx:docs/orders.json#doc:orders
+  kind: contains
+  to: fx:docs/orders.json#doc:orders/key:name
+  confidence: Extracted
+- from: fx:docs/orders.json#doc:orders
+  kind: contains
+  to: fx:docs/orders.json#doc:orders/key:nested
+  confidence: Extracted
+- from: fx:docs/orders.json#doc:orders
+  kind: contains
+  to: fx:docs/orders.json#doc:orders/key:tags
+  confidence: Extracted
+- from: fx:docs/orders.json#doc:orders/key:nested
+  kind: contains
+  to: fx:docs/orders.json#doc:orders/key:nested/key:a%2Fb
+  confidence: Extracted
+- from: fx:docs/orders.json#doc:orders/key:nested
+  kind: contains
+  to: fx:docs/orders.json#doc:orders/key:nested/key:x
+  confidence: Extracted
+- from: fx:docs/orders.json#doc:orders/key:tags
+  kind: contains
+  to: fx:docs/orders.json#doc:orders/key:tags/item:0
+  confidence: Extracted
+- from: fx:docs/orders.json#doc:orders/key:tags
+  kind: contains
+  to: fx:docs/orders.json#doc:orders/key:tags/item:1
+  confidence: Extracted
+- from: fx:docs/shapes.yaml#doc:shapes
+  kind: contains
+  to: fx:docs/shapes.yaml#doc:shapes/key:base
+  confidence: Extracted
+- from: fx:docs/shapes.yaml#doc:shapes
+  kind: contains
+  to: fx:docs/shapes.yaml#doc:shapes/key:copy
+  confidence: Extracted
+- from: fx:docs/shapes.yaml#doc:shapes
+  kind: contains
+  to: fx:docs/shapes.yaml#doc:shapes/key:items
+  confidence: Extracted
+- from: fx:docs/shapes.yaml#doc:shapes
+  kind: contains
+  to: fx:docs/shapes.yaml#doc:shapes/key:title
+  confidence: Extracted
+- from: fx:docs/shapes.yaml#doc:shapes/key:base
+  kind: contains
+  to: fx:docs/shapes.yaml#doc:shapes/key:base/key:size
+  confidence: Extracted
+- from: fx:docs/shapes.yaml#doc:shapes/key:copy
+  kind: contains
+  to: fx:docs/shapes.yaml#doc:shapes/key:copy/key:<<
+  confidence: Extracted
+- from: fx:docs/shapes.yaml#doc:shapes/key:items
+  kind: contains
+  to: fx:docs/shapes.yaml#doc:shapes/key:items/item:0
+  confidence: Extracted
+- from: fx:docs/shapes.yaml#doc:shapes/key:items/item:0
+  kind: contains
+  to: fx:docs/shapes.yaml#doc:shapes/key:items/item:0/key:id
+  confidence: Extracted
+- from: fx:docs/shapes.yaml#doc:shapes/key:items/item:0
+  kind: contains
+  to: fx:docs/shapes.yaml#doc:shapes/key:items/item:0/key:label
+  confidence: Extracted
+- from: fx:docs/shapes.yaml#doc:shapes~2
+  kind: contains
+  to: fx:docs/shapes.yaml#doc:shapes/key:second
+  confidence: Extracted

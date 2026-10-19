@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xsd:schema xmlns:xsd="http://www.w3.org/2001/XMLSchema" targetNamespace="urn:example:shipping">
+  <xsd:element name="shipment">
+    <xsd:complexType>
+      <xsd:sequence>
+        <xsd:element name="address">
+          <xsd:complexType>
+            <xsd:sequence>
+              <xsd:element name="street" type="xsd:string"/>
+              <xsd:element name="city" type="xsd:string"/>
+            </xsd:sequence>
+            <xsd:attribute name="kind" use="required">
+              <xsd:simpleType>
+                <xsd:restriction base="xsd:string">
+                  <xsd:enumeration value="home"/>
+                  <xsd:enumeration value="work"/>
+                </xsd:restriction>
+              </xsd:simpleType>
+            </xsd:attribute>
+          </xsd:complexType>
+        </xsd:element>
+        <xsd:element name="parcel" maxOccurs="3">
+          <xsd:complexType>
+            <xsd:sequence>
+              <xsd:element name="weight" type="xsd:float"/>
+            </xsd:sequence>
+          </xsd:complexType>
+        </xsd:element>
+      </xsd:sequence>
+      <xsd:attribute name="ref" type="xsd:string"/>
+    </xsd:complexType>
+  </xsd:element>
+
+  <xsd:complexType name="Route">
+    <xsd:sequence>
+      <xsd:element name="stop" maxOccurs="unbounded">
+        <xsd:complexType>
+          <xsd:sequence>
+            <xsd:element name="place" type="xsd:string"/>
+          </xsd:sequence>
+        </xsd:complexType>
+      </xsd:element>
+    </xsd:sequence>
+  </xsd:complexType>
+</xsd:schema>

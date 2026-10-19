@@ -1,0 +1,11 @@
+{
+  "title": "Common",
+  "type": "object",
+  "properties": { "id": { "type": "string" } },
+  "$defs": {
+    "Money": {
+      "type": "object",
+      "properties": { "amount": { "type": "number" } }
+    }
+  }
+}

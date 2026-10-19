@@ -1,0 +1,5 @@
+<?xml version="1.0"?>
+<order xmlns:p="urn:example:p" id="7">
+  <p:line sku="s1">first</p:line>
+  <line sku="s2"/>
+</order>

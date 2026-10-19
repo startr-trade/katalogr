@@ -117,6 +117,97 @@ mod cli {
         (code, body, err)
     }
 
+    const ORDER_XSD: &str = "<?xml version=\"1.0\"?>\n<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:o=\"urn:example:orders\" targetNamespace=\"urn:example:orders\">\n  <xs:complexType name=\"Order\">\n    <xs:sequence>\n      <xs:element name=\"id\" type=\"xs:string\"/>\n      <xs:element name=\"total\" type=\"xs:decimal\"/>\n      <xs:element name=\"tag\" type=\"xs:string\" minOccurs=\"0\" maxOccurs=\"unbounded\"/>\n    </xs:sequence>\n  </xs:complexType>\n</xs:schema>\n";
+
+    /// R-10. Two copies of one schema: identical, exit 0 and nothing printed; after an edit
+    /// (an extra field, a changed cardinality and a changed type) every difference is reported
+    /// and the exit code is 1.
+    #[test]
+    fn mirrors_reports_drift() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (_kx, repo) = setup(tmp.path());
+        for d in ["a", "b"] {
+            std::fs::create_dir_all(repo.join(d)).unwrap();
+            std::fs::write(repo.join(d).join("order.xsd"), ORDER_XSD).unwrap();
+        }
+        ok(&repo, &["index"]);
+
+        let (code, out, err) = run(&repo, &["mirrors"]);
+        assert_eq!((code, out.as_str()), (0, ""), "{err}");
+
+        let changed = ORDER_XSD
+            .replace(
+                "<xs:element name=\"tag\" type=\"xs:string\" minOccurs=\"0\" maxOccurs=\"unbounded\"/>",
+                "<xs:element name=\"tag\" type=\"xs:string\" minOccurs=\"0\"/>\n      <xs:element name=\"note\" type=\"xs:string\"/>",
+            )
+            .replace("xs:decimal", "xs:string");
+        std::fs::write(repo.join("b/order.xsd"), &changed).unwrap();
+        ok(&repo, &["index"]);
+
+        let (code, out, err) = run(&repo, &["mirrors"]);
+        assert_eq!(code, 1, "{out}{err}");
+        let lines: Vec<&str> = out.lines().collect();
+        assert_eq!(
+            lines[0], "contract:schema_type:{urn%3Aexample%3Aorders}Order",
+            "{out}"
+        );
+        assert_eq!(
+            lines[1],
+            "  app:a/order.xsd#type:Order -> app:b/order.xsd#type:Order"
+        );
+        assert_eq!(
+            &lines[2..],
+            [
+                "  missing-left  note  left: -  right: string required single",
+                "  many  tag  left: string optional many  right: string optional single",
+                "  type  total  left: number required single  right: string required single",
+            ],
+            "{out}"
+        );
+
+        let (code, out, _) = run(&repo, &["--json", "mirrors"]);
+        assert_eq!(code, 1);
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        let drift = &v["result"][0];
+        assert_eq!(drift["comparable"], true);
+        assert_eq!(drift["differences"].as_array().unwrap().len(), 3);
+        assert_eq!(drift["differences"][0]["what"], "missing-left");
+        assert_eq!(drift["right"]["path"], "b/order.xsd");
+
+        // A contract kind that has no mirror set reports nothing.
+        let (code, out, _) = run(&repo, &["mirrors", "--kind", "schema_element"]);
+        assert_eq!((code, out.as_str()), (0, ""));
+        let (code, _, _) = run(&repo, &["mirrors", "--kind", "schema_type"]);
+        assert_eq!(code, 1);
+
+        // `dangling` takes any link kind: the dangling `uses-type` of a missing type.
+        std::fs::write(
+            repo.join("a/missing.xsd"),
+            ORDER_XSD
+                .replace("name=\"Order\"", "name=\"Other\"")
+                .replace("xs:decimal", "o:Nowhere"),
+        )
+        .unwrap();
+        ok(&repo, &["index"]);
+        let (code, out, _) = run(&repo, &["dangling", "--kind", "uses-type"]);
+        assert_eq!(code, 1, "{out}");
+        assert!(
+            out.contains("wants schema-type:{urn:example:orders}Nowhere"),
+            "{out}"
+        );
+        let (code, out, _) = run(&repo, &["dangling"]);
+        assert_eq!(
+            (code, out.as_str()),
+            (0, ""),
+            "the default set is unchanged"
+        );
+        let (code, _, _) = run(
+            &repo,
+            &["dangling", "--kind", "uses-type", "--kind", "contract"],
+        );
+        assert_eq!(code, 1);
+    }
+
     #[test]
     fn kindex_and_project_init() {
         let tmp = tempfile::tempdir().unwrap();
@@ -504,7 +595,7 @@ mod cli {
     fn json_matches_schema() {
         let tmp = tempfile::tempdir().unwrap();
         let (_kx, repo) = query_project(tmp.path());
-        let cases: [(&str, &[&str]); 14] = [
+        let cases: [(&str, &[&str]); 15] = [
             ("find", &["find", "call"]),
             ("refs", &["refs", "target"]),
             ("callers", &["callers", "target", "--depth", "3"]),
@@ -520,6 +611,7 @@ mod cli {
             ("path", &["path", "top", "target"]),
             ("explain", &["explain", "target"]),
             ("explain", &["explain", "caller_a", "--budget", "20"]),
+            ("mirrors", &["mirrors"]),
         ];
         for (name, args) in cases {
             let schema: Value = serde_json::from_str(
@@ -643,7 +735,7 @@ mod query {
     fn schemas_current() {
         let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../schema/v1");
         let fresh = katalogr_dist::query::schemas();
-        assert_eq!(fresh.len(), 10);
+        assert_eq!(fresh.len(), 11);
         for (name, schema) in fresh {
             let mut want = serde_json::to_string_pretty(&schema).unwrap();
             want.push('\n');

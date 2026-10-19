@@ -83,6 +83,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "arraydeque"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7d902e3d592a523def97af8f317b08ce16b7ab854c1985a0c671e6f15cebc236"
+
+[[package]]
 name = "autocfg"
 version = "1.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1587,9 +1593,11 @@ version = "0.1.0"
 dependencies = [
  "camino",
  "katalogr-engine",
+ "katalogr-ext-data",
  "katalogr-ext-kanbanr",
  "katalogr-ext-md",
  "katalogr-ext-rust",
+ "katalogr-ext-schema",
  "katalogr-ext-sql",
  "katalogr-ext-ts",
  "katalogr-model",
@@ -1618,9 +1626,11 @@ version = "0.1.0"
 dependencies = [
  "camino",
  "katalogr-engine",
+ "katalogr-ext-data",
  "katalogr-ext-kanbanr",
  "katalogr-ext-md",
  "katalogr-ext-rust",
+ "katalogr-ext-schema",
  "katalogr-ext-sql",
  "katalogr-ext-ts",
  "katalogr-model",
@@ -1650,6 +1660,22 @@ dependencies = [
  "sha2",
  "tempfile",
  "thiserror",
+]
+
+[[package]]
+name = "katalogr-ext-data"
+version = "0.1.0"
+dependencies = [
+ "camino",
+ "katalogr-acceptance",
+ "katalogr-engine",
+ "katalogr-model",
+ "katalogr-store",
+ "proptest",
+ "quick-xml",
+ "saphyr-parser",
+ "serde_json",
+ "tempfile",
 ]
 
 [[package]]
@@ -1686,6 +1712,20 @@ dependencies = [
  "serde_yaml_ng",
  "tempfile",
  "toml",
+]
+
+[[package]]
+name = "katalogr-ext-schema"
+version = "0.1.0"
+dependencies = [
+ "camino",
+ "katalogr-acceptance",
+ "katalogr-engine",
+ "katalogr-ext-data",
+ "katalogr-model",
+ "katalogr-store",
+ "serde_json",
+ "tempfile",
 ]
 
 [[package]]
@@ -2242,6 +2282,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a1d01941d82fa2ab50be1e79e6714289dd7cde78eba4c074bc5a4374f650dfe0"
 
 [[package]]
+name = "quick-xml"
+version = "0.41.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e660451e55124f798a69a5af3f49ccfbefbd41910eefd25caf2393e1f3473ec1"
+dependencies = [
+ "memchr",
+]
+
+[[package]]
 name = "quote"
 version = "1.0.47"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2490,6 +2539,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "93fc1dc3aaa9bfed95e02e6eadabb4baf7e3078b0bd1b4d7b6b0b68378900502"
 dependencies = [
  "winapi-util",
+]
+
+[[package]]
+name = "saphyr-parser"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7429158804c36e705d9423b7848018e535b3e92d439a763e364ee12670ef473b"
+dependencies = [
+ "arraydeque",
+ "thiserror",
 ]
 
 [[package]]
