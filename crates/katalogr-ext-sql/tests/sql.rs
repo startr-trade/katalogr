@@ -310,4 +310,78 @@ mod sql {
         assert_eq!(Dialect::from_name("PG"), Some(Dialect::PostgreSql));
         assert_eq!(Dialect::from_name("oracle"), None);
     }
+
+    fn stmts(text: &str) -> Vec<String> {
+        split_statements(text)
+            .iter()
+            .map(|s| text[s.start..s.end].to_string())
+            .collect()
+    }
+
+    #[test]
+    fn splitter_handles_quotes_and_bodies() {
+        // quotes, comments and dollar quotes hide semicolons
+        let t = "SELECT 'a;b'; SELECT \"x;y\"; SELECT `p;q`; -- c;d\nSELECT 1; # e;f\nSELECT 2; /* g; /* h; */ i; */ SELECT 3;\nSELECT $$a;b$$; SELECT $fn$ x; $$ y; $fn$; SELECT 'it''s;';";
+        assert_eq!(
+            stmts(t),
+            vec![
+                "SELECT 'a;b'",
+                "SELECT \"x;y\"",
+                "SELECT `p;q`",
+                "SELECT 1",
+                "SELECT 2",
+                "SELECT 3",
+                "SELECT $$a;b$$",
+                "SELECT $fn$ x; $$ y; $fn$",
+                "SELECT 'it''s;'",
+            ]
+        );
+        // `$1` is not a dollar quote; a backslash escape in a string
+        assert_eq!(stmts("SELECT $1; SELECT 2"), vec!["SELECT $1", "SELECT 2"]);
+        assert_eq!(
+            stmts("SELECT 'a\\'b;c'; SELECT 2"),
+            vec!["SELECT 'a\\'b;c'", "SELECT 2"]
+        );
+        // a bracket identifier, and an array subscript that is not one
+        assert_eq!(
+            stmts("SELECT [a;b] FROM t; SELECT x[1]; SELECT 2"),
+            vec!["SELECT [a;b] FROM t", "SELECT x[1]", "SELECT 2"]
+        );
+        // DELIMITER with a MySQL procedure
+        let m = "DELIMITER //\nCREATE PROCEDURE p()\nBEGIN\n  SELECT 1;\n  SELECT 2;\nEND//\nDELIMITER ;\nSELECT 3;\n";
+        let got = stmts(m);
+        assert_eq!(got.len(), 2, "{got:?}");
+        assert!(got[0].starts_with("CREATE PROCEDURE p()") && got[0].ends_with("END"));
+        assert_eq!(got[1], "SELECT 3");
+        assert_eq!(split_statements(m)[0].delimiter, "//");
+        assert_eq!(split_statements(m)[1].delimiter, ";");
+        // a SQLite trigger BEGIN ... END without DELIMITER
+        let tr = "CREATE TRIGGER t AFTER INSERT ON o BEGIN\n  INSERT INTO a VALUES (1);\n  UPDATE b SET x = CASE WHEN 1 THEN 2 END;\nEND;\nSELECT 1;";
+        let got = stmts(tr);
+        assert_eq!(got.len(), 2, "{got:?}");
+        assert!(got[0].ends_with("END"));
+        // a MySQL procedure with IF ... END IF and CASE ... END CASE without DELIMITER
+        let p = "CREATE PROCEDURE q()\nBEGIN\n  IF x THEN SELECT 1; END IF;\n  CASE x WHEN 1 THEN SELECT 2; END CASE;\n  WHILE a DO SELECT 3; END WHILE;\nEND;\nSELECT 9;";
+        let got = stmts(p);
+        assert_eq!(got.len(), 2, "{got:?}");
+        assert!(got[0].ends_with("END") && got[1] == "SELECT 9");
+        // psql meta commands and comment-only tails are dropped
+        assert_eq!(
+            stmts("\\connect shop\nSELECT 1;\n-- bye\n/* x */\n"),
+            vec!["SELECT 1"]
+        );
+        // trailing statements without delimiter; ranges exclude delimiter and trailing space
+        let t = "SELECT 1  ;  SELECT 2  \n";
+        let r = split_statements(t);
+        assert_eq!((r[0].start, r[0].end), (0, 8));
+        assert_eq!(&t[r[1].start..r[1].end], "SELECT 2");
+        // a pg # operator is not a comment
+        assert_eq!(
+            stmts("SELECT a #> '{x}' FROM t; SELECT 2"),
+            vec!["SELECT a #> '{x}' FROM t", "SELECT 2"]
+        );
+        // an unterminated string consumes the rest without panicking
+        assert_eq!(stmts("SELECT 'abc; SELECT 2").len(), 1);
+        assert!(split_statements("").is_empty());
+    }
 }
