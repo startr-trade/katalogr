@@ -10,6 +10,7 @@ pub mod hooks;
 pub mod index;
 pub mod kindex;
 pub mod map;
+pub mod mirrors;
 pub mod notify;
 pub mod path;
 pub mod project;

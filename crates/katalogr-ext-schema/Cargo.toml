@@ -1,0 +1,20 @@
+[package]
+name = "katalogr-ext-schema"
+description = "Schemas: XSD and JSON Schema types, elements and fields."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+katalogr-model.workspace = true
+katalogr-ext-data.workspace = true
+
+[dev-dependencies]
+katalogr-engine.workspace = true
+katalogr-store.workspace = true
+katalogr-acceptance = { path = "../katalogr-acceptance" }
+camino.workspace = true
+tempfile.workspace = true
+serde_json.workspace = true

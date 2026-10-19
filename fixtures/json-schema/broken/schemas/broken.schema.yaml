@@ -1,0 +1,5 @@
+title: BrokenYaml
+type: object
+properties:
+  a: {type: string}
+  b: [1, 2

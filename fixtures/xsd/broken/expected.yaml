@@ -1,0 +1,24 @@
+mode: exact
+symbols:
+- fx:schemas/broken.xsd#schema:broken
+- fx:schemas/broken.xsd#type:Bad
+- fx:schemas/broken.xsd#type:Bad/field:y
+- fx:schemas/broken.xsd#type:Good
+- fx:schemas/broken.xsd#type:Good/field:x
+links:
+- from: fx:schemas/broken.xsd#type:Bad
+  kind: contains
+  to: fx:schemas/broken.xsd#type:Bad/field:y
+  confidence: Extracted
+- from: fx:schemas/broken.xsd#type:Bad
+  kind: declares
+  to: de3482b84aa00a03ba75a6d048afff56
+  confidence: Extracted
+- from: fx:schemas/broken.xsd#type:Good
+  kind: contains
+  to: fx:schemas/broken.xsd#type:Good/field:x
+  confidence: Extracted
+- from: fx:schemas/broken.xsd#type:Good
+  kind: declares
+  to: 96c553b95804b4451d0f70359967204e
+  confidence: Extracted

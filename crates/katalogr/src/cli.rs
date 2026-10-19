@@ -22,27 +22,6 @@ pub enum Consistency {
     StaleOk,
 }
 
-/// Link kinds `dangling` can report.
-#[derive(Debug, Clone, Copy, ValueEnum)]
-#[value(rename_all = "kebab-case")]
-pub enum DanglingKind {
-    LinksTo,
-    AnnotatedBy,
-    RefsItem,
-    Contract,
-}
-
-impl DanglingKind {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            DanglingKind::LinksTo => "links-to",
-            DanglingKind::AnnotatedBy => "annotated-by",
-            DanglingKind::RefsItem => "refs-item",
-            DanglingKind::Contract => "contract",
-        }
-    }
-}
-
 /// Traceability for polyglot systems.
 #[derive(Debug, Parser)]
 #[command(name = "katalogr", version = VERSION.as_str(), about, long_about = None)]
@@ -208,9 +187,17 @@ pub enum Command {
     },
     /// List references that name something that does not exist; exits 1 when any dangle.
     Dangling {
-        /// Only this link kind (default: links-to, annotated-by and refs-item).
-        #[arg(long, value_enum)]
-        kind: Option<DanglingKind>,
+        /// Only this link kind, or `contract` for one-sided contracts; repeatable (default:
+        /// links-to, annotated-by and refs-item).
+        #[arg(long, value_name = "KIND")]
+        kind: Vec<String>,
+    },
+    /// Compare mirrored copies of a structure: contracts with two or more declarers. Exits 1
+    /// when a field is missing on one side or differs in type, required or many.
+    Mirrors {
+        /// Only contracts of this kind (for example `schema_type`); repeatable.
+        #[arg(long, value_name = "KIND")]
+        kind: Vec<String>,
     },
 }
 

@@ -1,0 +1,33 @@
+mode: exact
+symbols:
+- fx:schemas/broken.schema.json#type:Broken
+- fx:schemas/broken.schema.json#type:Broken/field:a
+- fx:schemas/broken.schema.json#type:Broken/field:b
+- fx:schemas/broken.schema.yaml#type:BrokenYaml
+- fx:schemas/broken.schema.yaml#type:BrokenYaml/field:a
+- fx:schemas/broken.schema.yaml#type:BrokenYaml/field:b
+links:
+- from: fx:schemas/broken.schema.json#type:Broken
+  kind: contains
+  to: fx:schemas/broken.schema.json#type:Broken/field:a
+  confidence: Extracted
+- from: fx:schemas/broken.schema.json#type:Broken
+  kind: contains
+  to: fx:schemas/broken.schema.json#type:Broken/field:b
+  confidence: Extracted
+- from: fx:schemas/broken.schema.json#type:Broken
+  kind: declares
+  to: 8845d2d80eb03ba557e0ae43069794f1
+  confidence: Inferred
+- from: fx:schemas/broken.schema.yaml#type:BrokenYaml
+  kind: contains
+  to: fx:schemas/broken.schema.yaml#type:BrokenYaml/field:a
+  confidence: Extracted
+- from: fx:schemas/broken.schema.yaml#type:BrokenYaml
+  kind: contains
+  to: fx:schemas/broken.schema.yaml#type:BrokenYaml/field:b
+  confidence: Extracted
+- from: fx:schemas/broken.schema.yaml#type:BrokenYaml
+  kind: declares
+  to: eb3e430bd93af31e640c1a76365f0cad
+  confidence: Inferred

@@ -57,6 +57,9 @@ pub fn full_registry() -> ExtensionRegistry {
     let mut reg = testfmt::registry();
     reg.register(Box::new(katalogr_ext_rust::RustExtractor));
     reg.register(Box::new(katalogr_ext_ts::TsExtractor));
+    reg.register(Box::new(katalogr_ext_schema::XsdExtractor));
+    reg.register(Box::new(katalogr_ext_schema::JsonSchemaExtractor));
+    reg.register(Box::new(katalogr_ext_data::DataExtractor));
     // The board extension claims its own Markdown files before the general one.
     reg.register(Box::new(katalogr_ext_kanbanr::BoardExtractor));
     reg.register(Box::new(katalogr_ext_md::MarkdownExtractor));
@@ -254,58 +257,155 @@ pub fn compare(
     }
 }
 
-/// Canonical graph text of a case directory indexed as repository `fx` in a temporary kindex.
-pub fn index_case(
-    make_registry: &dyn Fn() -> ExtensionRegistry,
-    case_dir: &Utf8Path,
-) -> Result<String, AccError> {
-    let case_dir = Utf8PathBuf::from_path_buf(
-        std::fs::canonicalize(case_dir).map_err(|e| AccError::io(case_dir, e))?,
-    )
-    .map_err(|p| AccError::Run(format!("{}: not UTF-8", p.display())))?;
-    let tmp = tempfile::tempdir().map_err(AccError::run)?;
-    let kx = Utf8PathBuf::from_path_buf(tmp.path().join("kx"))
-        .map_err(|p| AccError::Run(format!("{}: not UTF-8", p.display())))?;
-    let name = ProjectName::new("fx").map_err(AccError::run)?;
-    let dir = Kindex::init(&kx)
-        .and_then(|k| {
-            k.create_project(
-                &name,
-                ProjectConfig {
-                    repos: vec![RepoConfig::new(REPO)],
-                    ..Default::default()
-                },
+/// Folder of a case (or repository) directory that holds the profiles to install in the
+/// temporary project. It is not indexed.
+pub const CASE_PROFILES: &str = ".katalogr-profiles";
+
+/// Repositories indexed into a temporary kindex, kept open for queries.
+pub struct Case {
+    _tmp: tempfile::TempDir,
+    engine: Engine,
+}
+
+impl Case {
+    /// Index the case directory as repository `fx`.
+    pub fn open(
+        make_registry: &dyn Fn() -> ExtensionRegistry,
+        case_dir: &Utf8Path,
+    ) -> Result<Case, AccError> {
+        Case::open_repos(make_registry, &[(REPO, case_dir)])
+    }
+
+    /// Index several repositories `(name, directory)` into one project, wait-all. Each
+    /// directory's `.katalogr-profiles/*.yaml` files are installed as the project's profiles
+    /// (prefixed with the repository name) and `.katalogr-profiles/**` is not indexed.
+    pub fn open_repos(
+        make_registry: &dyn Fn() -> ExtensionRegistry,
+        repos: &[(&str, &Utf8Path)],
+    ) -> Result<Case, AccError> {
+        let tmp = tempfile::tempdir().map_err(AccError::run)?;
+        let kx = Utf8PathBuf::from_path_buf(tmp.path().join("kx"))
+            .map_err(|p| AccError::Run(format!("{}: not UTF-8", p.display())))?;
+        let name = ProjectName::new("fx").map_err(AccError::run)?;
+        let dir = Kindex::init(&kx)
+            .and_then(|k| {
+                k.create_project(
+                    &name,
+                    ProjectConfig {
+                        repos: repos.iter().map(|(n, _)| RepoConfig::new(n)).collect(),
+                        ..Default::default()
+                    },
+                )
+            })
+            .map_err(AccError::run)?;
+        let mut roots = BTreeMap::new();
+        for (repo, case_dir) in repos {
+            let case_dir = Utf8PathBuf::from_path_buf(
+                std::fs::canonicalize(case_dir).map_err(|e| AccError::io(case_dir, e))?,
             )
-        })
+            .map_err(|p| AccError::Run(format!("{}: not UTF-8", p.display())))?;
+            install_profiles(&case_dir, dir.root(), repo, repos.len() > 1)?;
+            roots.insert((*repo).to_string(), case_dir);
+        }
+        let mut engine = Engine::open(
+            dir,
+            make_registry(),
+            roots,
+            Instant::now() + Duration::from_secs(30),
+        )
         .map_err(AccError::run)?;
-    let roots = BTreeMap::from([(REPO.to_string(), case_dir)]);
-    let engine = Engine::open(
-        dir,
-        make_registry(),
-        roots,
-        Instant::now() + Duration::from_secs(30),
-    )
-    .map_err(AccError::run)?;
-    engine
-        .inbox()
-        .append(&NewEvent::rescan(REPO))
-        .map_err(AccError::run)?;
-    let answer = engine
-        .with_consistency(
+        for (repo, _) in repos {
+            let (include, mut exclude) = engine.repo_filters(repo);
+            exclude.push(format!("{CASE_PROFILES}/**"));
+            engine.set_repo_filters(repo, include, exclude);
+            engine
+                .inbox()
+                .append(&NewEvent::rescan(repo))
+                .map_err(AccError::run)?;
+        }
+        let case = Case { _tmp: tmp, engine };
+        let answer = case.engine.with_consistency(
             &QueryOptions {
                 consistency: Consistency::WaitAll,
                 timeout: Duration::from_secs(30),
                 scope: Scope::Project,
             },
-            |tx| katalogr_engine::canonical_graph(tx),
-        )
-        .map_err(AccError::run)?;
-    if answer.stale {
-        return Err(AccError::Run(
-            "index did not drain before the timeout".into(),
-        ));
+            |_| (),
+        );
+        if answer.map_err(AccError::run)?.stale {
+            return Err(AccError::Run(
+                "index did not drain before the timeout".into(),
+            ));
+        }
+        Ok(case)
     }
-    Ok(answer.value)
+
+    pub fn engine(&self) -> &Engine {
+        &self.engine
+    }
+
+    /// Run `f` over a snapshot taken once nothing is queued.
+    pub fn read<T>(&self, f: impl FnOnce(&katalogr_store::ReadTx) -> T) -> Result<T, AccError> {
+        let answer = self
+            .engine
+            .with_consistency(
+                &QueryOptions {
+                    consistency: Consistency::WaitAll,
+                    timeout: Duration::from_secs(30),
+                    scope: Scope::Project,
+                },
+                f,
+            )
+            .map_err(AccError::run)?;
+        if answer.stale {
+            return Err(AccError::Run(
+                "index did not drain before the timeout".into(),
+            ));
+        }
+        Ok(answer.value)
+    }
+
+    /// The canonical graph text.
+    pub fn graph(&self) -> Result<String, AccError> {
+        self.read(|tx| katalogr_engine::canonical_graph(tx))
+    }
+}
+
+/// Copy `<repo dir>/.katalogr-profiles/*.yaml` into `<project>/profiles/`.
+fn install_profiles(
+    repo_dir: &Utf8Path,
+    project: &Utf8Path,
+    repo: &str,
+    prefix: bool,
+) -> Result<(), AccError> {
+    let from = repo_dir.join(CASE_PROFILES);
+    let Ok(rd) = std::fs::read_dir(&from) else {
+        return Ok(());
+    };
+    let to = project.join(katalogr_engine::profiles::PROFILES_DIR);
+    std::fs::create_dir_all(&to).map_err(|e| AccError::io(&to, e))?;
+    for e in rd.flatten() {
+        let Ok(name) = e.file_name().into_string() else {
+            continue;
+        };
+        if name.ends_with(".yaml") || name.ends_with(".yml") {
+            let target = if prefix {
+                format!("{repo}-{name}")
+            } else {
+                name
+            };
+            std::fs::copy(e.path(), to.join(&target)).map_err(|e| AccError::io(&target, e))?;
+        }
+    }
+    Ok(())
+}
+
+/// Canonical graph text of a case directory indexed as repository `fx` in a temporary kindex.
+pub fn index_case(
+    make_registry: &dyn Fn() -> ExtensionRegistry,
+    case_dir: &Utf8Path,
+) -> Result<String, AccError> {
+    Case::open(make_registry, case_dir)?.graph()
 }
 
 /// Index the case, wait-all, export the canonical graph and compare it with `expected.yaml`.

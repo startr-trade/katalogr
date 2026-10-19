@@ -1,0 +1,91 @@
+mode: exact
+symbols:
+- fx:schemas/shape.schema.json#type:Color
+- fx:schemas/shape.schema.json#type:Shape
+- fx:schemas/shape.schema.json#type:Shape/field:color
+- fx:schemas/shape.schema.json#type:Shape/field:kind
+- fx:schemas/shape.schema.json#type:Shape/field:points
+- fx:schemas/shape.schema.json#type:Shape/field:points/field:x
+- fx:schemas/shape.schema.json#type:Shape/field:points/field:y
+- fx:schemas/shape.schema.json#type:Shape/field:size
+- fx:schemas/shape.schema.yaml#type:Color
+- fx:schemas/shape.schema.yaml#type:Shape
+- fx:schemas/shape.schema.yaml#type:Shape/field:color
+- fx:schemas/shape.schema.yaml#type:Shape/field:kind
+- fx:schemas/shape.schema.yaml#type:Shape/field:points
+- fx:schemas/shape.schema.yaml#type:Shape/field:points/field:x
+- fx:schemas/shape.schema.yaml#type:Shape/field:points/field:y
+- fx:schemas/shape.schema.yaml#type:Shape/field:size
+links:
+- from: fx:schemas/shape.schema.json#type:Color
+  kind: declares
+  to: 9ed2e2831628bfd49c329accfeea8b0a
+  confidence: Extracted
+- from: fx:schemas/shape.schema.json#type:Shape
+  kind: contains
+  to: fx:schemas/shape.schema.json#type:Shape/field:color
+  confidence: Extracted
+- from: fx:schemas/shape.schema.json#type:Shape
+  kind: contains
+  to: fx:schemas/shape.schema.json#type:Shape/field:kind
+  confidence: Extracted
+- from: fx:schemas/shape.schema.json#type:Shape
+  kind: contains
+  to: fx:schemas/shape.schema.json#type:Shape/field:points
+  confidence: Extracted
+- from: fx:schemas/shape.schema.json#type:Shape
+  kind: contains
+  to: fx:schemas/shape.schema.json#type:Shape/field:size
+  confidence: Extracted
+- from: fx:schemas/shape.schema.json#type:Shape
+  kind: declares
+  to: 5c0cc3b663f02259f3aa05aff9420ca5
+  confidence: Extracted
+- from: fx:schemas/shape.schema.json#type:Shape/field:color
+  kind: uses-type
+  to: fx:schemas/shape.schema.json#type:Color
+  confidence: Extracted
+- from: fx:schemas/shape.schema.json#type:Shape/field:points
+  kind: contains
+  to: fx:schemas/shape.schema.json#type:Shape/field:points/field:x
+  confidence: Extracted
+- from: fx:schemas/shape.schema.json#type:Shape/field:points
+  kind: contains
+  to: fx:schemas/shape.schema.json#type:Shape/field:points/field:y
+  confidence: Extracted
+- from: fx:schemas/shape.schema.yaml#type:Color
+  kind: declares
+  to: 9ed2e2831628bfd49c329accfeea8b0a
+  confidence: Extracted
+- from: fx:schemas/shape.schema.yaml#type:Shape
+  kind: contains
+  to: fx:schemas/shape.schema.yaml#type:Shape/field:color
+  confidence: Extracted
+- from: fx:schemas/shape.schema.yaml#type:Shape
+  kind: contains
+  to: fx:schemas/shape.schema.yaml#type:Shape/field:kind
+  confidence: Extracted
+- from: fx:schemas/shape.schema.yaml#type:Shape
+  kind: contains
+  to: fx:schemas/shape.schema.yaml#type:Shape/field:points
+  confidence: Extracted
+- from: fx:schemas/shape.schema.yaml#type:Shape
+  kind: contains
+  to: fx:schemas/shape.schema.yaml#type:Shape/field:size
+  confidence: Extracted
+- from: fx:schemas/shape.schema.yaml#type:Shape
+  kind: declares
+  to: 5c0cc3b663f02259f3aa05aff9420ca5
+  confidence: Extracted
+- from: fx:schemas/shape.schema.yaml#type:Shape/field:color
+  kind: uses-type
+  to: fx:schemas/shape.schema.yaml#type:Color
+  confidence: Extracted
+- from: fx:schemas/shape.schema.yaml#type:Shape/field:points
+  kind: contains
+  to: fx:schemas/shape.schema.yaml#type:Shape/field:points/field:x
+  confidence: Extracted
+- from: fx:schemas/shape.schema.yaml#type:Shape/field:points
+  kind: contains
+  to: fx:schemas/shape.schema.yaml#type:Shape/field:points/field:y
+  confidence: Extracted

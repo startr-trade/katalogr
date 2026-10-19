@@ -1,0 +1,67 @@
+mode: exact
+symbols:
+- fx:api/events.yaml#type:Placed
+- fx:api/events.yaml#type:Placed/field:at
+- fx:api/events.yaml#type:Placed/field:orderId
+- fx:api/openapi.yaml#type:Owner
+- fx:api/openapi.yaml#type:Owner/field:id
+- fx:api/openapi.yaml#type:Pet
+- fx:api/openapi.yaml#type:Pet/field:name
+- fx:api/openapi.yaml#type:Pet/field:owner
+- fx:api/openapi.yaml#type:Pet/field:photos
+- fx:api/openapi.yaml#type:Pet/field:tag
+- fx:api/swagger.json#type:Tag
+- fx:api/swagger.json#type:Tag/field:label
+links:
+- from: fx:api/events.yaml#type:Placed
+  kind: contains
+  to: fx:api/events.yaml#type:Placed/field:at
+  confidence: Extracted
+- from: fx:api/events.yaml#type:Placed
+  kind: contains
+  to: fx:api/events.yaml#type:Placed/field:orderId
+  confidence: Extracted
+- from: fx:api/events.yaml#type:Placed
+  kind: declares
+  to: a3bc4b001777d30f230d95e345a6a735
+  confidence: Inferred
+- from: fx:api/openapi.yaml#type:Owner
+  kind: contains
+  to: fx:api/openapi.yaml#type:Owner/field:id
+  confidence: Extracted
+- from: fx:api/openapi.yaml#type:Owner
+  kind: declares
+  to: 030e9cc7ddb1f107100c0b49ef7222af
+  confidence: Inferred
+- from: fx:api/openapi.yaml#type:Pet
+  kind: contains
+  to: fx:api/openapi.yaml#type:Pet/field:name
+  confidence: Extracted
+- from: fx:api/openapi.yaml#type:Pet
+  kind: contains
+  to: fx:api/openapi.yaml#type:Pet/field:owner
+  confidence: Extracted
+- from: fx:api/openapi.yaml#type:Pet
+  kind: contains
+  to: fx:api/openapi.yaml#type:Pet/field:photos
+  confidence: Extracted
+- from: fx:api/openapi.yaml#type:Pet
+  kind: contains
+  to: fx:api/openapi.yaml#type:Pet/field:tag
+  confidence: Extracted
+- from: fx:api/openapi.yaml#type:Pet
+  kind: declares
+  to: 73fc69f74cc42f7e47067815ee1ca6ce
+  confidence: Inferred
+- from: fx:api/openapi.yaml#type:Pet/field:owner
+  kind: uses-type
+  to: fx:api/openapi.yaml#type:Owner
+  confidence: Extracted
+- from: fx:api/swagger.json#type:Tag
+  kind: contains
+  to: fx:api/swagger.json#type:Tag/field:label
+  confidence: Extracted
+- from: fx:api/swagger.json#type:Tag
+  kind: declares
+  to: 298fa2c1ba04daa6e45b3754b549142f
+  confidence: Inferred

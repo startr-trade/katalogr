@@ -630,3 +630,150 @@ fn session_start_100k() {
     );
     assert!(elapsed < Duration::from_millis(1000), "over budget");
 }
+
+mod bench {
+    use super::*;
+
+    /// R-14 (FEAT-009). Drift over 10,000 contracts, each declared by two types of 10 fields: one
+    /// of every ten pairs differs in a field. Budget: the full report in under 1000 ms.
+    #[test]
+    #[ignore]
+    fn mirrors_10k_contracts() {
+        use katalogr_model::{ContractName, Fact};
+        use katalogr_store::ContractRow;
+
+        const CONTRACTS: usize = 10_000;
+        const FIELDS: usize = 10;
+        let tmp = tempfile::tempdir().unwrap();
+        let cache = open_bench_cache(&tmp);
+        let span = Span {
+            start_line: 1,
+            start_col: 1,
+            end_line: 1,
+            end_col: 1,
+        };
+        let mut tx = cache.write().unwrap();
+        for c in 0..CONTRACTS {
+            let contract = ContractName {
+                kind: "schema_type".into(),
+                key: format!("{{urn:bench}}T{c}"),
+            };
+            let cid = contract.id();
+            tx.put_contract(
+                cid,
+                &ContractRow {
+                    name: contract,
+                    providers: 0,
+                    consumers: 0,
+                    declarers: 2,
+                },
+            )
+            .unwrap();
+            for side in ["a", "b"] {
+                let path = RelPath::new(&format!("{side}/t{c}.xsd")).unwrap();
+                let artifact = ArtifactName {
+                    repo: "r".into(),
+                    path: path.clone(),
+                };
+                let aid = artifact.id();
+                let provenance = Provenance {
+                    repo: "r".into(),
+                    path,
+                    revision: "ce013625030ba8dba906f756967f9e9ca394464a".into(),
+                };
+                let name = |segments: Vec<Segment>| SymbolName {
+                    artifact: artifact.clone(),
+                    segments,
+                    ordinal: 1,
+                };
+                let ty = name(vec![Segment {
+                    kind: "type".into(),
+                    name: format!("T{c}"),
+                }]);
+                let tid = ty.id();
+                tx.put_symbol(
+                    tid,
+                    &SymbolRow {
+                        name: ty.clone(),
+                        artifact: aid,
+                        kind: "type".into(),
+                        span,
+                        facts: Default::default(),
+                    },
+                )
+                .unwrap();
+                let link = |from: Id, kind: &str, to: Id| {
+                    (
+                        LinkKey {
+                            from,
+                            kind: LinkKind(kind.into()),
+                            to,
+                        },
+                        LinkRow {
+                            entries: vec![LinkEntry {
+                                origin: LinkOrigin::Intra,
+                                confidence: Confidence::Extracted,
+                                span: Some(span),
+                                provenance: provenance.clone(),
+                                fanout: None,
+                                produced_by: None,
+                            }],
+                        },
+                    )
+                };
+                let (k, r) = link(tid, "declares", cid);
+                tx.put_link(&k, &r).unwrap();
+                for f in 0..FIELDS {
+                    let mut segments = ty.segments.clone();
+                    segments.push(Segment {
+                        kind: "field".into(),
+                        name: format!("f{f}"),
+                    });
+                    let sym = name(segments);
+                    let fid = sym.id();
+                    // Every tenth contract differs in the type of one field on side b.
+                    let differs = side == "b" && c % 10 == 0 && f == 3;
+                    let ty_word = if differs { "string" } else { "integer" };
+                    let facts = BTreeMap::from([
+                        ("field_type".to_string(), Fact::Str(ty_word.into())),
+                        ("required".to_string(), Fact::Bool(f % 2 == 0)),
+                        ("many".to_string(), Fact::Bool(false)),
+                    ]);
+                    tx.put_symbol(
+                        fid,
+                        &SymbolRow {
+                            name: sym,
+                            artifact: aid,
+                            kind: "field".into(),
+                            span,
+                            facts,
+                        },
+                    )
+                    .unwrap();
+                    let (k, r) = link(tid, "contains", fid);
+                    tx.put_link(&k, &r).unwrap();
+                }
+            }
+        }
+        tx.commit().unwrap();
+
+        let read = cache.read().unwrap();
+        let start = Instant::now();
+        let drift = katalogr_query::mirror_drift(&read, &[]).unwrap();
+        let elapsed = start.elapsed();
+        println!(
+            "bench::mirrors_10k_contracts: {} drifts in {elapsed:?}",
+            drift.len()
+        );
+        assert_eq!(drift.len(), CONTRACTS / 10);
+        assert!(
+            drift
+                .iter()
+                .all(|d| d.comparable && d.differences.len() == 1)
+        );
+        assert!(
+            elapsed < Duration::from_millis(1000),
+            "mirror_drift took {elapsed:?}"
+        );
+    }
+}

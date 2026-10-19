@@ -1,4 +1,27 @@
 technologies:
+  data:
+    key-tree:
+      - data/key-tree
+      - data/codec-chain
+    parse-error:
+      - data/broken
+    xml:
+      - data/key-tree
+    yaml:
+      - data/key-tree
+  json-schema:
+    api-components:
+      - json-schema/api-components
+    defs:
+      - json-schema/defs-properties
+    parse-error:
+      - json-schema/broken
+    properties:
+      - json-schema/defs-properties
+    refs:
+      - json-schema/refs
+    yaml:
+      - json-schema/yaml
   kanbanr:
     adrs:
       - kanbanr/board
@@ -81,3 +104,17 @@ technologies:
       - ts/reexports
     require:
       - ts/require
+  xsd:
+    contracts:
+      - xsd/types-fields
+    fields:
+      - xsd/types-fields
+      - xsd/anonymous-nested
+    imports:
+      - xsd/imports
+    parse-error:
+      - xsd/broken
+    refs:
+      - xsd/refs-across-files
+    types:
+      - xsd/types-fields

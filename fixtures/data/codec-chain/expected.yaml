@@ -1,0 +1,147 @@
+mode: subset
+symbols:
+- fx:channels/orders.tx#channel:orders
+- fx:codecs/orders.yaml#doc:orders
+- fx:codecs/orders.yaml#doc:orders/key:formats
+- fx:codecs/orders.yaml#doc:orders/key:formats/key:csv
+- fx:codecs/orders.yaml#doc:orders/key:formats/key:csv/key:fields
+- fx:codecs/orders.yaml#doc:orders/key:formats/key:csv/key:fields/key:col_a
+- fx:codecs/orders.yaml#doc:orders/key:formats/key:csv/key:fields/key:col_b
+- fx:codecs/orders.yaml#doc:orders/key:formats/key:json
+- fx:codecs/orders.yaml#doc:orders/key:formats/key:json/key:fields
+- fx:codecs/orders.yaml#doc:orders/key:formats/key:json/key:fields/key:amount
+- fx:codecs/orders.yaml#doc:orders/key:formats/key:json/key:fields/key:ghost
+- fx:codecs/orders.yaml#doc:orders/key:formats/key:json/key:fields/key:orderId
+- fx:codecs/orders.yaml#doc:orders/key:formats/key:json/key:fields/key:sku
+- fx:codecs/orders.yaml#doc:orders/key:schema
+- fx:codecs/orders.yaml#doc:orders/key:schema/key:file
+- fx:codecs/orders.yaml#doc:orders/key:schema/key:kind
+- fx:codecs/orders.yaml#doc:orders/key:schema/key:type
+- fx:codecs/orders.yaml#doc:orders/key:urn
+- fx:schemas/orders.xsd#schema:orders
+- fx:schemas/orders.xsd#type:Order
+- fx:schemas/orders.xsd#type:Order/field:id
+- fx:schemas/orders.xsd#type:Order/field:lines
+- fx:schemas/orders.xsd#type:Order/field:lines/field:sku
+- fx:schemas/orders.xsd#type:Order/field:total
+links:
+- from: fx:channels/orders.tx#channel:orders
+  kind: consumes
+  to: 2360cb0e26a6e2aabbae51ad2e986518
+  confidence: Extracted
+- from: fx:codecs/orders.yaml#doc:orders
+  kind: contains
+  to: fx:codecs/orders.yaml#doc:orders/key:formats
+  confidence: Extracted
+- from: fx:codecs/orders.yaml#doc:orders
+  kind: contains
+  to: fx:codecs/orders.yaml#doc:orders/key:schema
+  confidence: Extracted
+- from: fx:codecs/orders.yaml#doc:orders
+  kind: contains
+  to: fx:codecs/orders.yaml#doc:orders/key:urn
+  confidence: Extracted
+- from: fx:codecs/orders.yaml#doc:orders
+  kind: provides
+  to: 2360cb0e26a6e2aabbae51ad2e986518
+  confidence: Declared
+- from: fx:codecs/orders.yaml#doc:orders/key:formats
+  kind: contains
+  to: fx:codecs/orders.yaml#doc:orders/key:formats/key:csv
+  confidence: Extracted
+- from: fx:codecs/orders.yaml#doc:orders/key:formats
+  kind: contains
+  to: fx:codecs/orders.yaml#doc:orders/key:formats/key:json
+  confidence: Extracted
+- from: fx:codecs/orders.yaml#doc:orders/key:formats/key:csv
+  kind: contains
+  to: fx:codecs/orders.yaml#doc:orders/key:formats/key:csv/key:fields
+  confidence: Extracted
+- from: fx:codecs/orders.yaml#doc:orders/key:formats/key:csv/key:fields
+  kind: contains
+  to: fx:codecs/orders.yaml#doc:orders/key:formats/key:csv/key:fields/key:col_a
+  confidence: Extracted
+- from: fx:codecs/orders.yaml#doc:orders/key:formats/key:csv/key:fields
+  kind: contains
+  to: fx:codecs/orders.yaml#doc:orders/key:formats/key:csv/key:fields/key:col_b
+  confidence: Extracted
+- from: fx:codecs/orders.yaml#doc:orders/key:formats/key:csv/key:fields/key:col_a
+  kind: maps-to
+  to: fx:schemas/orders.xsd#type:Order/field:id
+  confidence: Declared
+- from: fx:codecs/orders.yaml#doc:orders/key:formats/key:csv/key:fields/key:col_b
+  kind: maps-to
+  to: fx:schemas/orders.xsd#type:Order/field:total
+  confidence: Declared
+- from: fx:codecs/orders.yaml#doc:orders/key:formats/key:json
+  kind: contains
+  to: fx:codecs/orders.yaml#doc:orders/key:formats/key:json/key:fields
+  confidence: Extracted
+- from: fx:codecs/orders.yaml#doc:orders/key:formats/key:json/key:fields
+  kind: contains
+  to: fx:codecs/orders.yaml#doc:orders/key:formats/key:json/key:fields/key:amount
+  confidence: Extracted
+- from: fx:codecs/orders.yaml#doc:orders/key:formats/key:json/key:fields
+  kind: contains
+  to: fx:codecs/orders.yaml#doc:orders/key:formats/key:json/key:fields/key:ghost
+  confidence: Extracted
+- from: fx:codecs/orders.yaml#doc:orders/key:formats/key:json/key:fields
+  kind: contains
+  to: fx:codecs/orders.yaml#doc:orders/key:formats/key:json/key:fields/key:orderId
+  confidence: Extracted
+- from: fx:codecs/orders.yaml#doc:orders/key:formats/key:json/key:fields
+  kind: contains
+  to: fx:codecs/orders.yaml#doc:orders/key:formats/key:json/key:fields/key:sku
+  confidence: Extracted
+- from: fx:codecs/orders.yaml#doc:orders/key:formats/key:json/key:fields/key:amount
+  kind: maps-to
+  to: fx:schemas/orders.xsd#type:Order/field:total
+  confidence: Declared
+- from: fx:codecs/orders.yaml#doc:orders/key:formats/key:json/key:fields/key:orderId
+  kind: maps-to
+  to: fx:schemas/orders.xsd#type:Order/field:id
+  confidence: Declared
+- from: fx:codecs/orders.yaml#doc:orders/key:formats/key:json/key:fields/key:sku
+  kind: maps-to
+  to: fx:schemas/orders.xsd#type:Order/field:lines/field:sku
+  confidence: Declared
+- from: fx:codecs/orders.yaml#doc:orders/key:schema
+  kind: contains
+  to: fx:codecs/orders.yaml#doc:orders/key:schema/key:file
+  confidence: Extracted
+- from: fx:codecs/orders.yaml#doc:orders/key:schema
+  kind: contains
+  to: fx:codecs/orders.yaml#doc:orders/key:schema/key:kind
+  confidence: Extracted
+- from: fx:codecs/orders.yaml#doc:orders/key:schema
+  kind: contains
+  to: fx:codecs/orders.yaml#doc:orders/key:schema/key:type
+  confidence: Extracted
+- from: fx:codecs/orders.yaml#doc:orders/key:schema/key:file
+  kind: uses-schema
+  to: fx:schemas/orders.xsd
+  confidence: Declared
+- from: fx:codecs/orders.yaml#doc:orders/key:schema/key:type
+  kind: uses-type
+  to: fx:schemas/orders.xsd#type:Order
+  confidence: Declared
+- from: fx:schemas/orders.xsd#type:Order
+  kind: contains
+  to: fx:schemas/orders.xsd#type:Order/field:id
+  confidence: Extracted
+- from: fx:schemas/orders.xsd#type:Order
+  kind: contains
+  to: fx:schemas/orders.xsd#type:Order/field:lines
+  confidence: Extracted
+- from: fx:schemas/orders.xsd#type:Order
+  kind: contains
+  to: fx:schemas/orders.xsd#type:Order/field:total
+  confidence: Extracted
+- from: fx:schemas/orders.xsd#type:Order
+  kind: declares
+  to: 340a393938638551ba42ff8fc26888af
+  confidence: Extracted
+- from: fx:schemas/orders.xsd#type:Order/field:lines
+  kind: contains
+  to: fx:schemas/orders.xsd#type:Order/field:lines/field:sku
+  confidence: Extracted

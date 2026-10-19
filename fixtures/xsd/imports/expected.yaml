@@ -1,0 +1,49 @@
+mode: exact
+symbols:
+- fx:schemas/common/common.xsd#schema:common
+- fx:schemas/common/common.xsd#type:Id
+- fx:schemas/main.xsd#element:root
+- fx:schemas/main.xsd#schema:main
+- fx:schemas/parts/other.xsd#schema:other
+- fx:schemas/parts/other.xsd#type:Other
+- fx:schemas/parts/other.xsd#type:Other/field:n
+- fx:schemas/parts/part.xsd#schema:part
+- fx:schemas/parts/part.xsd#type:Part
+- fx:schemas/parts/part.xsd#type:Part/field:no
+links:
+- from: fx:schemas/common/common.xsd#type:Id
+  kind: declares
+  to: 31ba5f6498d9e700402fa085616bd2f2
+  confidence: Extracted
+- from: fx:schemas/main.xsd#element:root
+  kind: declares
+  to: abb67b33ce60d75185a3d7a6e41a7aed
+  confidence: Extracted
+- from: fx:schemas/main.xsd#schema:main
+  kind: imports
+  to: fx:schemas/common/common.xsd
+  confidence: Extracted
+- from: fx:schemas/main.xsd#schema:main
+  kind: imports
+  to: fx:schemas/parts/other.xsd
+  confidence: Extracted
+- from: fx:schemas/main.xsd#schema:main
+  kind: imports
+  to: fx:schemas/parts/part.xsd
+  confidence: Extracted
+- from: fx:schemas/parts/other.xsd#type:Other
+  kind: contains
+  to: fx:schemas/parts/other.xsd#type:Other/field:n
+  confidence: Extracted
+- from: fx:schemas/parts/other.xsd#type:Other
+  kind: declares
+  to: c72c7d7c36704d73a92fe206fb2088fe
+  confidence: Extracted
+- from: fx:schemas/parts/part.xsd#type:Part
+  kind: contains
+  to: fx:schemas/parts/part.xsd#type:Part/field:no
+  confidence: Extracted
+- from: fx:schemas/parts/part.xsd#type:Part
+  kind: declares
+  to: 6d6eb379f4249b2d11c8d4a1242f439b
+  confidence: Extracted

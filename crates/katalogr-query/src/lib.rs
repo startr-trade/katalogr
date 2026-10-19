@@ -11,6 +11,7 @@ mod explain;
 mod find;
 mod hints;
 mod map;
+mod mirror;
 mod path;
 mod rank;
 mod refs;
@@ -27,14 +28,15 @@ pub use explain::explain;
 pub use find::find;
 pub use hints::{HintSource, hints};
 pub use map::map;
+pub use mirror::mirror_drift;
 pub use path::path;
 pub use rank::{link_weight, rank, rank_cached_or_live, rank_live};
 pub use refs::refs;
 pub use resolve::resolve;
 pub use result::{
-    CallerHit, CommitHit, DanglingRef, Direction, Envelope, Explain, LinkBrief, MapEntry, Matched,
-    PathStep, RationaleLink, RefHit, ReplaceResult, Resolution, SearchHit, ShowResult, SymbolHit,
-    Truncation, WhyResult,
+    CallerHit, CommitHit, DanglingRef, Direction, Envelope, Explain, FieldDiff, FieldShape,
+    LinkBrief, MapEntry, Matched, MirrorDrift, PathStep, RationaleLink, RefHit, ReplaceResult,
+    Resolution, SearchHit, ShowResult, SymbolHit, Truncation, WhyResult,
 };
 pub use schema::schemas;
 pub use search::search;

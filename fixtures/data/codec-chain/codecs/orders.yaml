@@ -1,0 +1,16 @@
+urn: urn:example:orders
+schema:
+  kind: xsd
+  file: schemas/orders.xsd
+  type: '{urn:example:orders}Order'
+formats:
+  json:
+    fields:
+      orderId: id
+      amount: total
+      sku: lines/sku
+      ghost: missing
+  csv:
+    fields:
+      col_a: id
+      col_b: total

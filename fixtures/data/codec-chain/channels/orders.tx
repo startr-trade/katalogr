@@ -1,0 +1,2 @@
+sym channel orders
+bind orders consumes codec:urn:example:orders
