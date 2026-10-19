@@ -1,6 +1,7 @@
 //! The extractor SPI.
 
-use crate::fragment::Fragment;
+use crate::embed::{EmbeddedInput, EmbeddedText};
+use crate::fragment::{Binding, Fragment};
 use crate::graph::Span;
 use crate::relpath::RelPath;
 use serde::{Deserialize, Serialize};
@@ -40,6 +41,54 @@ pub trait Extractor: Send + Sync {
         let _ = files;
         Ok(Vec::new())
     }
+
+    /// The whole extraction, including literals offered to guests. The default wraps
+    /// `extract_with_errors` with no literals. The engine calls this method.
+    fn extract_full(&self, input: &ExtractInput) -> Result<Extraction, ExtractError> {
+        self.extract_with_errors(input)
+            .map(|(fragment, errors)| Extraction {
+                fragment,
+                errors,
+                embedded: Vec::new(),
+            })
+    }
+    /// Host: true when `extract_full` may return embedded texts. Default false.
+    fn embeds(&self) -> bool {
+        false
+    }
+    /// Guest: `Some(version)` when this extension binds embedded text. The version string changes
+    /// whenever its embedded output can change. Default None.
+    fn embedded_version(&self) -> Option<&'static str> {
+        None
+    }
+    /// Guest: a cheap test of whether `text` is worth `extract_embedded`. Default false.
+    fn accepts_embedded(&self, text: &str) -> bool {
+        let _ = text;
+        false
+    }
+    /// Guest: bindings for one embedded text. Each binding's `symbol` must be `input.owner`.
+    /// It must be pure and deterministic over `input` (including `input.context` and `input.call`),
+    /// and must not panic on any input. Default empty.
+    fn extract_embedded(&self, input: &EmbeddedInput) -> Vec<Binding> {
+        let _ = input;
+        Vec::new()
+    }
+    /// Guest: the part of this extension's repository context (its `build_context` bytes, or empty)
+    /// that `extract_embedded` depends on. Must be deterministic and as small as possible, because
+    /// every host file of the repository is re-extracted when it changes. Default: empty (the guest
+    /// uses no repository context).
+    fn embedded_context(&self, context: &[u8]) -> Vec<u8> {
+        let _ = context;
+        Vec::new()
+    }
+}
+
+/// The full result of extracting one file.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Extraction {
+    pub fragment: Fragment,
+    pub errors: Vec<ExtractError>,
+    pub embedded: Vec<EmbeddedText>,
 }
 
 /// Borrowed input; not serialisable.
