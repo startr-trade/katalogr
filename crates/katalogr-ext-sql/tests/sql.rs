@@ -384,4 +384,118 @@ mod sql {
         assert_eq!(stmts("SELECT 'abc; SELECT 2").len(), 1);
         assert!(split_statements("").is_empty());
     }
+
+    fn tables(text: &str) -> Vec<String> {
+        scan_body(text, "public").tables.into_iter().collect()
+    }
+
+    #[test]
+    fn scanner_unit_cases() {
+        // a plpgsql body: the INTO variable is not a table
+        let body = "BEGIN SELECT x INTO v FROM orders WHERE id = 1; INSERT INTO audit(a) VALUES (1); \
+                    UPDATE customers SET n = 1; INSERT INTO t2 VALUES (1) ON CONFLICT (id) DO UPDATE SET n = 2; \
+                    SELECT 1 FROM t3 FOR UPDATE; END";
+        assert_eq!(
+            tables(body),
+            vec![
+                "public.audit",
+                "public.customers",
+                "public.orders",
+                "public.t2",
+                "public.t3"
+            ]
+        );
+        // a CTE name is excluded, joins and comma lists are followed, NEW and OLD are not tables
+        let q = "WITH x AS (SELECT * FROM a), y AS (SELECT 1) INSERT INTO b SELECT * FROM x, c AS cc, d JOIN y ON 1=1 JOIN app.z ON 1=1";
+        assert_eq!(
+            tables(q),
+            vec!["app.z", "public.a", "public.b", "public.c", "public.d"]
+        );
+        assert_eq!(
+            tables("SELECT NEW.id FROM old, pg_class, information_schema.tables, dual"),
+            Vec::<String>::new()
+        );
+        // routines
+        let r = scan_body(
+            "PERFORM app.recalc(1); CALL purge(); EXECUTE FUNCTION touch();",
+            "public",
+        );
+        assert_eq!(
+            r.routines.into_iter().collect::<Vec<_>>(),
+            vec!["app.recalc", "public.purge", "public.touch"]
+        );
+        // strings and comments are skipped; dollar-quoted bodies are scanned once
+        assert_eq!(
+            tables("SELECT 'FROM nope' FROM real -- FROM no\n"),
+            vec!["public.real"]
+        );
+        assert_eq!(
+            tables("DO $$ BEGIN DELETE FROM gone; END $$"),
+            vec!["public.gone"]
+        );
+        // a table in the table position that is a function call or subquery gives nothing
+        assert_eq!(
+            tables("SELECT * FROM generate_series(1,2), (SELECT 1) s"),
+            Vec::<String>::new()
+        );
+        assert_eq!(
+            tables("TRUNCATE TABLE t9; LOCK TABLE t8"),
+            vec!["public.t8", "public.t9"]
+        );
+        assert_eq!(
+            tables("MERGE INTO tgt USING src ON 1=1"),
+            vec!["public.src", "public.tgt"]
+        );
+        // configured schema keys unqualified names
+        let r = scan_body("SELECT * FROM orders", "app");
+        assert!(r.tables.contains("app.orders"));
+
+        // headers
+        let h =
+            recognise_header("CREATE DEFINER=`x`@`%` PROCEDURE p()\nBEGIN SELECT 1 FROM t; END")
+                .unwrap();
+        assert_eq!(
+            (h.kind, h.ddl, h.name.clone()),
+            (ObjectKind::Procedure, Ddl::Create, vec!["p".to_string()])
+        );
+        let text = "CREATE DEFINER=`x`@`%` PROCEDURE p()\nBEGIN SELECT 1 FROM t; END";
+        assert!(text[h.body_start..].starts_with("BEGIN"));
+        let h = recognise_header("CREATE OR REPLACE FUNCTION app.touch() RETURNS trigger AS $$ BEGIN RETURN NEW; END $$ LANGUAGE plpgsql").unwrap();
+        assert_eq!(
+            (h.kind, h.name),
+            (
+                ObjectKind::Function,
+                vec!["app".to_string(), "touch".to_string()]
+            )
+        );
+        let h = recognise_header("CREATE TRIGGER IF NOT EXISTS tg BEFORE INSERT OR UPDATE ON public.orders FOR EACH ROW EXECUTE FUNCTION touch()").unwrap();
+        assert_eq!(h.kind, ObjectKind::Trigger);
+        assert_eq!(
+            h.on_table,
+            Some(vec!["public".to_string(), "orders".to_string()])
+        );
+        let h = recognise_header("CREATE POLICY own ON orders USING (true)").unwrap();
+        assert_eq!(
+            (h.kind, h.on_table),
+            (ObjectKind::Policy, Some(vec!["orders".to_string()]))
+        );
+        let h = recognise_header("ALTER TABLE ONLY IF EXISTS s.t ADD COLUMN c int").unwrap();
+        assert_eq!(
+            (h.kind, h.ddl, h.name),
+            (
+                ObjectKind::Table,
+                Ddl::Alter,
+                vec!["s".to_string(), "t".to_string()]
+            )
+        );
+        let h = recognise_header("DROP VIEW IF EXISTS v").unwrap();
+        assert_eq!((h.kind, h.ddl), (ObjectKind::View, Ddl::Drop));
+        let h = recognise_header("CREATE MATERIALIZED VIEW mv AS SELECT 1").unwrap();
+        assert_eq!(h.kind, ObjectKind::MaterializedView);
+        let h = recognise_header("DO $$ BEGIN PERFORM f(); END $$").unwrap();
+        assert_eq!(h.kind, ObjectKind::Anonymous);
+        assert!(recognise_header("SELECT 1").is_none());
+        assert!(recognise_header("CREATE INDEX i ON t(a)").is_none());
+        assert!(recognise_header("").is_none());
+    }
 }

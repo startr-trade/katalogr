@@ -6,6 +6,7 @@ pub mod dialect;
 mod lines;
 pub mod migration;
 pub mod names;
+pub mod scan;
 pub mod split;
 
 pub use context::{DialectDir, SchemaChoice, SqlContext, is_test_resource, schema_from_embedded};
@@ -14,6 +15,7 @@ pub use migration::{MigrationName, MigrationScheme, parse_migration_name};
 pub use names::{
     column_key, fold_schema, is_system_relation, normalise_ident, routine_key, table_key,
 };
+pub use scan::{Ddl, Header, ObjectKind, Refs, Tok, TokKind, recognise_header, scan_body, tokens};
 pub use split::{RawStatement, split_statements, split_statements_in};
 
 /// Contract kind of tables and views: any relation code can query.
