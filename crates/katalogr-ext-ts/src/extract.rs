@@ -1,6 +1,6 @@
 //! One file to one [`Fragment`] (FEAT-006 sections 7 and 8). Source files are parsed with oxc;
 //! a syntax error never discards the file: the recovered program is extracted and the errors
-//! are recorded on the artifact in the fact `parse_errors`.
+//! are returned with the fragment by `extract_with_errors` as `ExtractError::Parse` entries.
 
 use crate::context::{self, PACKAGE_JSON, TsContext};
 use crate::items::Builder;
@@ -16,6 +16,13 @@ use std::collections::BTreeMap;
 use std::path::Path;
 
 pub fn extract(input: &ExtractInput) -> Result<Fragment, ExtractError> {
+    extract_with_errors(input).map(|(fragment, _)| fragment)
+}
+
+/// The fragment plus one [`ExtractError::Parse`] (with span) per syntax error in the file.
+pub fn extract_with_errors(
+    input: &ExtractInput,
+) -> Result<(Fragment, Vec<ExtractError>), ExtractError> {
     let text = std::str::from_utf8(input.content).map_err(|e| ExtractError::Parse {
         span: None,
         message: format!("not utf-8: {e}"),
@@ -27,19 +34,11 @@ pub fn extract(input: &ExtractInput) -> Result<Fragment, ExtractError> {
     }
 }
 
-fn error_fact(line: u32, col: u32, message: &str) -> Fact {
-    Fact::Map(BTreeMap::from([
-        ("col".to_string(), Fact::Int(col as i64)),
-        ("line".to_string(), Fact::Int(line as i64)),
-        ("message".to_string(), Fact::Str(message.to_string())),
-    ]))
-}
-
 fn source_fragment(
     input: &ExtractInput,
     text: &str,
     ctx: &TsContext,
-) -> Result<Fragment, ExtractError> {
+) -> Result<(Fragment, Vec<ExtractError>), ExtractError> {
     let source_type = SourceType::from_path(Path::new(input.path.as_str()))
         .map_err(|_| ExtractError::Unsupported(format!("file kind of {}", input.path)))?;
     let allocator = Allocator::default();
@@ -71,24 +70,26 @@ fn source_fragment(
     b.finish_exports();
     b.walk_calls(pending);
 
-    let mut facts = BTreeMap::new();
-    let errors: Vec<Fact> = ret
+    let facts = BTreeMap::new();
+    let errors: Vec<ExtractError> = ret
         .diagnostics
         .errors()
         .map(|d| {
-            let offset = d.labels.first().map_or(0, |l| l.offset());
-            let (line, col) = b.lines.position(offset as usize);
-            error_fact(line, col, &d.message)
+            let (start, end) = d
+                .labels
+                .first()
+                .map_or((0, 0), |l| (l.offset(), l.offset() + l.len()));
+            ExtractError::Parse {
+                span: Some(b.lines.span(start, end)),
+                message: d.message.to_string(),
+            }
         })
         .collect();
-    if !errors.is_empty() {
-        facts.insert("parse_errors".to_string(), Fact::List(errors));
-    }
     let _ = &ret.module_record;
 
     let mut symbols = std::mem::take(&mut b.symbols);
     symbols.sort_by_key(|s| s.name.canonical());
-    Ok(Fragment {
+    let fragment = Fragment {
         provenance: b.provenance.clone(),
         extension: "ts".to_string(),
         artifact: ArtifactNode {
@@ -99,12 +100,13 @@ fn source_fragment(
         links: std::mem::take(&mut b.links),
         refs: std::mem::take(&mut b.refs),
         exports: std::mem::take(&mut b.exports),
-    })
+    };
+    Ok((fragment, errors))
 }
 
 /// `tsconfig.json`, `jsconfig.json`, `package.json`: an artifact; `package.json` also a
 /// `package:<name>` symbol that other files reach through `("ts-package", <name>)`.
-fn config_fragment(input: &ExtractInput, text: &str) -> Fragment {
+fn config_fragment(input: &ExtractInput, text: &str) -> (Fragment, Vec<ExtractError>) {
     let artifact = ArtifactName {
         repo: input.repo.to_string(),
         path: input.path.clone(),
@@ -115,6 +117,7 @@ fn config_fragment(input: &ExtractInput, text: &str) -> Fragment {
     }];
     let mut facts = BTreeMap::new();
     let mut symbols = Vec::new();
+    let mut errors = Vec::new();
     match context::parse_jsonc(input.content) {
         None => {
             let (line, col, msg) =
@@ -122,10 +125,16 @@ fn config_fragment(input: &ExtractInput, text: &str) -> Fragment {
                     Err(e) => (e.line() as u32, e.column() as u32, e.to_string()),
                     Ok(_) => (1, 1, "not valid JSON".to_string()),
                 };
-            facts.insert(
-                "parse_errors".to_string(),
-                Fact::List(vec![error_fact(line.max(1), col.max(1), &msg)]),
-            );
+            let (line, col) = (line.max(1), col.max(1));
+            errors.push(ExtractError::Parse {
+                span: Some(Span {
+                    start_line: line,
+                    start_col: col,
+                    end_line: line,
+                    end_col: col,
+                }),
+                message: msg,
+            });
         }
         Some(doc) => {
             if context::file_name(input.path.as_str()) == PACKAGE_JSON
@@ -155,7 +164,7 @@ fn config_fragment(input: &ExtractInput, text: &str) -> Fragment {
             }
         }
     }
-    Fragment {
+    let fragment = Fragment {
         provenance: Provenance {
             repo: input.repo.to_string(),
             path: input.path.clone(),
@@ -170,5 +179,6 @@ fn config_fragment(input: &ExtractInput, text: &str) -> Fragment {
         links: Vec::new(),
         refs: Vec::new(),
         exports,
-    }
+    };
+    (fragment, errors)
 }

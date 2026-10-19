@@ -1,7 +1,7 @@
 mod fixtures {
     use camino::{Utf8Path, Utf8PathBuf};
     use katalogr_acceptance::privacy;
-    use katalogr_acceptance::{Expected, load_manifest, testfmt};
+    use katalogr_acceptance::{Expected, full_registry, load_manifest};
     use std::collections::BTreeSet;
 
     fn workspace() -> Utf8PathBuf {
@@ -27,7 +27,7 @@ mod fixtures {
         let fx = workspace().join("fixtures");
         let manifest = load_manifest(&fx).unwrap();
         let mut problems = Vec::new();
-        for ext in testfmt::registry().extractors() {
+        for ext in full_registry().extractors() {
             for pattern in ext.patterns() {
                 let cases = manifest
                     .technologies

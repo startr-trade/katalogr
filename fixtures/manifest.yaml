@@ -1,4 +1,23 @@
 technologies:
+  rust:
+    attributes:
+      - rust/attributes
+    call-method:
+      - rust/calls
+    call-path:
+      - rust/calls
+    crate-deps:
+      - rust/workspace-two-crates
+    impl-links:
+      - rust/impls
+    items:
+      - rust/items
+    parse-error:
+      - rust/broken-syntax
+    re-export:
+      - rust/use-and-reexport
+    use-resolution:
+      - rust/use-and-reexport
   test:
     refs-ambiguous:
       - test/refs-ambiguous
@@ -8,3 +27,22 @@ technologies:
       - test/refs-unresolved
     symbols:
       - test/symbols
+  ts:
+    call-binding:
+      - ts/calls
+    call-member:
+      - ts/calls
+    items:
+      - ts/items
+      - ts/file-kinds
+    package-import:
+      - ts/package-imports
+    parse-error:
+      - ts/broken-syntax
+    path-alias:
+      - ts/path-alias
+    relative-import:
+      - ts/relative-imports
+      - ts/reexports
+    require:
+      - ts/require

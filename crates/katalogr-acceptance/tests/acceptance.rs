@@ -1,6 +1,6 @@
 mod acceptance {
     use camino::Utf8Path;
-    use katalogr_acceptance::{load_manifest, run_case, testfmt};
+    use katalogr_acceptance::{full_registry, load_manifest, run_case, testfmt};
 
     #[test]
     fn expected_vs_actual_report() {
@@ -12,7 +12,7 @@ mod acceptance {
             .values()
             .flat_map(|p| p.values().flatten())
         {
-            let report = run_case(&testfmt::registry, &fx.join(case)).unwrap();
+            let report = run_case(&full_registry, &fx.join(case)).unwrap();
             if !report.passed() {
                 failed.push(report.render());
             }

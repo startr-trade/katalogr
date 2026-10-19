@@ -6,7 +6,7 @@ use camino::Utf8PathBuf;
 use katalogr_engine::registry::ExtensionRegistry;
 use katalogr_engine::{Consistency, Engine, NewEvent, QueryOptions, Scope};
 use katalogr_ext_ts::TsExtractor;
-use katalogr_store::{Kindex, ProjectConfig, ProjectName, RepoConfig};
+use katalogr_store::{ErrorRow, Kindex, ProjectConfig, ProjectName, Reader, RepoConfig};
 use serde::Deserialize;
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
@@ -35,6 +35,8 @@ struct Graph {
     links: BTreeSet<ExpectedLink>,
     artifacts: BTreeMap<String, Value>,
     nodes: BTreeMap<String, Value>,
+    /// Index-error rows by repo-relative path (only paths that have rows).
+    errors: BTreeMap<String, Vec<ErrorRow>>,
 }
 
 fn copy_dir(from: &Path, to: &Path) {
@@ -94,7 +96,17 @@ fn index(case: &str) -> Graph {
         scope: Scope::Project,
     };
     let answer = engine
-        .with_consistency(&options, |tx| katalogr_engine::canonical_graph(tx))
+        .with_consistency(&options, |tx| {
+            let graph = katalogr_engine::canonical_graph(tx);
+            let mut errors = BTreeMap::new();
+            for ((repo, path), _) in tx.shard_hashes().unwrap() {
+                let rows = tx.index_errors(&repo, &path).unwrap();
+                if !rows.is_empty() {
+                    errors.insert(path.as_str().to_string(), rows);
+                }
+            }
+            (graph, errors)
+        })
         .unwrap();
     assert!(!answer.stale, "queue drained");
 
@@ -103,8 +115,9 @@ fn index(case: &str) -> Graph {
         links: BTreeSet::new(),
         artifacts: BTreeMap::new(),
         nodes: BTreeMap::new(),
+        errors: answer.value.1,
     };
-    for line in answer.value.lines() {
+    for line in answer.value.0.lines() {
         let v: Value = serde_json::from_str(line).unwrap();
         let s = |k: &str| v[k].as_str().unwrap_or_default().to_string();
         if v["link"] == Value::Bool(true) {
@@ -264,20 +277,17 @@ mod ts {
     #[test]
     fn parse_error_tolerant() {
         let g = check("broken-syntax");
-        let broken = &g.artifacts["fx:broken.ts"];
-        let errors = fact(broken, "parse_errors")["List"].as_array().unwrap();
-        assert!(!errors.is_empty(), "errors recorded with the artifact");
-        let line = errors[0]["Map"]["line"]["Int"].as_i64().unwrap();
-        assert_eq!(line, 3, "error located");
-        assert!(errors[0]["Map"]["message"]["Str"].as_str().is_some());
+        let rows = g.errors.get("broken.ts").expect("index_errors rows");
+        assert!(!rows.is_empty(), "errors recorded for the file");
+        assert!(
+            rows.iter()
+                .all(|r| r.span.is_some() && !r.message.is_empty())
+        );
+        assert_eq!(rows[0].span.unwrap().start_line, 3, "error located");
         // An unrecoverable error (oxc returns an empty program) still records the error.
-        let fatal = fact(&g.artifacts["fx:fatal.ts"], "parse_errors")["List"]
-            .as_array()
-            .unwrap()
-            .len();
-        assert!(fatal >= 1);
+        assert!(!g.errors.get("fatal.ts").expect("fatal rows").is_empty());
         assert!(g.symbols.iter().all(|s| !s.starts_with("fx:fatal.ts#")));
-        assert!(fact(&g.artifacts["fx:ok.ts"], "parse_errors").is_null());
+        assert!(!g.errors.contains_key("ok.ts"));
         assert!(
             g.symbols.contains("fx:ok.ts#fn:fine"),
             "other files keep indexing"
@@ -285,6 +295,11 @@ mod ts {
         assert!(
             g.symbols.contains("fx:broken.ts#fn:before"),
             "recovered part kept"
+        );
+        assert!(
+            g.artifacts
+                .values()
+                .all(|a| a["facts"].get("parse_errors").is_none())
         );
     }
 }
