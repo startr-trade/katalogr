@@ -54,7 +54,10 @@ pub fn search_line(h: &SearchHit) -> String {
     let matched: Vec<String> = h
         .matched
         .iter()
-        .map(|m| format!("{}@{}", m.term, m.field))
+        .map(|m| {
+            let star = if m.prefix { "*" } else { "" };
+            format!("{}{star}@{}", m.term, m.field)
+        })
         .collect();
     format!(
         "{:.6}  {}  [{}]",
