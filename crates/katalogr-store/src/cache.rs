@@ -23,7 +23,7 @@ use std::ops::Bound;
 use std::time::{Duration, Instant};
 
 /// Stored in `meta`; a different number rebuilds the cache from the shards.
-pub const CACHE_SCHEMA: u32 = 3;
+pub const CACHE_SCHEMA: u32 = 4;
 
 // ---------------------------------------------------------------- rows
 
@@ -64,6 +64,9 @@ pub struct LinkEntry {
     pub confidence: Confidence,
     pub span: Option<Span>,
     pub provenance: Provenance,
+    /// For an inferred link: how many targets its reference resolved to. `None` on rows
+    /// written before this field existed, and on links that are not inferred.
+    pub fanout: Option<u32>,
 }
 
 /// One row per `(from, kind, to)`; several origins can support the same row.

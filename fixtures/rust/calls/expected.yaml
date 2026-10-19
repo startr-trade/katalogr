@@ -4,6 +4,7 @@ symbols:
   - "fx:src/lib.rs#fn:local"
   - "fx:src/lib.rs#impl:Counter"
   - "fx:src/lib.rs#impl:Counter/fn:bump"
+  - "fx:src/lib.rs#impl:Counter/fn:map"
   - "fx:src/lib.rs#impl:Counter/fn:new"
   - "fx:src/lib.rs#impl:Counter/fn:run"
   - "fx:src/lib.rs#macro:trace"
@@ -14,6 +15,7 @@ symbols:
 links:
   - { from: "fx:src/lib.rs#fn:local", kind: calls, to: "fx:src/math.rs#fn:square", confidence: extracted }
   - { from: "fx:src/lib.rs#impl:Counter", kind: contains, to: "fx:src/lib.rs#impl:Counter/fn:bump", confidence: extracted }
+  - { from: "fx:src/lib.rs#impl:Counter", kind: contains, to: "fx:src/lib.rs#impl:Counter/fn:map", confidence: extracted }
   - { from: "fx:src/lib.rs#impl:Counter", kind: contains, to: "fx:src/lib.rs#impl:Counter/fn:new", confidence: extracted }
   - { from: "fx:src/lib.rs#impl:Counter", kind: contains, to: "fx:src/lib.rs#impl:Counter/fn:run", confidence: extracted }
   - { from: "fx:src/lib.rs#impl:Counter", kind: implements-for, to: "fx:src/lib.rs#struct:Counter", confidence: extracted }

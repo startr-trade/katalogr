@@ -3,9 +3,8 @@
     "MapEntry": {
       "properties": {
         "in_degree": {
-          "format": "uint64",
-          "minimum": 0,
-          "type": "integer"
+          "format": "double",
+          "type": "number"
         },
         "rank": {
           "description": "PageRank over all links, rounded to 6 decimal places.",

@@ -600,6 +600,25 @@ mod rust {
     }
 
     #[test]
+    fn std_method_names_not_inferred() {
+        let g = index_case("calls");
+        let run = "src/lib.rs#impl:Counter/fn:run";
+        // `[1].iter().map(..)` is a standard-library call, not a call of the workspace `map`.
+        assert!(
+            g.symbols
+                .contains_key(&format!("{REPO}:src/lib.rs#impl:Counter/fn:map"))
+        );
+        assert!(
+            !g.links_of_kind("calls")
+                .iter()
+                .any(|l| l.2.ends_with("impl:Counter/fn:map")),
+            "no link to the workspace `map`"
+        );
+        // Names off the list are still matched by name.
+        assert!(g.has_link(run, "calls", "src/lib.rs#impl:Counter/fn:bump", "inferred"));
+    }
+
+    #[test]
     fn attributes_recorded() {
         let g = index_case("attributes");
         assert_expected("attributes", &g);

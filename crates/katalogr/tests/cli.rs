@@ -294,6 +294,43 @@ mod cli {
     }
 
     #[test]
+    fn map_weights_inferred_links() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (_kx, repo) = setup(tmp.path());
+        std::fs::write(
+            repo.join("lib.tx"),
+            "sym fn single\nsym fn m1\nsym fn m2\nsym fn m3\n\
+             export ns:single single\nexport ns:multi m1\nexport ns:multi m2\n\
+             export ns:multi m3\n",
+        )
+        .unwrap();
+        std::fs::write(
+            repo.join("user.tx"),
+            "sym fn caller\nref caller calls ns:single\nref caller calls ns:multi\n",
+        )
+        .unwrap();
+        ok(&repo, &["index"]);
+        let (code, out, _) = run(&repo, &["map"]);
+        assert_eq!(code, 0, "{out}");
+        let degree = |name: &str| -> String {
+            out.lines()
+                .find(|l| l.contains(&format!("fn:{name} ")))
+                .unwrap_or_else(|| panic!("{name} in {out}"))
+                .split_whitespace()
+                .next()
+                .unwrap()
+                .to_string()
+        };
+        // The extracted reference weighs 1; each of the three inferred targets 1/3.
+        assert_eq!(degree("single"), "1", "{out}");
+        for m in ["m1", "m2", "m3"] {
+            assert_eq!(degree(m), "0.33", "{out}");
+        }
+        // The fully weighted target leads.
+        assert!(out.lines().next().unwrap().contains("fn:single "), "{out}");
+    }
+
+    #[test]
     fn ambiguous_exit_3() {
         let tmp = tempfile::tempdir().unwrap();
         let (_kx, repo) = query_project(tmp.path());

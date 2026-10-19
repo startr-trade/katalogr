@@ -107,7 +107,7 @@ pub struct DanglingRef {
 #[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]
 pub struct MapEntry {
     pub symbol: SymbolHit,
-    pub in_degree: u64,
+    pub in_degree: f64,
     /// PageRank over all links, rounded to 6 decimal places.
     pub rank: f64,
 }
