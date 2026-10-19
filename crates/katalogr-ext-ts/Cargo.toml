@@ -9,6 +9,7 @@ rust-version.workspace = true
 
 [dependencies]
 katalogr-model.workspace = true
+katalogr-ext-wasm.workspace = true
 oxc_allocator.workspace = true
 oxc_ast.workspace = true
 oxc_ast_visit.workspace = true

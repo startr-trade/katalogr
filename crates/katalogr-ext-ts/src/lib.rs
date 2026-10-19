@@ -9,6 +9,7 @@ pub mod extract;
 pub mod items;
 pub mod lines;
 pub mod modules;
+pub(crate) mod wasm;
 
 pub use context::{TsContext, TsProject};
 
@@ -26,11 +27,19 @@ impl Extractor for TsExtractor {
 
     fn handles(&self, p: &RelPath) -> bool {
         let s = p.as_str();
-        SOURCE_EXTENSIONS.iter().any(|e| s.ends_with(e)) || self.is_context_file(p)
+        let name = context::file_name(s);
+        SOURCE_EXTENSIONS.iter().any(|e| s.ends_with(e))
+            || name == context::PACKAGE_JSON
+            || context::is_config_name(name)
     }
 
     fn context_files(&self) -> &'static [&'static str] {
-        &[context::TSCONFIG, context::JSCONFIG, context::PACKAGE_JSON]
+        &[
+            context::TSCONFIG,
+            context::JSCONFIG,
+            context::PACKAGE_JSON,
+            context::CARGO_TOML,
+        ]
     }
 
     /// The exact names plus any `tsconfig*.json` / `jsconfig*.json`, so a config that another
@@ -55,7 +64,15 @@ impl Extractor for TsExtractor {
             "require",
             "annotations",
             "parse-error",
+            "wasm-import",
+            "wasm-glue",
         ]
+    }
+
+    /// Bumped when extraction output changes for unchanged input: `1` adds the wasm package
+    /// bindings (FEAT-016).
+    fn revision_salt(&self) -> &'static str {
+        "ts-extract-1"
     }
 
     /// The [`TsContext`] as compact JSON with sorted keys and vectors.

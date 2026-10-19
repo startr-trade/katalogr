@@ -125,3 +125,43 @@ links:
   kind: provides
   to: contract:wasm_export:demo_wasm%2FCounter
   confidence: Extracted
+- from: fx:web/src/app.ts
+  kind: consumes
+  to: contract:wasm_export:demo_wasm%2FColor
+  confidence: Extracted
+- from: fx:web/src/app.ts
+  kind: consumes
+  to: contract:wasm_export:demo_wasm%2FCounter
+  confidence: Extracted
+- from: fx:web/src/app.ts
+  kind: consumes
+  to: contract:wasm_export:demo_wasm%2Fgreet
+  confidence: Extracted
+- from: fx:web/src/app.ts
+  kind: consumes
+  to: contract:wasm_export:demo_wasm%2FsayHi
+  confidence: Extracted
+- from: fx:web/src/app.ts#fn:main
+  kind: consumes
+  to: contract:wasm_export:demo_wasm%2FColor.Red
+  confidence: Extracted
+- from: fx:web/src/app.ts#fn:main
+  kind: consumes
+  to: contract:wasm_export:demo_wasm%2FCounter
+  confidence: Extracted
+- from: fx:web/src/app.ts#fn:main
+  kind: consumes
+  to: contract:wasm_export:demo_wasm%2FCounter.increment
+  confidence: Inferred
+- from: fx:web/src/app.ts#fn:main
+  kind: consumes
+  to: contract:wasm_export:demo_wasm%2Fgreet
+  confidence: Extracted
+- from: fx:web/src/app.ts#fn:main
+  kind: consumes
+  to: contract:wasm_export:demo_wasm%2FsayHi
+  confidence: Extracted
+- from: fx:web/src/rel.ts#fn:run
+  kind: consumes
+  to: contract:wasm_export:demo_wasm%2Ftick
+  confidence: Extracted

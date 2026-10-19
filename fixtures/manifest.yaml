@@ -93,3 +93,8 @@ technologies:
       - ts/reexports
     require:
       - ts/require
+    wasm-glue:
+      - wasm/glue-committed
+    wasm-import:
+      - wasm/exports-uncommitted
+      - wasm/scripts-out-dir

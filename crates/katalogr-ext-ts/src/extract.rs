@@ -70,6 +70,7 @@ fn source_fragment(
         b.declare_statement(stmt, &mut pending);
     }
     b.finish_exports();
+    b.declare_glue();
     b.walk_calls(pending);
 
     let facts = BTreeMap::new();
@@ -102,7 +103,7 @@ fn source_fragment(
         links: std::mem::take(&mut b.links),
         refs: std::mem::take(&mut b.refs),
         exports: std::mem::take(&mut b.exports),
-        bindings: Vec::new(),
+        bindings: b.take_bindings(),
     };
     Ok((fragment, errors))
 }

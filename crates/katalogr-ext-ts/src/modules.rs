@@ -4,6 +4,7 @@
 
 use crate::context::{TsContext, join_norm, parent_dir};
 use crate::items::{Binding, Builder};
+use crate::wasm::WasmImport;
 use katalogr_model::{Confidence, ExportKey, LinkKind, Span};
 use oxc_ast::ast::{
     BindingPattern, Expression, ImportDeclaration, ImportDeclarationSpecifier, ModuleExportName,
@@ -217,11 +218,19 @@ impl Builder<'_> {
         let modules = self.modules_for(d.source.value.as_str());
         let span = self.lines.span(d.span.start, d.span.end);
         self.import_ref(modules.clone(), span);
+        let wasm = self.wasm_package_of(d.source.value.as_str(), &modules);
         for spec in d.specifiers.iter().flatten() {
             match spec {
                 ImportDeclarationSpecifier::ImportSpecifier(s) => {
                     let imported = module_export_name(&s.imported).to_string();
                     let span = self.lines.span(s.span.start, s.span.end);
+                    if let Some(package) = &wasm {
+                        let import = WasmImport::Named {
+                            package: package.clone(),
+                            export: imported.clone(),
+                        };
+                        self.wasm_import(s.local.name.as_str(), import, span);
+                    }
                     self.import_ref(export_candidates(&modules, &imported), span);
                     self.imports.insert(
                         s.local.name.as_str().to_string(),
@@ -233,6 +242,13 @@ impl Builder<'_> {
                 }
                 ImportDeclarationSpecifier::ImportDefaultSpecifier(s) => {
                     let span = self.lines.span(s.span.start, s.span.end);
+                    if let Some(package) = &wasm {
+                        let import = WasmImport::Named {
+                            package: package.clone(),
+                            export: "default".to_string(),
+                        };
+                        self.wasm_import(s.local.name.as_str(), import, span);
+                    }
                     self.import_ref(export_candidates(&modules, "default"), span);
                     self.imports.insert(
                         s.local.name.as_str().to_string(),
@@ -243,6 +259,13 @@ impl Builder<'_> {
                     );
                 }
                 ImportDeclarationSpecifier::ImportNamespaceSpecifier(s) => {
+                    if let Some(package) = &wasm {
+                        let span = self.lines.span(s.span.start, s.span.end);
+                        let import = WasmImport::Namespace {
+                            package: package.clone(),
+                        };
+                        self.wasm_import(s.local.name.as_str(), import, span);
+                    }
                     self.imports.insert(
                         s.local.name.as_str().to_string(),
                         Binding::Namespace {
@@ -259,6 +282,7 @@ impl Builder<'_> {
     /// the call walk.)
     pub(crate) fn require_bindings(&mut self, v: &VariableDeclaration<'_>) {
         for d in &v.declarations {
+            self.wasm_declarator_imports(d);
             let Some(init) = &d.init else { continue };
             let inner = init.get_inner_expression();
             if let Some(spec) = require_spec(inner) {

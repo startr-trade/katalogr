@@ -17,3 +17,15 @@ links:
   kind: provides
   to: contract:wasm_export:engine_core%2Fstop_engine
   confidence: Extracted
+- from: fx:web/main.ts
+  kind: consumes
+  to: contract:wasm_export:engine_core%2Frun_engine
+  confidence: Extracted
+- from: fx:web/main.ts#fn:start
+  kind: consumes
+  to: contract:wasm_export:engine_core%2Frun_engine
+  confidence: Extracted
+- from: fx:web/main.ts#fn:start
+  kind: consumes
+  to: contract:wasm_export:engine_core%2Fstop_engine
+  confidence: Extracted

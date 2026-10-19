@@ -5,7 +5,10 @@
 use crate::items::{Binding, Builder, Pending};
 use crate::modules::{NS_MEMBER, export_candidates, key};
 use katalogr_model::{Confidence, Id, Link, LinkKind};
-use oxc_ast::ast::{CallExpression, Expression, ImportExpression, NewExpression};
+use oxc_ast::ast::{
+    CallExpression, Expression, ImportExpression, NewExpression, StaticMemberExpression,
+    VariableDeclarator,
+};
 use oxc_ast_visit::{Visit, walk};
 
 struct CallWalk<'b, 's> {
@@ -38,6 +41,18 @@ impl<'a> Visit<'a> for CallWalk<'_, '_> {
         walk::walk_new_expression(self, it);
     }
 
+    /// A static member read (`Color.Red`, `c.value`): a use of a wasm import or instance.
+    fn visit_static_member_expression(&mut self, it: &StaticMemberExpression<'a>) {
+        let span = self.b.span(it.span);
+        self.b.wasm_use_member(self.from, it, span);
+        walk::walk_static_member_expression(self, it);
+    }
+
+    fn visit_variable_declarator(&mut self, it: &VariableDeclarator<'a>) {
+        self.b.wasm_track_instance(it);
+        walk::walk_variable_declarator(self, it);
+    }
+
     fn visit_import_expression(&mut self, it: &ImportExpression<'a>) {
         if let Expression::StringLiteral(s) = it.source.get_inner_expression() {
             let span = self.b.span(it.span);
@@ -61,6 +76,7 @@ fn require_spec_of<'x>(c: &'x CallExpression<'_>) -> Option<&'x str> {
 
 impl Builder<'_> {
     fn call(&mut self, from: Id, callee: &Expression<'_>, span: katalogr_model::Span) {
+        self.wasm_use(from, callee, span);
         match callee.get_inner_expression() {
             Expression::Identifier(id) => {
                 let name = id.name.as_str();
@@ -113,6 +129,7 @@ impl Builder<'_> {
     pub fn walk_calls(&mut self, pending: Vec<Pending<'_, '_>>) {
         let artifact = self.artifact_id;
         for p in pending {
+            self.wasm_reset_instances();
             match p {
                 Pending::Func(id, f) => {
                     let mut w = CallWalk { b: self, from: id };
