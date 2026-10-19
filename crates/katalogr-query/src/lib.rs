@@ -1,28 +1,40 @@
-//! Read-only queries over the graph cache: find, refs, callers, why and map (FEAT-004).
+//! Read-only queries over the graph cache: find, refs, callers, why, map (FEAT-004), search,
+//! path, explain and show (FEAT-025).
 //!
 //! Every function reads from one [`katalogr_store::ReadTx`] snapshot, so a result is internally
 //! consistent. Results are plain serialisable values; [`schemas`] describes their JSON form.
 
 pub mod budget;
 mod callers;
+mod explain;
 mod find;
+mod hints;
 mod map;
+mod path;
+mod rank;
 mod refs;
 mod resolve;
 pub mod result;
 mod schema;
+mod search;
+pub mod show;
 mod why;
 
 pub use callers::callers;
+pub use explain::explain;
 pub use find::find;
+pub use hints::{HintSource, hints};
 pub use map::map;
+pub use path::path;
+pub use rank::{link_weight, rank};
 pub use refs::refs;
 pub use resolve::resolve;
 pub use result::{
-    CallerHit, Envelope, MapEntry, RationaleLink, RefHit, Resolution, SymbolHit, Truncation,
-    WhyResult,
+    CallerHit, Direction, Envelope, Explain, LinkBrief, MapEntry, Matched, PathStep, RationaleLink,
+    RefHit, ReplaceResult, Resolution, SearchHit, ShowResult, SymbolHit, Truncation, WhyResult,
 };
 pub use schema::schemas;
+pub use search::search;
 pub use why::{RATIONALE_KINDS, why};
 
 /// Re-exported so wrappers can bound on it without a direct dependency.

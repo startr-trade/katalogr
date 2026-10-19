@@ -4,6 +4,7 @@ pub mod context;
 pub mod error;
 pub mod export;
 pub(crate) mod failpoint;
+pub mod lexicon;
 pub mod queue;
 pub mod registry;
 pub mod scan;

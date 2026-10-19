@@ -2,6 +2,7 @@
 //! re-resolution to exactly the references that name a changed key (FEAT-001 section 4 and 6).
 
 use crate::error::EngineError;
+use crate::lexicon;
 use katalogr_model::{ArtifactName, Confidence, Export, ExportKey, Fragment, Id, LinkKind, Name};
 use katalogr_store::{
     ArtifactRow, LinkEntry, LinkKey, LinkOrigin, LinkRow, Reader, RefId, Restitch, StoreError,
@@ -65,6 +66,7 @@ impl Stitcher {
         }
         let old_pairs = old.as_ref().map(export_pairs).unwrap_or_default();
         if let Some(o) = &old {
+            lexicon::unindex_artifact(tx, o)?;
             purge(tx, &mut cx, aid, o)?;
         }
 
@@ -111,6 +113,7 @@ impl Stitcher {
             refs: f.refs.clone(),
         };
         tx.put_artifact(aid, &row)?;
+        lexicon::index_artifact(tx, &row)?;
 
         for l in &f.links {
             let key = LinkKey {
@@ -166,6 +169,7 @@ impl Stitcher {
         let Some(old) = tx.artifact(aid)? else {
             return Ok(StitchDelta::default());
         };
+        lexicon::unindex_artifact(tx, &old)?;
         purge(tx, &mut cx, aid, &old)?;
         let mut affected: BTreeSet<RefId> = BTreeSet::new();
         for (k, _) in export_pairs(&old) {

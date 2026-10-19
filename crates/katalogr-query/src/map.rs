@@ -1,24 +1,21 @@
-//! `map`: an outline of the most referenced symbols.
+//! `map`: an outline of the most important symbols.
 
-use crate::resolve::hit;
+use crate::rank::rank;
 use crate::result::MapEntry;
+use crate::search::round6;
+use katalogr_model::Id;
 use katalogr_store::{Reader, StoreError};
 
-/// Every symbol with the number of links arriving at it (all kinds), by that count descending,
-/// then name. One scan of the incoming-link table.
+/// Every symbol with its PageRank and the number of links arriving at it (all kinds), by rank
+/// descending, then name. In-degree comes from one scan of the incoming-link table.
 pub fn map(tx: &impl Reader) -> Result<Vec<MapEntry>, StoreError> {
     let degree = tx.in_degrees()?;
-    let mut out: Vec<MapEntry> = tx
-        .symbols()?
+    Ok(rank(tx)?
         .into_iter()
-        .map(|(id, row)| MapEntry {
-            symbol: hit(&row),
-            in_degree: degree.get(&id).copied().unwrap_or(0),
+        .map(|(symbol, score)| MapEntry {
+            in_degree: degree.get(&Id::of(&symbol.name)).copied().unwrap_or(0),
+            rank: round6(score),
+            symbol,
         })
-        .collect();
-    out.sort_by(|a, b| {
-        (std::cmp::Reverse(a.in_degree), &a.symbol.name)
-            .cmp(&(std::cmp::Reverse(b.in_degree), &b.symbol.name))
-    });
-    Ok(out)
+        .collect())
 }

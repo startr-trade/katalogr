@@ -5,12 +5,16 @@
 mod error;
 mod roots;
 mod setup;
+mod span;
 #[cfg(feature = "test-extractor")]
 mod test_extractor;
 
 pub use error::DistError;
 pub use katalogr_query as query;
-use katalogr_query::{CallerHit, MapEntry, RefHit, Resolution, SymbolHit, WhyResult};
+use katalogr_query::{
+    CallerHit, Explain, MapEntry, PathStep, RefHit, Resolution, SearchHit, SymbolHit, WhyResult,
+};
+pub use katalogr_query::{ReplaceResult, ShowResult};
 pub use setup::{ProjectCreated, kindex_init, project_init};
 
 use camino::{Utf8Path, Utf8PathBuf};
@@ -122,6 +126,8 @@ pub enum Outcome<T> {
     Ambiguous(Vec<SymbolHit>),
     /// Nothing matched; the message says what was looked for.
     NoMatch(String),
+    /// The file on disk is not the file that was indexed; the message says what to do.
+    StaleFile(String),
 }
 
 /// A query answer with what the read saw.
@@ -140,7 +146,7 @@ fn found_or_none(items: Vec<SymbolHit>, text: &str) -> Outcome<Vec<SymbolHit>> {
 }
 
 /// Resolve `text` to one symbol and run `f` on it; several or no matches end the query.
-fn on_target<T>(
+pub(crate) fn on_target<T>(
     tx: &ReadTx,
     text: &str,
     f: impl FnOnce(&SymbolHit) -> Result<T, StoreError>,
@@ -155,6 +161,15 @@ fn on_target<T>(
 fn from_resolution<T>(r: Resolution<T>, what: &str) -> Outcome<T> {
     match r {
         Resolution::One(v) => Outcome::Found(v),
+        Resolution::Ambiguous(c) => Outcome::Ambiguous(c),
+        Resolution::None => Outcome::NoMatch(format!("no symbol matches {what:?}")),
+    }
+}
+
+/// The outcome when `r` did not name exactly one symbol.
+fn unresolved<T>(r: Resolution<SymbolHit>, what: &str) -> Outcome<T> {
+    match r {
+        Resolution::One(_) => unreachable!("callers handle the single match"),
         Resolution::Ambiguous(c) => Outcome::Ambiguous(c),
         Resolution::None => Outcome::NoMatch(format!("no symbol matches {what:?}")),
     }
@@ -313,7 +328,7 @@ impl Katalogr {
     }
 
     /// Run `f` on one snapshot at the requested consistency (default: wait).
-    fn query<T>(
+    pub(crate) fn query<T>(
         &self,
         opts: &Options,
         f: impl FnOnce(&ReadTx) -> Result<Outcome<T>, StoreError>,
@@ -385,9 +400,71 @@ impl Katalogr {
         })
     }
 
-    /// All symbols by how often they are referenced.
+    /// All symbols by PageRank.
     pub fn map(&self, opts: &Options) -> Result<Reply<Vec<MapEntry>>, DistError> {
         self.query(opts, |tx| Ok(Outcome::Found(katalogr_query::map(tx)?)))
+    }
+
+    /// The best `limit` symbols for the words in `terms` (BM25 over names, docs, sections and
+    /// contract keys). No word is a usage error; no hit is no match.
+    pub fn search(
+        &self,
+        terms: &str,
+        limit: usize,
+        opts: &Options,
+    ) -> Result<Reply<Vec<SearchHit>>, DistError> {
+        if katalogr_model::tokenize(terms).is_empty() {
+            return Err(DistError::usage(format!(
+                "{terms:?}: no searchable word (words need two letters, or a digit)"
+            )));
+        }
+        self.query(opts, |tx| {
+            let hits = katalogr_query::search(tx, terms, limit)?;
+            Ok(if hits.is_empty() {
+                Outcome::NoMatch(format!("nothing matches {terms:?}"))
+            } else {
+                Outcome::Found(hits)
+            })
+        })
+    }
+
+    /// The shortest chain of links between two symbols, in either direction.
+    pub fn path(
+        &self,
+        a: &str,
+        b: &str,
+        max_len: u32,
+        opts: &Options,
+    ) -> Result<Reply<Vec<PathStep>>, DistError> {
+        self.query(opts, |tx| {
+            let first = match katalogr_query::resolve(tx, a)? {
+                Resolution::One(h) => h,
+                other => return Ok(unresolved(other, a)),
+            };
+            let second = match katalogr_query::resolve(tx, b)? {
+                Resolution::One(h) => h,
+                other => return Ok(unresolved(other, b)),
+            };
+            Ok(match katalogr_query::path(tx, &first, &second, max_len)? {
+                Some(steps) => Outcome::Found(steps),
+                None => Outcome::NoMatch(format!(
+                    "no path from {} to {} within {max_len} steps",
+                    first.name, second.name
+                )),
+            })
+        })
+    }
+
+    /// One symbol, compactly: signature, doc, its links and rationale.
+    pub fn explain(
+        &self,
+        text: &str,
+        per_side: usize,
+        opts: &Options,
+    ) -> Result<Reply<Explain>, DistError> {
+        self.query(opts, |tx| {
+            on_target(tx, text, |t| katalogr_query::explain(tx, t, per_side))
+        })
     }
 
     fn read(
@@ -417,7 +494,7 @@ impl Katalogr {
     }
 }
 
-fn unknown_root(repo: &str) -> DistError {
+pub(crate) fn unknown_root(repo: &str) -> DistError {
     DistError::usage(format!(
         "{repo}: root unknown on this machine: run `katalogr project add-root {repo} <path>`"
     ))

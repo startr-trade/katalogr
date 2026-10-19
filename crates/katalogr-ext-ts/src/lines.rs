@@ -16,6 +16,14 @@ impl<'a> Lines<'a> {
         Lines { text, starts }
     }
 
+    /// Byte offset of the start of the 1-based `line` (the end of the text when past the last).
+    pub fn line_start(&self, line: u32) -> usize {
+        self.starts
+            .get((line as usize).saturating_sub(1))
+            .copied()
+            .unwrap_or(self.text.len())
+    }
+
     /// 1-based line and column of a byte offset (clamped to the text).
     pub fn position(&self, offset: usize) -> (u32, u32) {
         let mut offset = offset.min(self.text.len());

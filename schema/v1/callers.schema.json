@@ -116,6 +116,13 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "description": "What `--json` prints.",
   "properties": {
+    "next": {
+      "description": "Suggested follow-up commands, at most three.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
     "pending": {
       "format": "uint64",
       "minimum": 0,

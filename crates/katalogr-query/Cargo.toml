@@ -1,6 +1,6 @@
 [package]
 name = "katalogr-query"
-description = "Read-only graph queries: find, refs, callers, why and map, with versioned result schemas."
+description = "Read-only graph queries: find, search, refs, callers, why, map, path, explain and show, with versioned result schemas."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
