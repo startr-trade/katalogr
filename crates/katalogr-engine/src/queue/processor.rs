@@ -12,7 +12,7 @@ use camino::{Utf8Path, Utf8PathBuf};
 use fs4::FileExt;
 use katalogr_model::{ArtifactName, ExtractError, ExtractInput, Fragment, RelPath};
 use katalogr_store::blob::git_blob_id;
-use katalogr_store::{ErrorRow, JournalEntry, PendingKey, ReadTx, Reader};
+use katalogr_store::{ErrorRow, JournalEntry, PendingKey, RANK_CONTEXT, ReadTx, Reader, pagerank};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeSet;
 use std::fs::File;
@@ -174,7 +174,27 @@ impl<'a> Processor<'a> {
     ) -> Result<Seq, EngineError> {
         let wm = self.process_to_commit(scope, budget, deadline)?;
         self.recover()?;
+        self.refresh_rank()?;
         Ok(wm)
+    }
+
+    /// FEAT-057. When the stored rank does not reflect the current watermark (a publish changed
+    /// the rank's inputs, which drops it), compute it and store it with that watermark, in one
+    /// transaction while this processor holds its lock. A query that arrives meanwhile sees a
+    /// rank whose watermark is behind and computes live.
+    pub fn refresh_rank(&mut self) -> Result<(), EngineError> {
+        let cache = self.engine.cache();
+        if cache.read()?.rank_is_current(RANK_CONTEXT)? {
+            return Ok(());
+        }
+        let mut tx = cache.write()?;
+        let symbols = tx.symbols()?;
+        let scores = pagerank(&tx, &symbols)?;
+        let ranked: Vec<_> = symbols.iter().map(|(id, _)| *id).zip(scores).collect();
+        let wm = tx.watermark(RANK_CONTEXT)?;
+        tx.store_rank(&ranked, wm)?;
+        tx.commit()?;
+        Ok(())
     }
 
     /// The publish up to and including the commit; the renames and the journal clear are left
@@ -232,6 +252,7 @@ impl<'a> Processor<'a> {
         }
 
         let mut tx = engine.cache().write()?;
+        let rank_was_current = tx.rank_is_current(RANK_CONTEXT)?;
         let mut touched: BTreeSet<String> = BTreeSet::new();
         let mut hash_iter = hashes.into_iter();
         for p in planned {
@@ -291,6 +312,11 @@ impl<'a> Processor<'a> {
         }
         tx.set_publish_journal(&journal)?;
         let wm = tx.watermark(Context::WORKTREE)?;
+        // A publish that changed nothing the rank depends on keeps the stored rank, which then
+        // reflects the new watermark; one that did drops it (in `commit`) for `refresh_rank`.
+        if !tx.rank_inputs_changed()? && rank_was_current {
+            tx.set_rank_watermark(wm)?;
+        }
         tx.commit()?;
         fail!("after_publish_commit");
         Ok(Seq(wm))
