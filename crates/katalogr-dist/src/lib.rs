@@ -4,6 +4,7 @@
 
 mod claude;
 mod error;
+pub mod hooks;
 mod roots;
 mod setup;
 mod span;

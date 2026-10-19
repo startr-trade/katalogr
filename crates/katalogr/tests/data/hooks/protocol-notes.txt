@@ -1,0 +1,6 @@
+Confirmed 2026-10-19 against https://code.claude.com/docs/en/hooks (and /hooks-guide):
+- PreToolUse: exit 0 + stdout JSON hookSpecificOutput.permissionDecision "deny" blocks; permissionDecisionReason is shown to Claude. Exit 0 with no output continues the normal permission flow.
+- PostToolUse: hookSpecificOutput.additionalContext is delivered to Claude as a system reminder.
+- stdin: session_id, cwd, hook_event_name, tool_name, tool_input, tool_use_id. Read: file_path (absolute), offset, limit. Grep: pattern, path, glob, output_mode. Glob: pattern, path.
+- SessionStart: plain stdout or hookSpecificOutput.additionalContext is added as context.
+- settings.json: hooks.<Event>[{matcher, hooks:[{type:"command", command, timeout(seconds)}]}]; matcher "Grep|Glob" is read as a regex; omitted matcher matches all.
