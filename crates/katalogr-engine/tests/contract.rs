@@ -198,4 +198,134 @@ mod contract {
         assert_eq!(moved.providers, 1);
         assert_eq!(snap.contracts().unwrap().len(), 1);
     }
+
+    const ROUTES: &str = "sym fn register\nboundref register provides res:x item:show\n";
+    const HANDLERS: &str = "sym fn show\nexport item:show show\n";
+
+    fn links_into(e: &Env, c: Id) -> Vec<(LinkKey, Vec<katalogr_store::LinkEntry>)> {
+        let snap = e.cache.read().unwrap();
+        let mut keys = snap.links_in(c).unwrap();
+        keys.sort();
+        keys.into_iter()
+            .map(|k| {
+                let row = snap.link(&k).unwrap().unwrap();
+                (k, row.entries)
+            })
+            .collect()
+    }
+
+    #[test]
+    fn bound_ref_held_by_target() {
+        let e = env();
+        e.put("r", "routes.tx", ROUTES);
+        e.put("r", "handlers.tx", HANDLERS);
+        let c = contract_id("res", "x");
+        let show = sym("r", "handlers.tx", "show");
+        let got = links_into(&e, c);
+        assert_eq!(got.len(), 1, "{got:?}");
+        assert_eq!(got[0].0, link(show, "provides", c));
+        let entry = &got[0].1[0];
+        assert_eq!(entry.confidence, katalogr_model::Confidence::Extracted);
+        assert!(matches!(
+            entry.origin,
+            katalogr_store::LinkOrigin::Bound { index: 0, .. }
+        ));
+        let snap = e.cache.read().unwrap();
+        let row = snap.contract(c).unwrap().unwrap();
+        assert_eq!((row.providers, row.consumers, row.declarers), (1, 0, 0));
+        assert!(snap.unresolved_refs(None).unwrap().is_empty());
+    }
+
+    #[test]
+    fn bound_ref_follows_target_changes() {
+        let e = env();
+        e.put("r", "routes.tx", ROUTES);
+        e.put("r", "handlers.tx", HANDLERS);
+        let c = contract_id("res", "x");
+        let register = sym("r", "routes.tx", "register");
+        let show = sym("r", "handlers.tx", "show");
+
+        // The handler is renamed: its export key goes, so the registering symbol holds the link.
+        e.put(
+            "r",
+            "handlers.tx",
+            "sym fn display\nexport item:display display\n",
+        );
+        let got = links_into(&e, c);
+        assert_eq!(got.len(), 1, "{got:?}");
+        assert_eq!(got[0].0, link(register, "provides", c));
+        assert_eq!(got[0].1[0].confidence, katalogr_model::Confidence::Inferred);
+        {
+            let snap = e.cache.read().unwrap();
+            assert_eq!(snap.unresolved_refs(None).unwrap().len(), 1);
+            let row = snap.contract(c).unwrap().unwrap();
+            assert_eq!(row.providers, 1, "counted once throughout");
+        }
+
+        // Restoring it moves the link back.
+        e.put("r", "handlers.tx", HANDLERS);
+        let got = links_into(&e, c);
+        assert_eq!(got.len(), 1, "{got:?}");
+        assert_eq!(got[0].0, link(show, "provides", c));
+        assert_eq!(
+            got[0].1[0].confidence,
+            katalogr_model::Confidence::Extracted
+        );
+        let snap = e.cache.read().unwrap();
+        assert!(snap.unresolved_refs(None).unwrap().is_empty());
+        assert_eq!(snap.contract(c).unwrap().unwrap().providers, 1);
+        drop(snap);
+
+        // Removing the handler's file falls back as well.
+        e.remove("r", "handlers.tx");
+        let got = links_into(&e, c);
+        assert_eq!(got.len(), 1, "{got:?}");
+        assert_eq!(got[0].0, link(register, "provides", c));
+    }
+
+    #[test]
+    fn bound_ref_survives_target_reindex() {
+        let e = env();
+        e.put("r", "routes.tx", ROUTES);
+        e.put(
+            "r",
+            "handlers.tx",
+            "sym fn show\nexport item:show show\n# v1\n",
+        );
+        let c = contract_id("res", "x");
+        let before = links_into(&e, c);
+        e.put(
+            "r",
+            "handlers.tx",
+            "sym fn show\nexport item:show show\n# body changed\n# more\n",
+        );
+        let after = links_into(&e, c);
+        assert_eq!(before, after);
+        assert_eq!(after.len(), 1);
+        assert_eq!(
+            after[0].0,
+            link(sym("r", "handlers.tx", "show"), "provides", c)
+        );
+        let snap = e.cache.read().unwrap();
+        assert_eq!(snap.contract(c).unwrap().unwrap().providers, 1);
+    }
+
+    #[test]
+    fn bound_ref_withdrawn_with_owner() {
+        let e = env();
+        e.put("r", "routes.tx", ROUTES);
+        e.put("r", "handlers.tx", HANDLERS);
+        let c = contract_id("res", "x");
+        assert_eq!(links_into(&e, c).len(), 1);
+        e.remove("r", "routes.tx");
+        let snap = e.cache.read().unwrap();
+        assert!(snap.contract(c).unwrap().is_none());
+        assert!(snap.links_in(c).unwrap().is_empty());
+        assert!(
+            snap.links_out(sym("r", "handlers.tx", "show"), None)
+                .unwrap()
+                .is_empty()
+        );
+        assert!(snap.unresolved_refs(None).unwrap().is_empty());
+    }
 }

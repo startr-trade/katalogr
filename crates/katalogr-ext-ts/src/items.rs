@@ -226,6 +226,7 @@ impl<'s> Builder<'s> {
                         candidates: keys,
                         confidence: Confidence::Extracted,
                         origin: None,
+                        binds: None,
                     });
                 }
             }

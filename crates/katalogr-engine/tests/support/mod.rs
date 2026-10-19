@@ -368,7 +368,30 @@ impl TestExtractor {
                     candidates: vec![key(target)?],
                     confidence: Confidence::Extracted,
                     origin: None,
+                    binds: None,
                 }),
+                // A reference holding a contract binding (ADR-0022).
+                ["boundref", from, role, contract, cand] => {
+                    let role = parse_role(role).map_err(|m| bad(Some(span), m))?;
+                    let (ckind, ckey) = contract
+                        .split_once(':')
+                        .ok_or_else(|| bad(Some(span), format!("bad contract {contract:?}")))?;
+                    refs.push(OutRef {
+                        from: find(from)?,
+                        kind: LinkKind(role.as_str().to_string()),
+                        span: Some(span),
+                        candidates: vec![key(cand)?],
+                        confidence: Confidence::Extracted,
+                        origin: None,
+                        binds: Some(katalogr_model::RefBinding {
+                            contract: ContractName {
+                                kind: ckind.to_string(),
+                                key: ckey.to_string(),
+                            },
+                            role,
+                        }),
+                    });
+                }
                 ["export", k, sym] => exports.push(Export {
                     key: key(k)?,
                     target: find(sym)?,
@@ -438,6 +461,15 @@ impl TestExtractor {
             },
             embedded,
         ))
+    }
+}
+
+fn parse_role(role: &str) -> Result<ContractRole, String> {
+    match role {
+        "provides" => Ok(ContractRole::Provides),
+        "consumes" => Ok(ContractRole::Consumes),
+        "declares" => Ok(ContractRole::Declares),
+        other => Err(format!("bad role {other:?}")),
     }
 }
 

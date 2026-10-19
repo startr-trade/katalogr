@@ -288,6 +288,7 @@ pub fn apply_rule(profile: &str, rule: &Rule, f: &mut Fragment, scope: Option<&S
                 candidates,
                 confidence: Confidence::Declared,
                 origin: Some(origin.clone()),
+                binds: None,
             });
         }
         if let Some(add) = add {

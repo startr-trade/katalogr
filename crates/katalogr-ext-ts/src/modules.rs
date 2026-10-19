@@ -210,6 +210,7 @@ impl Builder<'_> {
             candidates,
             confidence,
             origin: None,
+            binds: None,
         });
     }
 

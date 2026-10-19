@@ -97,6 +97,7 @@ mod kindex {
                 candidates: vec![key("y"), key("z")],
                 confidence: Confidence::Extracted,
                 origin: None,
+                binds: None,
             },
             OutRef {
                 from: ids[0],
@@ -105,6 +106,7 @@ mod kindex {
                 candidates: vec![key("x")],
                 confidence: Confidence::Extracted,
                 origin: None,
+                binds: None,
             },
         ];
         let exports = vec![

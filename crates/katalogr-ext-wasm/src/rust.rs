@@ -304,6 +304,7 @@ fn extern_item(
         candidates,
         confidence,
         origin: None,
+        binds: None,
     };
     let export = |file: String| ExportKey {
         namespace: NS_EXPORT.to_string(),

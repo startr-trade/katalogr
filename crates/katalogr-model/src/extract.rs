@@ -6,6 +6,17 @@ use crate::graph::Span;
 use crate::relpath::RelPath;
 use serde::{Deserialize, Serialize};
 
+/// Turns a raw contract key into its canonical form. Implemented by an extension and named by
+/// profiles (`bind.normalise`, ADR-0020). Pure and deterministic.
+pub trait KeyNormaliser: Send + Sync {
+    /// Stable id, `[a-z0-9_]+`, unique across the registry.
+    fn id(&self) -> &'static str;
+    /// Raised whenever the output for some input changes; mixed into the profile hash.
+    fn version(&self) -> u32;
+    /// `None` when `raw` cannot be keyed; the binding is then not emitted.
+    fn normalise(&self, raw: &str) -> Option<String>;
+}
+
 pub trait Extractor: Send + Sync {
     /// Stable extension id.
     fn id(&self) -> &'static str;
@@ -87,6 +98,10 @@ pub trait Extractor: Send + Sync {
     fn embedded_context(&self, context: &[u8]) -> Vec<u8> {
         let _ = context;
         Vec::new()
+    }
+    /// Key normalisers this extension provides (ADR-0020). Default: none.
+    fn key_normalisers(&self) -> &'static [&'static dyn KeyNormaliser] {
+        &[]
     }
 }
 

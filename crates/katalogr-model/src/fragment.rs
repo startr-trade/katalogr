@@ -34,6 +34,19 @@ pub struct OutRef {
     /// (`profile:<name>#<rule id>`). Absent in shards written before profiles existed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub origin: Option<String>,
+    /// When set, this reference holds a contract binding: the stitcher links each resolved
+    /// target `--role--> contract`, or `from` (inferred) while it resolves to nothing (ADR-0022).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub binds: Option<RefBinding>,
+}
+
+/// The contract binding a reference holds on whatever it resolves to (ADR-0022). The
+/// reference's `kind` must equal `role.as_str()`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RefBinding {
+    pub contract: ContractName,
+    pub role: ContractRole,
 }
 
 /// How a symbol relates to a contract node.

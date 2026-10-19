@@ -4,7 +4,8 @@
 use crate::error::EngineError;
 use crate::lexicon;
 use katalogr_model::{
-    ArtifactName, Confidence, Export, ExportKey, Fragment, Id, LinkKind, Name, Provenance,
+    ArtifactName, Confidence, ContractRole, Export, ExportKey, Fragment, Id, LinkKind, Name,
+    OutRef, Provenance,
 };
 use katalogr_store::{
     ArtifactRow, BindingRow, ContractRow, LinkEntry, LinkKey, LinkOrigin, LinkRow, Reader, RefId,
@@ -257,10 +258,34 @@ fn distinct_candidates(row: &ArtifactRow, index: usize) -> BTreeSet<&ExportKey> 
 
 /// Steps 1 and 2: drop everything the old version of the artifact contributed.
 fn purge(tx: &mut WriteTx, cx: &mut Cx, aid: Id, old: &ArtifactRow) -> Result<(), EngineError> {
+    // Links this artifact's bound references wrote leave first, wherever they start (ADR-0022).
+    for (index, r) in old.refs.iter().enumerate() {
+        if let Some(b) = &r.binds {
+            drop_bound(
+                tx,
+                cx,
+                b.contract.id(),
+                b.role,
+                LinkOrigin::Bound {
+                    artifact: aid,
+                    index: index as u32,
+                },
+            )?;
+        }
+    }
+    // Then everything else the artifact's nodes start, except another artifact's bound links
+    // held by this artifact's symbols: re-resolution moves those when the symbol goes.
     for from in std::iter::once(aid).chain(old.symbols.iter().copied()) {
-        for (key, _) in tx.links_out(from, None)? {
-            tx.remove_link(&key)?;
-            cx.removed.insert(key);
+        for (key, mut row) in tx.links_out(from, None)? {
+            row.entries.retain(
+                |e| matches!(e.origin, LinkOrigin::Bound { artifact, .. } if artifact != aid),
+            );
+            if row.entries.is_empty() {
+                tx.remove_link(&key)?;
+                cx.removed.insert(key);
+            } else {
+                tx.put_link(&key, &row)?;
+            }
         }
     }
     for (r, _) in tx.unresolved_refs(Some(aid))? {
@@ -329,6 +354,35 @@ fn add_bindings(
     bindings.dedup_by_key(|b| (b.contract.id(), b.role, b.symbol));
     let provenance: &Provenance = &row.provenance;
     let mut rows = Vec::with_capacity(bindings.len());
+    // A bound reference counts like a binding of the registering symbol; its links are written
+    // when it resolves. Duplicates of a plain binding or of another reference count once.
+    let mut held: BTreeSet<(Id, ContractRole, Id)> = bindings
+        .iter()
+        .map(|b| (b.contract.id(), b.role, b.symbol))
+        .collect();
+    for r in &f.refs {
+        let Some(b) = &r.binds else { continue };
+        if !(r.from == aid || row.symbols.binary_search(&r.from).is_ok())
+            || b.contract.validate().is_err()
+            || !held.insert((b.contract.id(), b.role, r.from))
+        {
+            continue;
+        }
+        let cid = b.contract.id();
+        let mut c = tx.contract(cid)?.unwrap_or_else(|| ContractRow {
+            name: b.contract.clone(),
+            providers: 0,
+            consumers: 0,
+            declarers: 0,
+        });
+        c.adjust(b.role, 1);
+        tx.put_contract(cid, &c)?;
+        rows.push(BindingRow {
+            symbol: r.from,
+            contract: cid,
+            role: b.role,
+        });
+    }
     for b in bindings {
         let cid = b.contract.id();
         let mut c = tx.contract(cid)?.unwrap_or_else(|| ContractRow {
@@ -456,6 +510,9 @@ fn resolve(tx: &mut WriteTx, cx: &mut Cx, rid: RefId) -> Result<(), EngineError>
     };
     let provenance = row.provenance.clone();
 
+    if let Some(b) = &r.binds {
+        return resolve_bound(tx, cx, rid, &r, b.contract.id(), b.role, provenance);
+    }
     drop_origin(tx, cx, r.from, &r.kind, LinkOrigin::Ref(rid.index))?;
     tx.remove_unresolved(rid)?;
 
@@ -490,6 +547,96 @@ fn resolve(tx: &mut WriteTx, cx: &mut Cx, rid: RefId) -> Result<(), EngineError>
                 span: r.span,
                 provenance: provenance.clone(),
                 fanout: (confidence == Confidence::Inferred).then_some(fanout),
+                produced_by: r.origin.clone(),
+            },
+        )?;
+    }
+    cx.resolved.insert(rid);
+    Ok(())
+}
+
+/// Remove the links of `role` into `contract` that carry `origin`; a row left empty is removed.
+fn drop_bound(
+    tx: &mut WriteTx,
+    cx: &mut Cx,
+    contract: Id,
+    role: ContractRole,
+    origin: LinkOrigin,
+) -> Result<(), EngineError> {
+    let kind = LinkKind(role.as_str().to_string());
+    for key in tx.links_in(contract)? {
+        if key.kind != kind {
+            continue;
+        }
+        let Some(mut row) = tx.link(&key)? else {
+            continue;
+        };
+        let before = row.entries.len();
+        row.entries.retain(|e| e.origin != origin);
+        if row.entries.len() == before {
+            continue;
+        }
+        if row.entries.is_empty() {
+            tx.remove_link(&key)?;
+            cx.removed.insert(key);
+        } else {
+            tx.put_link(&key, &row)?;
+        }
+    }
+    Ok(())
+}
+
+/// Resolution of a reference that holds a contract binding (ADR-0022): every resolved target
+/// holds `target --role--> contract`; while nothing resolves, the reference's `from` symbol holds
+/// it, inferred, and the reference is listed as unresolved.
+fn resolve_bound(
+    tx: &mut WriteTx,
+    cx: &mut Cx,
+    rid: RefId,
+    r: &OutRef,
+    contract: Id,
+    role: ContractRole,
+    provenance: Provenance,
+) -> Result<(), EngineError> {
+    let origin = LinkOrigin::Bound {
+        artifact: rid.artifact,
+        index: rid.index,
+    };
+    drop_bound(tx, cx, contract, role, origin)?;
+    tx.remove_unresolved(rid)?;
+    let mut targets = Vec::new();
+    for cand in &r.candidates {
+        targets = tx.exports(cand)?;
+        if !targets.is_empty() {
+            break;
+        }
+    }
+    let kind = LinkKind(role.as_str().to_string());
+    let fallback = targets.is_empty();
+    let (holders, confidence) = if fallback {
+        tx.put_unresolved(rid, r)?;
+        (vec![r.from], Confidence::Inferred)
+    } else if targets.len() == 1 {
+        (targets, r.confidence)
+    } else {
+        (targets, Confidence::Inferred)
+    };
+    let fanout = u32::try_from(holders.len()).unwrap_or(u32::MAX);
+    for from in holders {
+        add_entry(
+            tx,
+            cx,
+            LinkKey {
+                from,
+                kind: kind.clone(),
+                to: contract,
+            },
+            LinkEntry {
+                origin,
+                confidence,
+                span: r.span,
+                provenance: provenance.clone(),
+                fanout: (!fallback && confidence == Confidence::Inferred).then_some(fanout),
                 produced_by: r.origin.clone(),
             },
         )?;

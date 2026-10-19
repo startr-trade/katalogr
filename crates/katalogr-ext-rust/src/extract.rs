@@ -282,6 +282,7 @@ impl Builder<'_> {
             candidates: seen,
             confidence,
             origin: None,
+            binds: None,
         });
     }
 

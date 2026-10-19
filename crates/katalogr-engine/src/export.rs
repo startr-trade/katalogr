@@ -100,6 +100,9 @@ fn render(snap: &impl Reader) -> Result<String, katalogr_store::StoreError> {
                 let origin = match e.origin {
                     LinkOrigin::Intra => json!("intra"),
                     LinkOrigin::Ref(n) => json!(format!("ref:{n}")),
+                    LinkOrigin::Bound { artifact, index } => {
+                        json!(format!("bound:{}:{index}", label(artifact)))
+                    }
                 };
                 let mut obj = json!({
                     "confidence": e.confidence,
