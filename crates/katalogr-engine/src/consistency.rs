@@ -190,6 +190,7 @@ impl Engine {
             && let Some(mut p) = Processor::try_acquire(self)?
         {
             // A changed profile queues the files it can affect before pending is counted.
+            p.refresh_embed_signature()?;
             p.refresh_profiles()?;
         }
         loop {

@@ -5,12 +5,14 @@ use camino::{Utf8Path, Utf8PathBuf};
 use katalogr_engine::registry::ExtensionRegistry;
 use katalogr_engine::{Consistency, Engine, EventKind, NewEvent, QueryOptions, Scope};
 use katalogr_model::{
-    ArtifactName, Binding, Confidence, ContractName, ContractRole, Export, ExportKey, ExtractError,
-    ExtractInput, Extractor, Fragment, Id, Link, LinkKind, Name, OutRef, Provenance, RelPath,
-    Segment, Span, SymbolName, SymbolNode,
+    ArtifactName, Binding, CallContext, Confidence, ContractName, ContractRole, EmbeddedInput,
+    EmbeddedText, Export, ExportKey, ExtractError, ExtractInput, Extraction, Extractor, Fragment,
+    Id, Link, LinkKind, Name, OutRef, Provenance, RelPath, Segment, Span, SymbolName, SymbolNode,
 };
 use katalogr_store::{Kindex, ProjectConfig, ProjectName, RepoConfig};
 use std::collections::BTreeMap;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 pub struct TestExtractor;
@@ -25,6 +27,110 @@ impl Extractor for TestExtractor {
     }
 
     fn extract(&self, input: &ExtractInput) -> Result<Fragment, ExtractError> {
+        self.extract_texts(input).map(|(f, _)| f)
+    }
+
+    fn embeds(&self) -> bool {
+        true
+    }
+
+    fn extract_full(&self, input: &ExtractInput) -> Result<Extraction, ExtractError> {
+        self.extract_texts(input)
+            .map(|(fragment, embedded)| Extraction {
+                fragment,
+                errors: Vec::new(),
+                embedded,
+            })
+    }
+}
+
+/// The test extractor with a shared counter of `extract_full` calls.
+pub struct CountedExtractor(pub Arc<AtomicUsize>);
+
+impl Extractor for CountedExtractor {
+    fn id(&self) -> &'static str {
+        "test"
+    }
+    fn handles(&self, path: &RelPath) -> bool {
+        TestExtractor.handles(path)
+    }
+    fn extract(&self, input: &ExtractInput) -> Result<Fragment, ExtractError> {
+        TestExtractor.extract(input)
+    }
+    fn embeds(&self) -> bool {
+        true
+    }
+    fn extract_full(&self, input: &ExtractInput) -> Result<Extraction, ExtractError> {
+        self.0.fetch_add(1, Ordering::SeqCst);
+        TestExtractor.extract_full(input)
+    }
+}
+
+/// A guest (id `tguest`) that binds `use <word>` texts to `res:<word>`, with a deliberately
+/// wrong symbol and `Extracted` confidence so tests can see the engine normalise them.
+pub struct TestGuest(pub &'static str);
+
+impl Extractor for TestGuest {
+    fn id(&self) -> &'static str {
+        "tguest"
+    }
+    fn handles(&self, _: &RelPath) -> bool {
+        false
+    }
+    fn extract(&self, _: &ExtractInput) -> Result<Fragment, ExtractError> {
+        Err(ExtractError::Unsupported("guest only".into()))
+    }
+    fn context_files(&self) -> &'static [&'static str] {
+        &["tguest.ctx"]
+    }
+    fn build_context(&self, files: &[(RelPath, Vec<u8>)]) -> Result<Vec<u8>, ExtractError> {
+        Ok(files.iter().flat_map(|(_, b)| b.clone()).collect())
+    }
+    fn embedded_context(&self, context: &[u8]) -> Vec<u8> {
+        context
+            .split(|b| *b == b'\n')
+            .next()
+            .unwrap_or_default()
+            .to_vec()
+    }
+    fn embedded_version(&self) -> Option<&'static str> {
+        Some(self.0)
+    }
+    fn accepts_embedded(&self, text: &str) -> bool {
+        text.starts_with("use ")
+    }
+    fn extract_embedded(&self, input: &EmbeddedInput) -> Vec<Binding> {
+        let word = input.text.split_whitespace().nth(1).unwrap_or("");
+        let ctx = String::from_utf8_lossy(input.context);
+        let key = |k: String| Binding {
+            symbol: Id::of("wrong"),
+            contract: ContractName {
+                kind: "res".into(),
+                key: k,
+            },
+            role: ContractRole::Consumes,
+            span: None,
+            confidence: Confidence::Extracted,
+            origin: None,
+        };
+        let mut out = vec![key(if ctx.is_empty() {
+            word.to_string()
+        } else {
+            format!("{ctx}.{word}")
+        })];
+        if let Some(c) = input.call {
+            out.push(key(format!("call.{}.{}", c.callee, c.arg)));
+        }
+        out
+    }
+}
+
+impl TestExtractor {
+    /// The fragment and the texts offered by `lit <sym> [call=<callee>:<arg>] <text...>` lines.
+    fn extract_texts(
+        &self,
+        input: &ExtractInput,
+    ) -> Result<(Fragment, Vec<EmbeddedText>), ExtractError> {
         let bad = |span: Option<Span>, message: String| ExtractError::Parse { span, message };
         let text =
             std::str::from_utf8(input.content).map_err(|e| bad(None, format!("not utf-8: {e}")))?;
@@ -42,6 +148,7 @@ impl Extractor for TestExtractor {
         let mut refs = Vec::new();
         let mut exports = Vec::new();
         let mut bindings = Vec::new();
+        let mut lits: Vec<(usize, String, Option<CallContext>, String, Span)> = Vec::new();
 
         for (idx, line) in text.lines().enumerate() {
             let trimmed = line.trim();
@@ -71,6 +178,23 @@ impl Extractor for TestExtractor {
                     })
                     .ok_or_else(|| bad(Some(span), format!("bad key {s:?}")))
             };
+            if let ["lit", sym, ..] = words.as_slice() {
+                let rest = trimmed["lit".len()..].trim_start()[sym.len()..].trim_start();
+                let (call, text) = match rest.split_once(' ') {
+                    Some((w, t)) if w.starts_with("call=") => {
+                        let (callee, arg) = w["call=".len()..]
+                            .rsplit_once(':')
+                            .ok_or_else(|| bad(Some(span), format!("bad call {w:?}")))?;
+                        let arg: u32 = arg
+                            .parse()
+                            .map_err(|_| bad(Some(span), format!("bad call {w:?}")))?;
+                        (CallContext::new(callee, arg), t)
+                    }
+                    _ => (None, rest),
+                };
+                lits.push((idx, sym.to_string(), call, text.to_string(), span));
+                continue;
+            }
             match words.as_slice() {
                 ["sym", kind, name] => {
                     let segments = vec![Segment {
@@ -139,19 +263,37 @@ impl Extractor for TestExtractor {
             }
         }
 
-        Ok(Fragment {
-            provenance,
-            extension: self.id().to_string(),
-            artifact: katalogr_model::ArtifactNode {
-                name: artifact,
-                facts: BTreeMap::new(),
+        let mut embedded = Vec::new();
+        for (_, sym, call, text, span) in lits {
+            let owner = symbols
+                .iter()
+                .find(|s| s.name.segments[0].name == sym)
+                .map(|s| s.name.id())
+                .ok_or_else(|| bad(Some(span), format!("undeclared symbol {sym:?}")))?;
+            embedded.push(EmbeddedText {
+                owner,
+                span,
+                text,
+                holes: Vec::new(),
+                call,
+            });
+        }
+        Ok((
+            Fragment {
+                provenance,
+                extension: self.id().to_string(),
+                artifact: katalogr_model::ArtifactNode {
+                    name: artifact,
+                    facts: BTreeMap::new(),
+                },
+                symbols,
+                links,
+                refs,
+                exports,
+                bindings,
             },
-            symbols,
-            links,
-            refs,
-            exports,
-            bindings,
-        })
+            embedded,
+        ))
     }
 }
 
@@ -172,12 +314,18 @@ pub fn init_project(kx: &Utf8Path) {
 /// Open project `p` of the kindex at `kx`, with the test extractor and repository `r` rooted
 /// at `work`.
 pub fn open_engine(kx: &Utf8Path, work: &Utf8Path) -> Engine {
+    let mut reg = ExtensionRegistry::new();
+    reg.register(Box::new(TestExtractor));
+    reg.register(Box::new(TestGuest("1")));
+    open_engine_with(kx, work, reg)
+}
+
+/// Like [`open_engine`] with a registry of the caller's choosing.
+pub fn open_engine_with(kx: &Utf8Path, work: &Utf8Path, reg: ExtensionRegistry) -> Engine {
     let dir = Kindex::open(kx)
         .unwrap()
         .project(&ProjectName::new("p").unwrap())
         .unwrap();
-    let mut reg = ExtensionRegistry::new();
-    reg.register(Box::new(TestExtractor));
     let roots = BTreeMap::from([("r".to_string(), work.to_path_buf())]);
     Engine::open(dir, reg, roots, Instant::now() + Duration::from_secs(10)).unwrap()
 }

@@ -5,6 +5,7 @@
 use super::{ChangeEvent, Context, EventKind, Inbox, Seq};
 use crate::consistency::{Engine, Scope};
 use crate::context;
+use crate::embed::{self, GuestContexts};
 use crate::error::EngineError;
 use crate::failpoint::fail;
 use crate::profiles::{self, ProfileSet};
@@ -211,6 +212,7 @@ impl<'a> Processor<'a> {
     ) -> Result<Seq, EngineError> {
         let engine = self.engine;
         let dir = engine.dir();
+        self.refresh_embed_signature()?;
         self.refresh_contexts()?;
         let profiles = self.refresh_profiles()?;
         let snap = engine.cache().read()?;
@@ -349,6 +351,21 @@ impl<'a> Processor<'a> {
             {
                 due.insert((key.repo.clone(), ext.id()));
             }
+            // A host's guests need their context before the host file is planned.
+            if engine
+                .registry()
+                .for_path(&key.path)
+                .is_some_and(|host| host.embeds())
+            {
+                for g in engine.registry().extractors() {
+                    if g.embedded_version().is_some()
+                        && !g.context_files().is_empty()
+                        && snap.ext_context(&key.repo, g.id())?.is_none()
+                    {
+                        due.insert((key.repo.clone(), g.id()));
+                    }
+                }
+            }
         }
         if due.is_empty() {
             return Ok(());
@@ -377,6 +394,30 @@ impl<'a> Processor<'a> {
         if changed {
             tx.commit()?;
         }
+        Ok(())
+    }
+
+    /// When the guest signature (ids and versions of the guest extensions) differs from the
+    /// stored one, store it and queue a rescan of every repository, so host files are extracted
+    /// against the new guest set. Runs before `refresh_contexts` so that step sees the queued paths.
+    pub fn refresh_embed_signature(&mut self) -> Result<(), EngineError> {
+        let engine = self.engine;
+        let new = embed::signature(engine.registry())
+            .map(|h| h.to_vec())
+            .unwrap_or_default();
+        let snap = engine.cache().read()?;
+        let stored = snap.meta(embed::META_SIGNATURE)?.unwrap_or_default();
+        drop(snap);
+        if stored == new {
+            return Ok(());
+        }
+        let mut tx = engine.cache().write()?;
+        tx.set_meta(embed::META_SIGNATURE, &new)?;
+        let repos: Vec<String> = engine.roots().keys().cloned().collect();
+        for repo in repos {
+            self.queue_rescan(&mut tx, &repo, "embed")?;
+        }
+        tx.commit()?;
         Ok(())
     }
 
@@ -514,18 +555,42 @@ impl<'a> Processor<'a> {
         if let Some(h) = profiles.hash_for(extractor.id()) {
             keyed.extend_from_slice(&h);
         }
+        // A host's output also depends on the guest set and on each guest's projected context.
+        let guests = if extractor.embeds() {
+            let g = GuestContexts::load(engine.registry(), snap, &key.repo, extractor.id())?;
+            if let Some(sig) = embed::signature(engine.registry()) {
+                keyed.extend_from_slice(&sig);
+            }
+            keyed.extend_from_slice(&g.key_bytes());
+            g
+        } else {
+            GuestContexts::default()
+        };
         let revision = context::revision(&git_blob_id(&content), &keyed);
         if existing.is_some_and(|f| f.provenance.revision == revision) {
             return Ok(Action::Skip);
         }
-        match extractor.extract_with_errors(&ExtractInput {
+        match extractor.extract_full(&ExtractInput {
             repo: &key.repo,
             path: &key.path,
             revision: &revision,
             content: &content,
             context: &ctx,
         }) {
-            Ok((mut fragment, errors)) => {
+            Ok(katalogr_model::Extraction {
+                mut fragment,
+                mut errors,
+                embedded,
+            }) => {
+                errors.extend(embed::apply(
+                    engine.registry(),
+                    &key.repo,
+                    &key.path,
+                    extractor.id(),
+                    &embedded,
+                    &guests,
+                    &mut fragment,
+                ));
                 profiles.apply(&mut fragment);
                 let errors = errors
                     .into_iter()
