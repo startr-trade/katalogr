@@ -158,6 +158,49 @@ fn bare_code_and_board(tmp: &Path) -> PathBuf {
 mod md {
     use super::*;
 
+    /// Canonical graph of the `md/emails` fixture, indexed in memory.
+    fn emails_graph() -> String {
+        let case =
+            camino::Utf8Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/md/emails");
+        katalogr_acceptance::index_case(&katalogr_acceptance::full_registry, &case).unwrap()
+    }
+
+    #[test]
+    fn emails_are_urls() {
+        let graph = emails_graph();
+        // The `mailto:` link and the autolink are both recorded as `mailto:` URL facts.
+        let artifact = graph
+            .lines()
+            .find(|l| l.contains(r#""node":"artifact""#) && l.contains("contact.md"))
+            .expect("the fixture's artifact node");
+        assert!(
+            artifact.contains(r#""mailto:someone@example.com""#),
+            "{artifact}"
+        );
+        assert!(
+            artifact.contains(r#""mailto:other@example.org""#),
+            "{artifact}"
+        );
+        // Emails create no reference: no link in the graph points at an address.
+        assert!(
+            !graph
+                .lines()
+                .any(|l| l.contains(r#""kind":"links-to""#) && l.contains("example")),
+            "{graph}"
+        );
+    }
+
+    #[test]
+    fn emails_not_dangling() {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = single(tmp.path(), "md/emails");
+
+        // The relative self-link resolves, and the addresses are not reported.
+        let (code, out, _) = katalogr(&repo, &["dangling", "--kind", "links-to"]);
+        assert_eq!(code, 0, "{out}");
+        assert!(!out.contains("example"), "{out}");
+    }
+
     #[test]
     fn sections_and_links() {
         let tmp = tempfile::tempdir().unwrap();

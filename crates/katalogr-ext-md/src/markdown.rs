@@ -268,6 +268,9 @@ fn link_target(repo: &str, path: &RelPath, dir: &str, dest: &str) -> Target {
     if dest.is_empty() {
         return Target::Ignore;
     }
+    if let Some(url) = email_url(dest) {
+        return Target::External(url);
+    }
     if has_scheme(dest) {
         return Target::External(dest.to_string());
     }
@@ -310,6 +313,34 @@ fn link_target(repo: &str, path: &RelPath, dir: &str, dest: &str) -> Target {
     }
     keys.push(key(NS_FILE, format!("{repo}:{resolved}")));
     Target::Keys(keys)
+}
+
+/// The `mailto:` URL of an email destination, if `dest` is one: it starts with `mailto:`, or it
+/// is a bare address (see [`is_addr_spec`]). pulldown-cmark's email autolinks take the second
+/// form. Emails are URL facts, so the result is never a reference target.
+fn email_url(dest: &str) -> Option<String> {
+    if dest.starts_with("mailto:") {
+        Some(dest.to_string())
+    } else if is_addr_spec(dest) {
+        Some(format!("mailto:{dest}"))
+    } else {
+        None
+    }
+}
+
+/// Hand-written equivalent of `^[^@\s/]+@[^@\s/]+\.[^@\s/]+$`: exactly one `@`; no whitespace
+/// or `/` anywhere; a non-empty local part; a domain with a `.` that has text on both sides.
+fn is_addr_spec(s: &str) -> bool {
+    let plain = |p: &str| !p.is_empty() && !p.chars().any(|c| c.is_whitespace() || c == '/');
+    let Some((local, domain)) = s.split_once('@') else {
+        return false;
+    };
+    if !plain(local) || !plain(domain) || domain.contains('@') {
+        return false;
+    }
+    domain
+        .match_indices('.')
+        .any(|(i, _)| i >= 1 && i + 1 < domain.len())
 }
 
 fn is_code(s: &str) -> bool {
@@ -407,5 +438,27 @@ mod tests {
         assert!(!has_scheme("a/b:c"));
         assert!(!has_scheme("C:"));
         assert!(!has_scheme("docs/a.md"));
+    }
+
+    #[test]
+    fn emails() {
+        assert!(is_addr_spec("someone@example.com"));
+        assert!(is_addr_spec("a.b@c.d.e"));
+        assert!(!is_addr_spec("someone@example"));
+        assert!(!is_addr_spec("someone@.com"));
+        assert!(!is_addr_spec("someone@example."));
+        assert!(!is_addr_spec("@example.com"));
+        assert!(!is_addr_spec("a@b@c.d"));
+        assert!(!is_addr_spec("a b@c.d"));
+        assert!(!is_addr_spec("docs/a@b.md"));
+        assert_eq!(
+            email_url("someone@example.com").as_deref(),
+            Some("mailto:someone@example.com")
+        );
+        assert_eq!(
+            email_url("mailto:someone@example.com").as_deref(),
+            Some("mailto:someone@example.com")
+        );
+        assert_eq!(email_url("guide.md"), None);
     }
 }

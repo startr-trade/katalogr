@@ -1572,8 +1572,10 @@ name = "katalogr"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "camino",
  "clap",
  "fs4",
+ "katalogr-acceptance",
  "katalogr-dist",
  "serde_json",
  "tempfile",

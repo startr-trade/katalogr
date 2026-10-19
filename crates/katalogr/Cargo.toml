@@ -23,3 +23,6 @@ serde_json.workspace = true
 katalogr-dist = { workspace = true, features = ["test-extractor"] }
 tempfile.workspace = true
 fs4.workspace = true
+camino.workspace = true
+# Reads an index's canonical graph, with the artifact facts (URLs) the CLI does not print.
+katalogr-acceptance = { path = "../katalogr-acceptance" }

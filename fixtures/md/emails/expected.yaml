@@ -1,0 +1,8 @@
+mode: exact
+symbols:
+- fx:contact.md#section:contact
+links:
+- from: fx:contact.md#section:contact
+  kind: links-to
+  to: fx:contact.md
+  confidence: Extracted
