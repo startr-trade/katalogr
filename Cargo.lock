@@ -1704,6 +1704,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "katalogr-ext-wasm"
+version = "0.1.0"
+dependencies = [
+ "katalogr-model",
+ "serde",
+ "serde_json",
+ "toml",
+]
+
+[[package]]
 name = "katalogr-model"
 version = "0.1.0"
 dependencies = [
