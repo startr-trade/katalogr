@@ -294,6 +294,43 @@ mod cli {
     }
 
     #[test]
+    fn map_weights_inferred_links() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (_kx, repo) = setup(tmp.path());
+        std::fs::write(
+            repo.join("lib.tx"),
+            "sym fn single\nsym fn m1\nsym fn m2\nsym fn m3\n\
+             export ns:single single\nexport ns:multi m1\nexport ns:multi m2\n\
+             export ns:multi m3\n",
+        )
+        .unwrap();
+        std::fs::write(
+            repo.join("user.tx"),
+            "sym fn caller\nref caller calls ns:single\nref caller calls ns:multi\n",
+        )
+        .unwrap();
+        ok(&repo, &["index"]);
+        let (code, out, _) = run(&repo, &["map"]);
+        assert_eq!(code, 0, "{out}");
+        let degree = |name: &str| -> String {
+            out.lines()
+                .find(|l| l.contains(&format!("fn:{name} ")))
+                .unwrap_or_else(|| panic!("{name} in {out}"))
+                .split_whitespace()
+                .next()
+                .unwrap()
+                .to_string()
+        };
+        // The extracted reference weighs 1; each of the three inferred targets 1/3.
+        assert_eq!(degree("single"), "1", "{out}");
+        for m in ["m1", "m2", "m3"] {
+            assert_eq!(degree(m), "0.33", "{out}");
+        }
+        // The fully weighted target leads.
+        assert!(out.lines().next().unwrap().contains("fn:single "), "{out}");
+    }
+
+    #[test]
     fn ambiguous_exit_3() {
         let tmp = tempfile::tempdir().unwrap();
         let (_kx, repo) = query_project(tmp.path());
@@ -308,6 +345,38 @@ mod cli {
         );
         // A canonical name is not ambiguous.
         let (code, _, err) = run(&repo, &["refs", "app:lib.tx#fn:dup"]);
+        assert_eq!(code, 0, "{err}");
+    }
+
+    #[test]
+    fn reexport_not_ambiguous() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (_kx, repo) = setup(tmp.path());
+        std::fs::write(
+            repo.join("lib.tx"),
+            "sym fn target\nsym use Target\nlink Target reexports target\n",
+        )
+        .unwrap();
+        ok(&repo, &["index"]);
+        // Link ends resolve by first plain-name match, so the alias is named `Target`; the
+        // case-insensitive tier puts both in one candidate set.
+        let (code, _, err) = run(&repo, &["refs", "TARGET"]);
+        assert_eq!(code, 0, "{err}");
+    }
+
+    #[test]
+    fn impl_not_ambiguous_with_its_type() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (_kx, repo) = setup(tmp.path());
+        std::fs::write(
+            repo.join("lib.tx"),
+            "sym struct Widget\nsym impl widget\nlink widget implements-for Widget\n",
+        )
+        .unwrap();
+        ok(&repo, &["index"]);
+        // The `.tx` extractor resolves link ends by first plain-name match, so the impl is
+        // named `widget`; the case-insensitive tier puts both in one candidate set.
+        let (code, _, err) = run(&repo, &["refs", "WIDGET"]);
         assert_eq!(code, 0, "{err}");
     }
 

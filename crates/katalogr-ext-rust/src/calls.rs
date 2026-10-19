@@ -6,6 +6,38 @@ use crate::extract::{Builder, NS_MACRO, NS_METHOD};
 use katalogr_model::{Confidence, ExportKey, Id};
 use ra_ap_syntax::{AstNode, SyntaxNode, WalkEvent, ast};
 
+/// Common standard-library method names. A method call with one of these names is not matched
+/// by name: it would link to any workspace method of the same name (FEAT-053). Sorted.
+const STD_METHODS: &[&str] = &[
+    "as_ref",
+    "as_str",
+    "clone",
+    "collect",
+    "contains",
+    "default",
+    "eq",
+    "filter",
+    "fmt",
+    "from",
+    "get",
+    "insert",
+    "into",
+    "into_iter",
+    "is_empty",
+    "iter",
+    "iter_mut",
+    "len",
+    "map",
+    "next",
+    "ok",
+    "push",
+    "remove",
+    "to_owned",
+    "to_string",
+    "unwrap",
+    "with_capacity",
+];
+
 impl Builder<'_> {
     /// Every call below `node` becomes a reference from the symbol `from`. Calls inside macro
     /// arguments are token trees, not expressions, and are not seen.
@@ -27,6 +59,10 @@ impl Builder<'_> {
                 let Some(name) = call.name_ref() else {
                     continue;
                 };
+                let text = name.text().to_string();
+                if STD_METHODS.contains(&text.as_str()) {
+                    continue;
+                }
                 let cands = vec![ExportKey {
                     namespace: NS_METHOD.to_string(),
                     key: name.text().to_string(),

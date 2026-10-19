@@ -135,6 +135,7 @@ impl Stitcher {
                     confidence: l.confidence,
                     span: l.span,
                     provenance: l.provenance.clone(),
+                    fanout: None,
                 },
             )?;
         }
@@ -386,6 +387,7 @@ fn resolve(tx: &mut WriteTx, cx: &mut Cx, rid: RefId) -> Result<(), EngineError>
     } else {
         Confidence::Inferred
     };
+    let fanout = u32::try_from(targets.len()).unwrap_or(u32::MAX);
     if targets.is_empty() {
         tx.put_unresolved(rid, &r)?;
     }
@@ -403,6 +405,7 @@ fn resolve(tx: &mut WriteTx, cx: &mut Cx, rid: RefId) -> Result<(), EngineError>
                 confidence,
                 span: r.span,
                 provenance: provenance.clone(),
+                fanout: (confidence == Confidence::Inferred).then_some(fanout),
             },
         )?;
     }
