@@ -3,6 +3,7 @@
 //! All behaviour of the command-line wrapper lives here; the wrapper parses, calls and renders.
 
 mod claude;
+pub mod doctor;
 mod error;
 pub mod hooks;
 mod roots;

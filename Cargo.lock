@@ -1644,6 +1644,7 @@ dependencies = [
  "katalogr-store",
  "proptest",
  "regex",
+ "schemars",
  "serde",
  "serde_json",
  "serde_yaml_ng",

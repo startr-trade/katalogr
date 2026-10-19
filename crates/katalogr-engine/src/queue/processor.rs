@@ -11,7 +11,6 @@ use crate::failpoint::fail;
 use crate::profiles::{self, ProfileSet};
 use crate::scan;
 use camino::{Utf8Path, Utf8PathBuf};
-use fs4::FileExt;
 use katalogr_model::{ArtifactName, ExtractError, ExtractInput, Fragment, RelPath};
 use katalogr_store::blob::git_blob_id;
 use katalogr_store::{
@@ -53,23 +52,12 @@ struct Planned {
 impl<'a> Processor<'a> {
     /// Non-blocking exclusive lock on `.cache/processor.lock`; `None` when another holder has it.
     pub fn try_acquire(engine: &'a Engine) -> Result<Option<Processor<'a>>, EngineError> {
-        let cache_dir = engine.dir().cache_dir();
-        std::fs::create_dir_all(&cache_dir).map_err(|e| EngineError::io(&cache_dir, e))?;
-        let path = cache_dir.join("processor.lock");
-        let file = std::fs::OpenOptions::new()
-            .create(true)
-            .truncate(false)
-            .write(true)
-            .open(&path)
-            .map_err(|e| EngineError::io(&path, e))?;
-        match FileExt::try_lock(&file) {
-            Ok(()) => Ok(Some(Processor {
+        Ok(
+            super::lock::try_lock(&engine.dir().cache_dir())?.map(|file| Processor {
                 engine,
                 _lock: file,
-            })),
-            Err(fs4::TryLockError::WouldBlock) => Ok(None),
-            Err(fs4::TryLockError::Error(e)) => Err(EngineError::io(&path, e)),
-        }
+            }),
+        )
     }
 
     /// Replay a non-empty publish journal (idempotent): rename each temp file that still
@@ -676,8 +664,15 @@ fn write_synced(path: &Utf8Path, bytes: &[u8]) -> Result<(), EngineError> {
     f.sync_all().map_err(io)
 }
 
-/// Delete every `.tmp-*` file under `dir`, recursively.
-fn remove_orphan_temps(dir: &Utf8Path) -> Result<(), EngineError> {
+/// The `.tmp-*` files under `dir`, recursively, sorted. A missing directory has none.
+pub fn find_orphan_temps(dir: &Utf8Path) -> Result<Vec<Utf8PathBuf>, EngineError> {
+    let mut out = Vec::new();
+    collect_orphan_temps(dir, &mut out)?;
+    out.sort();
+    Ok(out)
+}
+
+fn collect_orphan_temps(dir: &Utf8Path, out: &mut Vec<Utf8PathBuf>) -> Result<(), EngineError> {
     let rd = match std::fs::read_dir(dir) {
         Ok(rd) => rd,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
@@ -691,10 +686,18 @@ fn remove_orphan_temps(dir: &Utf8Path) -> Result<(), EngineError> {
         let path = dir.join(&name);
         let ft = e.file_type().map_err(|e| EngineError::io(dir, e))?;
         if ft.is_dir() {
-            remove_orphan_temps(&path)?;
+            collect_orphan_temps(&path, out)?;
         } else if ft.is_file() && name.starts_with(".tmp-") {
-            std::fs::remove_file(&path).map_err(|e| EngineError::io(&path, e))?;
+            out.push(path);
         }
+    }
+    Ok(())
+}
+
+/// Delete every `.tmp-*` file under `dir`, recursively.
+fn remove_orphan_temps(dir: &Utf8Path) -> Result<(), EngineError> {
+    for path in find_orphan_temps(dir)? {
+        std::fs::remove_file(&path).map_err(|e| EngineError::io(&path, e))?;
     }
     Ok(())
 }

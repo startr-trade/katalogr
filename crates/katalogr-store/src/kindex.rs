@@ -316,6 +316,15 @@ impl ProjectDir {
         &self.config
     }
 
+    /// Reads this project's `format.json` without the newer-format refusal.
+    pub fn format_file(&self) -> Result<FormatFile, StoreError> {
+        let fpath = self.root.join("format.json");
+        serde_json::from_str(&read_to_string(&fpath)?).map_err(|e| StoreError::Parse {
+            path: fpath.to_string(),
+            message: e.to_string(),
+        })
+    }
+
     /// `shards/<repo>/<path>.kshard.json` under the project directory.
     pub fn shard_path(&self, repo: &str, path: &RelPath) -> Utf8PathBuf {
         self.root.join(shard::shard_path(repo, path))

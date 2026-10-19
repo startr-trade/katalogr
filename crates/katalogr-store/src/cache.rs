@@ -1323,7 +1323,7 @@ pub struct ShardStat {
 }
 
 impl ShardStat {
-    fn of(meta: &std::fs::Metadata) -> Option<ShardStat> {
+    pub fn of(meta: &std::fs::Metadata) -> Option<ShardStat> {
         let d = meta
             .modified()
             .ok()?
