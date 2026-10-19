@@ -58,6 +58,14 @@ technologies:
       - ts/calls
     call-member:
       - ts/calls
+    commonjs-export:
+      - ts/commonjs
+    constructor-call:
+      - ts/new-calls
+    esm-js-specifier:
+      - ts/esm-js-specifiers
+    extends-any-name:
+      - ts/extends-base
     items:
       - ts/items
       - ts/file-kinds

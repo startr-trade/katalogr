@@ -14,8 +14,9 @@ use katalogr_model::{
     Provenance, RelPath, Segment, Span, SymbolName, SymbolNode,
 };
 use oxc_ast::ast::{
-    ArrowFunctionExpression, Class, ClassElement, Declaration, ExportDefaultDeclarationKind,
-    Expression, Function, ModuleDeclaration, Statement, VariableDeclarator,
+    ArrowFunctionExpression, AssignmentOperator, Class, ClassElement, Declaration,
+    ExportDefaultDeclarationKind, Expression, ExpressionStatement, Function, MemberExpression,
+    ModuleDeclaration, ObjectPropertyKind, PropertyKind, Statement, VariableDeclarator,
 };
 use oxc_span::GetSpan;
 use std::collections::{BTreeMap, HashMap};
@@ -279,6 +280,11 @@ impl<'s> Builder<'s> {
             }
             return;
         }
+        if let Statement::ExpressionStatement(es) = stmt
+            && self.commonjs_export(es, pending)
+        {
+            return;
+        }
         let Some(m) = stmt.as_module_declaration() else {
             pending.push(Pending::Statement(stmt));
             return;
@@ -363,6 +369,104 @@ impl<'s> Builder<'s> {
                 }
             }
             _ => {}
+        }
+    }
+
+    /// `exports.x = v`, `module.exports.x = v` and `module.exports = { a, b: c }` at the top
+    /// level: each member is an export of the file. Returns false for any other statement.
+    fn commonjs_export<'p, 'a>(
+        &mut self,
+        es: &'p ExpressionStatement<'a>,
+        pending: &mut Vec<Pending<'p, 'a>>,
+    ) -> bool {
+        let Expression::AssignmentExpression(a) = es.expression.get_inner_expression() else {
+            return false;
+        };
+        if a.operator != AssignmentOperator::Assign {
+            return false;
+        }
+        let Some(MemberExpression::StaticMemberExpression(m)) = a.left.as_member_expression()
+        else {
+            return false;
+        };
+        let prop = m.property.name.as_str();
+        let object = m.object.get_inner_expression();
+        let is_ident = |e: &Expression<'_>, n: &str| matches!(e.get_inner_expression(), Expression::Identifier(i) if i.name.as_str() == n);
+        let is_module_exports = matches!(
+            object,
+            Expression::StaticMemberExpression(o)
+                if is_ident(&o.object, "module") && o.property.name.as_str() == "exports"
+        );
+        if is_ident(object, "exports") || is_module_exports {
+            let span = self.span(es.span);
+            self.commonjs_member(prop, &a.right, span, pending);
+            return true;
+        }
+        if is_ident(object, "module")
+            && prop == "exports"
+            && let Expression::ObjectExpression(o) = a.right.get_inner_expression()
+        {
+            for p in &o.properties {
+                let ObjectPropertyKind::ObjectProperty(p) = p else {
+                    continue;
+                };
+                if p.kind != PropertyKind::Init || p.computed {
+                    continue;
+                }
+                let Some(name) = static_key(&p.key) else {
+                    continue;
+                };
+                let span = self.span(p.span);
+                self.commonjs_member(&name, &p.value, span, pending);
+            }
+            return true;
+        }
+        false
+    }
+
+    /// One CommonJS export `name = value`: a function value becomes an exported `fn` symbol,
+    /// a name of a local binding exports that binding, anything else an exported `const`.
+    fn commonjs_member<'p, 'a>(
+        &mut self,
+        name: &str,
+        value: &'p Expression<'a>,
+        span: Span,
+        pending: &mut Vec<Pending<'p, 'a>>,
+    ) {
+        let inner = value.get_inner_expression();
+        match inner {
+            Expression::Identifier(id) => {
+                self.export_locals
+                    .push((id.name.as_str().to_string(), name.to_string(), span));
+            }
+            Expression::ArrowFunctionExpression(_) | Expression::FunctionExpression(_) => {
+                let (is_async, sig_end) = match inner {
+                    Expression::ArrowFunctionExpression(a) => (a.r#async, body_start(a)),
+                    Expression::FunctionExpression(f) => (
+                        f.r#async,
+                        f.body.as_ref().map_or(f.span.end, |b| b.span.start),
+                    ),
+                    _ => unreachable!(),
+                };
+                let mut facts = Self::base_facts(true, false, is_async);
+                facts.insert(
+                    "signature".into(),
+                    Fact::Str(self.signature(inner_start(inner), sig_end)),
+                );
+                let id = self.add_symbol(vec![Self::seg("fn", name)], "fn", span, facts);
+                self.register(name, id, true, true, false);
+                match inner {
+                    Expression::ArrowFunctionExpression(a) => pending.push(Pending::Arrow(id, a)),
+                    Expression::FunctionExpression(f) => pending.push(Pending::Func(id, f)),
+                    _ => {}
+                }
+            }
+            _ => {
+                let facts = Self::base_facts(true, false, false);
+                let id = self.add_symbol(vec![Self::seg("const", name)], "const", span, facts);
+                self.register(name, id, false, true, false);
+                pending.push(Pending::Expression(value));
+            }
         }
     }
 

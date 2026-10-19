@@ -1,0 +1,17 @@
+mode: exact
+symbols:
+- fx:src/app.ts#const:run
+- fx:src/lib/util.ts#fn:helper
+links:
+- from: fx:src/app.ts
+  kind: imports
+  to: fx:src/lib/util.ts
+  confidence: Extracted
+- from: fx:src/app.ts
+  kind: imports
+  to: fx:src/lib/util.ts#fn:helper
+  confidence: Extracted
+- from: fx:src/app.ts#const:run
+  kind: calls
+  to: fx:src/lib/util.ts#fn:helper
+  confidence: Extracted

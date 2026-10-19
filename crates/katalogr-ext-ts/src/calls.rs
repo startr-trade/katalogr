@@ -5,7 +5,7 @@
 use crate::items::{Binding, Builder, Pending};
 use crate::modules::{NS_MEMBER, export_candidates, key};
 use katalogr_model::{Confidence, Id, Link, LinkKind};
-use oxc_ast::ast::{CallExpression, Expression, ImportExpression};
+use oxc_ast::ast::{CallExpression, Expression, ImportExpression, NewExpression};
 use oxc_ast_visit::{Visit, walk};
 
 struct CallWalk<'b, 's> {
@@ -29,6 +29,13 @@ impl<'a> Visit<'a> for CallWalk<'_, '_> {
             self.b.call(self.from, &it.callee, span);
         }
         walk::walk_call_expression(self, it);
+    }
+
+    /// `new X()`: a call to the class `X`, resolved like a call to `X`.
+    fn visit_new_expression(&mut self, it: &NewExpression<'a>) {
+        let span = self.b.span(it.span);
+        self.b.call(self.from, &it.callee, span);
+        walk::walk_new_expression(self, it);
     }
 
     fn visit_import_expression(&mut self, it: &ImportExpression<'a>) {

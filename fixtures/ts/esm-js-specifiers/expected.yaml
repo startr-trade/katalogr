@@ -1,0 +1,49 @@
+mode: exact
+symbols:
+- fx:src/a.ts#const:run
+- fx:src/common.cts#fn:fromCommon
+- fx:src/esm.mts#fn:fromModule
+- fx:src/lib/util.ts#fn:helper
+- fx:src/panel.tsx#fn:Panel
+- fx:src/side.ts#fn:ignored
+links:
+- from: fx:src/a.ts
+  kind: imports
+  to: fx:src/common.cts
+  confidence: Extracted
+- from: fx:src/a.ts
+  kind: imports
+  to: fx:src/common.cts#fn:fromCommon
+  confidence: Extracted
+- from: fx:src/a.ts
+  kind: imports
+  to: fx:src/esm.mts
+  confidence: Extracted
+- from: fx:src/a.ts
+  kind: imports
+  to: fx:src/esm.mts#fn:fromModule
+  confidence: Extracted
+- from: fx:src/a.ts
+  kind: imports
+  to: fx:src/lib/util.ts
+  confidence: Extracted
+- from: fx:src/a.ts
+  kind: imports
+  to: fx:src/lib/util.ts#fn:helper
+  confidence: Extracted
+- from: fx:src/a.ts
+  kind: imports
+  to: fx:src/panel.tsx
+  confidence: Extracted
+- from: fx:src/a.ts
+  kind: imports
+  to: fx:src/panel.tsx#fn:Panel
+  confidence: Extracted
+- from: fx:src/a.ts
+  kind: imports
+  to: fx:src/side.js
+  confidence: Extracted
+- from: fx:src/a.ts#const:run
+  kind: calls
+  to: fx:src/lib/util.ts#fn:helper
+  confidence: Extracted

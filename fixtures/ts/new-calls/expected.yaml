@@ -1,0 +1,22 @@
+mode: exact
+symbols:
+- fx:main.ts#class:Local
+- fx:main.ts#fn:build
+- fx:widget.ts#class:Widget
+links:
+- from: fx:main.ts
+  kind: imports
+  to: fx:widget.ts
+  confidence: Extracted
+- from: fx:main.ts
+  kind: imports
+  to: fx:widget.ts#class:Widget
+  confidence: Extracted
+- from: fx:main.ts#fn:build
+  kind: calls
+  to: fx:main.ts#class:Local
+  confidence: Extracted
+- from: fx:main.ts#fn:build
+  kind: calls
+  to: fx:widget.ts#class:Widget
+  confidence: Extracted

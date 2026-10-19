@@ -71,6 +71,11 @@ pub fn parent_dir(path: &str) -> &str {
     path.rsplit_once('/').map_or("", |(d, _)| d)
 }
 
+/// `tsconfig*.json` or `jsconfig*.json` (`tsconfig.json`, `tsconfig.base.json`, ...).
+pub fn is_config_name(name: &str) -> bool {
+    name.ends_with(".json") && (name.starts_with("tsconfig") || name.starts_with("jsconfig"))
+}
+
 pub fn file_name(path: &str) -> &str {
     path.rsplit('/').next().unwrap_or(path)
 }
@@ -284,14 +289,11 @@ pub fn build(files: &[(RelPath, Vec<u8>)]) -> TsContext {
         let Some(doc) = parse_jsonc(bytes) else {
             continue;
         };
-        match file_name(p.as_str()) {
-            TSCONFIG | JSCONFIG => {
-                configs.insert(p.as_str().to_string(), doc);
-            }
-            PACKAGE_JSON => {
-                packages.insert(p.as_str().to_string(), doc);
-            }
-            _ => {}
+        let name = file_name(p.as_str());
+        if is_config_name(name) {
+            configs.insert(p.as_str().to_string(), doc);
+        } else if name == PACKAGE_JSON {
+            packages.insert(p.as_str().to_string(), doc);
         }
     }
     let mut dirs: BTreeMap<String, TsProject> = BTreeMap::new();
@@ -303,6 +305,10 @@ pub fn build(files: &[(RelPath, Vec<u8>)]) -> TsContext {
         paths: Vec::new(),
     };
     for path in configs.keys() {
+        // Only the standard names define a project; other names are reached through `extends`.
+        if ![TSCONFIG, JSCONFIG].contains(&file_name(path)) {
+            continue;
+        }
         let dir = parent_dir(path);
         // `tsconfig.json` wins over `jsconfig.json` in the same directory.
         if file_name(path) == JSCONFIG && configs.contains_key(&join_file(dir, TSCONFIG)) {
@@ -360,7 +366,7 @@ mod tests {
         let files = vec![
             file(
                 "tsconfig.base.json",
-                "{}", // not a context file name: ignored by the engine, never followed
+                "{}", // not a standard name: defines no project of its own
             ),
             file(
                 "base/tsconfig.json",

@@ -11,14 +11,9 @@ use crate::scan;
 use katalogr_model::{Extractor, RelPath};
 use sha2::{Digest, Sha256};
 
-/// The last path component.
-pub(crate) fn file_name(path: &RelPath) -> &str {
-    path.as_str().rsplit('/').next().unwrap_or("")
-}
-
 /// True when `path` is one of the extension's context files.
 pub(crate) fn is_context_file(ext: &dyn Extractor, path: &RelPath) -> bool {
-    ext.context_files().contains(&file_name(path))
+    ext.is_context_file(path)
 }
 
 pub(crate) fn hash(bytes: &[u8]) -> [u8; 32] {
