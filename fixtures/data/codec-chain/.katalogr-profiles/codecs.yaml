@@ -1,0 +1,21 @@
+profile: example-codecs        # synthetic example; real conventions live in the project's kindex
+version: 2
+select:
+  - { extension: data, path: 'codecs/*.yaml' }
+rules:
+  - id: codec-provides
+    when: { extension: data, kind: doc, path: 'codecs/*.yaml' }
+    emit:
+      bind: { contract: { kind: codec, key: '${scope:urn}' }, role: provides }
+      fact: { schema_kind: '${scope:schema/kind}' }
+  - id: codec-schema-file
+    when: { extension: data, kind: key, path: 'codecs/*.yaml', fact: pointer, matches: '^/schema/file$' }
+    emit: { ref: { kind: uses-schema, candidates: [ { ns: file, key: '$repo:${fact:value}' } ] } }
+  - id: codec-type
+    when: { extension: data, kind: key, path: 'codecs/*.yaml', fact: pointer, matches: '^/schema/type$' }
+    emit: { ref: { kind: uses-type, candidates: [ { ns: schema-type, key: '${fact:value}' } ] } }
+  - id: codec-field-mapping
+    when: { extension: data, kind: key, path: 'codecs/*.yaml', fact: pointer, matches: '^/formats/([^/]+)/fields/([^/]+)$' }
+    emit:
+      ref: { kind: maps-to, candidates: [ { ns: schema-member, key: '${scope:schema/type}/${fact:value}' } ] }
+      fact: { wire_format: '$1', wire_field: '$2' }

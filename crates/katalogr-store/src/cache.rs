@@ -54,6 +54,61 @@ pub struct SymbolRow {
     pub facts: BTreeMap<String, Fact>,
 }
 
+/// What a structural comparison needs of a symbol, read without building its whole row: the
+/// name of its last segment (unescaped, without an ordinal) and its facts.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SymbolBrief {
+    pub leaf: String,
+    pub facts: BTreeMap<String, Fact>,
+}
+
+#[derive(Deserialize)]
+struct RawBrief<'a> {
+    #[serde(borrow)]
+    name: std::borrow::Cow<'a, str>,
+    facts: BTreeMap<String, Fact>,
+}
+
+impl RawBrief<'_> {
+    fn brief(self) -> SymbolBrief {
+        // `<artifact>#<kind>:<name>/…[~<ordinal>]`: '/' and '~' inside a name are escaped.
+        let body = self.name.split_once('#').map_or("", |(_, b)| b);
+        let last = body.rsplit('/').next().unwrap_or("");
+        let last = match last.rsplit_once('~') {
+            Some((l, n)) if !n.is_empty() && n.bytes().all(|c| c.is_ascii_digit()) => l,
+            _ => last,
+        };
+        let raw = last.split_once(':').map_or("", |(_, n)| n);
+        SymbolBrief {
+            leaf: percent_decode(raw),
+            facts: self.facts,
+        }
+    }
+}
+
+fn percent_decode(s: &str) -> String {
+    if !s.contains('%') {
+        return s.to_string();
+    }
+    let b = s.as_bytes();
+    let mut out = Vec::with_capacity(b.len());
+    let mut i = 0;
+    while i < b.len() {
+        let hex = |c: u8| (c as char).to_digit(16).map(|d| d as u8);
+        if b[i] == b'%'
+            && i + 2 < b.len()
+            && let (Some(h), Some(l)) = (hex(b[i + 1]), hex(b[i + 2]))
+        {
+            out.push(h << 4 | l);
+            i += 3;
+        } else {
+            out.push(b[i]);
+            i += 1;
+        }
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
 /// A contract node: how many bindings of each role name it. The row exists while the sum is
 /// positive.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -508,6 +563,27 @@ fn scan_in<T: ReadableTable<&'static [u8], &'static [u8]>>(
     Ok(out)
 }
 
+/// The keys of [`scan_in`], without copying the values.
+fn scan_keys_in<T: ReadableTable<&'static [u8], &'static [u8]>>(
+    t: &T,
+    prefix: &[u8],
+) -> Result<Vec<Vec<u8>>, StoreError> {
+    let hi = prefix_end(prefix);
+    let hi_ref = match &hi {
+        Some(e) => Bound::Excluded(e.as_slice()),
+        None => Bound::Unbounded,
+    };
+    let it = t
+        .range::<&[u8]>((Bound::Included(prefix), hi_ref))
+        .map_err(db)?;
+    let mut out = Vec::new();
+    for r in it {
+        let (k, _) = r.map_err(db)?;
+        out.push(k.value().to_vec());
+    }
+    Ok(out)
+}
+
 // ---------------------------------------------------------------- reading
 
 /// Typed reads, shared by [`ReadTx`] (a snapshot) and [`WriteTx`] (sees its own writes).
@@ -517,6 +593,33 @@ pub trait Reader {
     fn raw_get(&self, t: TableId, key: &[u8]) -> Result<Option<Vec<u8>>, StoreError>;
     #[doc(hidden)]
     fn raw_scan(&self, t: TableId, prefix: &[u8]) -> Result<RawRows, StoreError>;
+    /// The keys of [`Reader::raw_scan`], without copying the values.
+    #[doc(hidden)]
+    fn raw_scan_keys(&self, t: TableId, prefix: &[u8]) -> Result<Vec<Vec<u8>>, StoreError> {
+        Ok(self
+            .raw_scan(t, prefix)?
+            .into_iter()
+            .map(|(k, _)| k)
+            .collect())
+    }
+    /// [`Reader::raw_get`] for many keys, opening the table once.
+    #[doc(hidden)]
+    fn raw_get_many(
+        &self,
+        t: TableId,
+        keys: &[Vec<u8>],
+    ) -> Result<Vec<Option<Vec<u8>>>, StoreError> {
+        keys.iter().map(|k| self.raw_get(t, k)).collect()
+    }
+    /// [`Reader::raw_scan_keys`] for many prefixes, opening the table once.
+    #[doc(hidden)]
+    fn raw_scan_keys_many(
+        &self,
+        t: TableId,
+        prefixes: &[Vec<u8>],
+    ) -> Result<Vec<Vec<Vec<u8>>>, StoreError> {
+        prefixes.iter().map(|p| self.raw_scan_keys(t, p)).collect()
+    }
 
     fn meta(&self, name: &str) -> Result<Option<Vec<u8>>, StoreError> {
         self.raw_get(TableId::Meta, name.as_bytes())
@@ -592,6 +695,95 @@ pub trait Reader {
         self.raw_scan(TableId::LinksOut, &prefix)?
             .into_iter()
             .map(|(k, v)| Ok((decode_link_key(&k)?, de(&v)?)))
+            .collect()
+    }
+
+    /// [`Reader::symbol`] for many ids, in order; the reads share one table lookup.
+    fn symbols_many(&self, ids: &[Id]) -> Result<Vec<Option<SymbolRow>>, StoreError> {
+        let keys: Vec<Vec<u8>> = ids.iter().map(|i| i.0.to_vec()).collect();
+        self.raw_get_many(TableId::Symbols, &keys)?
+            .into_iter()
+            .map(|v| v.map(|v| de(&v)).transpose())
+            .collect()
+    }
+
+    /// The briefs of many symbols, in order (None for an id that is not a symbol). A large
+    /// batch is decoded on a few threads; the result does not depend on how many.
+    fn symbol_briefs_many(&self, ids: &[Id]) -> Result<Vec<Option<SymbolBrief>>, StoreError> {
+        let keys: Vec<Vec<u8>> = ids.iter().map(|i| i.0.to_vec()).collect();
+        let rows = self.raw_get_many(TableId::Symbols, &keys)?;
+        let decode = |v: &Option<Vec<u8>>| -> Result<Option<SymbolBrief>, StoreError> {
+            v.as_ref()
+                .map(|v| {
+                    serde_json::from_slice::<RawBrief>(v)
+                        .map(RawBrief::brief)
+                        .map_err(|e| StoreError::Row(e.to_string()))
+                })
+                .transpose()
+        };
+        const PARALLEL_FROM: usize = 20_000;
+        let threads = std::thread::available_parallelism()
+            .map_or(1, usize::from)
+            .min(4);
+        if rows.len() < PARALLEL_FROM || threads < 2 {
+            return rows.iter().map(decode).collect();
+        }
+        let chunk = rows.len().div_ceil(threads);
+        let parts: Vec<Result<Vec<Option<SymbolBrief>>, StoreError>> = std::thread::scope(|s| {
+            let handles: Vec<_> = rows
+                .chunks(chunk)
+                .map(|c| s.spawn(|| c.iter().map(decode).collect::<Result<Vec<_>, _>>()))
+                .collect();
+            handles
+                .into_iter()
+                .map(|h| h.join().expect("decode thread"))
+                .collect()
+        });
+        let mut out = Vec::with_capacity(rows.len());
+        for p in parts {
+            out.extend(p?);
+        }
+        Ok(out)
+    }
+
+    /// [`Reader::link_keys_out`] for many sources, in order.
+    fn link_keys_out_many(
+        &self,
+        froms: &[Id],
+        kind: &LinkKind,
+    ) -> Result<Vec<Vec<LinkKey>>, StoreError> {
+        let prefixes: Vec<Vec<u8>> = froms.iter().map(|f| link_prefix(*f, kind)).collect();
+        self.raw_scan_keys_many(TableId::LinksOut, &prefixes)?
+            .into_iter()
+            .map(|keys| keys.iter().map(|k| decode_link_key(k)).collect())
+            .collect()
+    }
+
+    /// [`Reader::links_in`] for many targets, in order.
+    fn links_in_many(&self, tos: &[Id]) -> Result<Vec<Vec<LinkKey>>, StoreError> {
+        let prefixes: Vec<Vec<u8>> = tos.iter().map(|t| t.0.to_vec()).collect();
+        self.raw_scan_keys_many(TableId::LinksIn, &prefixes)?
+            .into_iter()
+            .map(|keys| {
+                keys.iter()
+                    .map(|k| {
+                        let r = decode_link_key(k)?;
+                        Ok(LinkKey {
+                            from: r.to,
+                            kind: r.kind,
+                            to: r.from,
+                        })
+                    })
+                    .collect()
+            })
+            .collect()
+    }
+
+    /// The keys of the links leaving `from` with `kind`, without decoding their rows.
+    fn link_keys_out(&self, from: Id, kind: &LinkKind) -> Result<Vec<LinkKey>, StoreError> {
+        self.raw_scan_keys(TableId::LinksOut, &link_prefix(from, kind))?
+            .iter()
+            .map(|k| decode_link_key(k))
             .collect()
     }
 
@@ -931,6 +1123,28 @@ impl Reader for ReadTx<'_> {
     fn raw_scan(&self, t: TableId, prefix: &[u8]) -> Result<RawRows, StoreError> {
         scan_in(&self.txn.open_table(t.def()).map_err(db)?, prefix)
     }
+
+    fn raw_scan_keys(&self, t: TableId, prefix: &[u8]) -> Result<Vec<Vec<u8>>, StoreError> {
+        scan_keys_in(&self.txn.open_table(t.def()).map_err(db)?, prefix)
+    }
+
+    fn raw_get_many(
+        &self,
+        t: TableId,
+        keys: &[Vec<u8>],
+    ) -> Result<Vec<Option<Vec<u8>>>, StoreError> {
+        let table = self.txn.open_table(t.def()).map_err(db)?;
+        keys.iter().map(|k| get_in(&table, k)).collect()
+    }
+
+    fn raw_scan_keys_many(
+        &self,
+        t: TableId,
+        prefixes: &[Vec<u8>],
+    ) -> Result<Vec<Vec<Vec<u8>>>, StoreError> {
+        let table = self.txn.open_table(t.def()).map_err(db)?;
+        prefixes.iter().map(|p| scan_keys_in(&table, p)).collect()
+    }
 }
 
 // ---------------------------------------------------------------- writing
@@ -957,6 +1171,10 @@ impl Reader for WriteTx<'_> {
 
     fn raw_scan(&self, t: TableId, prefix: &[u8]) -> Result<RawRows, StoreError> {
         scan_in(&self.txn.open_table(t.def()).map_err(db)?, prefix)
+    }
+
+    fn raw_scan_keys(&self, t: TableId, prefix: &[u8]) -> Result<Vec<Vec<u8>>, StoreError> {
+        scan_keys_in(&self.txn.open_table(t.def()).map_err(db)?, prefix)
     }
 }
 

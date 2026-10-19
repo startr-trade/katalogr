@@ -1,0 +1,7 @@
+{
+  "name": "orders",
+  "count": 2,
+  "active": true,
+  "tags": ["a", "b"],
+  "nested": { "x": null, "a/b": "slash" }
+}

@@ -1,0 +1,13 @@
+asyncapi: 2.6.0
+info:
+  title: Example events
+  version: "1.0"
+channels: {}
+components:
+  schemas:
+    Placed:
+      type: object
+      required: [orderId]
+      properties:
+        orderId: {type: string}
+        at: {type: string, format: date-time}

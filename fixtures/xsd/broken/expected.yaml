@@ -1,0 +1,27 @@
+mode: exact
+symbols:
+- fx:schemas/broken.xsd#schema:broken
+- fx:schemas/broken.xsd#type:Bad
+- fx:schemas/broken.xsd#type:Bad/field:y
+- fx:schemas/broken.xsd#type:Good
+- fx:schemas/broken.xsd#type:Good/field:x
+contracts:
+- contract:schema_type:{urn%3Aexample%3Abroken}Bad
+- contract:schema_type:{urn%3Aexample%3Abroken}Good
+links:
+- from: fx:schemas/broken.xsd#type:Bad
+  kind: contains
+  to: fx:schemas/broken.xsd#type:Bad/field:y
+  confidence: Extracted
+- from: fx:schemas/broken.xsd#type:Bad
+  kind: declares
+  to: contract:schema_type:{urn%3Aexample%3Abroken}Bad
+  confidence: Extracted
+- from: fx:schemas/broken.xsd#type:Good
+  kind: contains
+  to: fx:schemas/broken.xsd#type:Good/field:x
+  confidence: Extracted
+- from: fx:schemas/broken.xsd#type:Good
+  kind: declares
+  to: contract:schema_type:{urn%3Aexample%3Abroken}Good
+  confidence: Extracted

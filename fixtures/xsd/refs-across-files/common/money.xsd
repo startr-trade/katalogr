@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:c="urn:example:common" targetNamespace="urn:example:common">
+  <xs:simpleType name="Currency">
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="EUR"/>
+      <xs:enumeration value="USD"/>
+    </xs:restriction>
+  </xs:simpleType>
+  <xs:complexType name="Money">
+    <xs:sequence>
+      <xs:element name="amount" type="xs:decimal"/>
+      <xs:element name="currency" type="c:Currency"/>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:element name="note" type="xs:string"/>
+  <xs:group name="Stamp">
+    <xs:sequence>
+      <xs:element name="stamp" type="xs:dateTime"/>
+    </xs:sequence>
+  </xs:group>
+</xs:schema>

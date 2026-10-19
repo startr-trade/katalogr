@@ -25,6 +25,14 @@ impl ExtensionRegistry {
             .map(|e| e.as_ref())
     }
 
+    /// The registered extractor with this id.
+    pub fn by_id(&self, id: &str) -> Option<&dyn Extractor> {
+        self.extractors
+            .iter()
+            .find(|e| e.id() == id)
+            .map(|e| e.as_ref())
+    }
+
     /// Registered extractors in registration order.
     pub fn extractors(&self) -> impl Iterator<Item = &dyn Extractor> {
         self.extractors.iter().map(|e| e.as_ref())

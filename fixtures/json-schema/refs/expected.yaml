@@ -1,0 +1,181 @@
+mode: exact
+symbols:
+- fx:a/main.schema.json#type:Alias
+- fx:a/main.schema.json#type:Cat
+- fx:a/main.schema.json#type:Cat/field:lives
+- fx:a/main.schema.json#type:Derived
+- fx:a/main.schema.json#type:Derived/field:extra
+- fx:a/main.schema.json#type:Dog
+- fx:a/main.schema.json#type:Dog/field:bark
+- fx:a/main.schema.json#type:Local
+- fx:a/main.schema.json#type:Local/field:n
+- fx:a/main.schema.json#type:Main
+- fx:a/main.schema.json#type:Main/field:inner
+- fx:a/main.schema.json#type:Main/field:list
+- fx:a/main.schema.json#type:Main/field:local
+- fx:a/main.schema.json#type:Main/field:lost
+- fx:a/main.schema.json#type:Main/field:money
+- fx:a/main.schema.json#type:Main/field:pet
+- fx:a/main.schema.json#type:Main/field:remote
+- fx:a/main.schema.json#type:Main/field:whole
+- fx:b/common.schema.json#type:Common
+- fx:b/common.schema.json#type:Common/field:id
+- fx:b/common.schema.json#type:Money
+- fx:b/common.schema.json#type:Money/field:amount
+- fx:c/with-id.schema.json#type:Ext
+- fx:c/with-id.schema.json#type:Ext/field:e
+contracts:
+- contract:schema_type:{https%3A%2F%2Fexample.test%2Fschemas%2Fext.json}Ext
+- contract:schema_type:{}Alias
+- contract:schema_type:{}Cat
+- contract:schema_type:{}Common
+- contract:schema_type:{}Derived
+- contract:schema_type:{}Dog
+- contract:schema_type:{}Local
+- contract:schema_type:{}Main
+- contract:schema_type:{}Money
+links:
+- from: fx:a/main.schema.json#type:Alias
+  kind: declares
+  to: contract:schema_type:{}Alias
+  confidence: Inferred
+- from: fx:a/main.schema.json#type:Alias
+  kind: extends
+  to: fx:b/common.schema.json#type:Money
+  confidence: Extracted
+- from: fx:a/main.schema.json#type:Alias
+  kind: imports
+  to: fx:b/common.schema.json
+  confidence: Extracted
+- from: fx:a/main.schema.json#type:Cat
+  kind: contains
+  to: fx:a/main.schema.json#type:Cat/field:lives
+  confidence: Extracted
+- from: fx:a/main.schema.json#type:Cat
+  kind: declares
+  to: contract:schema_type:{}Cat
+  confidence: Inferred
+- from: fx:a/main.schema.json#type:Derived
+  kind: contains
+  to: fx:a/main.schema.json#type:Derived/field:extra
+  confidence: Extracted
+- from: fx:a/main.schema.json#type:Derived
+  kind: declares
+  to: contract:schema_type:{}Derived
+  confidence: Inferred
+- from: fx:a/main.schema.json#type:Derived
+  kind: extends
+  to: fx:a/main.schema.json#type:Local
+  confidence: Extracted
+- from: fx:a/main.schema.json#type:Dog
+  kind: contains
+  to: fx:a/main.schema.json#type:Dog/field:bark
+  confidence: Extracted
+- from: fx:a/main.schema.json#type:Dog
+  kind: declares
+  to: contract:schema_type:{}Dog
+  confidence: Inferred
+- from: fx:a/main.schema.json#type:Local
+  kind: contains
+  to: fx:a/main.schema.json#type:Local/field:n
+  confidence: Extracted
+- from: fx:a/main.schema.json#type:Local
+  kind: declares
+  to: contract:schema_type:{}Local
+  confidence: Inferred
+- from: fx:a/main.schema.json#type:Main
+  kind: contains
+  to: fx:a/main.schema.json#type:Main/field:inner
+  confidence: Extracted
+- from: fx:a/main.schema.json#type:Main
+  kind: contains
+  to: fx:a/main.schema.json#type:Main/field:list
+  confidence: Extracted
+- from: fx:a/main.schema.json#type:Main
+  kind: contains
+  to: fx:a/main.schema.json#type:Main/field:local
+  confidence: Extracted
+- from: fx:a/main.schema.json#type:Main
+  kind: contains
+  to: fx:a/main.schema.json#type:Main/field:lost
+  confidence: Extracted
+- from: fx:a/main.schema.json#type:Main
+  kind: contains
+  to: fx:a/main.schema.json#type:Main/field:money
+  confidence: Extracted
+- from: fx:a/main.schema.json#type:Main
+  kind: contains
+  to: fx:a/main.schema.json#type:Main/field:pet
+  confidence: Extracted
+- from: fx:a/main.schema.json#type:Main
+  kind: contains
+  to: fx:a/main.schema.json#type:Main/field:remote
+  confidence: Extracted
+- from: fx:a/main.schema.json#type:Main
+  kind: contains
+  to: fx:a/main.schema.json#type:Main/field:whole
+  confidence: Extracted
+- from: fx:a/main.schema.json#type:Main
+  kind: declares
+  to: contract:schema_type:{}Main
+  confidence: Inferred
+- from: fx:a/main.schema.json#type:Main/field:list
+  kind: uses-type
+  to: fx:a/main.schema.json#type:Local
+  confidence: Extracted
+- from: fx:a/main.schema.json#type:Main/field:local
+  kind: uses-type
+  to: fx:a/main.schema.json#type:Local
+  confidence: Extracted
+- from: fx:a/main.schema.json#type:Main/field:money
+  kind: imports
+  to: fx:b/common.schema.json
+  confidence: Extracted
+- from: fx:a/main.schema.json#type:Main/field:money
+  kind: uses-type
+  to: fx:b/common.schema.json#type:Money
+  confidence: Extracted
+- from: fx:a/main.schema.json#type:Main/field:pet
+  kind: uses-type
+  to: fx:a/main.schema.json#type:Cat
+  confidence: Extracted
+- from: fx:a/main.schema.json#type:Main/field:pet
+  kind: uses-type
+  to: fx:a/main.schema.json#type:Dog
+  confidence: Extracted
+- from: fx:a/main.schema.json#type:Main/field:remote
+  kind: uses-type
+  to: fx:c/with-id.schema.json#type:Ext
+  confidence: Extracted
+- from: fx:a/main.schema.json#type:Main/field:whole
+  kind: imports
+  to: fx:b/common.schema.json
+  confidence: Extracted
+- from: fx:a/main.schema.json#type:Main/field:whole
+  kind: uses-type
+  to: fx:b/common.schema.json#type:Common
+  confidence: Extracted
+- from: fx:b/common.schema.json#type:Common
+  kind: contains
+  to: fx:b/common.schema.json#type:Common/field:id
+  confidence: Extracted
+- from: fx:b/common.schema.json#type:Common
+  kind: declares
+  to: contract:schema_type:{}Common
+  confidence: Inferred
+- from: fx:b/common.schema.json#type:Money
+  kind: contains
+  to: fx:b/common.schema.json#type:Money/field:amount
+  confidence: Extracted
+- from: fx:b/common.schema.json#type:Money
+  kind: declares
+  to: contract:schema_type:{}Money
+  confidence: Inferred
+- from: fx:c/with-id.schema.json#type:Ext
+  kind: contains
+  to: fx:c/with-id.schema.json#type:Ext/field:e
+  confidence: Extracted
+- from: fx:c/with-id.schema.json#type:Ext
+  kind: declares
+  to: contract:schema_type:{https%3A%2F%2Fexample.test%2Fschemas%2Fext.json}Ext
+  confidence: Extracted

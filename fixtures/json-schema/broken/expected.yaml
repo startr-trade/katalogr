@@ -1,0 +1,36 @@
+mode: exact
+symbols:
+- fx:schemas/broken.schema.json#type:Broken
+- fx:schemas/broken.schema.json#type:Broken/field:a
+- fx:schemas/broken.schema.json#type:Broken/field:b
+- fx:schemas/broken.schema.yaml#type:BrokenYaml
+- fx:schemas/broken.schema.yaml#type:BrokenYaml/field:a
+- fx:schemas/broken.schema.yaml#type:BrokenYaml/field:b
+contracts:
+- contract:schema_type:{}Broken
+- contract:schema_type:{}BrokenYaml
+links:
+- from: fx:schemas/broken.schema.json#type:Broken
+  kind: contains
+  to: fx:schemas/broken.schema.json#type:Broken/field:a
+  confidence: Extracted
+- from: fx:schemas/broken.schema.json#type:Broken
+  kind: contains
+  to: fx:schemas/broken.schema.json#type:Broken/field:b
+  confidence: Extracted
+- from: fx:schemas/broken.schema.json#type:Broken
+  kind: declares
+  to: contract:schema_type:{}Broken
+  confidence: Inferred
+- from: fx:schemas/broken.schema.yaml#type:BrokenYaml
+  kind: contains
+  to: fx:schemas/broken.schema.yaml#type:BrokenYaml/field:a
+  confidence: Extracted
+- from: fx:schemas/broken.schema.yaml#type:BrokenYaml
+  kind: contains
+  to: fx:schemas/broken.schema.yaml#type:BrokenYaml/field:b
+  confidence: Extracted
+- from: fx:schemas/broken.schema.yaml#type:BrokenYaml
+  kind: declares
+  to: contract:schema_type:{}BrokenYaml
+  confidence: Inferred

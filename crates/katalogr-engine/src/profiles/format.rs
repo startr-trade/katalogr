@@ -1,4 +1,5 @@
-//! The profile file format (ADR-0017): YAML with `profile`, `version`, `rules`. Parsing
+//! The profile file format (ADR-0017, ADR-0020): YAML with `profile`, `version`, `select`
+//! (version 2) and `rules`. Parsing
 //! validates everything it can, so a refused file names a line and a reason. Errors raised
 //! inside `Deserialize` impls carry the position of the node being read (serde_yaml_ng adds it).
 
@@ -9,14 +10,27 @@ use serde::Deserialize;
 use serde::de::{self, Deserializer};
 use std::collections::BTreeMap;
 
-/// The only `version` this build reads.
-pub const FORMAT_VERSION: u32 = 1;
+/// The latest `version`, the one new files are written in.
+pub const FORMAT_VERSION: u32 = 2;
+/// The versions this build reads.
+pub const FORMAT_VERSIONS: &[u32] = &[1, 2];
 
 /// A parsed, validated profile file.
 #[derive(Debug, Clone)]
 pub struct ProfileDoc {
     pub profile: String,
+    pub version: u32,
+    pub select: Vec<Select>,
     pub rules: Vec<Rule>,
+}
+
+/// `select` (version 2): route the files a glob matches to a registered extension.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Select {
+    /// An extractor id.
+    pub extension: String,
+    pub path: PathGlob,
 }
 
 #[derive(Deserialize)]
@@ -24,6 +38,8 @@ pub struct ProfileDoc {
 struct RawDoc {
     profile: String,
     version: u32,
+    #[serde(default)]
+    select: Vec<Select>,
     #[serde(default)]
     rules: Vec<Rule>,
 }
@@ -37,11 +53,35 @@ impl<'de> Deserialize<'de> for ProfileDoc {
                 raw.profile
             )));
         }
-        if raw.version != FORMAT_VERSION {
+        if !FORMAT_VERSIONS.contains(&raw.version) {
             return Err(de::Error::custom(format!(
-                "unsupported version {} (this build reads version {FORMAT_VERSION})",
-                raw.version
+                "unsupported version {} (this build reads versions {})",
+                raw.version,
+                FORMAT_VERSIONS
+                    .iter()
+                    .map(u32::to_string)
+                    .collect::<Vec<_>>()
+                    .join(" and ")
             )));
+        }
+        for s in &raw.select {
+            if !is_word(&s.extension) {
+                return Err(de::Error::custom(format!(
+                    "select extension {:?} must be letters, digits, '_', '-' or '.'",
+                    s.extension
+                )));
+            }
+        }
+        if raw.version < 2 {
+            if !raw.select.is_empty() {
+                return Err(de::Error::custom(NEEDS_SELECT));
+            }
+            if raw.rules.iter().any(|r| r.uses_fact()) {
+                return Err(de::Error::custom(NEEDS_FACT));
+            }
+            if raw.rules.iter().any(|r| r.uses_scope()) {
+                return Err(de::Error::custom(NEEDS_SCOPE));
+            }
         }
         let mut seen = std::collections::BTreeSet::new();
         for r in &raw.rules {
@@ -51,10 +91,18 @@ impl<'de> Deserialize<'de> for ProfileDoc {
         }
         Ok(ProfileDoc {
             profile: raw.profile,
+            version: raw.version,
+            select: raw.select,
             rules: raw.rules,
         })
     }
 }
+
+/// Messages of the refusal of a version 2 feature in a version 1 file; `document_line` finds
+/// their line by these texts.
+pub(crate) const NEEDS_SELECT: &str = "`select` needs version: 2";
+pub(crate) const NEEDS_FACT: &str = "`${fact:}` needs version: 2";
+pub(crate) const NEEDS_SCOPE: &str = "`${scope:}` needs version: 2";
 
 fn is_word(s: &str) -> bool {
     !s.is_empty()
@@ -125,9 +173,14 @@ pub enum Piece {
     /// `$1` to `$9`.
     Capture(usize),
     Var(Var),
+    /// `${fact:<name>}` (version 2): the matched symbol's fact, when it is a string.
+    Fact(String),
+    /// `${scope:<a>/<b>}` (version 2): the `value` fact of the nearest enclosing symbol path.
+    Scope(Vec<String>),
 }
 
-/// A string with `$1`..`$9`, `$name`, `$repo`, `$path`, `$dir`; `$$` is a literal dollar.
+/// A string with `$1`..`$9`, `$name`, `$repo`, `$path`, `$dir`, and (version 2) `${fact:name}`
+/// and `${scope:a/b}`; `$$` is a literal dollar.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Template(pub Vec<Piece>);
 
@@ -151,6 +204,47 @@ impl Template {
                 Some('$') => {
                     chars.next();
                     lit.push('$');
+                }
+                Some('{') => {
+                    chars.next();
+                    let mut body = String::new();
+                    loop {
+                        match chars.next() {
+                            Some('}') => break,
+                            Some(c) => body.push(c),
+                            None => return Err(format!("{s:?}: a '${{' is not closed by '}}'")),
+                        }
+                    }
+                    let (kind, name) = body.split_once(':').unwrap_or((body.as_str(), ""));
+                    let name_ok = |n: &str| {
+                        !n.is_empty()
+                            && n.chars().all(|c| {
+                                c.is_ascii_alphanumeric()
+                                    || matches!(c, '_' | '@' | '#' | '.' | '-')
+                            })
+                    };
+                    let piece = match kind {
+                        "fact" if name_ok(name) => Piece::Fact(name.to_string()),
+                        "scope" if !name.is_empty() && name.split('/').all(name_ok) => {
+                            Piece::Scope(name.split('/').map(str::to_string).collect())
+                        }
+                        "fact" | "scope" => {
+                            return Err(format!(
+                                "{s:?}: ${{{kind}:..}} needs a name of letters, digits, '_', '@', '#', '.' or '-'{}",
+                                if kind == "scope" {
+                                    " (parts joined by '/')"
+                                } else {
+                                    ""
+                                }
+                            ));
+                        }
+                        other => {
+                            return Err(format!(
+                                "{s:?}: unknown template variable ${{{other}:..}} (use ${{fact:..}} or ${{scope:..}})"
+                            ));
+                        }
+                    };
+                    flush(&mut lit, piece, &mut pieces);
                 }
                 Some(d) if d.is_ascii_digit() => {
                     chars.next();
@@ -207,6 +301,19 @@ impl Template {
             })
             .max()
             .unwrap_or(0)
+    }
+
+    /// True when a piece needs profile format version 2.
+    pub fn uses_v2(&self) -> bool {
+        self.uses_fact() || self.uses_scope()
+    }
+
+    fn uses_fact(&self) -> bool {
+        self.0.iter().any(|p| matches!(p, Piece::Fact(_)))
+    }
+
+    fn uses_scope(&self) -> bool {
+        self.0.iter().any(|p| matches!(p, Piece::Scope(_)))
     }
 
     /// The text when the template has no variables or captures.
@@ -404,6 +511,47 @@ pub struct Rule {
 }
 
 impl Rule {
+    /// Every template of the emit part.
+    fn templates(&self) -> Vec<&Template> {
+        let mut out = Vec::new();
+        if let Some(b) = &self.emit.bind {
+            out.push(&b.kind);
+            out.push(&b.key);
+        }
+        if let Some(r) = &self.emit.reference {
+            for c in &r.candidates {
+                out.push(&c.ns);
+                out.push(&c.key);
+            }
+        }
+        if let Some(f) = &self.emit.fact {
+            fn walk<'a>(spec: &'a FactSpec, out: &mut Vec<&'a Template>) {
+                match spec {
+                    FactSpec::Str(t) => out.push(t),
+                    FactSpec::List(l) => l.iter().for_each(|s| walk(s, out)),
+                    FactSpec::Map(m) => m.values().for_each(|s| walk(s, out)),
+                    _ => {}
+                }
+            }
+            f.values().for_each(|s| walk(s, &mut out));
+        }
+        out
+    }
+
+    /// True when a template reads a `${scope:..}`.
+    pub fn uses_scope(&self) -> bool {
+        self.templates().iter().any(|t| t.uses_scope())
+    }
+
+    fn uses_fact(&self) -> bool {
+        self.templates().iter().any(|t| t.uses_fact())
+    }
+
+    /// True when the rule needs profile format version 2.
+    pub fn uses_v2(&self) -> bool {
+        self.templates().iter().any(|t| t.uses_v2())
+    }
+
     /// How many capture groups `$1..$9` can name: those of `matches`, else those of `name`.
     pub fn groups(&self) -> usize {
         match (&self.when.matches, &self.when.name) {
@@ -461,5 +609,42 @@ impl<'de> Deserialize<'de> for Rule {
             )));
         }
         Ok(rule)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn scope_template_parses() {
+        let t = Template::parse("a/${scope:schema/type}-${fact:value}-$1-$$").unwrap();
+        assert_eq!(
+            t.0,
+            vec![
+                Piece::Lit("a/".into()),
+                Piece::Scope(vec!["schema".into(), "type".into()]),
+                Piece::Lit("-".into()),
+                Piece::Fact("value".into()),
+                Piece::Lit("-".into()),
+                Piece::Capture(1),
+                Piece::Lit("-$".into()),
+            ]
+        );
+        assert!(t.uses_v2());
+        assert!(!Template::parse("$repo:$dir").unwrap().uses_v2());
+        // Names may carry '@', '#' and '.' (XML attributes, text, dotted keys).
+        assert!(Template::parse("${scope:@id/#text/a.b-c_d}").is_ok());
+        for bad in [
+            "${}",
+            "${fact:}",
+            "${fact:a b}",
+            "${scope:a//b}",
+            "${nope:x}",
+            "${fact:x",
+            "${x}",
+        ] {
+            assert!(Template::parse(bad).is_err(), "{bad}");
+        }
     }
 }

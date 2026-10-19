@@ -1,0 +1,92 @@
+mode: exact
+symbols:
+- fx:schemas/order.schema.json#type:Code
+- fx:schemas/order.schema.json#type:Money
+- fx:schemas/order.schema.json#type:Money/field:amount
+- fx:schemas/order.schema.json#type:Money/field:currency
+- fx:schemas/order.schema.json#type:Order
+- fx:schemas/order.schema.json#type:Order/field:address
+- fx:schemas/order.schema.json#type:Order/field:address/field:city
+- fx:schemas/order.schema.json#type:Order/field:extra
+- fx:schemas/order.schema.json#type:Order/field:id
+- fx:schemas/order.schema.json#type:Order/field:lines
+- fx:schemas/order.schema.json#type:Order/field:lines/field:qty
+- fx:schemas/order.schema.json#type:Order/field:lines/field:sku
+- fx:schemas/order.schema.json#type:Order/field:note
+- fx:schemas/order.schema.json#type:Order/field:placed
+- fx:schemas/order.schema.json#type:Order/field:status
+- fx:schemas/order.schema.json#type:Order/field:tags
+- fx:schemas/order.schema.json#type:Order/field:total
+contracts:
+- contract:schema_type:{}Code
+- contract:schema_type:{}Money
+- contract:schema_type:{}Order
+links:
+- from: fx:schemas/order.schema.json#type:Code
+  kind: declares
+  to: contract:schema_type:{}Code
+  confidence: Inferred
+- from: fx:schemas/order.schema.json#type:Money
+  kind: contains
+  to: fx:schemas/order.schema.json#type:Money/field:amount
+  confidence: Extracted
+- from: fx:schemas/order.schema.json#type:Money
+  kind: contains
+  to: fx:schemas/order.schema.json#type:Money/field:currency
+  confidence: Extracted
+- from: fx:schemas/order.schema.json#type:Money
+  kind: declares
+  to: contract:schema_type:{}Money
+  confidence: Inferred
+- from: fx:schemas/order.schema.json#type:Order
+  kind: contains
+  to: fx:schemas/order.schema.json#type:Order/field:address
+  confidence: Extracted
+- from: fx:schemas/order.schema.json#type:Order
+  kind: contains
+  to: fx:schemas/order.schema.json#type:Order/field:extra
+  confidence: Extracted
+- from: fx:schemas/order.schema.json#type:Order
+  kind: contains
+  to: fx:schemas/order.schema.json#type:Order/field:id
+  confidence: Extracted
+- from: fx:schemas/order.schema.json#type:Order
+  kind: contains
+  to: fx:schemas/order.schema.json#type:Order/field:lines
+  confidence: Extracted
+- from: fx:schemas/order.schema.json#type:Order
+  kind: contains
+  to: fx:schemas/order.schema.json#type:Order/field:note
+  confidence: Extracted
+- from: fx:schemas/order.schema.json#type:Order
+  kind: contains
+  to: fx:schemas/order.schema.json#type:Order/field:placed
+  confidence: Extracted
+- from: fx:schemas/order.schema.json#type:Order
+  kind: contains
+  to: fx:schemas/order.schema.json#type:Order/field:status
+  confidence: Extracted
+- from: fx:schemas/order.schema.json#type:Order
+  kind: contains
+  to: fx:schemas/order.schema.json#type:Order/field:tags
+  confidence: Extracted
+- from: fx:schemas/order.schema.json#type:Order
+  kind: contains
+  to: fx:schemas/order.schema.json#type:Order/field:total
+  confidence: Extracted
+- from: fx:schemas/order.schema.json#type:Order
+  kind: declares
+  to: contract:schema_type:{}Order
+  confidence: Inferred
+- from: fx:schemas/order.schema.json#type:Order/field:address
+  kind: contains
+  to: fx:schemas/order.schema.json#type:Order/field:address/field:city
+  confidence: Extracted
+- from: fx:schemas/order.schema.json#type:Order/field:lines
+  kind: contains
+  to: fx:schemas/order.schema.json#type:Order/field:lines/field:qty
+  confidence: Extracted
+- from: fx:schemas/order.schema.json#type:Order/field:lines
+  kind: contains
+  to: fx:schemas/order.schema.json#type:Order/field:lines/field:sku
+  confidence: Extracted

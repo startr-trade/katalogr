@@ -1,0 +1,10 @@
+title: Shapes
+items:
+  - id: 1
+    label: circle
+base: &base
+  size: 3
+copy:
+  <<: *base
+---
+second: doc

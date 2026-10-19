@@ -9,10 +9,11 @@ use crate::embed::{self, GuestContexts};
 use crate::error::EngineError;
 use crate::failpoint::fail;
 use crate::profiles::{self, ProfileSet};
+use crate::registry::ExtensionRegistry;
 use crate::scan;
 use camino::{Utf8Path, Utf8PathBuf};
 use fs4::FileExt;
-use katalogr_model::{ArtifactName, ExtractError, ExtractInput, Fragment, RelPath};
+use katalogr_model::{ArtifactName, ExtractError, ExtractInput, Extractor, Fragment, RelPath};
 use katalogr_store::blob::git_blob_id;
 use katalogr_store::{
     ErrorRow, JournalEntry, PendingKey, RANK_CONTEXT, ReadTx, Reader, WriteTx, pagerank,
@@ -26,6 +27,22 @@ use std::time::Instant;
 pub struct Processor<'a> {
     engine: &'a Engine,
     _lock: File,
+    /// The profiles in force after the last `refresh_profiles`; they route files to
+    /// extensions when a rescan lists paths.
+    profiles: Option<ProfileSet>,
+}
+
+/// The extractor for `path`: the profile route when it names a registered extension, else the
+/// first registered extractor that handles the path.
+fn extractor_for<'r>(
+    registry: &'r ExtensionRegistry,
+    profiles: &ProfileSet,
+    path: &RelPath,
+) -> Option<&'r dyn Extractor> {
+    profiles
+        .route(path)
+        .and_then(|id| registry.by_id(id))
+        .or_else(|| registry.for_path(path))
 }
 
 /// What one pending path needs.
@@ -66,6 +83,7 @@ impl<'a> Processor<'a> {
             Ok(()) => Ok(Some(Processor {
                 engine,
                 _lock: file,
+                profiles: None,
             })),
             Err(fs4::TryLockError::WouldBlock) => Ok(None),
             Err(fs4::TryLockError::Error(e)) => Err(EngineError::io(&path, e)),
@@ -92,6 +110,9 @@ impl<'a> Processor<'a> {
         let files = inbox.list()?;
         if files.is_empty() {
             return Ok(0);
+        }
+        if self.profiles.is_none() {
+            self.refresh_profiles()?;
         }
         let mut tx = self.engine.cache().write()?;
         let mut ingested = 0;
@@ -154,8 +175,10 @@ impl<'a> Processor<'a> {
         let mut out = BTreeSet::new();
         if let Some(root) = self.engine.roots().get(&ev.repo) {
             let (include, exclude) = self.engine.repo_filters(&ev.repo);
+            let none = ProfileSet::empty();
+            let profiles = self.profiles.as_ref().unwrap_or(&none);
             for p in scan::list_files(root.as_std_path(), &include, &exclude)? {
-                if self.engine.registry().for_path(&p).is_some() {
+                if extractor_for(self.engine.registry(), profiles, &p).is_some() {
                     out.insert(p);
                 }
             }
@@ -213,8 +236,8 @@ impl<'a> Processor<'a> {
         let engine = self.engine;
         let dir = engine.dir();
         self.refresh_embed_signature()?;
-        self.refresh_contexts()?;
         let profiles = self.refresh_profiles()?;
+        self.refresh_contexts()?;
         let snap = engine.cache().read()?;
         let pending = snap.pending_entries(None)?;
         let (mut first, rest): (Vec<_>, Vec<_>) = pending
@@ -336,6 +359,8 @@ impl<'a> Processor<'a> {
         let engine = self.engine;
         let snap = engine.cache().read()?;
         let mut due: BTreeSet<(String, &'static str)> = BTreeSet::new();
+        let none = ProfileSet::empty();
+        let profiles = self.profiles.as_ref().unwrap_or(&none);
         for (key, _) in snap.pending_entries(None)? {
             if !engine.roots().contains_key(&key.repo) {
                 continue;
@@ -345,18 +370,16 @@ impl<'a> Processor<'a> {
                     due.insert((key.repo.clone(), ext.id()));
                 }
             }
-            if let Some(ext) = engine.registry().for_path(&key.path)
+            // The routed extractor (a profile `select`, else the path's own) is the one planned.
+            let routed = extractor_for(engine.registry(), profiles, &key.path);
+            if let Some(ext) = routed
                 && !ext.context_files().is_empty()
                 && snap.ext_context(&key.repo, ext.id())?.is_none()
             {
                 due.insert((key.repo.clone(), ext.id()));
             }
             // A host's guests need their context before the host file is planned.
-            if engine
-                .registry()
-                .for_path(&key.path)
-                .is_some_and(|host| host.embeds())
-            {
+            if routed.is_some_and(|host| host.embeds()) {
                 for g in engine.registry().extractors() {
                     if g.embedded_version().is_some()
                         && !g.context_files().is_empty()
@@ -467,6 +490,7 @@ impl<'a> Processor<'a> {
             .map(|(n, t)| (n.as_str(), t.as_str()))
             .collect();
         let report = ProfileSet::load_keeping(engine.dir().root(), &builtins, &previous);
+        self.profiles = Some(report.set.clone());
         let good =
             serde_json::to_vec(&report.good).map_err(|e| EngineError::Queue(e.to_string()))?;
         let errors =
@@ -543,8 +567,15 @@ impl<'a> Processor<'a> {
                 fin: has_shard.then_some(fin),
             });
         };
-        let Some(extractor) = engine.registry().for_path(&key.path) else {
-            return Ok(Action::Skip);
+        let Some(extractor) = extractor_for(engine.registry(), profiles, &key.path) else {
+            // No extractor applies any more (a `select` was removed, or the extension is gone):
+            // a shard left from before is stale.
+            let has_shard = dir.shard_path(&key.repo, &key.path).exists();
+            return Ok(if has_shard {
+                Action::Delete { fin: Some(fin) }
+            } else {
+                Action::Skip
+            });
         };
         let ctx = snap
             .ext_context(&key.repo, extractor.id())?

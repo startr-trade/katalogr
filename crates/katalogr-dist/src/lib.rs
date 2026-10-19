@@ -19,8 +19,8 @@ pub use claude::{
 pub use error::DistError;
 pub use katalogr_query as query;
 use katalogr_query::{
-    Blame, CallerHit, DanglingRef, Explain, MapEntry, PathStep, RefHit, Resolution, SearchHit,
-    SymbolHit, WhyResult,
+    Blame, CallerHit, DanglingRef, Explain, MapEntry, MirrorDrift, PathStep, RefHit, Resolution,
+    SearchHit, SymbolHit, WhyResult,
 };
 pub use katalogr_query::{ReplaceResult, ShowResult};
 pub use setup::{ProjectCreated, kindex_init, project_init};
@@ -142,6 +142,10 @@ fn build_registry() -> ExtensionRegistry {
     registry.register(Box::new(katalogr_ext_rust::RustExtractor));
     registry.register(Box::new(katalogr_ext_ts::TsExtractor));
     registry.register(Box::new(katalogr_ext_sql::SqlExtractor));
+    registry.register(Box::new(katalogr_ext_schema::XsdExtractor));
+    registry.register(Box::new(katalogr_ext_schema::JsonSchemaExtractor));
+    // Claims no file by itself: a profile `select` routes data documents to it.
+    registry.register(Box::new(katalogr_ext_data::DataExtractor));
     // The board extension claims its own Markdown files before the general one.
     registry.register(Box::new(katalogr_ext_kanbanr::BoardExtractor));
     registry.register(Box::new(katalogr_ext_md::MarkdownExtractor));
@@ -486,6 +490,18 @@ impl Katalogr {
                 kinds
             };
             Ok(Outcome::Found(katalogr_query::dangling(tx, kinds)?))
+        })
+    }
+
+    /// Contracts with two or more declarers (mirrored copies of a structure), compared field by
+    /// field; only `kinds` when given. Pairs with no difference are left out.
+    pub fn mirrors(
+        &self,
+        kinds: &[&str],
+        opts: &Options,
+    ) -> Result<Reply<Vec<MirrorDrift>>, DistError> {
+        self.query(opts, |tx| {
+            Ok(Outcome::Found(katalogr_query::mirror_drift(tx, kinds)?))
         })
     }
 

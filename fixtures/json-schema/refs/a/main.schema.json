@@ -1,0 +1,26 @@
+{
+  "title": "Main",
+  "type": "object",
+  "properties": {
+    "local": { "$ref": "#/$defs/Local" },
+    "money": { "$ref": "../b/common.schema.json#/$defs/Money" },
+    "whole": { "$ref": "../b/common.schema.json" },
+    "remote": { "$ref": "https://example.test/schemas/ext.json#/$defs/Ext" },
+    "inner": { "$ref": "#/properties/local" },
+    "lost": { "$ref": "../../outside.schema.json#/$defs/Gone" },
+    "list": { "type": "array", "items": { "$ref": "#/$defs/Local" } },
+    "pet": { "oneOf": [{ "$ref": "#/$defs/Cat" }, { "$ref": "#/$defs/Dog" }] }
+  },
+  "$defs": {
+    "Local": { "type": "object", "properties": { "n": { "type": "integer" } } },
+    "Cat": { "type": "object", "properties": { "lives": { "type": "integer" } } },
+    "Dog": { "type": "object", "properties": { "bark": { "type": "boolean" } } },
+    "Derived": {
+      "allOf": [
+        { "$ref": "#/$defs/Local" },
+        { "properties": { "extra": { "type": "string" } }, "required": ["extra"] }
+      ]
+    },
+    "Alias": { "$ref": "../b/common.schema.json#/$defs/Money" }
+  }
+}

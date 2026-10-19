@@ -1,0 +1,72 @@
+mode: exact
+symbols:
+- fx:api/events.yaml#type:Placed
+- fx:api/events.yaml#type:Placed/field:at
+- fx:api/events.yaml#type:Placed/field:orderId
+- fx:api/openapi.yaml#type:Owner
+- fx:api/openapi.yaml#type:Owner/field:id
+- fx:api/openapi.yaml#type:Pet
+- fx:api/openapi.yaml#type:Pet/field:name
+- fx:api/openapi.yaml#type:Pet/field:owner
+- fx:api/openapi.yaml#type:Pet/field:photos
+- fx:api/openapi.yaml#type:Pet/field:tag
+- fx:api/swagger.json#type:Tag
+- fx:api/swagger.json#type:Tag/field:label
+contracts:
+- contract:schema_type:{}Owner
+- contract:schema_type:{}Pet
+- contract:schema_type:{}Placed
+- contract:schema_type:{}Tag
+links:
+- from: fx:api/events.yaml#type:Placed
+  kind: contains
+  to: fx:api/events.yaml#type:Placed/field:at
+  confidence: Extracted
+- from: fx:api/events.yaml#type:Placed
+  kind: contains
+  to: fx:api/events.yaml#type:Placed/field:orderId
+  confidence: Extracted
+- from: fx:api/events.yaml#type:Placed
+  kind: declares
+  to: contract:schema_type:{}Placed
+  confidence: Inferred
+- from: fx:api/openapi.yaml#type:Owner
+  kind: contains
+  to: fx:api/openapi.yaml#type:Owner/field:id
+  confidence: Extracted
+- from: fx:api/openapi.yaml#type:Owner
+  kind: declares
+  to: contract:schema_type:{}Owner
+  confidence: Inferred
+- from: fx:api/openapi.yaml#type:Pet
+  kind: contains
+  to: fx:api/openapi.yaml#type:Pet/field:name
+  confidence: Extracted
+- from: fx:api/openapi.yaml#type:Pet
+  kind: contains
+  to: fx:api/openapi.yaml#type:Pet/field:owner
+  confidence: Extracted
+- from: fx:api/openapi.yaml#type:Pet
+  kind: contains
+  to: fx:api/openapi.yaml#type:Pet/field:photos
+  confidence: Extracted
+- from: fx:api/openapi.yaml#type:Pet
+  kind: contains
+  to: fx:api/openapi.yaml#type:Pet/field:tag
+  confidence: Extracted
+- from: fx:api/openapi.yaml#type:Pet
+  kind: declares
+  to: contract:schema_type:{}Pet
+  confidence: Inferred
+- from: fx:api/openapi.yaml#type:Pet/field:owner
+  kind: uses-type
+  to: fx:api/openapi.yaml#type:Owner
+  confidence: Extracted
+- from: fx:api/swagger.json#type:Tag
+  kind: contains
+  to: fx:api/swagger.json#type:Tag/field:label
+  confidence: Extracted
+- from: fx:api/swagger.json#type:Tag
+  kind: declares
+  to: contract:schema_type:{}Tag
+  confidence: Inferred

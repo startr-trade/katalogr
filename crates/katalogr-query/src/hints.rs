@@ -1,8 +1,8 @@
 //! Next-query hints: fixed rules per command, so output stays deterministic (FEAT-025 R-9).
 
 use crate::result::{
-    CallerHit, DanglingRef, Explain, MapEntry, PathStep, RefHit, SearchHit, ShowResult, SymbolHit,
-    WhyResult,
+    CallerHit, DanglingRef, Explain, MapEntry, MirrorDrift, PathStep, RefHit, SearchHit,
+    ShowResult, SymbolHit, WhyResult,
 };
 
 /// The most useful symbol of a result, if there is one.
@@ -13,6 +13,12 @@ pub trait HintSource {
 
 /// Unresolved references have no useful symbol to follow up on, so no hints.
 impl HintSource for Vec<DanglingRef> {
+    fn lead(&self) -> Option<String> {
+        None
+    }
+}
+/// A drift is followed up by looking at the contract, which `explain` can do from the output.
+impl HintSource for Vec<MirrorDrift> {
     fn lead(&self) -> Option<String> {
         None
     }

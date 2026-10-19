@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:cm="urn:example:common" targetNamespace="urn:example:orders">
+  <xs:import namespace="urn:example:common" schemaLocation="../common/money.xsd"/>
+  <xs:complexType name="Order">
+    <xs:sequence>
+      <xs:element name="total" type="cm:Money"/>
+      <xs:element name="currency" type="cm:Currency"/>
+      <xs:element ref="cm:note" minOccurs="0"/>
+      <xs:group ref="cm:Stamp"/>
+      <xs:element name="ghost" type="cm:Missing"/>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="Refund">
+    <xs:complexContent>
+      <xs:extension base="cm:Money">
+        <xs:sequence>
+          <xs:element name="reason" type="xs:string"/>
+        </xs:sequence>
+      </xs:extension>
+    </xs:complexContent>
+  </xs:complexType>
+</xs:schema>

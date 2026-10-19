@@ -1,0 +1,105 @@
+mode: exact
+symbols:
+- fx:common/money.xsd#element:note
+- fx:common/money.xsd#group:Stamp
+- fx:common/money.xsd#group:Stamp/field:stamp
+- fx:common/money.xsd#schema:money
+- fx:common/money.xsd#type:Currency
+- fx:common/money.xsd#type:Money
+- fx:common/money.xsd#type:Money/field:amount
+- fx:common/money.xsd#type:Money/field:currency
+- fx:orders/order.xsd#schema:order
+- fx:orders/order.xsd#type:Order
+- fx:orders/order.xsd#type:Order/field:currency
+- fx:orders/order.xsd#type:Order/field:ghost
+- fx:orders/order.xsd#type:Order/field:note
+- fx:orders/order.xsd#type:Order/field:total
+- fx:orders/order.xsd#type:Refund
+- fx:orders/order.xsd#type:Refund/field:reason
+contracts:
+- contract:schema_element:{urn%3Aexample%3Acommon}note
+- contract:schema_type:{urn%3Aexample%3Acommon}Currency
+- contract:schema_type:{urn%3Aexample%3Acommon}Money
+- contract:schema_type:{urn%3Aexample%3Aorders}Order
+- contract:schema_type:{urn%3Aexample%3Aorders}Refund
+links:
+- from: fx:common/money.xsd#element:note
+  kind: declares
+  to: contract:schema_element:{urn%3Aexample%3Acommon}note
+  confidence: Extracted
+- from: fx:common/money.xsd#group:Stamp
+  kind: contains
+  to: fx:common/money.xsd#group:Stamp/field:stamp
+  confidence: Extracted
+- from: fx:common/money.xsd#type:Currency
+  kind: declares
+  to: contract:schema_type:{urn%3Aexample%3Acommon}Currency
+  confidence: Extracted
+- from: fx:common/money.xsd#type:Money
+  kind: contains
+  to: fx:common/money.xsd#type:Money/field:amount
+  confidence: Extracted
+- from: fx:common/money.xsd#type:Money
+  kind: contains
+  to: fx:common/money.xsd#type:Money/field:currency
+  confidence: Extracted
+- from: fx:common/money.xsd#type:Money
+  kind: declares
+  to: contract:schema_type:{urn%3Aexample%3Acommon}Money
+  confidence: Extracted
+- from: fx:common/money.xsd#type:Money/field:currency
+  kind: uses-type
+  to: fx:common/money.xsd#type:Currency
+  confidence: Extracted
+- from: fx:orders/order.xsd#schema:order
+  kind: imports
+  to: fx:common/money.xsd
+  confidence: Extracted
+- from: fx:orders/order.xsd#type:Order
+  kind: contains
+  to: fx:orders/order.xsd#type:Order/field:currency
+  confidence: Extracted
+- from: fx:orders/order.xsd#type:Order
+  kind: contains
+  to: fx:orders/order.xsd#type:Order/field:ghost
+  confidence: Extracted
+- from: fx:orders/order.xsd#type:Order
+  kind: contains
+  to: fx:orders/order.xsd#type:Order/field:note
+  confidence: Extracted
+- from: fx:orders/order.xsd#type:Order
+  kind: contains
+  to: fx:orders/order.xsd#type:Order/field:total
+  confidence: Extracted
+- from: fx:orders/order.xsd#type:Order
+  kind: declares
+  to: contract:schema_type:{urn%3Aexample%3Aorders}Order
+  confidence: Extracted
+- from: fx:orders/order.xsd#type:Order
+  kind: uses-group
+  to: fx:common/money.xsd#group:Stamp
+  confidence: Extracted
+- from: fx:orders/order.xsd#type:Order/field:currency
+  kind: uses-type
+  to: fx:common/money.xsd#type:Currency
+  confidence: Extracted
+- from: fx:orders/order.xsd#type:Order/field:note
+  kind: uses-element
+  to: fx:common/money.xsd#element:note
+  confidence: Extracted
+- from: fx:orders/order.xsd#type:Order/field:total
+  kind: uses-type
+  to: fx:common/money.xsd#type:Money
+  confidence: Extracted
+- from: fx:orders/order.xsd#type:Refund
+  kind: contains
+  to: fx:orders/order.xsd#type:Refund/field:reason
+  confidence: Extracted
+- from: fx:orders/order.xsd#type:Refund
+  kind: declares
+  to: contract:schema_type:{urn%3Aexample%3Aorders}Refund
+  confidence: Extracted
+- from: fx:orders/order.xsd#type:Refund
+  kind: extends
+  to: fx:common/money.xsd#type:Money
+  confidence: Extracted
