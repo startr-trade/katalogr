@@ -1,0 +1,56 @@
+mode: subset
+symbols:
+- fx:Cargo.toml#crate:shop
+- fx:migrations/V1__init.sql#table:public.orders
+- fx:migrations/V1__init.sql#table:public.orders/column:customer_id
+- fx:migrations/V1__init.sql#table:public.orders/column:id
+- fx:migrations/V1__init.sql#table:public.orders/column:total
+- fx:src/lib.rs#fn:greeting
+- fx:src/lib.rs#fn:load_orders
+- fx:src/lib.rs#fn:orders_url
+- fx:src/lib.rs#fn:purge
+contracts:
+- contract:sql_column:public.orders.customer_id
+- contract:sql_column:public.orders.id
+- contract:sql_column:public.orders.total
+- contract:sql_routine:app.purge
+- contract:sql_table:public.orders
+links:
+- from: fx:migrations/V1__init.sql#table:public.orders
+  kind: contains
+  to: fx:migrations/V1__init.sql#table:public.orders/column:customer_id
+  confidence: Extracted
+- from: fx:migrations/V1__init.sql#table:public.orders
+  kind: contains
+  to: fx:migrations/V1__init.sql#table:public.orders/column:id
+  confidence: Extracted
+- from: fx:migrations/V1__init.sql#table:public.orders
+  kind: contains
+  to: fx:migrations/V1__init.sql#table:public.orders/column:total
+  confidence: Extracted
+- from: fx:migrations/V1__init.sql#table:public.orders
+  kind: provides
+  to: contract:sql_table:public.orders
+  confidence: Extracted
+- from: fx:migrations/V1__init.sql#table:public.orders/column:customer_id
+  kind: provides
+  to: contract:sql_column:public.orders.customer_id
+  confidence: Extracted
+- from: fx:migrations/V1__init.sql#table:public.orders/column:id
+  kind: provides
+  to: contract:sql_column:public.orders.id
+  confidence: Extracted
+- from: fx:migrations/V1__init.sql#table:public.orders/column:total
+  kind: provides
+  to: contract:sql_column:public.orders.total
+  confidence: Extracted
+- from: fx:src/lib.rs#fn:load_orders
+  kind: consumes
+  to: contract:sql_table:public.orders
+  confidence: Inferred
+  produced_by: embedded:sql
+- from: fx:src/lib.rs#fn:purge
+  kind: consumes
+  to: contract:sql_routine:app.purge
+  confidence: Inferred
+  produced_by: embedded:sql

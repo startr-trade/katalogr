@@ -1,0 +1,30 @@
+mode: subset
+symbols:
+- fx:views.sql#view:public.open_orders
+- fx:views.sql#view:public.order_totals
+contracts:
+- contract:sql_table:public.customers
+- contract:sql_table:public.open_orders
+- contract:sql_table:public.order_totals
+- contract:sql_table:public.orders
+links:
+- from: fx:views.sql#view:public.open_orders
+  kind: consumes
+  to: contract:sql_table:public.customers
+  confidence: Extracted
+- from: fx:views.sql#view:public.open_orders
+  kind: consumes
+  to: contract:sql_table:public.orders
+  confidence: Extracted
+- from: fx:views.sql#view:public.open_orders
+  kind: provides
+  to: contract:sql_table:public.open_orders
+  confidence: Extracted
+- from: fx:views.sql#view:public.order_totals
+  kind: consumes
+  to: contract:sql_table:public.orders
+  confidence: Extracted
+- from: fx:views.sql#view:public.order_totals
+  kind: provides
+  to: contract:sql_table:public.order_totals
+  confidence: Extracted

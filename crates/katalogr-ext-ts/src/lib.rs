@@ -8,12 +8,13 @@ pub mod context;
 pub mod extract;
 pub mod items;
 pub mod lines;
+pub mod literals;
 pub mod modules;
 pub(crate) mod wasm;
 
 pub use context::{TsContext, TsProject};
 
-use katalogr_model::{ExtractError, ExtractInput, Extractor, Fragment, RelPath};
+use katalogr_model::{ExtractError, ExtractInput, Extraction, Extractor, Fragment, RelPath};
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct TsExtractor;
@@ -66,13 +67,15 @@ impl Extractor for TsExtractor {
             "parse-error",
             "wasm-import",
             "wasm-glue",
+            "embedded-literals",
         ]
     }
 
     /// Bumped when extraction output changes for unchanged input: `1` adds the wasm package
-    /// bindings (FEAT-016).
+    /// bindings (FEAT-016); `2` offers string literals to guest
+    /// extensions (FEAT-017).
     fn revision_salt(&self) -> &'static str {
-        "ts-extract-1"
+        "ts-extract-2"
     }
 
     /// The [`TsContext`] as compact JSON with sorted keys and vectors.
@@ -89,5 +92,13 @@ impl Extractor for TsExtractor {
         input: &ExtractInput,
     ) -> Result<(Fragment, Vec<ExtractError>), ExtractError> {
         extract::extract_with_errors(input)
+    }
+
+    fn embeds(&self) -> bool {
+        true
+    }
+
+    fn extract_full(&self, input: &ExtractInput) -> Result<Extraction, ExtractError> {
+        extract::extract_full(input)
     }
 }

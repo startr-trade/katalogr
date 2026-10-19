@@ -1,0 +1,24 @@
+mode: subset
+symbols: []
+contracts:
+- contract:sql_routine:app.purge
+- contract:sql_table:public.audit
+- contract:sql_table:public.customers
+- contract:sql_table:public.orders
+links:
+- from: fx:queries.sql
+  kind: consumes
+  to: contract:sql_routine:app.purge
+  confidence: Extracted
+- from: fx:queries.sql
+  kind: consumes
+  to: contract:sql_table:public.audit
+  confidence: Extracted
+- from: fx:queries.sql
+  kind: consumes
+  to: contract:sql_table:public.customers
+  confidence: Extracted
+- from: fx:queries.sql
+  kind: consumes
+  to: contract:sql_table:public.orders
+  confidence: Extracted

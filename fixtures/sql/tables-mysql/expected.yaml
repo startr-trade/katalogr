@@ -1,0 +1,76 @@
+mode: subset
+symbols:
+- fx:schema.sql#table:public.customers
+- fx:schema.sql#table:public.customers/column:email
+- fx:schema.sql#table:public.customers/column:id
+- fx:schema.sql#table:public.orders
+- fx:schema.sql#table:public.orders/column:customer_id
+- fx:schema.sql#table:public.orders/column:id
+- fx:schema.sql#table:public.orders/column:note
+- fx:schema.sql#table:public.orders/column:total
+contracts:
+- contract:sql_column:public.customers.email
+- contract:sql_column:public.customers.id
+- contract:sql_column:public.orders.customer_id
+- contract:sql_column:public.orders.id
+- contract:sql_column:public.orders.note
+- contract:sql_column:public.orders.total
+- contract:sql_table:public.customers
+- contract:sql_table:public.orders
+links:
+- from: fx:schema.sql#table:public.customers
+  kind: contains
+  to: fx:schema.sql#table:public.customers/column:email
+  confidence: Extracted
+- from: fx:schema.sql#table:public.customers
+  kind: contains
+  to: fx:schema.sql#table:public.customers/column:id
+  confidence: Extracted
+- from: fx:schema.sql#table:public.customers
+  kind: provides
+  to: contract:sql_table:public.customers
+  confidence: Extracted
+- from: fx:schema.sql#table:public.customers/column:email
+  kind: provides
+  to: contract:sql_column:public.customers.email
+  confidence: Extracted
+- from: fx:schema.sql#table:public.customers/column:id
+  kind: provides
+  to: contract:sql_column:public.customers.id
+  confidence: Extracted
+- from: fx:schema.sql#table:public.orders
+  kind: contains
+  to: fx:schema.sql#table:public.orders/column:customer_id
+  confidence: Extracted
+- from: fx:schema.sql#table:public.orders
+  kind: contains
+  to: fx:schema.sql#table:public.orders/column:id
+  confidence: Extracted
+- from: fx:schema.sql#table:public.orders
+  kind: contains
+  to: fx:schema.sql#table:public.orders/column:note
+  confidence: Extracted
+- from: fx:schema.sql#table:public.orders
+  kind: contains
+  to: fx:schema.sql#table:public.orders/column:total
+  confidence: Extracted
+- from: fx:schema.sql#table:public.orders
+  kind: provides
+  to: contract:sql_table:public.orders
+  confidence: Extracted
+- from: fx:schema.sql#table:public.orders/column:customer_id
+  kind: provides
+  to: contract:sql_column:public.orders.customer_id
+  confidence: Extracted
+- from: fx:schema.sql#table:public.orders/column:id
+  kind: provides
+  to: contract:sql_column:public.orders.id
+  confidence: Extracted
+- from: fx:schema.sql#table:public.orders/column:note
+  kind: provides
+  to: contract:sql_column:public.orders.note
+  confidence: Extracted
+- from: fx:schema.sql#table:public.orders/column:total
+  kind: provides
+  to: contract:sql_column:public.orders.total
+  confidence: Extracted

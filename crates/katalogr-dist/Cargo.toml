@@ -16,6 +16,7 @@ katalogr-query.workspace = true
 katalogr-engine.workspace = true
 katalogr-ext-rust.workspace = true
 katalogr-ext-ts.workspace = true
+katalogr-ext-sql.workspace = true
 katalogr-ext-md.workspace = true
 katalogr-ext-kanbanr.workspace = true
 katalogr-model.workspace = true

@@ -1,0 +1,1 @@
+CREATE TRIGGER orders_touch BEFORE UPDATE ON orders FOR EACH ROW EXECUTE FUNCTION app.touch();

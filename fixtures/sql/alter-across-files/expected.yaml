@@ -1,0 +1,59 @@
+mode: subset
+symbols:
+- fx:db/migration/V1__create_orders.sql#table:public.orders
+- fx:db/migration/V1__create_orders.sql#table:public.orders/column:id
+- fx:db/migration/V1__create_orders.sql#table:public.orders/column:legacy
+- fx:db/migration/V2__add_total.sql#table:public.orders
+- fx:db/migration/V2__add_total.sql#table:public.orders/column:total
+- fx:db/migration/V3__drop_legacy.sql#table:public.orders
+- fx:db/migration/V3__drop_legacy.sql#table:public.orders/column:legacy
+contracts:
+- contract:sql_column:public.orders.id
+- contract:sql_column:public.orders.legacy
+- contract:sql_column:public.orders.total
+- contract:sql_table:public.orders
+links:
+- from: fx:db/migration/V1__create_orders.sql#table:public.orders
+  kind: contains
+  to: fx:db/migration/V1__create_orders.sql#table:public.orders/column:id
+  confidence: Extracted
+- from: fx:db/migration/V1__create_orders.sql#table:public.orders
+  kind: contains
+  to: fx:db/migration/V1__create_orders.sql#table:public.orders/column:legacy
+  confidence: Extracted
+- from: fx:db/migration/V1__create_orders.sql#table:public.orders
+  kind: provides
+  to: contract:sql_table:public.orders
+  confidence: Extracted
+- from: fx:db/migration/V1__create_orders.sql#table:public.orders/column:id
+  kind: provides
+  to: contract:sql_column:public.orders.id
+  confidence: Extracted
+- from: fx:db/migration/V1__create_orders.sql#table:public.orders/column:legacy
+  kind: provides
+  to: contract:sql_column:public.orders.legacy
+  confidence: Extracted
+- from: fx:db/migration/V2__add_total.sql#table:public.orders
+  kind: contains
+  to: fx:db/migration/V2__add_total.sql#table:public.orders/column:total
+  confidence: Extracted
+- from: fx:db/migration/V2__add_total.sql#table:public.orders
+  kind: provides
+  to: contract:sql_table:public.orders
+  confidence: Extracted
+- from: fx:db/migration/V2__add_total.sql#table:public.orders/column:total
+  kind: provides
+  to: contract:sql_column:public.orders.total
+  confidence: Extracted
+- from: fx:db/migration/V3__drop_legacy.sql#table:public.orders
+  kind: contains
+  to: fx:db/migration/V3__drop_legacy.sql#table:public.orders/column:legacy
+  confidence: Extracted
+- from: fx:db/migration/V3__drop_legacy.sql#table:public.orders
+  kind: provides
+  to: contract:sql_table:public.orders
+  confidence: Extracted
+- from: fx:db/migration/V3__drop_legacy.sql#table:public.orders/column:legacy
+  kind: declares
+  to: contract:sql_column:public.orders.legacy
+  confidence: Extracted

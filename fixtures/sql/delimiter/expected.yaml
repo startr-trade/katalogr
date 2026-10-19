@@ -1,0 +1,25 @@
+mode: subset
+symbols:
+- fx:mysql.sql#procedure:public.settle
+contracts:
+- contract:sql_routine:public.settle
+- contract:sql_table:public.audit
+- contract:sql_table:public.customers
+- contract:sql_table:public.orders
+links:
+- from: fx:mysql.sql
+  kind: consumes
+  to: contract:sql_table:public.customers
+  confidence: Extracted
+- from: fx:mysql.sql#procedure:public.settle
+  kind: consumes
+  to: contract:sql_table:public.audit
+  confidence: Inferred
+- from: fx:mysql.sql#procedure:public.settle
+  kind: consumes
+  to: contract:sql_table:public.orders
+  confidence: Inferred
+- from: fx:mysql.sql#procedure:public.settle
+  kind: provides
+  to: contract:sql_routine:public.settle
+  confidence: Inferred

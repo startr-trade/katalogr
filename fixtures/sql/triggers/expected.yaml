@@ -1,0 +1,34 @@
+mode: subset
+symbols:
+- fx:mysql.sql#trigger:public.orders_ai
+- fx:pg.sql#trigger:public.orders_touch
+- fx:sqlite.sql#trigger:public.orders_log
+contracts:
+- contract:sql_routine:app.touch
+- contract:sql_table:public.audit
+- contract:sql_table:public.orders
+links:
+- from: fx:mysql.sql#trigger:public.orders_ai
+  kind: consumes
+  to: contract:sql_table:public.audit
+  confidence: Inferred
+- from: fx:mysql.sql#trigger:public.orders_ai
+  kind: consumes
+  to: contract:sql_table:public.orders
+  confidence: Inferred
+- from: fx:pg.sql#trigger:public.orders_touch
+  kind: consumes
+  to: contract:sql_routine:app.touch
+  confidence: Extracted
+- from: fx:pg.sql#trigger:public.orders_touch
+  kind: consumes
+  to: contract:sql_table:public.orders
+  confidence: Extracted
+- from: fx:sqlite.sql#trigger:public.orders_log
+  kind: consumes
+  to: contract:sql_table:public.audit
+  confidence: Extracted
+- from: fx:sqlite.sql#trigger:public.orders_log
+  kind: consumes
+  to: contract:sql_table:public.orders
+  confidence: Extracted

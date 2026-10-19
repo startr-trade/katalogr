@@ -34,6 +34,8 @@ technologies:
       - rust/calls
     crate-deps:
       - rust/workspace-two-crates
+    embedded-literals:
+      - rust/embedded-sql
     extern-items:
       - rust/extern-items
     impl-links:
@@ -51,6 +53,37 @@ technologies:
       - wasm/scripts-out-dir
     wasm-extern:
       - wasm/extern-imports
+  sql:
+    alter-across-files:
+      - sql/alter-across-files
+    default-schema:
+      - sql/default-schema
+    delimiter:
+      - sql/delimiter
+    dialect-context:
+      - sql/dialect-context
+    dml:
+      - sql/dml
+    foreign-keys:
+      - sql/foreign-keys
+    migrations:
+      - sql/migrations
+    parse-error:
+      - sql/broken
+    policies:
+      - sql/policies
+    procedural-body:
+      - sql/procedural-body
+    routines:
+      - sql/routines
+    tables-columns:
+      - sql/tables-mysql
+      - sql/tables-pg
+      - sql/tables-sqlite
+    triggers:
+      - sql/triggers
+    views:
+      - sql/views
   test:
     contracts:
       - test/contracts-bind
@@ -75,6 +108,8 @@ technologies:
       - ts/commonjs
     constructor-call:
       - ts/new-calls
+    embedded-literals:
+      - ts/embedded-sql
     esm-js-specifier:
       - ts/esm-js-specifiers
     extends-any-name:

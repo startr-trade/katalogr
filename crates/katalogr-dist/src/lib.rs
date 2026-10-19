@@ -141,6 +141,7 @@ fn build_registry() -> ExtensionRegistry {
     let mut registry = ExtensionRegistry::new();
     registry.register(Box::new(katalogr_ext_rust::RustExtractor));
     registry.register(Box::new(katalogr_ext_ts::TsExtractor));
+    registry.register(Box::new(katalogr_ext_sql::SqlExtractor));
     // The board extension claims its own Markdown files before the general one.
     registry.register(Box::new(katalogr_ext_kanbanr::BoardExtractor));
     registry.register(Box::new(katalogr_ext_md::MarkdownExtractor));
