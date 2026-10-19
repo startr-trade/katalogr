@@ -1,0 +1,70 @@
+mode: subset
+symbols:
+- fx:schema.sql#table:public.customers
+- fx:schema.sql#table:public.customers/column:email
+- fx:schema.sql#table:public.customers/column:id
+- fx:schema.sql#table:public.orders
+- fx:schema.sql#table:public.orders/column:customer_id
+- fx:schema.sql#table:public.orders/column:id
+- fx:schema.sql#table:public.orders/column:region_id
+links:
+- from: fx:schema.sql#table:public.customers
+  kind: contains
+  to: fx:schema.sql#table:public.customers/column:email
+  confidence: Extracted
+- from: fx:schema.sql#table:public.customers
+  kind: contains
+  to: fx:schema.sql#table:public.customers/column:id
+  confidence: Extracted
+- from: fx:schema.sql#table:public.customers
+  kind: provides
+  to: ae55660c9bda7db77685392a3bab6377
+  confidence: Extracted
+- from: fx:schema.sql#table:public.customers/column:email
+  kind: provides
+  to: 2638a0b53443c7cd58091a2ca813b63e
+  confidence: Extracted
+- from: fx:schema.sql#table:public.customers/column:id
+  kind: provides
+  to: e7b9f3aaa893f376061286cc2dc4587e
+  confidence: Extracted
+- from: fx:schema.sql#table:public.orders
+  kind: consumes
+  to: 18d032ce38243fe0b250657d6e295158
+  confidence: Extracted
+- from: fx:schema.sql#table:public.orders
+  kind: consumes
+  to: 89ded4fcff698ffe8a42b0fe5ad5af4d
+  confidence: Extracted
+- from: fx:schema.sql#table:public.orders
+  kind: consumes
+  to: ae55660c9bda7db77685392a3bab6377
+  confidence: Extracted
+- from: fx:schema.sql#table:public.orders
+  kind: contains
+  to: fx:schema.sql#table:public.orders/column:customer_id
+  confidence: Extracted
+- from: fx:schema.sql#table:public.orders
+  kind: contains
+  to: fx:schema.sql#table:public.orders/column:id
+  confidence: Extracted
+- from: fx:schema.sql#table:public.orders
+  kind: contains
+  to: fx:schema.sql#table:public.orders/column:region_id
+  confidence: Extracted
+- from: fx:schema.sql#table:public.orders
+  kind: provides
+  to: e71321af6d8f5770318bedc9ac5ff4b1
+  confidence: Extracted
+- from: fx:schema.sql#table:public.orders/column:customer_id
+  kind: provides
+  to: 502ba5fc2801bca1a658a67b6e27d743
+  confidence: Extracted
+- from: fx:schema.sql#table:public.orders/column:id
+  kind: provides
+  to: db368348325213dfe7b2e311b703e399
+  confidence: Extracted
+- from: fx:schema.sql#table:public.orders/column:region_id
+  kind: provides
+  to: b5be058a9c6549a352e674222d88f039
+  confidence: Extracted

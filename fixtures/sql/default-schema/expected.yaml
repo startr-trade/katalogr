@@ -1,0 +1,49 @@
+mode: subset
+symbols:
+- fx:V1__init.sql#table:app.orders
+- fx:V1__init.sql#table:app.orders/column:id
+- fx:V1__init.sql#table:app.orders/column:total
+- fx:V1__init.sql#table:public.audit
+- fx:V1__init.sql#table:public.audit/column:id
+- fx:V1__init.sql#view:app.order_ids
+links:
+- from: fx:V1__init.sql#table:app.orders
+  kind: contains
+  to: fx:V1__init.sql#table:app.orders/column:id
+  confidence: Extracted
+- from: fx:V1__init.sql#table:app.orders
+  kind: contains
+  to: fx:V1__init.sql#table:app.orders/column:total
+  confidence: Extracted
+- from: fx:V1__init.sql#table:app.orders
+  kind: provides
+  to: a038ece3dcaa65850ea8ed5f2308c2d2
+  confidence: Extracted
+- from: fx:V1__init.sql#table:app.orders/column:id
+  kind: provides
+  to: f0865ea5b782d7bc2deec732bf5087f1
+  confidence: Extracted
+- from: fx:V1__init.sql#table:app.orders/column:total
+  kind: provides
+  to: 9c109b9b9274cad1e860b76a8f8e47f7
+  confidence: Extracted
+- from: fx:V1__init.sql#table:public.audit
+  kind: contains
+  to: fx:V1__init.sql#table:public.audit/column:id
+  confidence: Extracted
+- from: fx:V1__init.sql#table:public.audit
+  kind: provides
+  to: f320da856b0954cfaf687b377b1c714d
+  confidence: Extracted
+- from: fx:V1__init.sql#table:public.audit/column:id
+  kind: provides
+  to: df1b709b1a77508c891f037db3a0033c
+  confidence: Extracted
+- from: fx:V1__init.sql#view:app.order_ids
+  kind: consumes
+  to: a038ece3dcaa65850ea8ed5f2308c2d2
+  confidence: Extracted
+- from: fx:V1__init.sql#view:app.order_ids
+  kind: provides
+  to: 9a7a862efe45ae1a8f8128c4df4d939c
+  confidence: Extracted

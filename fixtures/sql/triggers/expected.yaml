@@ -1,0 +1,30 @@
+mode: subset
+symbols:
+- fx:mysql.sql#trigger:public.orders_ai
+- fx:pg.sql#trigger:public.orders_touch
+- fx:sqlite.sql#trigger:public.orders_log
+links:
+- from: fx:mysql.sql#trigger:public.orders_ai
+  kind: consumes
+  to: e71321af6d8f5770318bedc9ac5ff4b1
+  confidence: Inferred
+- from: fx:mysql.sql#trigger:public.orders_ai
+  kind: consumes
+  to: f320da856b0954cfaf687b377b1c714d
+  confidence: Inferred
+- from: fx:pg.sql#trigger:public.orders_touch
+  kind: consumes
+  to: 74dec82d48b7b1c61442f7533bf662eb
+  confidence: Extracted
+- from: fx:pg.sql#trigger:public.orders_touch
+  kind: consumes
+  to: e71321af6d8f5770318bedc9ac5ff4b1
+  confidence: Extracted
+- from: fx:sqlite.sql#trigger:public.orders_log
+  kind: consumes
+  to: e71321af6d8f5770318bedc9ac5ff4b1
+  confidence: Extracted
+- from: fx:sqlite.sql#trigger:public.orders_log
+  kind: consumes
+  to: f320da856b0954cfaf687b377b1c714d
+  confidence: Extracted

@@ -1,0 +1,25 @@
+mode: subset
+symbols:
+- fx:views.sql#view:public.open_orders
+- fx:views.sql#view:public.order_totals
+links:
+- from: fx:views.sql#view:public.open_orders
+  kind: consumes
+  to: ae55660c9bda7db77685392a3bab6377
+  confidence: Extracted
+- from: fx:views.sql#view:public.open_orders
+  kind: consumes
+  to: e71321af6d8f5770318bedc9ac5ff4b1
+  confidence: Extracted
+- from: fx:views.sql#view:public.open_orders
+  kind: provides
+  to: 62b59bcd40c3da99a9ecbea5d66d5183
+  confidence: Extracted
+- from: fx:views.sql#view:public.order_totals
+  kind: consumes
+  to: e71321af6d8f5770318bedc9ac5ff4b1
+  confidence: Extracted
+- from: fx:views.sql#view:public.order_totals
+  kind: provides
+  to: 1c882e2d89247d67c44b4fad51e3e4d6
+  confidence: Extracted

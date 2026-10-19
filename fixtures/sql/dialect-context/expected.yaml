@@ -1,0 +1,40 @@
+mode: subset
+symbols:
+- fx:db/migration/V1__init.sql#table:public.customers
+- fx:db/migration/V1__init.sql#table:public.customers/column:email
+- fx:db/migration/V1__init.sql#table:public.customers/column:id
+- fx:other/V1__init.sql#table:public.orders
+- fx:other/V1__init.sql#table:public.orders/column:id
+links:
+- from: fx:db/migration/V1__init.sql#table:public.customers
+  kind: contains
+  to: fx:db/migration/V1__init.sql#table:public.customers/column:email
+  confidence: Extracted
+- from: fx:db/migration/V1__init.sql#table:public.customers
+  kind: contains
+  to: fx:db/migration/V1__init.sql#table:public.customers/column:id
+  confidence: Extracted
+- from: fx:db/migration/V1__init.sql#table:public.customers
+  kind: provides
+  to: ae55660c9bda7db77685392a3bab6377
+  confidence: Extracted
+- from: fx:db/migration/V1__init.sql#table:public.customers/column:email
+  kind: provides
+  to: 2638a0b53443c7cd58091a2ca813b63e
+  confidence: Extracted
+- from: fx:db/migration/V1__init.sql#table:public.customers/column:id
+  kind: provides
+  to: e7b9f3aaa893f376061286cc2dc4587e
+  confidence: Extracted
+- from: fx:other/V1__init.sql#table:public.orders
+  kind: contains
+  to: fx:other/V1__init.sql#table:public.orders/column:id
+  confidence: Extracted
+- from: fx:other/V1__init.sql#table:public.orders
+  kind: provides
+  to: e71321af6d8f5770318bedc9ac5ff4b1
+  confidence: Extracted
+- from: fx:other/V1__init.sql#table:public.orders/column:id
+  kind: provides
+  to: db368348325213dfe7b2e311b703e399
+  confidence: Extracted

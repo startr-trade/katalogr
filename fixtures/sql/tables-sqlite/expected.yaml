@@ -1,0 +1,63 @@
+mode: subset
+symbols:
+- fx:schema.sql#table:public.customers
+- fx:schema.sql#table:public.customers/column:email
+- fx:schema.sql#table:public.customers/column:id
+- fx:schema.sql#table:public.docs
+- fx:schema.sql#table:public.orders
+- fx:schema.sql#table:public.orders/column:customer_id
+- fx:schema.sql#table:public.orders/column:id
+- fx:schema.sql#table:public.orders/column:total
+links:
+- from: fx:schema.sql#table:public.customers
+  kind: contains
+  to: fx:schema.sql#table:public.customers/column:email
+  confidence: Extracted
+- from: fx:schema.sql#table:public.customers
+  kind: contains
+  to: fx:schema.sql#table:public.customers/column:id
+  confidence: Extracted
+- from: fx:schema.sql#table:public.customers
+  kind: provides
+  to: ae55660c9bda7db77685392a3bab6377
+  confidence: Extracted
+- from: fx:schema.sql#table:public.customers/column:email
+  kind: provides
+  to: 2638a0b53443c7cd58091a2ca813b63e
+  confidence: Extracted
+- from: fx:schema.sql#table:public.customers/column:id
+  kind: provides
+  to: e7b9f3aaa893f376061286cc2dc4587e
+  confidence: Extracted
+- from: fx:schema.sql#table:public.docs
+  kind: provides
+  to: d3ffbe35533a748269a7ff84c07011b3
+  confidence: Extracted
+- from: fx:schema.sql#table:public.orders
+  kind: contains
+  to: fx:schema.sql#table:public.orders/column:customer_id
+  confidence: Extracted
+- from: fx:schema.sql#table:public.orders
+  kind: contains
+  to: fx:schema.sql#table:public.orders/column:id
+  confidence: Extracted
+- from: fx:schema.sql#table:public.orders
+  kind: contains
+  to: fx:schema.sql#table:public.orders/column:total
+  confidence: Extracted
+- from: fx:schema.sql#table:public.orders
+  kind: provides
+  to: e71321af6d8f5770318bedc9ac5ff4b1
+  confidence: Extracted
+- from: fx:schema.sql#table:public.orders/column:customer_id
+  kind: provides
+  to: 502ba5fc2801bca1a658a67b6e27d743
+  confidence: Extracted
+- from: fx:schema.sql#table:public.orders/column:id
+  kind: provides
+  to: db368348325213dfe7b2e311b703e399
+  confidence: Extracted
+- from: fx:schema.sql#table:public.orders/column:total
+  kind: provides
+  to: 1129d29644bfd1714c65196e8f83d814
+  confidence: Extracted

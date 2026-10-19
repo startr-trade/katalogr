@@ -1,6 +1,143 @@
 //! FEAT-017 SQL extension tests.
 
+use camino::{Utf8Path, Utf8PathBuf};
+use katalogr_ext_sql::{SqlContext, SqlExtractor};
+use katalogr_model::{
+    ArtifactName, ExtractError, ExtractInput, Extractor, Fact, Fragment, Id, Name, RelPath,
+};
+use std::collections::BTreeMap;
+
+fn fixtures() -> Utf8PathBuf {
+    Utf8Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/sql")
+}
+
+fn walk(dir: &Utf8Path, base: &Utf8Path, out: &mut Vec<(String, Vec<u8>)>) {
+    let mut entries: Vec<_> = std::fs::read_dir(dir)
+        .unwrap()
+        .flatten()
+        .map(|e| Utf8PathBuf::from_path_buf(e.path()).unwrap())
+        .collect();
+    entries.sort();
+    for p in entries {
+        if p.is_dir() {
+            walk(&p, base, out);
+        } else if p.file_name() != Some("expected.yaml") {
+            out.push((
+                p.strip_prefix(base).unwrap().to_string(),
+                std::fs::read(&p).unwrap(),
+            ));
+        }
+    }
+}
+
+/// The files of a text corpus, as `(path, bytes)`.
+type Files = Vec<(String, Vec<u8>)>;
+
+fn case_files(case: &str) -> Files {
+    let dir = fixtures().join(case);
+    let mut out = Vec::new();
+    walk(&dir, &dir, &mut out);
+    out
+}
+
+/// What the engine would do for the SQL extension: build the context from the config files,
+/// then extract every handled file.
+fn extract_all(files: &Files) -> BTreeMap<String, (Fragment, Vec<ExtractError>)> {
+    let ext = SqlExtractor;
+    let cfg: Vec<(RelPath, Vec<u8>)> = files
+        .iter()
+        .map(|(p, b)| (RelPath::new(p).unwrap(), b.clone()))
+        .filter(|(p, _)| ext.is_context_file(p))
+        .collect();
+    let ctx = ext.build_context(&cfg).unwrap();
+    let mut out = BTreeMap::new();
+    for (p, b) in files {
+        let rp = RelPath::new(p).unwrap();
+        if !ext.handles(&rp) {
+            continue;
+        }
+        let r = ext
+            .extract_with_errors(&ExtractInput {
+                repo: "fx",
+                path: &rp,
+                revision: "rev",
+                content: b,
+                context: &ctx,
+            })
+            .unwrap();
+        out.insert(p.clone(), r);
+    }
+    out
+}
+
+fn case(name: &str) -> BTreeMap<String, (Fragment, Vec<ExtractError>)> {
+    extract_all(&case_files(name))
+}
+
+/// `symbol role contract confidence` lines of a fragment, sorted; the symbol is its name after
+/// `#` (empty for the artifact).
+fn binding_lines(f: &Fragment) -> Vec<String> {
+    let mut names: BTreeMap<Id, String> = BTreeMap::new();
+    names.insert(f.artifact.name.id(), String::new());
+    for s in &f.symbols {
+        let c = s.name.canonical();
+        names.insert(s.name.id(), c.split_once('#').unwrap().1.to_string());
+    }
+    let mut v: Vec<String> = f
+        .bindings
+        .iter()
+        .map(|b| {
+            format!(
+                "{} {} {} {:?}{}",
+                names[&b.symbol],
+                b.role.as_str(),
+                b.contract.canonical(),
+                b.confidence,
+                b.origin
+                    .as_deref()
+                    .map(|o| format!(" {o}"))
+                    .unwrap_or_default()
+            )
+        })
+        .collect();
+    v.sort();
+    v
+}
+
+fn has(lines: &[String], want: &str) -> bool {
+    lines.iter().any(|l| l == want)
+}
+
+fn sym<'a>(f: &'a Fragment, suffix: &str) -> &'a katalogr_model::SymbolNode {
+    f.symbols
+        .iter()
+        .find(|s| s.name.canonical().ends_with(&format!("#{suffix}")))
+        .unwrap_or_else(|| {
+            panic!(
+                "no symbol {suffix}; have {:?}",
+                f.symbols
+                    .iter()
+                    .map(|s| s.name.canonical())
+                    .collect::<Vec<_>>()
+            )
+        })
+}
+
+fn fact<'a>(s: &'a katalogr_model::SymbolNode, k: &str) -> Option<&'a Fact> {
+    s.facts.get(k)
+}
+
+fn st(v: &str) -> Fact {
+    Fact::Str(v.to_string())
+}
+
+#[allow(dead_code)]
+fn artifact_id(path: &str) -> Id {
+    ArtifactName::new("fx", path).unwrap().id()
+}
+
 mod sql {
+    use super::*;
     use katalogr_ext_sql::*;
     use katalogr_model::RelPath;
 
@@ -497,5 +634,749 @@ mod sql {
         assert!(recognise_header("SELECT 1").is_none());
         assert!(recognise_header("CREATE INDEX i ON t(a)").is_none());
         assert!(recognise_header("").is_none());
+    }
+
+    #[test]
+    fn tables_and_columns_per_dialect() {
+        // PostgreSQL
+        let c = case("tables-pg");
+        let (f, errs) = &c["schema.sql"];
+        assert!(errs.is_empty(), "{errs:?}");
+        let b = binding_lines(f);
+        assert!(
+            has(
+                &b,
+                "table:public.orders provides contract:sql_table:public.orders Extracted"
+            ),
+            "{b:#?}"
+        );
+        assert!(has(
+            &b,
+            "table:public.orders/column:total provides contract:sql_column:public.orders.total Extracted"
+        ));
+        assert!(has(
+            &b,
+            "table:public.customers provides contract:sql_table:public.customers Extracted"
+        ));
+        let id = sym(f, "table:public.customers/column:id");
+        assert_eq!(fact(id, "primary_key"), Some(&Fact::Bool(true)));
+        assert_eq!(fact(id, "nullable"), Some(&Fact::Bool(false)));
+        assert_eq!(fact(id, "type"), Some(&st("bigserial")));
+        let email = sym(f, "table:public.customers/column:email");
+        assert_eq!(fact(email, "nullable"), Some(&Fact::Bool(false)));
+        let name = sym(f, "table:public.customers/column:name");
+        assert_eq!(fact(name, "nullable"), Some(&Fact::Bool(true)));
+        let total = sym(f, "table:public.orders/column:total");
+        assert_eq!(fact(total, "default"), Some(&st("0")));
+        assert_eq!(fact(total, "comment"), Some(&st("Order total")));
+        let orders = sym(f, "table:public.orders");
+        assert_eq!(fact(orders, "comment"), Some(&st("Customer orders")));
+        assert_eq!(
+            fact(orders, "ddl"),
+            Some(&Fact::List(vec![
+                st("create"),
+                st("index"),
+                st("comment"),
+                st("comment")
+            ]))
+        );
+        assert_eq!(fact(orders, "dialect"), Some(&st("postgresql")));
+        assert_eq!(fact(orders, "parsed"), Some(&Fact::Bool(true)));
+        assert!(f.artifact.facts.contains_key("statements"));
+        assert_eq!(f.artifact.facts["default_schema"], st("public"));
+        assert_eq!(f.artifact.facts["default_schema_source"], st("default"));
+        // spans: a column span is inside the statement and not the whole table's
+        assert!(
+            total.span.start_line == 10 && total.span.start_col == 3,
+            "{:?}",
+            total.span
+        );
+
+        // MySQL
+        let c = case("tables-mysql");
+        let (f, errs) = &c["schema.sql"];
+        assert!(errs.is_empty(), "{errs:?}");
+        let b = binding_lines(f);
+        assert!(
+            has(
+                &b,
+                "table:public.orders provides contract:sql_table:public.orders Extracted"
+            ),
+            "{b:#?}"
+        );
+        assert!(has(
+            &b,
+            "table:public.orders/column:note provides contract:sql_column:public.orders.note Extracted"
+        ));
+        assert_eq!(
+            fact(sym(f, "table:public.orders"), "dialect"),
+            Some(&st("mysql"))
+        );
+        assert_eq!(
+            fact(sym(f, "table:public.orders/column:note"), "nullable"),
+            Some(&Fact::Bool(true))
+        );
+        assert_eq!(
+            fact(sym(f, "table:public.customers/column:id"), "primary_key"),
+            Some(&Fact::Bool(true))
+        );
+
+        // SQLite: `main` folds into `public`
+        let c = case("tables-sqlite");
+        let (f, errs) = &c["schema.sql"];
+        assert!(errs.is_empty(), "{errs:?}");
+        let b = binding_lines(f);
+        assert!(
+            has(
+                &b,
+                "table:public.orders provides contract:sql_table:public.orders Extracted"
+            ),
+            "{b:#?}"
+        );
+        assert!(has(
+            &b,
+            "table:public.docs provides contract:sql_table:public.docs Extracted"
+        ));
+        assert_eq!(
+            fact(sym(f, "table:public.docs"), "virtual"),
+            Some(&Fact::Bool(true))
+        );
+        assert_eq!(
+            fact(sym(f, "table:public.orders/column:customer_id"), "type"),
+            Some(&st("INTEGER"))
+        );
+    }
+
+    #[test]
+    fn foreign_keys_consume_tables() {
+        let c = case("foreign-keys");
+        let (f, errs) = &c["schema.sql"];
+        assert!(errs.is_empty(), "{errs:?}");
+        let b = binding_lines(f);
+        assert!(
+            has(
+                &b,
+                "table:public.orders consumes contract:sql_table:public.customers Extracted"
+            ),
+            "{b:#?}"
+        );
+        assert!(has(
+            &b,
+            "table:public.orders consumes contract:sql_table:public.regions Extracted"
+        ));
+        assert!(has(
+            &b,
+            "table:public.orders consumes contract:sql_table:audit.customers Extracted"
+        ));
+        assert!(has(
+            &b,
+            "table:public.orders provides contract:sql_table:public.orders Extracted"
+        ));
+        let cid = sym(f, "table:public.orders/column:customer_id");
+        // the later ALTER ... FOREIGN KEY wins as the latest value
+        assert!(matches!(fact(cid, "references"), Some(Fact::Str(_))));
+        let region = sym(f, "table:public.orders/column:region_id");
+        assert_eq!(fact(region, "references"), Some(&st("public.regions.id")));
+    }
+
+    #[test]
+    fn broken_statement_reported() {
+        let c = case("broken");
+        let (f, errs) = &c["schema.sql"];
+        assert_eq!(errs.len(), 1, "{errs:?}");
+        match &errs[0] {
+            ExtractError::Parse { span: Some(sp), .. } => {
+                assert_eq!((sp.start_line, sp.start_col), (3, 1), "{sp:?}");
+                assert_eq!(sp.end_line, 3);
+            }
+            e => panic!("{e:?}"),
+        }
+        // both tables are kept
+        sym(f, "table:public.customers");
+        sym(f, "table:public.orders");
+    }
+
+    #[test]
+    fn deterministic_output() {
+        let names: Vec<String> = std::fs::read_dir(fixtures())
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .collect();
+        assert!(names.len() >= 10);
+        for n in names {
+            let files = case_files(&n);
+            let a = extract_all(&files);
+            let b = extract_all(&files);
+            let mut rev = files.clone();
+            rev.reverse();
+            let c = extract_all(&rev);
+            assert_eq!(a, b, "{n}");
+            assert_eq!(a, c, "{n}: reversed order");
+        }
+    }
+
+    #[test]
+    fn views_consume_relations() {
+        let c = case("views");
+        let (f, errs) = &c["views.sql"];
+        assert!(errs.is_empty(), "{errs:?}");
+        let b = binding_lines(f);
+        assert!(
+            has(
+                &b,
+                "view:public.open_orders provides contract:sql_table:public.open_orders Extracted"
+            ),
+            "{b:#?}"
+        );
+        assert!(has(
+            &b,
+            "view:public.open_orders consumes contract:sql_table:public.orders Extracted"
+        ));
+        assert!(has(
+            &b,
+            "view:public.open_orders consumes contract:sql_table:public.customers Extracted"
+        ));
+        // CTE names and system catalogs are excluded
+        assert!(
+            !b.iter()
+                .any(|l| l.contains("recent") || l.contains("information_schema")),
+            "{b:#?}"
+        );
+        assert!(has(
+            &b,
+            "view:public.order_totals consumes contract:sql_table:public.orders Extracted"
+        ));
+        assert_eq!(
+            fact(sym(f, "view:public.order_totals"), "materialized"),
+            Some(&Fact::Bool(true))
+        );
+    }
+
+    #[test]
+    fn routines_per_dialect() {
+        let c = case("routines");
+        let (f, errs) = &c["pg.sql"];
+        assert!(errs.is_empty(), "{errs:?}");
+        let b = binding_lines(f);
+        assert!(
+            has(
+                &b,
+                "function:app.order_count provides contract:sql_routine:app.order_count Extracted"
+            ),
+            "{b:#?}"
+        );
+        assert!(has(
+            &b,
+            "function:app.order_count consumes contract:sql_table:public.orders Extracted"
+        ));
+        // the overload is a second symbol
+        let second = sym(f, "function:app.order_count~2");
+        assert_eq!(fact(second, "language"), Some(&st("sql")));
+        assert_eq!(fact(second, "body"), Some(&st("parsed")));
+        // plpgsql: scanned, so inferred
+        let touch = sym(f, "function:app.touch");
+        assert_eq!(fact(touch, "language"), Some(&st("plpgsql")));
+        assert_eq!(fact(touch, "body"), Some(&st("scanned")));
+        assert_eq!(fact(touch, "returns"), Some(&st("TRIGGER")));
+        assert!(
+            has(
+                &b,
+                "function:app.touch consumes contract:sql_table:public.audit Inferred"
+            ),
+            "{b:#?}"
+        );
+        assert!(has(
+            &b,
+            "function:app.touch consumes contract:sql_routine:app.recalc Inferred"
+        ));
+        assert!(has(
+            &b,
+            "function:app.touch provides contract:sql_routine:app.touch Extracted"
+        ));
+        // a PG procedure
+        let purge = sym(f, "procedure:public.purge_old");
+        assert!(matches!(fact(purge, "parsed"), Some(Fact::Bool(_))));
+        assert!(b.iter().any(|l| l.starts_with(
+            "procedure:public.purge_old provides contract:sql_routine:public.purge_old"
+        )));
+        assert!(b.iter().any(|l| {
+            l.starts_with("procedure:public.purge_old consumes contract:sql_table:public.orders")
+        }));
+        // MySQL function
+        let (m, errs) = &c["mysql.sql"];
+        assert!(errs.is_empty(), "{errs:?}");
+        let mb = binding_lines(m);
+        assert!(
+            mb.iter()
+                .any(|l| l
+                    .starts_with("function:public.tax provides contract:sql_routine:public.tax")),
+            "{mb:#?}"
+        );
+    }
+
+    #[test]
+    fn triggers_bind_table_and_routine() {
+        let c = case("triggers");
+        let (pg, errs) = &c["pg.sql"];
+        assert!(errs.is_empty(), "{errs:?}");
+        let b = binding_lines(pg);
+        assert!(
+            has(
+                &b,
+                "trigger:public.orders_touch consumes contract:sql_table:public.orders Extracted"
+            ),
+            "{b:#?}"
+        );
+        assert!(has(
+            &b,
+            "trigger:public.orders_touch consumes contract:sql_routine:app.touch Extracted"
+        ));
+        let t = sym(pg, "trigger:public.orders_touch");
+        assert_eq!(fact(t, "timing"), Some(&st("before")));
+        assert_eq!(fact(t, "events"), Some(&Fact::List(vec![st("update")])));
+        assert_eq!(fact(t, "for_each"), Some(&st("row")));
+        assert_eq!(fact(t, "executes"), Some(&st("app.touch")));
+        assert_eq!(fact(t, "table"), Some(&st("public.orders")));
+        for file in ["mysql.sql", "sqlite.sql"] {
+            let (f, errs) = &c[file];
+            assert!(errs.is_empty(), "{file}: {errs:?}");
+            let b = binding_lines(f);
+            assert!(
+                b.iter()
+                    .any(|l| l.contains(" consumes contract:sql_table:public.orders ")),
+                "{file}: {b:#?}"
+            );
+            assert!(
+                b.iter()
+                    .any(|l| l.contains(" consumes contract:sql_table:public.audit ")),
+                "{file}: {b:#?}"
+            );
+        }
+        let (lite, _) = &c["sqlite.sql"];
+        assert_eq!(
+            fact(sym(lite, "trigger:public.orders_log"), "timing"),
+            Some(&st("after"))
+        );
+    }
+
+    #[test]
+    fn policies_bind_table() {
+        let c = case("policies");
+        let (f, errs) = &c["policies.sql"];
+        assert!(errs.is_empty(), "{errs:?}");
+        let b = binding_lines(f);
+        assert!(
+            has(
+                &b,
+                "policy:public.orders.own_rows consumes contract:sql_table:public.orders Extracted"
+            ),
+            "{b:#?}"
+        );
+        assert!(has(
+            &b,
+            "policy:public.orders.own_rows consumes contract:sql_table:public.customers Extracted"
+        ));
+        let p = sym(f, "policy:public.orders.own_rows");
+        assert_eq!(fact(p, "command"), Some(&st("select")));
+        assert_eq!(fact(p, "roles"), Some(&Fact::List(vec![st("app_user")])));
+        assert_eq!(fact(p, "permissive"), Some(&Fact::Bool(true)));
+        assert!(matches!(fact(p, "using"), Some(Fact::Str(_))));
+        assert_eq!(
+            fact(sym(f, "table:public.orders"), "row_level_security"),
+            Some(&Fact::Bool(true))
+        );
+    }
+
+    #[test]
+    fn procedural_bodies_scanned() {
+        let c = case("procedural-body");
+        for (file, (_, errs)) in &c {
+            assert!(errs.is_empty(), "{file}: {errs:?}");
+        }
+        let (pg, _) = &c["pg.sql"];
+        let proc = sym(pg, "procedure:public.archive_orders");
+        assert_eq!(fact(proc, "parsed"), Some(&Fact::Bool(false)));
+        assert!(fact(proc, "dialect").is_none());
+        let b = binding_lines(pg);
+        assert!(
+            has(
+                &b,
+                "procedure:public.archive_orders provides contract:sql_routine:public.archive_orders Inferred"
+            ),
+            "{b:#?}"
+        );
+        for t in ["audit", "orders"] {
+            assert!(
+                has(
+                    &b,
+                    &format!(
+                        "procedure:public.archive_orders consumes contract:sql_table:public.{t} Inferred"
+                    )
+                ),
+                "{b:#?}"
+            );
+        }
+        assert!(has(
+            &b,
+            "procedure:public.archive_orders consumes contract:sql_routine:app.vacuum_orders Inferred"
+        ));
+        // the DO block belongs to the artifact
+        assert!(
+            has(&b, " consumes contract:sql_table:public.customers Inferred"),
+            "{b:#?}"
+        );
+        let (my, _) = &c["mysql.sql"];
+        let mb = binding_lines(my);
+        assert!(
+            mb.iter()
+                .any(|l| l.starts_with("procedure:public.recount provides")
+                    && l.ends_with("Inferred")),
+            "{mb:#?}"
+        );
+        assert!(
+            mb.iter().any(|l| l
+                .starts_with("procedure:public.recount consumes contract:sql_table:public.orders")),
+            "{mb:#?}"
+        );
+        assert!(mb.iter().any(|l| {
+            l.starts_with("procedure:public.recount consumes contract:sql_table:public.customers")
+        }));
+        let (lite, _) = &c["sqlite.sql"];
+        let lb = binding_lines(lite);
+        assert!(
+            lb.iter().any(|l| l.starts_with(
+                "trigger:public.customers_ad consumes contract:sql_table:public.customers"
+            )),
+            "{lb:#?}"
+        );
+        assert!(
+            lb.iter().any(|l| l.starts_with(
+                "trigger:public.customers_ad consumes contract:sql_table:public.orders"
+            )),
+            "{lb:#?}"
+        );
+        // DELIMITER and block-depth splitting
+        let d = case("delimiter");
+        let (f, errs) = &d["mysql.sql"];
+        assert!(errs.is_empty(), "{errs:?}");
+        let db = binding_lines(f);
+        assert!(
+            db.iter().any(|l| l.starts_with(
+                "procedure:public.settle provides contract:sql_routine:public.settle"
+            )),
+            "{db:#?}"
+        );
+        assert!(
+            db.iter().any(|l| l
+                .starts_with("procedure:public.settle consumes contract:sql_table:public.orders")),
+            "{db:#?}"
+        );
+        assert!(
+            db.iter().any(|l| l
+                .starts_with("procedure:public.settle consumes contract:sql_table:public.audit")),
+            "{db:#?}"
+        );
+        assert!(
+            has(
+                &db,
+                " consumes contract:sql_table:public.customers Extracted"
+            ),
+            "{db:#?}"
+        );
+        assert_eq!(f.artifact.facts["statements"], Fact::Int(2));
+        // top-level DML
+        let q = case("dml");
+        let (f, errs) = &q["queries.sql"];
+        assert!(errs.is_empty(), "{errs:?}");
+        assert_eq!(f.artifact.facts["dml_statements"], Fact::Int(5));
+        let qb = binding_lines(f);
+        for t in ["orders", "customers", "audit"] {
+            assert!(
+                has(
+                    &qb,
+                    &format!(" consumes contract:sql_table:public.{t} Extracted")
+                ),
+                "{qb:#?}"
+            );
+        }
+        assert!(
+            has(&qb, " consumes contract:sql_routine:app.purge Extracted"),
+            "{qb:#?}"
+        );
+    }
+
+    #[test]
+    fn configured_schema_keys_unqualified_names() {
+        let c = case("default-schema");
+        let (f, errs) = &c["V1__init.sql"];
+        assert!(errs.is_empty(), "{errs:?}");
+        let b = binding_lines(f);
+        assert!(
+            has(
+                &b,
+                "table:app.orders provides contract:sql_table:app.orders Extracted"
+            ),
+            "{b:#?}"
+        );
+        assert!(has(
+            &b,
+            "table:app.orders/column:id provides contract:sql_column:app.orders.id Extracted"
+        ));
+        assert!(has(
+            &b,
+            "table:public.audit provides contract:sql_table:public.audit Extracted"
+        ));
+        assert!(has(
+            &b,
+            "view:app.order_ids consumes contract:sql_table:app.orders Extracted"
+        ));
+        assert_eq!(f.artifact.facts["default_schema"], st("app"));
+        assert_eq!(f.artifact.facts["default_schema_source"], st("flyway.conf"));
+        assert_eq!(f.artifact.facts["dialect"], st("postgresql"));
+        match &f.artifact.facts["migration"] {
+            Fact::Map(m) => {
+                assert_eq!(m["scheme"], st("versioned"));
+                assert_eq!(m["version"], st("1"));
+                assert_eq!(m["description"], st("init"));
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn no_config_defaults_to_public() {
+        let c = case("alter-across-files");
+        assert_eq!(c.len(), 3);
+        for (path, (f, errs)) in &c {
+            assert!(errs.is_empty(), "{errs:?}");
+            assert_eq!(f.artifact.facts["default_schema_source"], st("default"));
+            assert_eq!(f.artifact.facts["default_schema"], st("public"));
+            for l in binding_lines(f) {
+                assert!(
+                    l.contains(".public.") || l.contains(":public."),
+                    "{path}: {l}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn migrations_facts() {
+        let c = case("migrations");
+        let m = |p: &str| match &c[p].0.artifact.facts["migration"] {
+            Fact::Map(m) => m.clone(),
+            o => panic!("{o:?}"),
+        };
+        assert_eq!(m("0001_init.up.sql")["scheme"], st("up"));
+        assert_eq!(m("0001_init.down.sql")["scheme"], st("down"));
+        assert_eq!(m("R__refresh.sql")["scheme"], st("repeatable"));
+        let b = binding_lines(&c["0001_init.down.sql"].0);
+        assert!(
+            has(
+                &b,
+                "table:public.customers declares contract:sql_table:public.customers Extracted"
+            ),
+            "{b:#?}"
+        );
+    }
+
+    // ---- engine-level tests ----------------------------------------------------------------
+
+    use katalogr_engine::registry::ExtensionRegistry;
+    use katalogr_engine::{Consistency, Engine, EventKind, NewEvent, QueryOptions, Scope};
+    use katalogr_model::{ContractName, Segment, SymbolName};
+    use katalogr_store::{Kindex, ProjectConfig, ProjectName, Reader, RepoConfig};
+    use std::time::{Duration, Instant};
+
+    struct Env {
+        _tmp: tempfile::TempDir,
+        work: Utf8PathBuf,
+        engine: Engine,
+    }
+
+    fn env(files: &Files) -> Env {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = Utf8PathBuf::from_path_buf(tmp.path().to_path_buf()).unwrap();
+        let work = root.join("work");
+        for (p, b) in files {
+            let f = work.join(p);
+            std::fs::create_dir_all(f.parent().unwrap()).unwrap();
+            std::fs::write(f, b).unwrap();
+        }
+        std::fs::create_dir_all(&work).unwrap();
+        let kx = root.join("kx");
+        let dir = Kindex::init(&kx)
+            .unwrap()
+            .create_project(
+                &ProjectName::new("p").unwrap(),
+                ProjectConfig {
+                    repos: vec![RepoConfig::new("r")],
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        let mut reg = ExtensionRegistry::new();
+        reg.register(Box::new(SqlExtractor));
+        let roots = BTreeMap::from([("r".to_string(), work.clone())]);
+        let engine =
+            Engine::open(dir, reg, roots, Instant::now() + Duration::from_secs(10)).unwrap();
+        Env {
+            _tmp: tmp,
+            work,
+            engine,
+        }
+    }
+
+    impl Env {
+        fn drain<T>(&self, f: impl FnOnce(&katalogr_store::ReadTx) -> T) -> T {
+            let a = self
+                .engine
+                .with_consistency(
+                    &QueryOptions {
+                        consistency: Consistency::WaitAll,
+                        timeout: Duration::from_secs(30),
+                        scope: Scope::Project,
+                    },
+                    f,
+                )
+                .unwrap();
+            assert!(!a.stale);
+            a.value
+        }
+
+        fn index(&self) {
+            self.engine.inbox().append(&NewEvent::rescan("r")).unwrap();
+            self.drain(|_| ());
+        }
+
+        fn changed(&self, path: &str) {
+            self.engine
+                .inbox()
+                .append(&NewEvent::file(
+                    "r",
+                    &RelPath::new(path).unwrap(),
+                    EventKind::Changed,
+                ))
+                .unwrap();
+            self.drain(|_| ());
+        }
+
+        fn fragment(&self, path: &str) -> Fragment {
+            self.engine
+                .dir()
+                .read_shard("r", &RelPath::new(path).unwrap())
+                .unwrap()
+                .unwrap()
+        }
+    }
+
+    fn symbol_id(path: &str, segs: &[(&str, &str)]) -> Id {
+        SymbolName {
+            artifact: ArtifactName::new("r", path).unwrap(),
+            segments: segs
+                .iter()
+                .map(|(k, n)| Segment {
+                    kind: (*k).into(),
+                    name: (*n).into(),
+                })
+                .collect(),
+            ordinal: 1,
+        }
+        .id()
+    }
+
+    fn contract_id(kind: &str, key: &str) -> Id {
+        ContractName {
+            kind: kind.into(),
+            key: key.into(),
+        }
+        .id()
+    }
+
+    fn incoming(e: &Env, kind: &str, key: &str) -> Vec<(Id, String)> {
+        let c = contract_id(kind, key);
+        e.drain(|tx| {
+            tx.links_in(c)
+                .unwrap()
+                .into_iter()
+                .map(|l| (l.from, l.kind.0))
+                .collect()
+        })
+    }
+
+    #[test]
+    fn migration_alters_share_table_contract() {
+        let e = env(&case_files("alter-across-files"));
+        e.index();
+        let v = |n: &str| format!("db/migration/{n}");
+        let table = |f: &str| symbol_id(&v(f), &[("table", "public.orders")]);
+        let inc = incoming(&e, "sql_table", "public.orders");
+        for f in [
+            "V1__create_orders.sql",
+            "V2__add_total.sql",
+            "V3__drop_legacy.sql",
+        ] {
+            assert!(
+                inc.contains(&(table(f), "provides".to_string())),
+                "{f}: {inc:?}"
+            );
+        }
+        assert_eq!(inc.len(), 3, "{inc:?}");
+        let total = incoming(&e, "sql_column", "public.orders.total");
+        assert_eq!(
+            total,
+            vec![(
+                symbol_id(
+                    &v("V2__add_total.sql"),
+                    &[("table", "public.orders"), ("column", "total")]
+                ),
+                "provides".to_string()
+            )]
+        );
+        let legacy = incoming(&e, "sql_column", "public.orders.legacy");
+        assert!(legacy.contains(&(
+            symbol_id(
+                &v("V3__drop_legacy.sql"),
+                &[("table", "public.orders"), ("column", "legacy")]
+            ),
+            "declares".to_string()
+        )));
+        assert!(legacy.contains(&(
+            symbol_id(
+                &v("V1__create_orders.sql"),
+                &[("table", "public.orders"), ("column", "legacy")]
+            ),
+            "provides".to_string()
+        )));
+    }
+
+    #[test]
+    fn dialect_context_change_reextracts() {
+        let e = env(&case_files("dialect-context"));
+        e.index();
+        let path = "db/migration/V1__init.sql";
+        assert_eq!(e.fragment(path).artifact.facts["dialect"], st("mysql"));
+        assert_eq!(
+            e.fragment(path).artifact.facts["dialect_source"],
+            st("db/flyway.conf")
+        );
+        // the sibling directory has no configured dialect
+        assert_eq!(
+            e.fragment("other/V1__init.sql").artifact.facts["dialect"],
+            st("auto")
+        );
+        std::fs::write(
+            e.work.join("db/flyway.conf"),
+            "flyway.url=jdbc:postgresql://localhost/shop\nflyway.locations=filesystem:migration\n",
+        )
+        .unwrap();
+        e.changed("db/flyway.conf");
+        assert_eq!(e.fragment(path).artifact.facts["dialect"], st("postgresql"));
+        // the PostgreSQL parser rejects the backticks: the generic fallback is tried, then the scanner
+        assert_eq!(
+            e.fragment("other/V1__init.sql").artifact.facts["dialect"],
+            st("auto")
+        );
     }
 }

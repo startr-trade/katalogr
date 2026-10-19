@@ -1,0 +1,54 @@
+mode: subset
+symbols:
+- fx:db/migration/V1__create_orders.sql#table:public.orders
+- fx:db/migration/V1__create_orders.sql#table:public.orders/column:id
+- fx:db/migration/V1__create_orders.sql#table:public.orders/column:legacy
+- fx:db/migration/V2__add_total.sql#table:public.orders
+- fx:db/migration/V2__add_total.sql#table:public.orders/column:total
+- fx:db/migration/V3__drop_legacy.sql#table:public.orders
+- fx:db/migration/V3__drop_legacy.sql#table:public.orders/column:legacy
+links:
+- from: fx:db/migration/V1__create_orders.sql#table:public.orders
+  kind: contains
+  to: fx:db/migration/V1__create_orders.sql#table:public.orders/column:id
+  confidence: Extracted
+- from: fx:db/migration/V1__create_orders.sql#table:public.orders
+  kind: contains
+  to: fx:db/migration/V1__create_orders.sql#table:public.orders/column:legacy
+  confidence: Extracted
+- from: fx:db/migration/V1__create_orders.sql#table:public.orders
+  kind: provides
+  to: e71321af6d8f5770318bedc9ac5ff4b1
+  confidence: Extracted
+- from: fx:db/migration/V1__create_orders.sql#table:public.orders/column:id
+  kind: provides
+  to: db368348325213dfe7b2e311b703e399
+  confidence: Extracted
+- from: fx:db/migration/V1__create_orders.sql#table:public.orders/column:legacy
+  kind: provides
+  to: 77539a40ac23f8bac9f038637a108465
+  confidence: Extracted
+- from: fx:db/migration/V2__add_total.sql#table:public.orders
+  kind: contains
+  to: fx:db/migration/V2__add_total.sql#table:public.orders/column:total
+  confidence: Extracted
+- from: fx:db/migration/V2__add_total.sql#table:public.orders
+  kind: provides
+  to: e71321af6d8f5770318bedc9ac5ff4b1
+  confidence: Extracted
+- from: fx:db/migration/V2__add_total.sql#table:public.orders/column:total
+  kind: provides
+  to: 1129d29644bfd1714c65196e8f83d814
+  confidence: Extracted
+- from: fx:db/migration/V3__drop_legacy.sql#table:public.orders
+  kind: contains
+  to: fx:db/migration/V3__drop_legacy.sql#table:public.orders/column:legacy
+  confidence: Extracted
+- from: fx:db/migration/V3__drop_legacy.sql#table:public.orders
+  kind: provides
+  to: e71321af6d8f5770318bedc9ac5ff4b1
+  confidence: Extracted
+- from: fx:db/migration/V3__drop_legacy.sql#table:public.orders/column:legacy
+  kind: declares
+  to: 77539a40ac23f8bac9f038637a108465
+  confidence: Extracted

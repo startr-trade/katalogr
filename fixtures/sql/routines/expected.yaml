@@ -1,0 +1,48 @@
+mode: subset
+symbols:
+- fx:mysql.sql#function:public.tax
+- fx:pg.sql#function:app.order_count
+- fx:pg.sql#function:app.order_count~2
+- fx:pg.sql#function:app.touch
+- fx:pg.sql#procedure:public.purge_old
+links:
+- from: fx:mysql.sql#function:public.tax
+  kind: provides
+  to: f852771530a04b463306c644a96ac359
+  confidence: Inferred
+- from: fx:pg.sql#function:app.order_count
+  kind: consumes
+  to: e71321af6d8f5770318bedc9ac5ff4b1
+  confidence: Extracted
+- from: fx:pg.sql#function:app.order_count
+  kind: provides
+  to: 551fdd61aadd625535bcf68e534436fd
+  confidence: Extracted
+- from: fx:pg.sql#function:app.order_count~2
+  kind: consumes
+  to: e71321af6d8f5770318bedc9ac5ff4b1
+  confidence: Extracted
+- from: fx:pg.sql#function:app.order_count~2
+  kind: provides
+  to: 551fdd61aadd625535bcf68e534436fd
+  confidence: Extracted
+- from: fx:pg.sql#function:app.touch
+  kind: consumes
+  to: c7fff3d356c087fc762ee0f24a2cece2
+  confidence: Inferred
+- from: fx:pg.sql#function:app.touch
+  kind: consumes
+  to: f320da856b0954cfaf687b377b1c714d
+  confidence: Inferred
+- from: fx:pg.sql#function:app.touch
+  kind: provides
+  to: 74dec82d48b7b1c61442f7533bf662eb
+  confidence: Extracted
+- from: fx:pg.sql#procedure:public.purge_old
+  kind: consumes
+  to: e71321af6d8f5770318bedc9ac5ff4b1
+  confidence: Inferred
+- from: fx:pg.sql#procedure:public.purge_old
+  kind: provides
+  to: 4e666f3a7a445365abc9f5ce90779926
+  confidence: Inferred

@@ -1,0 +1,40 @@
+mode: subset
+symbols:
+- fx:0001_init.down.sql#table:public.customers
+- fx:0001_init.up.sql#table:public.customers
+- fx:0001_init.up.sql#table:public.customers/column:email
+- fx:0001_init.up.sql#table:public.customers/column:id
+- fx:R__refresh.sql#view:public.customer_emails
+links:
+- from: fx:0001_init.down.sql#table:public.customers
+  kind: declares
+  to: ae55660c9bda7db77685392a3bab6377
+  confidence: Extracted
+- from: fx:0001_init.up.sql#table:public.customers
+  kind: contains
+  to: fx:0001_init.up.sql#table:public.customers/column:email
+  confidence: Extracted
+- from: fx:0001_init.up.sql#table:public.customers
+  kind: contains
+  to: fx:0001_init.up.sql#table:public.customers/column:id
+  confidence: Extracted
+- from: fx:0001_init.up.sql#table:public.customers
+  kind: provides
+  to: ae55660c9bda7db77685392a3bab6377
+  confidence: Extracted
+- from: fx:0001_init.up.sql#table:public.customers/column:email
+  kind: provides
+  to: 2638a0b53443c7cd58091a2ca813b63e
+  confidence: Extracted
+- from: fx:0001_init.up.sql#table:public.customers/column:id
+  kind: provides
+  to: e7b9f3aaa893f376061286cc2dc4587e
+  confidence: Extracted
+- from: fx:R__refresh.sql#view:public.customer_emails
+  kind: consumes
+  to: ae55660c9bda7db77685392a3bab6377
+  confidence: Extracted
+- from: fx:R__refresh.sql#view:public.customer_emails
+  kind: provides
+  to: cca74b6781cbfe8fff11c81c20760ad4
+  confidence: Extracted

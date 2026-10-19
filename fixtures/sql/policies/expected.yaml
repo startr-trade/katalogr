@@ -1,0 +1,17 @@
+mode: subset
+symbols:
+- fx:policies.sql#policy:public.orders.own_rows
+- fx:policies.sql#table:public.orders
+links:
+- from: fx:policies.sql#policy:public.orders.own_rows
+  kind: consumes
+  to: ae55660c9bda7db77685392a3bab6377
+  confidence: Extracted
+- from: fx:policies.sql#policy:public.orders.own_rows
+  kind: consumes
+  to: e71321af6d8f5770318bedc9ac5ff4b1
+  confidence: Extracted
+- from: fx:policies.sql#table:public.orders
+  kind: provides
+  to: e71321af6d8f5770318bedc9ac5ff4b1
+  confidence: Extracted

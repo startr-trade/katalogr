@@ -57,6 +57,7 @@ pub fn full_registry() -> ExtensionRegistry {
     let mut reg = testfmt::registry();
     reg.register(Box::new(katalogr_ext_rust::RustExtractor));
     reg.register(Box::new(katalogr_ext_ts::TsExtractor));
+    reg.register(Box::new(katalogr_ext_sql::SqlExtractor));
     // The board extension claims its own Markdown files before the general one.
     reg.register(Box::new(katalogr_ext_kanbanr::BoardExtractor));
     reg.register(Box::new(katalogr_ext_md::MarkdownExtractor));

@@ -43,6 +43,37 @@ technologies:
       - rust/use-and-reexport
     use-resolution:
       - rust/use-and-reexport
+  sql:
+    alter-across-files:
+      - sql/alter-across-files
+    default-schema:
+      - sql/default-schema
+    delimiter:
+      - sql/delimiter
+    dialect-context:
+      - sql/dialect-context
+    dml:
+      - sql/dml
+    foreign-keys:
+      - sql/foreign-keys
+    migrations:
+      - sql/migrations
+    parse-error:
+      - sql/broken
+    policies:
+      - sql/policies
+    procedural-body:
+      - sql/procedural-body
+    routines:
+      - sql/routines
+    tables-columns:
+      - sql/tables-mysql
+      - sql/tables-pg
+      - sql/tables-sqlite
+    triggers:
+      - sql/triggers
+    views:
+      - sql/views
   test:
     refs-ambiguous:
       - test/refs-ambiguous

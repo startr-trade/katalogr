@@ -1,0 +1,1 @@
+CREATE TRIGGER orders_ai AFTER INSERT ON orders FOR EACH ROW INSERT INTO audit (order_id) VALUES (NEW.id);

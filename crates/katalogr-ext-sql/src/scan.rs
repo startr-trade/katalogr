@@ -542,7 +542,7 @@ fn scan_into(text: &str, schema: &str, refs: &mut Refs, recurse: bool) {
         }
     }
     let mut seen_merge = false;
-    let mut add_table = |parts: &[String], refs: &mut Refs| {
+    let add_table = |parts: &[String], refs: &mut Refs| {
         let p: Vec<&str> = parts.iter().map(String::as_str).collect();
         if is_system_relation(&p) {
             return;
