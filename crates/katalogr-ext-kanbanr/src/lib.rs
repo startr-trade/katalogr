@@ -284,6 +284,7 @@ impl<'a> Build<'a> {
             links: self.links,
             refs: self.refs,
             exports: self.exports,
+            bindings: Vec::new(),
         }
     }
 }

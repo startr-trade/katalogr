@@ -3,10 +3,12 @@
 
 use crate::error::EngineError;
 use crate::lexicon;
-use katalogr_model::{ArtifactName, Confidence, Export, ExportKey, Fragment, Id, LinkKind, Name};
+use katalogr_model::{
+    ArtifactName, Confidence, Export, ExportKey, Fragment, Id, LinkKind, Name, Provenance,
+};
 use katalogr_store::{
-    ArtifactRow, LinkEntry, LinkKey, LinkOrigin, LinkRow, Reader, RefId, Restitch, StoreError,
-    SymbolRow, WriteTx,
+    ArtifactRow, BindingRow, ContractRow, LinkEntry, LinkKey, LinkOrigin, LinkRow, Reader, RefId,
+    Restitch, StoreError, SymbolRow, WriteTx,
 };
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Mutex;
@@ -139,6 +141,7 @@ impl Stitcher {
                 },
             )?;
         }
+        add_bindings(tx, &mut cx, &f, aid, &row)?;
         add_exports(tx, &row.exports)?;
         register_refs(tx, aid, &row)?;
 
@@ -274,11 +277,90 @@ fn purge(tx: &mut WriteTx, cx: &mut Cx, aid: Id, old: &ArtifactRow) -> Result<()
         targets.retain(|t| *t != e.target);
         tx.put_exports(&e.key, &targets)?;
     }
+    withdraw_bindings(tx, aid)?;
     for s in &old.symbols {
         tx.remove_symbol(*s)?;
     }
     tx.remove_artifact_row(aid)?;
     cx.rows.remove(&aid);
+    Ok(())
+}
+
+/// Undo the artifact's bindings: decrement the counts of their contracts and delete a contract
+/// node when no binding names it any more. The binding links leave with the symbols' links.
+fn withdraw_bindings(tx: &mut WriteTx, aid: Id) -> Result<(), EngineError> {
+    let rows = tx.bindings_of(aid)?;
+    for b in &rows {
+        let Some(mut c) = tx.contract(b.contract)? else {
+            continue;
+        };
+        c.adjust(b.role, -1);
+        if c.is_empty() {
+            tx.remove_contract(b.contract)?;
+        } else {
+            tx.put_contract(b.contract, &c)?;
+        }
+    }
+    tx.put_bindings(aid, &[])?;
+    Ok(())
+}
+
+/// Record the fragment's bindings: count them on their contract nodes (creating a node on first
+/// use) and write `symbol --<role>--> contract` links. Duplicates count once. A binding whose
+/// symbol is neither in the fragment nor the artifact, or whose contract kind is malformed,
+/// is ignored.
+fn add_bindings(
+    tx: &mut WriteTx,
+    cx: &mut Cx,
+    f: &Fragment,
+    aid: Id,
+    row: &ArtifactRow,
+) -> Result<(), EngineError> {
+    let mut bindings: Vec<&katalogr_model::Binding> = f
+        .bindings
+        .iter()
+        .filter(|b| {
+            (b.symbol == aid || row.symbols.binary_search(&b.symbol).is_ok())
+                && b.contract.validate().is_ok()
+        })
+        .collect();
+    bindings.sort_by_key(|b| (b.contract.canonical(), b.role, b.symbol));
+    bindings.dedup_by_key(|b| (b.contract.id(), b.role, b.symbol));
+    let provenance: &Provenance = &row.provenance;
+    let mut rows = Vec::with_capacity(bindings.len());
+    for b in bindings {
+        let cid = b.contract.id();
+        let mut c = tx.contract(cid)?.unwrap_or_else(|| ContractRow {
+            name: b.contract.clone(),
+            providers: 0,
+            consumers: 0,
+            declarers: 0,
+        });
+        c.adjust(b.role, 1);
+        tx.put_contract(cid, &c)?;
+        add_entry(
+            tx,
+            cx,
+            LinkKey {
+                from: b.symbol,
+                kind: LinkKind(b.role.as_str().to_string()),
+                to: cid,
+            },
+            LinkEntry {
+                origin: LinkOrigin::Intra,
+                confidence: b.confidence,
+                span: b.span,
+                provenance: provenance.clone(),
+                fanout: None,
+            },
+        )?;
+        rows.push(BindingRow {
+            symbol: b.symbol,
+            contract: cid,
+            role: b.role,
+        });
+    }
+    tx.put_bindings(aid, &rows)?;
     Ok(())
 }
 

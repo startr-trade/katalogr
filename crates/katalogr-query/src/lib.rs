@@ -22,7 +22,7 @@ pub mod show;
 mod why;
 
 pub use callers::callers;
-pub use dangling::{DEFAULT_KINDS as DANGLING_KINDS, dangling};
+pub use dangling::{CONTRACT_KIND as DANGLING_CONTRACT, DEFAULT_KINDS as DANGLING_KINDS, dangling};
 pub use explain::explain;
 pub use find::find;
 pub use hints::{HintSource, hints};

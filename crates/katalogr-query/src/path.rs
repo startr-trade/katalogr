@@ -103,15 +103,18 @@ fn name_of(
     if let Some(n) = names.get(&id) {
         return Ok(n.clone());
     }
-    let n = tx
-        .symbol(id)?
-        .map(|s| s.name.canonical())
-        .unwrap_or_default();
+    let n = match tx.symbol(id)? {
+        Some(s) => s.name.canonical(),
+        None => tx
+            .contract(id)?
+            .map(|c| c.name.canonical())
+            .unwrap_or_default(),
+    };
     names.insert(id, n.clone());
     Ok(n)
 }
 
-/// Queue `other` as a neighbour when it is a symbol.
+/// Queue `other` as a neighbour when it is a symbol or a contract node.
 fn neighbour(
     tx: &impl Reader,
     names: &mut BTreeMap<Id, String>,

@@ -61,6 +61,9 @@ pub struct CallerHit {
     pub depth: u32,
     #[schemars(with = "ConfidenceSchema")]
     pub confidence: Confidence,
+    /// The contract (`contract:<kind>:<key>`) the call goes through, when it does.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub via: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]

@@ -36,8 +36,13 @@ pub fn ref_line(r: &RefHit) -> String {
 }
 
 pub fn caller_line(c: &CallerHit) -> String {
+    let via = c
+        .via
+        .as_ref()
+        .map(|v| format!("  via {v}"))
+        .unwrap_or_default();
     format!(
-        "{}  {}  {}  [{:?}]  depth {}",
+        "{}  {}  {}  [{:?}]  depth {}{via}",
         c.caller.kind,
         c.caller.name,
         place(&c.caller),

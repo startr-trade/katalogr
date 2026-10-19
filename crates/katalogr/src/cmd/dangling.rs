@@ -1,4 +1,4 @@
-//! `katalogr dangling [--kind links-to|annotated-by|refs-item]`.
+//! `katalogr dangling [--kind links-to|annotated-by|refs-item|contract]`.
 
 use katalogr_dist::DistError;
 

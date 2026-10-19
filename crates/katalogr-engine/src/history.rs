@@ -204,6 +204,7 @@ pub fn history_fragment(
         links: Vec::new(),
         refs,
         exports: Vec::new(),
+        bindings: Vec::new(),
     }))
 }
 

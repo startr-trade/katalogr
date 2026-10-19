@@ -5,8 +5,9 @@ use camino::{Utf8Path, Utf8PathBuf};
 use katalogr_engine::registry::ExtensionRegistry;
 use katalogr_engine::{Consistency, Engine, EventKind, NewEvent, QueryOptions, Scope};
 use katalogr_model::{
-    ArtifactName, Confidence, Export, ExportKey, ExtractError, ExtractInput, Extractor, Fragment,
-    Id, Link, LinkKind, Name, OutRef, Provenance, RelPath, Segment, Span, SymbolName, SymbolNode,
+    ArtifactName, Binding, Confidence, ContractName, ContractRole, Export, ExportKey, ExtractError,
+    ExtractInput, Extractor, Fragment, Id, Link, LinkKind, Name, OutRef, Provenance, RelPath,
+    Segment, Span, SymbolName, SymbolNode,
 };
 use katalogr_store::{Kindex, ProjectConfig, ProjectName, RepoConfig};
 use std::collections::BTreeMap;
@@ -40,6 +41,7 @@ impl Extractor for TestExtractor {
         let mut links = Vec::new();
         let mut refs = Vec::new();
         let mut exports = Vec::new();
+        let mut bindings = Vec::new();
 
         for (idx, line) in text.lines().enumerate() {
             let trimmed = line.trim();
@@ -110,6 +112,27 @@ impl Extractor for TestExtractor {
                     span: Some(span),
                     provenance: provenance.clone(),
                 }),
+                ["bind", sym, role, contract] => {
+                    let role = match *role {
+                        "provides" => ContractRole::Provides,
+                        "consumes" => ContractRole::Consumes,
+                        "declares" => ContractRole::Declares,
+                        other => return Err(bad(Some(span), format!("bad role {other:?}"))),
+                    };
+                    let (kind, ckey) = contract
+                        .split_once(':')
+                        .ok_or_else(|| bad(Some(span), format!("bad contract {contract:?}")))?;
+                    bindings.push(Binding {
+                        symbol: find(sym)?,
+                        contract: ContractName {
+                            kind: kind.to_string(),
+                            key: ckey.to_string(),
+                        },
+                        role,
+                        span: Some(span),
+                        confidence: Confidence::Extracted,
+                    });
+                }
                 _ => return Err(bad(Some(span), format!("unknown directive {trimmed:?}"))),
             }
         }
@@ -125,6 +148,7 @@ impl Extractor for TestExtractor {
             links,
             refs,
             exports,
+            bindings,
         })
     }
 }

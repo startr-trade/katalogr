@@ -15,6 +15,9 @@ fn node_name(tx: &impl Reader, id: Id) -> Result<String, StoreError> {
     if let Some(a) = tx.artifact(id)? {
         return Ok(a.name.canonical());
     }
+    if let Some(c) = tx.contract(id)? {
+        return Ok(c.name.canonical());
+    }
     Ok(id.to_hex())
 }
 

@@ -29,6 +29,7 @@ pub enum DanglingKind {
     LinksTo,
     AnnotatedBy,
     RefsItem,
+    Contract,
 }
 
 impl DanglingKind {
@@ -37,6 +38,7 @@ impl DanglingKind {
             DanglingKind::LinksTo => "links-to",
             DanglingKind::AnnotatedBy => "annotated-by",
             DanglingKind::RefsItem => "refs-item",
+            DanglingKind::Contract => "contract",
         }
     }
 }

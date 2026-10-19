@@ -118,5 +118,6 @@ pub fn extract(input: &ExtractInput) -> Result<Fragment, ExtractError> {
         links: Vec::new(),
         refs,
         exports,
+        bindings: Vec::new(),
     })
 }

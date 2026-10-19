@@ -1,7 +1,7 @@
 //! Text to symbols.
 
 use crate::result::{Resolution, SymbolHit};
-use katalogr_model::{Id, LinkKind, Name};
+use katalogr_model::{AnyName, Id, LinkKind, Name, Span, parse_name};
 use katalogr_store::{Reader, StoreError, SymbolRow};
 use std::collections::BTreeSet;
 
@@ -18,6 +18,34 @@ fn plain_name(row: &SymbolRow) -> &str {
     row.name.segments.last().map_or("", |s| s.name.as_str())
 }
 
+/// The kind of the pseudo symbol a contract node is reported as.
+pub(crate) const CONTRACT_KIND: &str = "contract";
+
+/// A contract node as a hit: its canonical name, kind `contract`, no path and a 1:1 span.
+pub(crate) fn contract_node_hit(name: &str) -> SymbolHit {
+    SymbolHit {
+        name: name.to_string(),
+        kind: CONTRACT_KIND.to_string(),
+        path: String::new(),
+        span: Span {
+            start_line: 1,
+            start_col: 1,
+            end_line: 1,
+            end_col: 1,
+        },
+    }
+}
+
+/// `text` as the canonical name of a contract node that exists.
+fn contract_hit(tx: &impl Reader, text: &str) -> Result<Option<SymbolHit>, StoreError> {
+    let Ok(AnyName::Contract(c)) = parse_name(text) else {
+        return Ok(None);
+    };
+    Ok(tx
+        .contract(c.id())?
+        .map(|row| contract_node_hit(&row.name.canonical())))
+}
+
 /// Every symbol, sorted by canonical name.
 pub(crate) fn all_hits(tx: &impl Reader) -> Result<Vec<(SymbolHit, String)>, StoreError> {
     let mut out: Vec<(SymbolHit, String)> = tx
@@ -32,6 +60,9 @@ pub(crate) fn all_hits(tx: &impl Reader) -> Result<Vec<(SymbolHit, String)>, Sto
 /// The symbols `text` names, by the first tier that matches: exact canonical name, exact plain
 /// name, then plain name ignoring case.
 pub fn resolve(tx: &impl Reader, text: &str) -> Result<Resolution<SymbolHit>, StoreError> {
+    if let Some(h) = contract_hit(tx, text)? {
+        return Ok(Resolution::One(h));
+    }
     let all = all_hits(tx)?;
     let lower = text.to_lowercase();
     for tier in 0..3 {

@@ -9,7 +9,7 @@ pub mod name;
 pub mod relpath;
 
 pub use extract::{ExtractError, ExtractInput, Extractor};
-pub use fragment::{Export, ExportKey, Fragment, OutRef};
+pub use fragment::{Binding, ContractRole, Export, ExportKey, Fragment, OutRef};
 pub use graph::{
     ArtifactNode, Confidence, Fact, Link, LinkKind, LinkTarget, Provenance, Span, SymbolNode,
 };

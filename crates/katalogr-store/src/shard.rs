@@ -63,7 +63,7 @@ fn json_err(e: serde_json::Error) -> StoreError {
 }
 
 /// Sort a copy of the fragment's vectors: symbols by canonical name; links by (from, kind, to);
-/// refs by (from, kind, first candidate); exports by key. Ties break on the serialised element.
+/// refs by (from, kind, first candidate); exports by key; bindings by (contract, role, symbol). Ties break on the serialised element.
 fn sorted(f: &Fragment) -> Fragment {
     let mut g = f.clone();
     let ser = |x: &dyn erased::Ser| x.json();
@@ -81,6 +81,8 @@ fn sorted(f: &Fragment) -> Fragment {
     });
     g.exports
         .sort_by_cached_key(|e| (e.key.clone(), e.target, ser(e)));
+    g.bindings
+        .sort_by_cached_key(|b| (b.contract.canonical(), b.role, b.symbol, ser(b)));
     g
 }
 

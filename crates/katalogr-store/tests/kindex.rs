@@ -126,6 +126,7 @@ mod kindex {
             links,
             refs,
             exports,
+            bindings: Vec::new(),
         }
     }
 
