@@ -34,6 +34,8 @@ technologies:
       - rust/calls
     crate-deps:
       - rust/workspace-two-crates
+    extern-items:
+      - rust/extern-items
     impl-links:
       - rust/impls
     items:

@@ -35,6 +35,7 @@ impl Extractor for RustExtractor {
         &[
             "crate-deps",
             "items",
+            "extern-items",
             "impl-links",
             "use-resolution",
             "re-export",

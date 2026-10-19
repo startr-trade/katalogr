@@ -664,6 +664,23 @@ mod rust {
     }
 
     #[test]
+    fn extern_items_recorded() {
+        let g = index_case("extern-items");
+        assert_expected("extern-items", &g);
+        let f = fact(g.sym("src/lib.rs#fn:c_abs"), "abi");
+        assert_eq!(f, Some(serde_json::json!("C")));
+        assert_eq!(
+            fact(g.sym("src/lib.rs#static:ERRNO"), "abi"),
+            Some(serde_json::json!("C"))
+        );
+        assert_eq!(fact(g.sym("src/lib.rs#fn:c_abs"), "extern_attrs"), None);
+        assert_eq!(
+            fact(g.sym("src/lib.rs#fn:c_abs"), "vis"),
+            Some(serde_json::json!("pub"))
+        );
+    }
+
+    #[test]
     fn attributes_recorded() {
         let g = index_case("attributes");
         assert_expected("attributes", &g);

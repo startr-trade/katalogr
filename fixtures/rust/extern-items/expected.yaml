@@ -1,0 +1,6 @@
+mode: exact
+symbols:
+  - "fx:Cargo.toml#crate:extern-items"
+  - "fx:src/lib.rs#fn:c_abs"
+  - "fx:src/lib.rs#static:ERRNO"
+links: []
