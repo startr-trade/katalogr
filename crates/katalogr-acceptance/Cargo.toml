@@ -23,3 +23,6 @@ serde_yaml_ng.workspace = true
 sha2.workspace = true
 tempfile.workspace = true
 thiserror.workspace = true
+
+[dev-dependencies]
+katalogr-query.workspace = true

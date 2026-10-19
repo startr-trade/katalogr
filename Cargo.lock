@@ -1592,6 +1592,7 @@ dependencies = [
  "katalogr-ext-rust",
  "katalogr-ext-ts",
  "katalogr-model",
+ "katalogr-query",
  "katalogr-store",
  "serde",
  "serde_json",
