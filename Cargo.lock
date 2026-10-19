@@ -1674,6 +1674,7 @@ dependencies = [
  "camino",
  "katalogr-engine",
  "katalogr-model",
+ "katalogr-query",
  "katalogr-store",
  "ra_ap_syntax",
  "serde",

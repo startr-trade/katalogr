@@ -17,6 +17,7 @@ ra_ap_syntax.workspace = true
 [dev-dependencies]
 katalogr-engine.workspace = true
 katalogr-store.workspace = true
+katalogr-query.workspace = true
 camino.workspace = true
 serde_yaml_ng.workspace = true
 tempfile.workspace = true
