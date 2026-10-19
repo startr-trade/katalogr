@@ -4,6 +4,10 @@
 //! weights are fixed, ties are broken by canonical name. A token of 3+ characters also matches
 //! the indexed terms it prefixes (FEAT-055). There is no stemming, no fuzziness and no model.
 
+use crate::diagnostic::{
+    DIAG_TERMS, DIAG_TOP, Diagnostic, ExpandedTerm, PartTrace, PrefixTrace, RankTrace,
+    RoutingTrace, TermTrace,
+};
 use crate::resolve::hit;
 use crate::result::{Matched, SearchHit};
 use katalogr_model::{Field, Id, tokenize};
@@ -24,6 +28,9 @@ pub(crate) fn round6(x: f64) -> f64 {
     (x * 1e6).round() / 1e6
 }
 
+/// Per document, the candidate index, `t` and contribution that gave the best value.
+type Best = BTreeMap<Id, (usize, f64, f64)>;
+
 #[derive(Default)]
 struct Acc {
     score: f64,
@@ -35,11 +42,39 @@ struct Acc {
 /// query term is one of its tokens. Per term, the field-weighted, length-normalised term
 /// frequency `t` contributes `idf * t / (k1 + t)`.
 pub fn search(tx: &impl Reader, terms: &str, limit: usize) -> Result<Vec<SearchHit>, StoreError> {
+    search_traced(tx, terms, limit, &mut Diagnostic::off())
+}
+
+/// What [`search`] does, recording its routing, retrieval and scoring into `diag`. The answer
+/// does not depend on `diag`.
+pub fn search_traced(
+    tx: &impl Reader,
+    terms: &str,
+    limit: usize,
+    diag: &mut Diagnostic,
+) -> Result<Vec<SearchHit>, StoreError> {
     let mut query: Vec<String> = Vec::new();
     for t in tokenize(terms) {
         if !query.contains(&t) {
             query.push(t);
         }
+    }
+    if let Some(d) = diag.on() {
+        let dropped = terms
+            .split_whitespace()
+            .filter(|w| tokenize(w).is_empty())
+            .map(str::to_string)
+            .collect();
+        d.routing = Some(RoutingTrace {
+            command: "search".into(),
+            input: terms.to_string(),
+            kind: if query.is_empty() { "none" } else { "tokens" }.into(),
+            tokens: query.clone(),
+            dropped,
+            tier: None,
+            candidates: 0,
+            after_collapse: 0,
+        });
     }
     let stats = tx.lexicon_stats()?;
     if query.is_empty() || stats.docs == 0 {
@@ -54,18 +89,23 @@ pub fn search(tx: &impl Reader, terms: &str, limit: usize) -> Result<Vec<SearchH
     }
     let mut lens: BTreeMap<Id, [u32; LEXICON_FIELDS]> = BTreeMap::new();
     let mut acc: BTreeMap<Id, Acc> = BTreeMap::new();
+    // Recorded only when tracing: per query token, the term that gave each document its best value.
+    let mut sources: Vec<Best> = Vec::new();
+    let mut cand_terms: Vec<Vec<(bool, String)>> = Vec::new();
     for (qi, term) in query.iter().enumerate() {
         // The exact term, then (3+ characters) the most frequent indexed terms it prefixes.
-        let mut candidates: Vec<(bool, Vec<Posting>)> = vec![(false, tx.postings(term)?)];
-        if term.chars().count() >= MIN_PREFIX {
-            for (_, postings) in tx.postings_prefix(term, MAX_EXPANSIONS)? {
-                candidates.push((true, postings));
+        let mut candidates: Vec<(bool, String, Vec<Posting>)> =
+            vec![(false, term.clone(), tx.postings(term)?)];
+        let attempted = term.chars().count() >= MIN_PREFIX;
+        if attempted {
+            for (t, postings) in tx.postings_prefix(term, MAX_EXPANSIONS)? {
+                candidates.push((true, t, postings));
             }
         }
         // Per candidate term, the field-weighted, length-normalised frequency of each document.
         let mut per_term: Vec<(bool, BTreeMap<Id, f64>)> = Vec::new();
         let mut matching: BTreeSet<Id> = BTreeSet::new();
-        for (is_prefix, postings) in &candidates {
+        for (is_prefix, _, postings) in &candidates {
             let mut weighted: BTreeMap<Id, f64> = BTreeMap::new();
             for p in postings {
                 let Some(field) = Field::from_index(p.field as usize) else {
@@ -94,21 +134,52 @@ pub fn search(tx: &impl Reader, terms: &str, limit: usize) -> Result<Vec<SearchH
         let n = matching.len() as f64;
         let idf = (1.0 + (docs - n + 0.5) / (n + 0.5)).ln();
         let mut best: BTreeMap<Id, f64> = BTreeMap::new();
-        for (is_prefix, weighted) in per_term {
+        let tracing = diag.on().is_some();
+        let mut source: Best = BTreeMap::new();
+        for (ci, (is_prefix, weighted)) in per_term.into_iter().enumerate() {
             let factor = if is_prefix { PREFIX_FACTOR } else { 1.0 };
             for (id, t) in weighted {
                 let c = factor * idf * t / (K1 + t);
                 let e = best.entry(id).or_insert(0.0);
                 if c > *e {
                     *e = c;
+                    if tracing {
+                        source.insert(id, (ci, t, c));
+                    }
                 }
             }
+        }
+        if let Some(d) = diag.on() {
+            let expanded = candidates.len() - 1;
+            let mut listed: Vec<ExpandedTerm> = candidates[1..]
+                .iter()
+                .map(|(_, t, p)| ExpandedTerm {
+                    term: t.clone(),
+                    postings: p.len() as u64,
+                })
+                .collect();
+            d.cap(&mut listed, DIAG_TERMS, "prefix_terms");
+            d.terms.push(TermTrace {
+                token: term.clone(),
+                exact_postings: candidates[0].2.len() as u64,
+                matching_docs: matching.len() as u64,
+                idf: round6(idf),
+                prefix: PrefixTrace {
+                    attempted,
+                    expanded: expanded as u64,
+                    cap_hit: expanded == MAX_EXPANSIONS,
+                    factor: PREFIX_FACTOR,
+                    terms: listed,
+                },
+            });
+            sources.push(source);
+            cand_terms.push(candidates.iter().map(|c| (c.0, c.1.clone())).collect());
         }
         for (id, c) in best {
             acc.entry(id).or_default().score += c;
         }
     }
-    let mut hits: Vec<(f64, SearchHit)> = Vec::new();
+    let mut hits: Vec<(f64, Id, SearchHit)> = Vec::new();
     for (id, a) in acc {
         let Some(row) = tx.symbol(id)? else { continue };
         let mut matched = a.matched;
@@ -123,6 +194,7 @@ pub fn search(tx: &impl Reader, terms: &str, limit: usize) -> Result<Vec<SearchH
         matched.retain(|m| !m.2 || !exact.contains(&(m.0, m.1)));
         hits.push((
             a.score,
+            id,
             SearchHit {
                 symbol: hit(&row),
                 score: round6(a.score),
@@ -139,8 +211,38 @@ pub fn search(tx: &impl Reader, terms: &str, limit: usize) -> Result<Vec<SearchH
     }
     hits.sort_by(|a, b| {
         b.0.total_cmp(&a.0)
-            .then_with(|| a.1.symbol.name.cmp(&b.1.symbol.name))
+            .then_with(|| a.2.symbol.name.cmp(&b.2.symbol.name))
     });
+    if let Some(d) = diag.on() {
+        for (i, (score, id, h)) in hits.iter().take(limit.min(DIAG_TOP)).enumerate() {
+            let mut parts = Vec::new();
+            for (qi, token) in query.iter().enumerate() {
+                let Some(&(ci, t, c)) = sources[qi].get(id) else {
+                    continue;
+                };
+                let (is_prefix, term) = &cand_terms[qi][ci];
+                parts.push(PartTrace {
+                    token: token.clone(),
+                    via: if *is_prefix { "prefix" } else { "exact" }.into(),
+                    term: term.clone(),
+                    t: round6(t),
+                    factor: if *is_prefix { PREFIX_FACTOR } else { 1.0 },
+                    contribution: round6(c),
+                });
+            }
+            d.ranking.push(RankTrace {
+                position: i as u64 + 1,
+                symbol: h.symbol.name.clone(),
+                score: h.score,
+                parts,
+                tied_with_next: hits.get(i + 1).is_some_and(|n| n.0 == *score),
+            });
+        }
+        d.add_omitted(
+            "ranking",
+            hits.len().min(limit).saturating_sub(DIAG_TOP) as u64,
+        );
+    }
     hits.truncate(limit);
-    Ok(hits.into_iter().map(|(_, h)| h).collect())
+    Ok(hits.into_iter().map(|(_, _, h)| h).collect())
 }

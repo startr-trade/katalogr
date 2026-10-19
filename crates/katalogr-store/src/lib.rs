@@ -21,4 +21,6 @@ pub use guard::{GuardError, scan_for_absolute};
 pub use kindex::{
     FormatFile, Kindex, ProjectConfig, ProjectDir, ProjectName, RepoConfig, SHARD_FORMAT,
 };
-pub use rank::{RANK_CONTEXT, link_weight, pagerank, row_weight};
+pub use rank::{
+    PAGERANK_DAMPING, PAGERANK_ITERATIONS, RANK_CONTEXT, link_weight, pagerank, row_weight,
+};

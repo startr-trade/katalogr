@@ -17,9 +17,16 @@ pub fn rank(tx: &impl Reader) -> Result<Vec<(SymbolHit, f64)>, StoreError> {
 /// The stored rank when it reflects the snapshot's watermark and covers every symbol, else the
 /// rank computed now. Both give the same scores bit for bit.
 pub fn rank_cached_or_live(tx: &impl Reader) -> Result<Vec<(SymbolHit, f64)>, StoreError> {
+    Ok(rank_cached_or_live_with_source(tx)?.0)
+}
+
+/// [`rank_cached_or_live`], and whether the stored rank was the one served.
+pub fn rank_cached_or_live_with_source(
+    tx: &impl Reader,
+) -> Result<(Vec<(SymbolHit, f64)>, bool), StoreError> {
     let symbols = tx.symbols()?;
     if symbols.is_empty() {
-        return Ok(Vec::new());
+        return Ok((Vec::new(), false));
     }
     let cached = tx.cached_rank(RANK_CONTEXT)?.and_then(|m| {
         symbols
@@ -27,11 +34,12 @@ pub fn rank_cached_or_live(tx: &impl Reader) -> Result<Vec<(SymbolHit, f64)>, St
             .map(|(id, _)| m.get(id).copied())
             .collect::<Option<Vec<f64>>>()
     });
+    let is_cached = cached.is_some();
     let scores = match cached {
         Some(scores) => scores,
         None => pagerank(tx, &symbols)?,
     };
-    Ok(sorted(symbols, scores))
+    Ok((sorted(symbols, scores), is_cached))
 }
 
 /// The rank computed now, ignoring the stored one.

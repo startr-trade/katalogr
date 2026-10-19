@@ -6,8 +6,10 @@ use crate::error::StoreError;
 use katalogr_model::{Confidence, Id};
 use std::collections::BTreeMap;
 
-const DAMPING: f64 = 0.85;
-const ITERATIONS: usize = 30;
+/// The PageRank damping factor.
+pub const PAGERANK_DAMPING: f64 = 0.85;
+/// The number of PageRank iterations.
+pub const PAGERANK_ITERATIONS: u32 = 30;
 
 /// The context whose watermark the stored rank is compared against.
 pub const RANK_CONTEXT: &str = "worktree";
@@ -60,12 +62,12 @@ pub fn pagerank(tx: &impl Reader, symbols: &[(Id, SymbolRow)]) -> Result<Vec<f64
     }
     let nf = n as f64;
     let mut r = vec![1.0 / nf; n];
-    for _ in 0..ITERATIONS {
+    for _ in 0..PAGERANK_ITERATIONS {
         let dangling: f64 = (0..n).filter(|i| out_weight[*i] == 0.0).map(|i| r[i]).sum();
-        let base = (1.0 - DAMPING) / nf + DAMPING * dangling / nf;
+        let base = (1.0 - PAGERANK_DAMPING) / nf + PAGERANK_DAMPING * dangling / nf;
         let mut next = vec![base; n];
         for &(a, b, w) in &edges {
-            next[b] += DAMPING * r[a] * w / out_weight[a];
+            next[b] += PAGERANK_DAMPING * r[a] * w / out_weight[a];
         }
         r = next;
     }

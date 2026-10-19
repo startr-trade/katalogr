@@ -32,18 +32,20 @@ pub use diagnostic::{
 pub use explain::explain;
 pub use find::find;
 pub use hints::{HintSource, hints};
-pub use map::map;
+pub use map::{map, map_traced};
 pub use path::path;
-pub use rank::{link_weight, rank, rank_cached_or_live, rank_live};
-pub use refs::refs;
-pub use resolve::resolve;
+pub use rank::{
+    link_weight, rank, rank_cached_or_live, rank_cached_or_live_with_source, rank_live,
+};
+pub use refs::{refs, refs_traced};
+pub use resolve::{resolve, resolve_traced};
 pub use result::{
     CallerHit, CommitHit, DanglingRef, Direction, Envelope, Explain, LinkBrief, MapEntry, Matched,
     PathStep, RationaleLink, RefHit, ReplaceResult, Resolution, SearchHit, ShowResult, SymbolHit,
     Truncation, WhyResult,
 };
 pub use schema::schemas;
-pub use search::search;
+pub use search::{search, search_traced};
 pub use why::{Blame, RATIONALE_KINDS, why};
 
 /// Re-exported so wrappers can bound on it without a direct dependency.

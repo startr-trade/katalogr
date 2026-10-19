@@ -1,5 +1,6 @@
 //! Text to symbols.
 
+use crate::diagnostic::{Diagnostic, RoutingTrace};
 use crate::result::{Resolution, SymbolHit};
 use katalogr_model::{AnyName, Id, LinkKind, Name, Span, parse_name};
 use katalogr_store::{Reader, StoreError, SymbolRow};
@@ -60,7 +61,35 @@ pub(crate) fn all_hits(tx: &impl Reader) -> Result<Vec<(SymbolHit, String)>, Sto
 /// The symbols `text` names, by the first tier that matches: exact canonical name, exact plain
 /// name, then plain name ignoring case.
 pub fn resolve(tx: &impl Reader, text: &str) -> Result<Resolution<SymbolHit>, StoreError> {
+    resolve_traced(tx, text, &mut Diagnostic::off())
+}
+
+/// Records the routing of a `refs` query: the tier that matched, and the candidates before and
+/// after alias collapsing (`kind` is `none` when nothing matched).
+fn record(diag: &mut Diagnostic, text: &str, tier: Option<&str>, before: usize, after: usize) {
+    if let Some(d) = diag.on() {
+        d.routing = Some(RoutingTrace {
+            command: "refs".into(),
+            input: text.to_string(),
+            kind: if tier.is_some() { "name" } else { "none" }.into(),
+            tokens: Vec::new(),
+            dropped: Vec::new(),
+            tier: tier.map(str::to_string),
+            candidates: before as u64,
+            after_collapse: after as u64,
+        });
+    }
+}
+
+/// What [`resolve`] does, recording the routing into `diag` (as the routing of a `refs` query,
+/// the only traced caller). The answer does not depend on `diag`.
+pub fn resolve_traced(
+    tx: &impl Reader,
+    text: &str,
+    diag: &mut Diagnostic,
+) -> Result<Resolution<SymbolHit>, StoreError> {
     if let Some(h) = contract_hit(tx, text)? {
+        record(diag, text, Some("contract"), 1, 1);
         return Ok(Resolution::One(h));
     }
     let all = all_hits(tx)?;
@@ -75,15 +104,24 @@ pub fn resolve(tx: &impl Reader, text: &str) -> Result<Resolution<SymbolHit>, St
             })
             .map(|(h, _)| h.clone())
             .collect();
+        let before = found.len();
         if !found.is_empty() {
             found = collapse_aliases(tx, found)?;
         }
+        let name = ["canonical", "plain", "plain_ci"][tier];
         match found.len() {
             0 => continue,
-            1 => return Ok(Resolution::One(found.remove(0))),
-            _ => return Ok(Resolution::Ambiguous(found)),
+            1 => {
+                record(diag, text, Some(name), before, 1);
+                return Ok(Resolution::One(found.remove(0)));
+            }
+            n => {
+                record(diag, text, Some(name), before, n);
+                return Ok(Resolution::Ambiguous(found));
+            }
         }
     }
+    record(diag, text, None, 0, 0);
     Ok(Resolution::None)
 }
 

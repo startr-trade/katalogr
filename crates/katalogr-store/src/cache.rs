@@ -835,6 +835,11 @@ pub trait Reader {
             .map_or(Ok(0), u64_value)
     }
 
+    /// The watermark the stored rank reflects, when a rank is stored.
+    fn rank_watermark(&self) -> Result<Option<u64>, StoreError> {
+        self.meta(RANK_WATERMARK_META)?.map(u64_value).transpose()
+    }
+
     /// Whether the stored rank reflects `context`'s current watermark.
     fn rank_is_current(&self, context: &str) -> Result<bool, StoreError> {
         let Some(v) = self.meta(RANK_WATERMARK_META)? else {

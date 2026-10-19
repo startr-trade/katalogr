@@ -1753,6 +1753,7 @@ dependencies = [
  "camino",
  "katalogr-model",
  "katalogr-store",
+ "proptest",
  "schemars",
  "serde",
  "serde_json",
