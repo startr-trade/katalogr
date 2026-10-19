@@ -1,0 +1,1 @@
+{"hooks":{"PreToolUse":[{"matcher":"Read","hooks":[{"type":"command","command":"katalogr hook pre-read"}]}],"PostToolUse":[{"matcher":"Grep|Glob","hooks":[{"type":"command","command":"katalogr hook post-search"}]}],"SessionStart":[{"hooks":[{"type":"command","command":"katalogr session-start"}]}]}}

@@ -15,7 +15,13 @@ fn run(cli: &Cli) -> Result<ExitCode, DistError> {
     match &cli.command {
         Some(Command::Kindex { action }) => cmd::kindex::run(action),
         Some(Command::Project { action }) => cmd::project::run(cli, action),
-        Some(Command::Notify { deleted, paths }) => cmd::notify::run(cli, *deleted, paths),
+        Some(Command::Notify {
+            deleted,
+            from_git,
+            paths,
+        }) => cmd::notify::run(cli, *deleted, from_git.as_deref(), paths),
+        Some(Command::Hook { action }) => cmd::hook::run(cli, action),
+        Some(Command::Hooks { action }) => cmd::hooks::run(cli, action),
         Some(Command::Index { since, range, full }) => {
             cmd::index::run(cli, since.as_ref(), range.as_ref(), *full)
         }

@@ -3,6 +3,7 @@
 //! All behaviour of the command-line wrapper lives here; the wrapper parses, calls and renders.
 
 mod error;
+pub mod hooks;
 mod roots;
 mod setup;
 mod span;

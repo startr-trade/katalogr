@@ -71,9 +71,23 @@ pub enum Command {
         /// The paths were deleted.
         #[arg(long)]
         deleted: bool,
+        /// Queue what a git hook event changed (`post-commit`, `post-checkout`, `post-merge`);
+        /// the paths are then the hook's own arguments. Never fails, never blocks git.
+        #[arg(long, value_name = "HOOK")]
+        from_git: Option<String>,
         /// Paths relative to the repository root.
-        #[arg(required = true)]
+        #[arg(required_unless_present = "from_git")]
         paths: Vec<String>,
+    },
+    /// Claude Code hook entry points (read the hook JSON on stdin).
+    Hook {
+        #[command(subcommand)]
+        action: HookAction,
+    },
+    /// Install, remove or show the Claude Code settings entries and git hooks.
+    Hooks {
+        #[command(subcommand)]
+        action: HooksAction,
     },
     /// List symbols whose name matches the text.
     Find {
@@ -155,6 +169,32 @@ pub enum Command {
         #[arg(long)]
         full: bool,
     },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum HookAction {
+    /// PreToolUse for Read: block a whole-file read of a large indexed file.
+    PreRead,
+    /// PostToolUse for Grep and Glob: add index facts about the names searched for.
+    PostSearch,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum HooksAction {
+    /// Add katalogr's entries (idempotent) and the git hooks of the current repository.
+    Install {
+        /// Write `~/.claude/settings.json` instead of the project's.
+        #[arg(long)]
+        global: bool,
+    },
+    /// Remove only katalogr's entries and git hook lines.
+    Uninstall {
+        /// Use `~/.claude/settings.json` instead of the project's.
+        #[arg(long)]
+        global: bool,
+    },
+    /// Show what is installed where.
+    Status,
 }
 
 #[derive(Debug, Subcommand)]

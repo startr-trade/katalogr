@@ -3,6 +3,8 @@
 pub mod callers;
 pub mod explain;
 pub mod find;
+pub mod hook;
+pub mod hooks;
 pub mod index;
 pub mod kindex;
 pub mod map;
@@ -34,6 +36,13 @@ pub fn resolve(cli: &Cli) -> Result<Katalogr, DistError> {
             project: cli.project.clone(),
         },
     )
+}
+
+pub fn overrides(cli: &Cli) -> Overrides {
+    Overrides {
+        kindex: cli.kindex.clone(),
+        project: cli.project.clone(),
+    }
 }
 
 pub fn options(cli: &Cli) -> Options {
