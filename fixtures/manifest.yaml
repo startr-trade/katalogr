@@ -1,5 +1,29 @@
 technologies:
+  kanbanr:
+    adrs:
+      - kanbanr/board
+    goals:
+      - kanbanr/board
+    items:
+      - kanbanr/board
+    requirements:
+      - kanbanr/board
+    specs:
+      - kanbanr/board
+    tasks:
+      - kanbanr/board
+  md:
+    annotations:
+      - md/annotations
+    dangling-links:
+      - md/dangling-links
+    links:
+      - md/sections-links
+    sections:
+      - md/sections-links
   rust:
+    annotations:
+      - rust/annotations
     attributes:
       - rust/attributes
     call-method:
@@ -28,6 +52,8 @@ technologies:
     symbols:
       - test/symbols
   ts:
+    annotations:
+      - ts/annotations
     call-binding:
       - ts/calls
     call-member:

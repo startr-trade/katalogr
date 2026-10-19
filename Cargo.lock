@@ -617,6 +617,7 @@ checksum = "2156d2e07fc3afa7632a82bf3cb0db91f995645a2852f642105c9ac9b52e1cb2"
 dependencies = [
  "gix-actor",
  "gix-attributes",
+ "gix-blame",
  "gix-command",
  "gix-commitgraph",
  "gix-config",
@@ -696,6 +697,25 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "408cb9e482e0dcc5fc481850556348dda6981ec054a4a8e81a8e1bbf84f85eef"
 dependencies = [
  "gix-error",
+]
+
+[[package]]
+name = "gix-blame"
+version = "0.19.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d918e9dd7593182b9e8e19323a22d33b663f28c28507e05fede14de466563045"
+dependencies = [
+ "gix-commitgraph",
+ "gix-date",
+ "gix-diff",
+ "gix-error",
+ "gix-hash",
+ "gix-object",
+ "gix-revwalk",
+ "gix-trace",
+ "gix-traverse",
+ "gix-worktree",
+ "smallvec",
 ]
 
 [[package]]
@@ -1565,6 +1585,8 @@ version = "0.1.0"
 dependencies = [
  "camino",
  "katalogr-engine",
+ "katalogr-ext-kanbanr",
+ "katalogr-ext-md",
  "katalogr-ext-rust",
  "katalogr-ext-ts",
  "katalogr-model",
@@ -1592,6 +1614,8 @@ version = "0.1.0"
 dependencies = [
  "camino",
  "katalogr-engine",
+ "katalogr-ext-kanbanr",
+ "katalogr-ext-md",
  "katalogr-ext-rust",
  "katalogr-ext-ts",
  "katalogr-model",
@@ -1619,6 +1643,24 @@ dependencies = [
  "sha2",
  "tempfile",
  "thiserror",
+]
+
+[[package]]
+name = "katalogr-ext-kanbanr"
+version = "0.1.0"
+dependencies = [
+ "katalogr-model",
+ "pulldown-cmark",
+ "serde",
+ "serde_yaml_ng",
+]
+
+[[package]]
+name = "katalogr-ext-md"
+version = "0.1.0"
+dependencies = [
+ "katalogr-model",
+ "pulldown-cmark",
 ]
 
 [[package]]
@@ -1661,6 +1703,7 @@ name = "katalogr-model"
 version = "0.1.0"
 dependencies = [
  "proptest",
+ "regex",
  "serde",
  "serde_json",
  "sha2",
@@ -2146,6 +2189,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "pulldown-cmark"
+version = "0.13.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e9f068eba8e7071c5f9511831b44f32c740d5adf574e990f946ddb53db2f314e"
+dependencies = [
+ "bitflags 2.13.2",
+ "memchr",
+ "unicase",
+]
+
+[[package]]
 name = "quick-error"
 version = "1.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2294,6 +2348,18 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 3.0.9",
+]
+
+[[package]]
+name = "regex"
+version = "1.13.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f020237b6c8eed93db2e2cb53c00c60a8e1bc73da7d073199a1180401450218d"
+dependencies = [
+ "aho-corasick",
+ "memchr",
+ "regex-automata",
+ "regex-syntax",
 ]
 
 [[package]]
@@ -2755,6 +2821,12 @@ name = "unarray"
 version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "eaea85b334db583fe3274d12b4cd1880032beab409c0d774be044d4480ab9a94"
+
+[[package]]
+name = "unicase"
+version = "2.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "357cc3acc6a036009fd6c973ed009037c732d60d0b4f6c673e9041497482a28f"
 
 [[package]]
 name = "unicode-bom"

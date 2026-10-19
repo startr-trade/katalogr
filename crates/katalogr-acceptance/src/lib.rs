@@ -3,7 +3,7 @@
 //!
 //! Interpretation: `katalogr-dist` exposes no registry or graph-export API (its `build_registry`
 //! is private), so the runner takes a registry factory; [`full_registry`] holds the `.tx` test
-//! extractor and the Rust and TypeScript extensions.
+//! extractor and the Rust, TypeScript, Markdown and board extensions.
 //!
 //! Setting `KATALOGR_BLESS=1` makes [`run_case`] rewrite the case's `expected.yaml` from the
 //! actual result (sorted, keeping the case's mode) and pass.
@@ -57,6 +57,9 @@ pub fn full_registry() -> ExtensionRegistry {
     let mut reg = testfmt::registry();
     reg.register(Box::new(katalogr_ext_rust::RustExtractor));
     reg.register(Box::new(katalogr_ext_ts::TsExtractor));
+    // The board extension claims its own Markdown files before the general one.
+    reg.register(Box::new(katalogr_ext_kanbanr::BoardExtractor));
+    reg.register(Box::new(katalogr_ext_md::MarkdownExtractor));
     reg
 }
 

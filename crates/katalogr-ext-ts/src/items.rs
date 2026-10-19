@@ -8,6 +8,7 @@ use crate::modules::{
     NS_EXPORT, NS_FILE, NS_MEMBER, export_candidates, export_name, key, module_export_name,
     static_key,
 };
+use katalogr_model::annotate;
 use katalogr_model::{
     ArtifactName, Confidence, Export, ExportKey, Fact, Id, Link, LinkKind, Name, OutRef,
     Provenance, RelPath, Segment, Span, SymbolName, SymbolNode,
@@ -141,7 +142,53 @@ impl<'s> Builder<'s> {
             span,
             facts,
         });
+        self.annotations(id, span);
         id
+    }
+
+    /// FEAT-019 T6: item annotations (`FEAT-001 R-1`) in the comment lines directly above the
+    /// item become `annotated-by` references from the symbol.
+    fn annotations(&mut self, id: Id, span: Span) {
+        let lines: Vec<&str> = self.text.lines().collect();
+        let mut i = (span.start_line as usize).saturating_sub(1);
+        let mut found: Vec<(u32, String)> = Vec::new();
+        while i > 0 {
+            let t = lines.get(i - 1).map_or("", |l| l.trim());
+            let comment = t.starts_with("//")
+                || t.starts_with("/*")
+                || t.starts_with('*')
+                || t.ends_with("*/");
+            if !comment {
+                break;
+            }
+            found.push((i as u32, t.to_string()));
+            i -= 1;
+        }
+        found.reverse();
+        for (line, text) in found {
+            let at = Span {
+                start_line: line,
+                start_col: 1,
+                end_line: line,
+                end_col: text.chars().count().max(1) as u32,
+            };
+            for r in annotate::scan(&text) {
+                let keys = annotate::keys(&r);
+                let dup = self
+                    .refs
+                    .iter()
+                    .any(|x| x.from == id && x.kind.0 == "annotated-by" && x.candidates == keys);
+                if !dup {
+                    self.refs.push(OutRef {
+                        from: id,
+                        kind: LinkKind("annotated-by".to_string()),
+                        span: Some(at),
+                        candidates: keys,
+                        confidence: Confidence::Extracted,
+                    });
+                }
+            }
+        }
     }
 
     fn export(&mut self, namespace: &str, k: String, target: Id) {

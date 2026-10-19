@@ -1,0 +1,38 @@
+mode: exact
+symbols:
+- fx:notes.md#section:notes
+- fx:notes.md#section:notes/section:unknown
+- fx:projects/demo/charter.yaml#goal:G-1
+- fx:projects/demo/features/Planned/FEAT-001.yaml#item:FEAT-001
+- fx:projects/demo/features/Planned/FEAT-001.yaml#item:FEAT-001/req:R-1
+- fx:projects/demo/features/Planned/FEAT-001.yaml#item:FEAT-001/req:R-2
+- fx:projects/demo/features/Planned/FEAT-001.yaml#item:FEAT-001/task:TL-001%2FT1
+links:
+- from: fx:notes.md#section:notes
+  kind: annotated-by
+  to: fx:projects/demo/features/Planned/FEAT-001.yaml#item:FEAT-001
+  confidence: Extracted
+- from: fx:notes.md#section:notes
+  kind: annotated-by
+  to: fx:projects/demo/features/Planned/FEAT-001.yaml#item:FEAT-001/req:R-1
+  confidence: Extracted
+- from: fx:notes.md#section:notes
+  kind: contains
+  to: fx:notes.md#section:notes/section:unknown
+  confidence: Extracted
+- from: fx:projects/demo/features/Planned/FEAT-001.yaml#item:FEAT-001
+  kind: contains
+  to: fx:projects/demo/features/Planned/FEAT-001.yaml#item:FEAT-001/req:R-1
+  confidence: Extracted
+- from: fx:projects/demo/features/Planned/FEAT-001.yaml#item:FEAT-001
+  kind: contains
+  to: fx:projects/demo/features/Planned/FEAT-001.yaml#item:FEAT-001/req:R-2
+  confidence: Extracted
+- from: fx:projects/demo/features/Planned/FEAT-001.yaml#item:FEAT-001
+  kind: contains
+  to: fx:projects/demo/features/Planned/FEAT-001.yaml#item:FEAT-001/task:TL-001%2FT1
+  confidence: Extracted
+- from: fx:projects/demo/features/Planned/FEAT-001.yaml#item:FEAT-001
+  kind: serves
+  to: fx:projects/demo/charter.yaml#goal:G-1
+  confidence: Extracted

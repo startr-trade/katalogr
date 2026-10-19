@@ -16,9 +16,13 @@ fn run(cli: &Cli) -> Result<ExitCode, DistError> {
         Some(Command::Kindex { action }) => cmd::kindex::run(action),
         Some(Command::Project { action }) => cmd::project::run(cli, action),
         Some(Command::Notify { deleted, paths }) => cmd::notify::run(cli, *deleted, paths),
-        Some(Command::Index { since, range, full }) => {
-            cmd::index::run(cli, since.as_ref(), range.as_ref(), *full)
-        }
+        Some(Command::Index {
+            since,
+            range,
+            full,
+            history,
+        }) => cmd::index::run(cli, since.as_ref(), range.as_ref(), *full, *history),
+        Some(Command::Dangling { kind }) => cmd::dangling::run(cli, *kind),
         Some(Command::Find { text }) => cmd::find::run(cli, text),
         Some(Command::Refs { text }) => cmd::refs::run(cli, text),
         Some(Command::Callers { text, depth }) => cmd::callers::run(cli, text, *depth),

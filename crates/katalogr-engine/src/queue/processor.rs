@@ -381,6 +381,13 @@ impl<'a> Processor<'a> {
         };
         let file = root.join(key.path.as_str());
         let fin = relative_shard(dir.root(), &dir.shard_path(&key.repo, &key.path));
+        if let Some(sha) = key
+            .path
+            .as_str()
+            .strip_prefix(crate::history::HISTORY_PREFIX)
+        {
+            return self.plan_history(key, seq, root, sha, fin);
+        }
         let content = match std::fs::read(&file) {
             Ok(c) => Some(c),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
@@ -431,6 +438,43 @@ impl<'a> Processor<'a> {
                     fin,
                 })
             }
+            Err(e) => Ok(Action::Failed(e.to_string())),
+        }
+    }
+}
+
+impl Processor<'_> {
+    /// A history path (`@history/<sha>`) names a commit, not a file: its fragment comes from the
+    /// repository's history. A commit's fragment never changes, so an existing shard is current.
+    fn plan_history(
+        &self,
+        key: &PendingKey,
+        seq: u64,
+        root: &Utf8Path,
+        sha: &str,
+        fin: String,
+    ) -> Result<Action, EngineError> {
+        let dir = self.engine.dir();
+        let has_shard = dir.shard_path(&key.repo, &key.path).exists();
+        let existing = dir.read_shard(&key.repo, &key.path).unwrap_or_default();
+        if existing.is_some_and(|f| f.provenance.revision == sha) {
+            return Ok(Action::Skip);
+        }
+        let opts = crate::history::HistoryOptions::default();
+        match crate::history::history_fragment(&key.repo, root.as_std_path(), sha, &opts) {
+            Ok(Some(fragment)) => {
+                let leaf = Utf8Path::new(&fin).file_name().unwrap_or("shard");
+                let parent = Utf8Path::new(&fin).parent().unwrap_or(Utf8Path::new(""));
+                Ok(Action::Replace {
+                    fragment: Box::new(fragment),
+                    errors: Vec::new(),
+                    tmp: parent.join(format!(".tmp-{seq}-{leaf}")).to_string(),
+                    fin,
+                })
+            }
+            Ok(None) => Ok(Action::Delete {
+                fin: has_shard.then_some(fin),
+            }),
             Err(e) => Ok(Action::Failed(e.to_string())),
         }
     }

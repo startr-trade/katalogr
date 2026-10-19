@@ -1,0 +1,55 @@
+mode: exact
+symbols:
+- fx:README.md#section:example-project
+- fx:README.md#section:example-project/section:usage
+- fx:README.md#section:example-project/section:usage/section:options
+- fx:README.md#section:example-project/section:usage~2
+- fx:docs/api.md#section:api
+- fx:docs/api.md#section:api/section:overview
+- fx:guide.md#section:guide
+- fx:guide.md#section:guide/section:setup
+links:
+- from: fx:README.md#section:example-project
+  kind: contains
+  to: fx:README.md#section:example-project/section:usage
+  confidence: Extracted
+- from: fx:README.md#section:example-project
+  kind: contains
+  to: fx:README.md#section:example-project/section:usage~2
+  confidence: Extracted
+- from: fx:README.md#section:example-project
+  kind: links-to
+  to: fx:README.md#section:example-project/section:usage
+  confidence: Extracted
+- from: fx:README.md#section:example-project
+  kind: links-to
+  to: fx:docs/api.md#section:api/section:overview
+  confidence: Extracted
+- from: fx:README.md#section:example-project
+  kind: links-to
+  to: fx:guide.md
+  confidence: Extracted
+- from: fx:README.md#section:example-project/section:usage
+  kind: contains
+  to: fx:README.md#section:example-project/section:usage/section:options
+  confidence: Extracted
+- from: fx:README.md#section:example-project/section:usage
+  kind: links-to
+  to: fx:guide.md#section:guide/section:setup
+  confidence: Extracted
+- from: fx:README.md#section:example-project/section:usage~2
+  kind: links-to
+  to: fx:README.md#section:example-project/section:usage/section:options
+  confidence: Extracted
+- from: fx:docs/api.md#section:api
+  kind: contains
+  to: fx:docs/api.md#section:api/section:overview
+  confidence: Extracted
+- from: fx:docs/api.md#section:api/section:overview
+  kind: links-to
+  to: fx:README.md
+  confidence: Extracted
+- from: fx:guide.md#section:guide
+  kind: contains
+  to: fx:guide.md#section:guide/section:setup
+  confidence: Extracted

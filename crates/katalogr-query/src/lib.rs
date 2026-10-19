@@ -5,6 +5,7 @@
 
 pub mod budget;
 mod callers;
+mod dangling;
 mod find;
 mod map;
 mod refs;
@@ -14,16 +15,17 @@ mod schema;
 mod why;
 
 pub use callers::callers;
+pub use dangling::{DEFAULT_KINDS as DANGLING_KINDS, dangling};
 pub use find::find;
 pub use map::map;
 pub use refs::refs;
 pub use resolve::resolve;
 pub use result::{
-    CallerHit, Envelope, MapEntry, RationaleLink, RefHit, Resolution, SymbolHit, Truncation,
-    WhyResult,
+    CallerHit, CommitHit, DanglingRef, Envelope, MapEntry, RationaleLink, RefHit, Resolution,
+    SymbolHit, Truncation, WhyResult,
 };
 pub use schema::schemas;
-pub use why::{RATIONALE_KINDS, why};
+pub use why::{Blame, RATIONALE_KINDS, why};
 
 /// Re-exported so wrappers can bound on it without a direct dependency.
 pub use serde::Serialize;

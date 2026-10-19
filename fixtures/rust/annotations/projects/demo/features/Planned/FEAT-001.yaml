@@ -1,0 +1,23 @@
+code: FEAT-001
+title: Example item
+status: Planned
+milestone: MS-001
+kind: feature
+definition:
+  statement: Example statement.
+  goals:
+  - G-1
+  requirements:
+  - id: R-1
+    kind: functional
+    text: THE SYSTEM SHALL do the first example thing.
+  - id: R-2
+    kind: functional
+    text: THE SYSTEM SHALL do the second example thing.
+todo_lists:
+- code: TL-001
+  description: Example list
+  tasks:
+  - key: T1
+    text: Example task
+    state: NotStarted

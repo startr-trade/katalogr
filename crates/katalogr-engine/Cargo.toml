@@ -14,7 +14,7 @@ failpoints = ["katalogr-store/failpoints"]
 [dependencies]
 katalogr-model.workspace = true
 katalogr-store.workspace = true
-gix = { version = "0.89", default-features = false, features = ["sha1", "revision", "blob-diff"] }
+gix = { version = "0.89", default-features = false, features = ["sha1", "revision", "blob-diff", "blame"] }
 thiserror = "2.0"
 camino.workspace = true
 fs4.workspace = true
