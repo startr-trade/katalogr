@@ -312,6 +312,38 @@ mod cli {
     }
 
     #[test]
+    fn reexport_not_ambiguous() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (_kx, repo) = setup(tmp.path());
+        std::fs::write(
+            repo.join("lib.tx"),
+            "sym fn target\nsym use Target\nlink Target reexports target\n",
+        )
+        .unwrap();
+        ok(&repo, &["index"]);
+        // Link ends resolve by first plain-name match, so the alias is named `Target`; the
+        // case-insensitive tier puts both in one candidate set.
+        let (code, _, err) = run(&repo, &["refs", "TARGET"]);
+        assert_eq!(code, 0, "{err}");
+    }
+
+    #[test]
+    fn impl_not_ambiguous_with_its_type() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (_kx, repo) = setup(tmp.path());
+        std::fs::write(
+            repo.join("lib.tx"),
+            "sym struct Widget\nsym impl widget\nlink widget implements-for Widget\n",
+        )
+        .unwrap();
+        ok(&repo, &["index"]);
+        // The `.tx` extractor resolves link ends by first plain-name match, so the impl is
+        // named `widget`; the case-insensitive tier puts both in one candidate set.
+        let (code, _, err) = run(&repo, &["refs", "WIDGET"]);
+        assert_eq!(code, 0, "{err}");
+    }
+
+    #[test]
     fn no_match_exit_4() {
         let tmp = tempfile::tempdir().unwrap();
         let (_kx, repo) = query_project(tmp.path());
