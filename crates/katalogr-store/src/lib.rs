@@ -8,6 +8,7 @@ pub mod failpoint;
 pub mod guard;
 pub mod kindex;
 pub mod marker;
+pub mod rank;
 pub mod shard;
 
 pub use cache::{
@@ -20,3 +21,4 @@ pub use guard::{GuardError, scan_for_absolute};
 pub use kindex::{
     FormatFile, Kindex, ProjectConfig, ProjectDir, ProjectName, RepoConfig, SHARD_FORMAT,
 };
+pub use rank::{RANK_CONTEXT, link_weight, pagerank, row_weight};

@@ -28,7 +28,7 @@ pub use find::find;
 pub use hints::{HintSource, hints};
 pub use map::map;
 pub use path::path;
-pub use rank::{link_weight, rank};
+pub use rank::{link_weight, rank, rank_cached_or_live, rank_live};
 pub use refs::refs;
 pub use resolve::resolve;
 pub use result::{

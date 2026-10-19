@@ -23,7 +23,10 @@ use std::ops::Bound;
 use std::time::{Duration, Instant};
 
 /// Stored in `meta`; a different number rebuilds the cache from the shards.
-pub const CACHE_SCHEMA: u32 = 4;
+pub const CACHE_SCHEMA: u32 = 5;
+
+/// `meta` key: the watermark the stored rank reflects.
+const RANK_WATERMARK_META: &str = "rank_watermark";
 
 // ---------------------------------------------------------------- rows
 
@@ -357,10 +360,11 @@ pub enum TableId {
     Postings,
     DocLen,
     LexiconStats,
+    Rank,
 }
 
 impl TableId {
-    const ALL: [TableId; 20] = [
+    const ALL: [TableId; 21] = [
         TableId::Meta,
         TableId::ShardHashes,
         TableId::Artifacts,
@@ -381,6 +385,7 @@ impl TableId {
         TableId::Postings,
         TableId::DocLen,
         TableId::LexiconStats,
+        TableId::Rank,
     ];
 
     /// The graph tables, in the order `dump_graph` reports them.
@@ -417,6 +422,7 @@ impl TableId {
             TableId::Postings => "postings",
             TableId::DocLen => "doc_len",
             TableId::LexiconStats => "lexicon_stats",
+            TableId::Rank => "rank",
         }
     }
 
@@ -722,6 +728,30 @@ pub trait Reader {
             .map_or(Ok(0), u64_value)
     }
 
+    /// Whether the stored rank reflects `context`'s current watermark.
+    fn rank_is_current(&self, context: &str) -> Result<bool, StoreError> {
+        let Some(v) = self.meta(RANK_WATERMARK_META)? else {
+            return Ok(false);
+        };
+        Ok(u64_value(v)? == self.watermark(context)?)
+    }
+
+    /// The stored rank of every symbol (FEAT-057), or `None` when it does not reflect
+    /// `context`'s current watermark. The values are bit-exact what [`crate::pagerank`] computed.
+    fn cached_rank(&self, context: &str) -> Result<Option<BTreeMap<Id, f64>>, StoreError> {
+        if !self.rank_is_current(context)? {
+            return Ok(None);
+        }
+        let mut out = BTreeMap::new();
+        for (k, v) in self.raw_scan(TableId::Rank, &[])? {
+            let bad = || StoreError::Row("bad rank row".into());
+            let id = Id(k.try_into().map_err(|_| bad())?);
+            let bits = u64::from_le_bytes(v.try_into().map_err(|_| bad())?);
+            out.insert(id, f64::from_bits(bits));
+        }
+        Ok(Some(out))
+    }
+
     /// The renames of a publish that has committed but not yet finished.
     fn publish_journal(&self) -> Result<Vec<JournalEntry>, StoreError> {
         Ok(self
@@ -802,6 +832,15 @@ impl Reader for ReadTx<'_> {
 pub struct WriteTx<'a> {
     txn: WriteTransaction,
     _cache: PhantomData<&'a Cache>,
+    touched: RankTouched,
+}
+
+/// What a write transaction touched of the rank's inputs (FEAT-057): each link with its rank
+/// weight when first touched (`None`: absent), each symbol with whether it existed.
+#[derive(Default)]
+struct RankTouched {
+    links: BTreeMap<LinkKey, Option<f64>>,
+    symbols: BTreeMap<Id, bool>,
 }
 
 impl Reader for WriteTx<'_> {
@@ -870,21 +909,25 @@ impl WriteTx<'_> {
     }
 
     pub fn put_symbol(&mut self, id: Id, row: &SymbolRow) -> Result<(), StoreError> {
+        self.touch_symbol(id)?;
         self.put(TableId::Symbols, &id.0, &ser(row)?)
     }
 
     pub fn remove_symbol(&mut self, id: Id) -> Result<(), StoreError> {
+        self.touch_symbol(id)?;
         self.del(TableId::Symbols, &id.0)
     }
 
     /// Writes `links_out` and the matching `links_in` entry.
     pub fn put_link(&mut self, key: &LinkKey, row: &LinkRow) -> Result<(), StoreError> {
+        self.touch_link(key)?;
         self.put(TableId::LinksOut, &link_out_key(key), &ser(row)?)?;
         self.put(TableId::LinksIn, &link_in_key(key), &[])
     }
 
     /// Removes `links_out` and the matching `links_in` entry.
     pub fn remove_link(&mut self, key: &LinkKey) -> Result<(), StoreError> {
+        self.touch_link(key)?;
         self.del(TableId::LinksOut, &link_out_key(key))?;
         self.del(TableId::LinksIn, &link_in_key(key))
     }
@@ -1038,7 +1081,66 @@ impl WriteTx<'_> {
         self.put(TableId::LexiconStats, STATS_KEY, &encode_stats(&stats))
     }
 
-    pub fn commit(self) -> Result<(), StoreError> {
+    /// Remember the state a symbol had when this transaction first touched it.
+    fn touch_symbol(&mut self, id: Id) -> Result<(), StoreError> {
+        if !self.touched.symbols.contains_key(&id) {
+            let existed = self.raw_get(TableId::Symbols, &id.0)?.is_some();
+            self.touched.symbols.insert(id, existed);
+        }
+        Ok(())
+    }
+
+    /// Remember the rank weight a link had when this transaction first touched it.
+    fn touch_link(&mut self, key: &LinkKey) -> Result<(), StoreError> {
+        if !self.touched.links.contains_key(key) {
+            let weight = self.link(key)?.map(|r| crate::rank::row_weight(&r));
+            self.touched.links.insert(key.clone(), weight);
+        }
+        Ok(())
+    }
+
+    /// Whether this transaction changed anything the rank depends on: the set of symbols, or
+    /// the rank weight of any link row. Writes that restore what was there cancel out.
+    pub fn rank_inputs_changed(&self) -> Result<bool, StoreError> {
+        for (id, existed) in &self.touched.symbols {
+            if self.raw_get(TableId::Symbols, &id.0)?.is_some() != *existed {
+                return Ok(true);
+            }
+        }
+        for (key, was) in &self.touched.links {
+            let now = self.link(key)?.map(|r| crate::rank::row_weight(&r));
+            if now != *was {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+
+    /// Replace the stored rank with `scores`, recorded as reflecting `watermark`.
+    pub fn store_rank(&mut self, scores: &[(Id, f64)], watermark: u64) -> Result<(), StoreError> {
+        self.txn.delete_table(TableId::Rank.def()).map_err(db)?;
+        {
+            let mut table = self.txn.open_table(TableId::Rank.def()).map_err(db)?;
+            for (id, score) in scores {
+                table
+                    .insert(id.0.as_slice(), score.to_bits().to_le_bytes().as_slice())
+                    .map_err(db)?;
+            }
+        }
+        self.set_rank_watermark(watermark)
+    }
+
+    /// Record that the stored rank reflects `watermark`.
+    pub fn set_rank_watermark(&mut self, watermark: u64) -> Result<(), StoreError> {
+        self.set_meta(RANK_WATERMARK_META, &watermark.to_le_bytes())
+    }
+
+    /// Commits. A transaction that changed the rank's inputs also drops the stored rank's
+    /// watermark, so no reader can take a rank that does not match the graph it reads.
+    pub fn commit(mut self) -> Result<(), StoreError> {
+        if self.rank_inputs_changed()? {
+            self.del(TableId::Meta, RANK_WATERMARK_META.as_bytes())?;
+        }
         self.txn.commit().map_err(db)
     }
 }
@@ -1190,6 +1292,7 @@ impl Cache {
         Ok(WriteTx {
             txn: self.db.begin_write().map_err(db)?,
             _cache: PhantomData,
+            touched: RankTouched::default(),
         })
     }
 
@@ -1353,6 +1456,7 @@ fn schema_current(database: &Database) -> Result<bool, StoreError> {
     let mut tx = WriteTx {
         txn,
         _cache: PhantomData,
+        touched: RankTouched::default(),
     };
     for t in TableId::ALL {
         tx.txn.open_table(t.def()).map_err(db)?;

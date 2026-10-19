@@ -8,7 +8,7 @@ use katalogr_model::{
 use katalogr_query::{rank, refs, resolve, result::Resolution, search};
 use katalogr_store::{
     Cache, Kindex, LEXICON_FIELDS, LinkEntry, LinkKey, LinkOrigin, LinkRow, ProjectConfig,
-    ProjectName, RepoConfig, Restitch, StoreError, SymbolRow, WriteTx,
+    ProjectName, Reader, RepoConfig, Restitch, StoreError, SymbolRow, WriteTx,
 };
 use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
@@ -521,4 +521,109 @@ fn rank_100k() {
     let elapsed = start.elapsed();
     assert_eq!(ranked.len(), SYMBOLS);
     println!("bench::rank_100k: {} ms", elapsed.as_secs_f64() * 1000.0);
+}
+
+#[test]
+#[ignore]
+fn session_start_100k() {
+    // The same graph as `rank_100k`, with the rank stored as the processor stores it at publish.
+    let tmp = tempfile::tempdir().unwrap();
+    let cache = open_bench_cache(&tmp);
+    let path = RelPath::new("bench.tx").unwrap();
+    let artifact = ArtifactName {
+        repo: "r".into(),
+        path: path.clone(),
+    };
+    let artifact_id = artifact.id();
+    let provenance = Provenance {
+        repo: "r".into(),
+        path,
+        revision: "ce013625030ba8dba906f756967f9e9ca394464a".into(),
+    };
+    let span = Span {
+        start_line: 1,
+        start_col: 1,
+        end_line: 1,
+        end_col: 1,
+    };
+    let mut tx = cache.write().unwrap();
+    let mut ids: Vec<Id> = Vec::with_capacity(SYMBOLS);
+    for i in 0..SYMBOLS {
+        let name = SymbolName {
+            artifact: artifact.clone(),
+            segments: vec![Segment {
+                kind: "fn".into(),
+                name: format!("s{i}"),
+            }],
+            ordinal: 1,
+        };
+        let id = name.id();
+        tx.put_symbol(
+            id,
+            &SymbolRow {
+                name,
+                artifact: artifact_id,
+                kind: "fn".into(),
+                span,
+                facts: Default::default(),
+            },
+        )
+        .unwrap();
+        ids.push(id);
+    }
+    let mut rng = SEED;
+    for (i, from) in ids.iter().enumerate() {
+        let mut targets: Vec<usize> = Vec::with_capacity(3);
+        while targets.len() < 3 {
+            let j = next_rand(&mut rng) as usize % SYMBOLS;
+            if j != i && !targets.contains(&j) {
+                targets.push(j);
+            }
+        }
+        for j in targets {
+            tx.put_link(
+                &LinkKey {
+                    from: *from,
+                    kind: LinkKind("calls".into()),
+                    to: ids[j],
+                },
+                &LinkRow {
+                    entries: vec![LinkEntry {
+                        origin: LinkOrigin::Intra,
+                        confidence: Confidence::Extracted,
+                        span: Some(span),
+                        provenance: provenance.clone(),
+                        fanout: None,
+                    }],
+                },
+            )
+            .unwrap();
+        }
+    }
+    tx.commit().unwrap();
+
+    // The publish step: compute once and store.
+    let mut tx = cache.write().unwrap();
+    let symbols = tx.symbols().unwrap();
+    let scores = katalogr_store::pagerank(&tx, &symbols).unwrap();
+    let stored: Vec<(Id, f64)> = symbols.iter().map(|(i, _)| *i).zip(scores).collect();
+    let wm = tx.watermark(katalogr_store::RANK_CONTEXT).unwrap();
+    tx.store_rank(&stored, wm).unwrap();
+    tx.commit().unwrap();
+
+    // Session start: read the rank from the snapshot and take the top symbols.
+    let start = Instant::now();
+    let read = cache.read().unwrap();
+    let ranked = rank(&read).unwrap();
+    let top: Vec<_> = ranked.iter().take(10).collect();
+    let elapsed = start.elapsed();
+    assert_eq!(ranked.len(), SYMBOLS);
+    assert_eq!(top.len(), 10);
+    let live = katalogr_query::rank_live(&read).unwrap();
+    assert_eq!(ranked, live, "the stored rank equals the live rank");
+    println!(
+        "bench::session_start_100k: {} ms",
+        elapsed.as_secs_f64() * 1000.0
+    );
+    assert!(elapsed < Duration::from_millis(1000), "over budget");
 }
