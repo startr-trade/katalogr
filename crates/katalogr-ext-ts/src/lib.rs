@@ -55,4 +55,11 @@ impl Extractor for TsExtractor {
     fn extract(&self, input: &ExtractInput) -> Result<Fragment, ExtractError> {
         extract::extract(input)
     }
+
+    fn extract_with_errors(
+        &self,
+        input: &ExtractInput,
+    ) -> Result<(Fragment, Vec<ExtractError>), ExtractError> {
+        extract::extract_with_errors(input)
+    }
 }

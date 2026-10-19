@@ -108,6 +108,7 @@ pub struct Katalogr {
 fn build_registry() -> ExtensionRegistry {
     let mut registry = ExtensionRegistry::new();
     registry.register(Box::new(katalogr_ext_rust::RustExtractor));
+    registry.register(Box::new(katalogr_ext_ts::TsExtractor));
     #[cfg(feature = "test-extractor")]
     registry.register(Box::new(test_extractor::TestExtractor));
     registry

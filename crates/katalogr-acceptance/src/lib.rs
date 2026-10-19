@@ -1,8 +1,12 @@
 //! Fixture corpus runner (FEAT-023): index a case, compare the canonical graph with its
 //! `expected.yaml`, and report every difference.
 //!
-//! Interpretation: `katalogr-dist` registers no extractor yet, so the runner takes a registry
-//! factory and `testfmt::registry()` supplies the `.tx` test extractor.
+//! Interpretation: `katalogr-dist` exposes no registry or graph-export API (its `build_registry`
+//! is private), so the runner takes a registry factory; [`full_registry`] holds the `.tx` test
+//! extractor and the Rust and TypeScript extensions.
+//!
+//! Setting `KATALOGR_BLESS=1` makes [`run_case`] rewrite the case's `expected.yaml` from the
+//! actual result (sorted, keeping the case's mode) and pass.
 
 pub mod privacy;
 pub mod testfmt;
@@ -11,7 +15,7 @@ use camino::{Utf8Path, Utf8PathBuf};
 use katalogr_engine::registry::ExtensionRegistry;
 use katalogr_engine::{Consistency, Engine, NewEvent, QueryOptions, Scope};
 use katalogr_store::{Kindex, ProjectConfig, ProjectName, RepoConfig};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::{Duration, Instant};
 
@@ -48,13 +52,21 @@ impl AccError {
     }
 }
 
+/// The test extractor plus every shipped language extension.
+pub fn full_registry() -> ExtensionRegistry {
+    let mut reg = testfmt::registry();
+    reg.register(Box::new(katalogr_ext_rust::RustExtractor));
+    reg.register(Box::new(katalogr_ext_ts::TsExtractor));
+    reg
+}
+
 /// technologies x link patterns -> case directories (relative to the fixtures root).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
 pub struct Manifest {
     pub technologies: BTreeMap<String, BTreeMap<String, Vec<String>>>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum MatchMode {
     Exact,
@@ -62,13 +74,13 @@ pub enum MatchMode {
     Subset,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ExpectedLink {
     pub from: String,
     pub kind: String,
     pub to: String,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub confidence: Option<String>,
 }
 
@@ -196,11 +208,16 @@ fn matches(expected: &ExpectedLink, actual: &ExpectedLink) -> bool {
     expected.from == actual.from
         && expected.kind == actual.kind
         && expected.to == actual.to
-        && (expected.confidence.is_none() || expected.confidence == actual.confidence)
+        && match (&expected.confidence, &actual.confidence) {
+            (None, _) => true,
+            (Some(e), Some(a)) => e.eq_ignore_ascii_case(a),
+            (Some(_), None) => false,
+        }
 }
 
 /// Set differences on canonical strings (design section 6). An expected link without a
-/// confidence matches any confidence.
+/// confidence matches any confidence; confidences compare ignoring case (the Rust fixtures
+/// spell them in lower case).
 pub fn compare(
     case: &str,
     expected: &Expected,
@@ -296,7 +313,20 @@ pub fn run_case(
     let expected = Expected::load(&case_dir.join("expected.yaml"))?;
     let graph = index_case(make_registry, case_dir)?;
     let (symbols, links) = parse_graph(&graph)?;
-    let label = std::fs::canonicalize(case_dir)
+    if std::env::var_os("KATALOGR_BLESS").is_some_and(|v| v == "1") {
+        bless(case_dir, expected.mode, &symbols, &links)?;
+        return Ok(compare(
+            &label_of(case_dir),
+            &Expected::load(&case_dir.join("expected.yaml"))?,
+            &symbols,
+            &links,
+        ));
+    }
+    Ok(compare(&label_of(case_dir), &expected, &symbols, &links))
+}
+
+fn label_of(case_dir: &Utf8Path) -> String {
+    std::fs::canonicalize(case_dir)
         .ok()
         .and_then(|p| Utf8PathBuf::from_path_buf(p).ok())
         .and_then(|p| {
@@ -304,6 +334,30 @@ pub fn run_case(
             let a = p.parent()?.file_name()?.to_string();
             Some(format!("{a}/{b}"))
         })
-        .unwrap_or_else(|| case_dir.to_string());
-    Ok(compare(&label, &expected, &symbols, &links))
+        .unwrap_or_else(|| case_dir.to_string())
+}
+
+#[derive(Serialize)]
+struct OutExpected<'a> {
+    mode: MatchMode,
+    symbols: Vec<&'a String>,
+    links: Vec<&'a ExpectedLink>,
+}
+
+/// Rewrite `expected.yaml` from the actual result; lists come out sorted (sets are ordered).
+fn bless(
+    case_dir: &Utf8Path,
+    mode: MatchMode,
+    symbols: &BTreeSet<String>,
+    links: &BTreeSet<ExpectedLink>,
+) -> Result<(), AccError> {
+    let out = OutExpected {
+        mode,
+        symbols: symbols.iter().collect(),
+        links: links.iter().collect(),
+    };
+    let path = case_dir.join("expected.yaml");
+    let text =
+        serde_yaml_ng::to_string(&out).map_err(|e| AccError::format(&path, e.to_string()))?;
+    std::fs::write(&path, text).map_err(|e| AccError::io(&path, e))
 }

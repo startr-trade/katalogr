@@ -15,6 +15,7 @@ test-extractor = []
 katalogr-query.workspace = true
 katalogr-engine.workspace = true
 katalogr-ext-rust.workspace = true
+katalogr-ext-ts.workspace = true
 katalogr-model.workspace = true
 katalogr-store.workspace = true
 camino.workspace = true

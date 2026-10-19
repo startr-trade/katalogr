@@ -1565,6 +1565,8 @@ version = "0.1.0"
 dependencies = [
  "camino",
  "katalogr-engine",
+ "katalogr-ext-rust",
+ "katalogr-ext-ts",
  "katalogr-model",
  "katalogr-store",
  "serde",
@@ -1591,6 +1593,7 @@ dependencies = [
  "camino",
  "katalogr-engine",
  "katalogr-ext-rust",
+ "katalogr-ext-ts",
  "katalogr-model",
  "katalogr-query",
  "katalogr-store",
