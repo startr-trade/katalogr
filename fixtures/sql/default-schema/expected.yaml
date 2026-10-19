@@ -1,0 +1,56 @@
+mode: subset
+symbols:
+- fx:V1__init.sql#table:app.orders
+- fx:V1__init.sql#table:app.orders/column:id
+- fx:V1__init.sql#table:app.orders/column:total
+- fx:V1__init.sql#table:public.audit
+- fx:V1__init.sql#table:public.audit/column:id
+- fx:V1__init.sql#view:app.order_ids
+contracts:
+- contract:sql_column:app.orders.id
+- contract:sql_column:app.orders.total
+- contract:sql_column:public.audit.id
+- contract:sql_table:app.order_ids
+- contract:sql_table:app.orders
+- contract:sql_table:public.audit
+links:
+- from: fx:V1__init.sql#table:app.orders
+  kind: contains
+  to: fx:V1__init.sql#table:app.orders/column:id
+  confidence: Extracted
+- from: fx:V1__init.sql#table:app.orders
+  kind: contains
+  to: fx:V1__init.sql#table:app.orders/column:total
+  confidence: Extracted
+- from: fx:V1__init.sql#table:app.orders
+  kind: provides
+  to: contract:sql_table:app.orders
+  confidence: Extracted
+- from: fx:V1__init.sql#table:app.orders/column:id
+  kind: provides
+  to: contract:sql_column:app.orders.id
+  confidence: Extracted
+- from: fx:V1__init.sql#table:app.orders/column:total
+  kind: provides
+  to: contract:sql_column:app.orders.total
+  confidence: Extracted
+- from: fx:V1__init.sql#table:public.audit
+  kind: contains
+  to: fx:V1__init.sql#table:public.audit/column:id
+  confidence: Extracted
+- from: fx:V1__init.sql#table:public.audit
+  kind: provides
+  to: contract:sql_table:public.audit
+  confidence: Extracted
+- from: fx:V1__init.sql#table:public.audit/column:id
+  kind: provides
+  to: contract:sql_column:public.audit.id
+  confidence: Extracted
+- from: fx:V1__init.sql#view:app.order_ids
+  kind: consumes
+  to: contract:sql_table:app.orders
+  confidence: Extracted
+- from: fx:V1__init.sql#view:app.order_ids
+  kind: provides
+  to: contract:sql_table:app.order_ids
+  confidence: Extracted

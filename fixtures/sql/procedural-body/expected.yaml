@@ -1,0 +1,53 @@
+mode: subset
+symbols:
+- fx:mysql.sql#procedure:public.recount
+- fx:pg.sql#procedure:public.archive_orders
+- fx:sqlite.sql#trigger:public.customers_ad
+contracts:
+- contract:sql_routine:app.vacuum_orders
+- contract:sql_routine:public.archive_orders
+- contract:sql_routine:public.recount
+- contract:sql_table:public.audit
+- contract:sql_table:public.customers
+- contract:sql_table:public.orders
+links:
+- from: fx:mysql.sql#procedure:public.recount
+  kind: consumes
+  to: contract:sql_table:public.customers
+  confidence: Inferred
+- from: fx:mysql.sql#procedure:public.recount
+  kind: consumes
+  to: contract:sql_table:public.orders
+  confidence: Inferred
+- from: fx:mysql.sql#procedure:public.recount
+  kind: provides
+  to: contract:sql_routine:public.recount
+  confidence: Inferred
+- from: fx:pg.sql
+  kind: consumes
+  to: contract:sql_table:public.customers
+  confidence: Inferred
+- from: fx:pg.sql#procedure:public.archive_orders
+  kind: consumes
+  to: contract:sql_routine:app.vacuum_orders
+  confidence: Inferred
+- from: fx:pg.sql#procedure:public.archive_orders
+  kind: consumes
+  to: contract:sql_table:public.audit
+  confidence: Inferred
+- from: fx:pg.sql#procedure:public.archive_orders
+  kind: consumes
+  to: contract:sql_table:public.orders
+  confidence: Inferred
+- from: fx:pg.sql#procedure:public.archive_orders
+  kind: provides
+  to: contract:sql_routine:public.archive_orders
+  confidence: Inferred
+- from: fx:sqlite.sql#trigger:public.customers_ad
+  kind: consumes
+  to: contract:sql_table:public.customers
+  confidence: Extracted
+- from: fx:sqlite.sql#trigger:public.customers_ad
+  kind: consumes
+  to: contract:sql_table:public.orders
+  confidence: Extracted

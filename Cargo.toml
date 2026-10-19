@@ -19,6 +19,7 @@ katalogr-ext-wasm = { path = "crates/katalogr-ext-wasm", version = "0.1.0" }
 katalogr-query = { path = "crates/katalogr-query", version = "0.1.0" }
 katalogr-dist = { path = "crates/katalogr-dist", version = "0.1.0" }
 katalogr-ext-ts = { path = "crates/katalogr-ext-ts", version = "0.1.0" }
+katalogr-ext-sql = { path = "crates/katalogr-ext-sql", version = "0.1.0" }
 katalogr-ext-md = { path = "crates/katalogr-ext-md", version = "0.1.0" }
 katalogr-ext-kanbanr = { path = "crates/katalogr-ext-kanbanr", version = "0.1.0" }
 oxc_parser = "=0.154.0"
@@ -46,3 +47,4 @@ ra_ap_syntax = "=0.0.358"
 schemars = "1.2"
 pulldown-cmark = { version = "0.13", default-features = false }
 regex = "1"
+sqlparser = { version = "=0.63.0", default-features = false, features = ["std", "visitor"] }

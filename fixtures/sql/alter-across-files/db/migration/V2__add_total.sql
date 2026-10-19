@@ -1,0 +1,1 @@
+ALTER TABLE orders ADD COLUMN total numeric(12, 2) NOT NULL DEFAULT 0;

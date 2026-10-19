@@ -6,8 +6,9 @@ use crate::lines::LineIndex;
 use crate::ownership::owner_of;
 use katalogr_model::annotate;
 use katalogr_model::{
-    ArtifactName, ArtifactNode, Confidence, Export, ExportKey, ExtractError, ExtractInput, Fact,
-    Fragment, Id, Link, LinkKind, Name, OutRef, Provenance, Segment, Span, SymbolName, SymbolNode,
+    ArtifactName, ArtifactNode, Confidence, Export, ExportKey, ExtractError, ExtractInput,
+    Extraction, Fact, Fragment, Id, Link, LinkKind, Name, OutRef, Provenance, Segment, Span,
+    SymbolName, SymbolNode,
 };
 use ra_ap_syntax::{
     AstNode, Edition, SourceFile, SyntaxElement, SyntaxKind, SyntaxNode,
@@ -94,13 +95,18 @@ pub(crate) struct Builder<'a> {
 }
 
 pub fn extract(input: &ExtractInput) -> Result<Fragment, ExtractError> {
-    extract_with_errors(input).map(|(fragment, _)| fragment)
+    extract_full(input).map(|x| x.fragment)
 }
 
 /// The fragment plus one [`ExtractError::Parse`] (with span) per syntax error in the file.
 pub fn extract_with_errors(
     input: &ExtractInput,
 ) -> Result<(Fragment, Vec<ExtractError>), ExtractError> {
+    extract_full(input).map(|x| (x.fragment, x.errors))
+}
+
+/// The fragment, the syntax errors, and the string literals offered to guest extensions.
+pub fn extract_full(input: &ExtractInput) -> Result<Extraction, ExtractError> {
     let text = std::str::from_utf8(input.content).map_err(|e| ExtractError::Parse {
         span: None,
         message: format!("not utf-8: {e}"),
@@ -191,6 +197,7 @@ pub fn extract_with_errors(
         })
         .collect();
 
+    let embedded = crate::literals::collect(&tree, &b.lines, &b.symbols, artifact.id());
     let mut fragment = Fragment {
         provenance,
         extension: "rust".to_string(),
@@ -214,7 +221,11 @@ pub fn extract_with_errors(
             }),
         );
     }
-    Ok((fragment, errors))
+    Ok(Extraction {
+        fragment,
+        errors,
+        embedded,
+    })
 }
 
 impl Builder<'_> {

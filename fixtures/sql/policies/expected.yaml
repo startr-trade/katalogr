@@ -1,0 +1,20 @@
+mode: subset
+symbols:
+- fx:policies.sql#policy:public.orders.own_rows
+- fx:policies.sql#table:public.orders
+contracts:
+- contract:sql_table:public.customers
+- contract:sql_table:public.orders
+links:
+- from: fx:policies.sql#policy:public.orders.own_rows
+  kind: consumes
+  to: contract:sql_table:public.customers
+  confidence: Extracted
+- from: fx:policies.sql#policy:public.orders.own_rows
+  kind: consumes
+  to: contract:sql_table:public.orders
+  confidence: Extracted
+- from: fx:policies.sql#table:public.orders
+  kind: provides
+  to: contract:sql_table:public.orders
+  confidence: Extracted

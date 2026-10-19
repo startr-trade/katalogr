@@ -1,0 +1,56 @@
+mode: subset
+symbols:
+- fx:mysql.sql#function:public.tax
+- fx:pg.sql#function:app.order_count
+- fx:pg.sql#function:app.order_count~2
+- fx:pg.sql#function:app.touch
+- fx:pg.sql#procedure:public.purge_old
+contracts:
+- contract:sql_routine:app.order_count
+- contract:sql_routine:app.recalc
+- contract:sql_routine:app.touch
+- contract:sql_routine:public.purge_old
+- contract:sql_routine:public.tax
+- contract:sql_table:public.audit
+- contract:sql_table:public.orders
+links:
+- from: fx:mysql.sql#function:public.tax
+  kind: provides
+  to: contract:sql_routine:public.tax
+  confidence: Inferred
+- from: fx:pg.sql#function:app.order_count
+  kind: consumes
+  to: contract:sql_table:public.orders
+  confidence: Extracted
+- from: fx:pg.sql#function:app.order_count
+  kind: provides
+  to: contract:sql_routine:app.order_count
+  confidence: Extracted
+- from: fx:pg.sql#function:app.order_count~2
+  kind: consumes
+  to: contract:sql_table:public.orders
+  confidence: Extracted
+- from: fx:pg.sql#function:app.order_count~2
+  kind: provides
+  to: contract:sql_routine:app.order_count
+  confidence: Extracted
+- from: fx:pg.sql#function:app.touch
+  kind: consumes
+  to: contract:sql_routine:app.recalc
+  confidence: Inferred
+- from: fx:pg.sql#function:app.touch
+  kind: consumes
+  to: contract:sql_table:public.audit
+  confidence: Inferred
+- from: fx:pg.sql#function:app.touch
+  kind: provides
+  to: contract:sql_routine:app.touch
+  confidence: Extracted
+- from: fx:pg.sql#procedure:public.purge_old
+  kind: consumes
+  to: contract:sql_table:public.orders
+  confidence: Inferred
+- from: fx:pg.sql#procedure:public.purge_old
+  kind: provides
+  to: contract:sql_routine:public.purge_old
+  confidence: Inferred

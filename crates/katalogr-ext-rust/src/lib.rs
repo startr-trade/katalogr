@@ -8,12 +8,13 @@ pub mod extract;
 pub mod impls;
 pub mod items;
 pub mod lines;
+pub mod literals;
 pub mod manifest;
 pub mod ownership;
 
 pub use context::{CrateInfo, Dep, Target, TargetKind, WorkspaceContext};
 
-use katalogr_model::{ExtractError, ExtractInput, Extractor, Fragment, RelPath};
+use katalogr_model::{ExtractError, ExtractInput, Extraction, Extractor, Fragment, RelPath};
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct RustExtractor;
@@ -46,13 +47,15 @@ impl Extractor for RustExtractor {
             "parse-error",
             "wasm-export",
             "wasm-extern",
+            "embedded-literals",
         ]
     }
 
     /// Bumped when extraction output changes for unchanged input: `1` adds extern-block items
-    /// and the wasm-bindgen bindings (FEAT-016).
+    /// and the wasm-bindgen bindings (FEAT-016); `2` offers string literals to guest
+    /// extensions (FEAT-017).
     fn revision_salt(&self) -> &'static str {
-        "rust-extract-1"
+        "rust-extract-2"
     }
 
     /// The [`WorkspaceContext`] as compact JSON with sorted keys and vectors.
@@ -72,10 +75,22 @@ impl Extractor for RustExtractor {
         &self,
         input: &ExtractInput,
     ) -> Result<(Fragment, Vec<ExtractError>), ExtractError> {
+        self.extract_full(input).map(|x| (x.fragment, x.errors))
+    }
+
+    fn embeds(&self) -> bool {
+        true
+    }
+
+    fn extract_full(&self, input: &ExtractInput) -> Result<Extraction, ExtractError> {
         if input.path.as_str().rsplit('/').next() == Some(context::MANIFEST) {
-            manifest::extract(input).map(|f| (f, Vec::new()))
+            manifest::extract(input).map(|fragment| Extraction {
+                fragment,
+                errors: Vec::new(),
+                embedded: Vec::new(),
+            })
         } else {
-            extract::extract_with_errors(input)
+            extract::extract_full(input)
         }
     }
 }

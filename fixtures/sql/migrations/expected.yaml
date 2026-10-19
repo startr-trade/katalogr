@@ -1,0 +1,45 @@
+mode: subset
+symbols:
+- fx:0001_init.down.sql#table:public.customers
+- fx:0001_init.up.sql#table:public.customers
+- fx:0001_init.up.sql#table:public.customers/column:email
+- fx:0001_init.up.sql#table:public.customers/column:id
+- fx:R__refresh.sql#view:public.customer_emails
+contracts:
+- contract:sql_column:public.customers.email
+- contract:sql_column:public.customers.id
+- contract:sql_table:public.customer_emails
+- contract:sql_table:public.customers
+links:
+- from: fx:0001_init.down.sql#table:public.customers
+  kind: declares
+  to: contract:sql_table:public.customers
+  confidence: Extracted
+- from: fx:0001_init.up.sql#table:public.customers
+  kind: contains
+  to: fx:0001_init.up.sql#table:public.customers/column:email
+  confidence: Extracted
+- from: fx:0001_init.up.sql#table:public.customers
+  kind: contains
+  to: fx:0001_init.up.sql#table:public.customers/column:id
+  confidence: Extracted
+- from: fx:0001_init.up.sql#table:public.customers
+  kind: provides
+  to: contract:sql_table:public.customers
+  confidence: Extracted
+- from: fx:0001_init.up.sql#table:public.customers/column:email
+  kind: provides
+  to: contract:sql_column:public.customers.email
+  confidence: Extracted
+- from: fx:0001_init.up.sql#table:public.customers/column:id
+  kind: provides
+  to: contract:sql_column:public.customers.id
+  confidence: Extracted
+- from: fx:R__refresh.sql#view:public.customer_emails
+  kind: consumes
+  to: contract:sql_table:public.customers
+  confidence: Extracted
+- from: fx:R__refresh.sql#view:public.customer_emails
+  kind: provides
+  to: contract:sql_table:public.customer_emails
+  confidence: Extracted
