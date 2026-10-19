@@ -4,7 +4,7 @@
 //! inside `Deserialize` impls carry the position of the node being read (serde_yaml_ng adds it).
 
 use globset::{Glob, GlobMatcher};
-use katalogr_model::{ContractName, ContractRole};
+use katalogr_model::{Confidence, ContractName, ContractRole};
 use regex::Regex;
 use serde::Deserialize;
 use serde::de::{self, Deserializer};
@@ -82,6 +82,9 @@ impl<'de> Deserialize<'de> for ProfileDoc {
             if raw.rules.iter().any(|r| r.uses_scope()) {
                 return Err(de::Error::custom(NEEDS_SCOPE));
             }
+            if let Some(key) = raw.rules.iter().find_map(|r| r.v2_key()) {
+                return Err(de::Error::custom(needs_v2(key)));
+            }
         }
         let mut seen = std::collections::BTreeSet::new();
         for r in &raw.rules {
@@ -103,6 +106,14 @@ impl<'de> Deserialize<'de> for ProfileDoc {
 pub(crate) const NEEDS_SELECT: &str = "`select` needs version: 2";
 pub(crate) const NEEDS_FACT: &str = "`${fact:}` needs version: 2";
 pub(crate) const NEEDS_SCOPE: &str = "`${scope:}` needs version: 2";
+
+/// The keys of FEAT-014 that need version 2, in the order they are looked for.
+pub(crate) const V2_RULE_KEYS: [&str; 5] = ["each", "on", "normalise", "confidence", "holder"];
+
+/// The refusal of a version-2 rule key in a version-1 file.
+pub(crate) fn needs_v2(key: &str) -> String {
+    format!("`{key}` needs version: 2")
+}
 
 fn is_word(s: &str) -> bool {
     !s.is_empty()
@@ -352,6 +363,27 @@ pub struct When {
     pub matches: Option<Pattern>,
     /// Glob over the artifact's path.
     pub path: Option<PathGlob>,
+    /// Version 2: a list fact; the rule runs once per element (exclusive with `fact`).
+    pub each: Option<String>,
+    /// Version 2: which nodes the rule visits (default `symbols`).
+    pub on: Option<On>,
+}
+
+/// Which nodes a rule visits (version 2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum On {
+    Symbols,
+    Artifact,
+    All,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum ConfidenceName {
+    Extracted,
+    Inferred,
+    Declared,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -374,6 +406,9 @@ struct ContractSpec {
 struct RawBind {
     contract: ContractSpec,
     role: RoleName,
+    normalise: Option<String>,
+    confidence: Option<ConfidenceName>,
+    holder: Option<Template>,
 }
 
 /// `bind`: attach the matched symbol to a contract.
@@ -382,6 +417,13 @@ pub struct BindEmit {
     pub kind: Template,
     pub key: Template,
     pub role: ContractRole,
+    /// Version 2: the id of the key normaliser the expanded key passes through.
+    pub normalise: Option<String>,
+    /// Version 2: confidence of the binding (default declared).
+    pub confidence: Option<Confidence>,
+    /// Version 2: names an argument of the matched element; the binding is held by what it
+    /// resolves to. Needs `when.each`.
+    pub holder: Option<Template>,
 }
 
 impl<'de> Deserialize<'de> for BindEmit {
@@ -399,6 +441,16 @@ impl<'de> Deserialize<'de> for BindEmit {
                 ))
             })?;
         }
+        if let Some(n) = &raw.normalise
+            && (n.is_empty()
+                || !n
+                    .chars()
+                    .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_'))
+        {
+            return Err(de::Error::custom(format!(
+                "normaliser id {n:?} must be lowercase letters, digits or '_'"
+            )));
+        }
         Ok(BindEmit {
             kind: raw.contract.kind,
             key: raw.contract.key,
@@ -407,6 +459,13 @@ impl<'de> Deserialize<'de> for BindEmit {
                 RoleName::Consumes => ContractRole::Consumes,
                 RoleName::Declares => ContractRole::Declares,
             },
+            normalise: raw.normalise,
+            confidence: raw.confidence.map(|c| match c {
+                ConfidenceName::Extracted => Confidence::Extracted,
+                ConfidenceName::Inferred => Confidence::Inferred,
+                ConfidenceName::Declared => Confidence::Declared,
+            }),
+            holder: raw.holder,
         })
     }
 }
@@ -517,6 +576,9 @@ impl Rule {
         if let Some(b) = &self.emit.bind {
             out.push(&b.kind);
             out.push(&b.key);
+            if let Some(h) = &b.holder {
+                out.push(h);
+            }
         }
         if let Some(r) = &self.emit.reference {
             for c in &r.candidates {
@@ -538,6 +600,11 @@ impl Rule {
         out
     }
 
+    /// True when the rule has a `bind.holder`.
+    pub fn has_holder(&self) -> bool {
+        self.emit.bind.as_ref().is_some_and(|b| b.holder.is_some())
+    }
+
     /// True when a template reads a `${scope:..}`.
     pub fn uses_scope(&self) -> bool {
         self.templates().iter().any(|t| t.uses_scope())
@@ -549,7 +616,24 @@ impl Rule {
 
     /// True when the rule needs profile format version 2.
     pub fn uses_v2(&self) -> bool {
-        self.templates().iter().any(|t| t.uses_v2())
+        self.v2_key().is_some() || self.templates().iter().any(|t| t.uses_v2())
+    }
+
+    /// The first of `each`, `on`, `normalise`, `confidence` and `holder` the rule uses.
+    pub fn v2_key(&self) -> Option<&'static str> {
+        let b = self.emit.bind.as_ref();
+        let used = [
+            self.when.each.is_some(),
+            self.when.on.is_some(),
+            b.is_some_and(|b| b.normalise.is_some()),
+            b.is_some_and(|b| b.confidence.is_some()),
+            b.is_some_and(|b| b.holder.is_some()),
+        ];
+        V2_RULE_KEYS
+            .iter()
+            .zip(used)
+            .find(|(_, u)| *u)
+            .map(|(k, _)| *k)
     }
 
     /// How many capture groups `$1..$9` can name: those of `matches`, else those of `name`.
@@ -576,8 +660,16 @@ impl<'de> Deserialize<'de> for Rule {
         {
             return Err(err("emit is empty: give bind, ref or fact".to_string()));
         }
-        if raw.when.matches.is_some() && raw.when.fact.is_none() {
-            return Err(err("'matches' needs the 'fact' it matches".to_string()));
+        if raw.when.matches.is_some() && raw.when.fact.is_none() && raw.when.each.is_none() {
+            return Err(err(
+                "'matches' needs the 'fact' or 'each' it matches".to_string()
+            ));
+        }
+        if raw.when.fact.is_some() && raw.when.each.is_some() {
+            return Err(err("give 'fact' or 'each', not both".to_string()));
+        }
+        if e.bind.as_ref().is_some_and(|b| b.holder.is_some()) && raw.when.each.is_none() {
+            return Err(err("'holder' needs 'each'".to_string()));
         }
         if let Some(r) = &e.reference
             && r.candidates.is_empty()
@@ -593,6 +685,9 @@ impl<'de> Deserialize<'de> for Rule {
         let mut used = 0;
         if let Some(b) = &rule.emit.bind {
             used = used.max(b.kind.max_capture()).max(b.key.max_capture());
+            if let Some(h) = &b.holder {
+                used = used.max(h.max_capture());
+            }
         }
         if let Some(r) = &rule.emit.reference {
             for c in &r.candidates {

@@ -10,7 +10,7 @@ pub mod format;
 
 use camino::Utf8Path;
 use format::{ProfileDoc, Rule};
-use katalogr_model::Fragment;
+use katalogr_model::{Fragment, KeyNormaliser};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
@@ -66,6 +66,28 @@ struct Loaded {
 #[derive(Clone, Debug, Default)]
 pub struct ProfileSet {
     loaded: Vec<Loaded>,
+    /// The key normalisers rules may name (ADR-0020).
+    norms: Norms,
+    /// `(project file, built-in file)` for each built-in a project file replaced by name.
+    overridden: Vec<(String, String)>,
+}
+
+/// The registered key normalisers, in registration order.
+#[derive(Clone, Default)]
+struct Norms(Vec<&'static dyn KeyNormaliser>);
+
+impl std::fmt::Debug for Norms {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_list()
+            .entries(self.0.iter().map(|n| n.id()))
+            .finish()
+    }
+}
+
+impl Norms {
+    fn find(&self, id: &str) -> Option<&'static dyn KeyNormaliser> {
+        self.0.iter().find(|n| n.id() == id).copied()
+    }
 }
 
 /// What a load found.
@@ -101,6 +123,36 @@ pub fn parse(file: &str, text: &str) -> Result<ProfileDoc, ProfileError> {
     })
 }
 
+/// Refuse a rule that names a normaliser no registered extension provides.
+fn check_normalisers(
+    file: &str,
+    text: &str,
+    doc: &ProfileDoc,
+    norms: &Norms,
+) -> Result<(), ProfileError> {
+    for r in &doc.rules {
+        let Some(n) = r.emit.bind.as_ref().and_then(|b| b.normalise.as_deref()) else {
+            continue;
+        };
+        if norms.find(n).is_some() {
+            continue;
+        }
+        let known: Vec<&str> = norms.0.iter().map(|n| n.id()).collect();
+        return Err(ProfileError {
+            file: file.to_string(),
+            line: rule_key_line(text, Some(&r.id), "normalise"),
+            column: None,
+            message: format!(
+                "rule {:?}: unknown normaliser {:?} (known: {})",
+                r.id,
+                n,
+                known.join(", ")
+            ),
+        });
+    }
+    Ok(())
+}
+
 /// The line of a document-level refusal, which the YAML reader does not position: the
 /// `version:` or `profile:` key, or the second rule with a repeated id.
 fn document_line(text: &str, message: &str) -> Option<usize> {
@@ -114,6 +166,12 @@ fn document_line(text: &str, message: &str) -> Option<usize> {
     }
     if message == format::NEEDS_SELECT {
         return key_line("select");
+    }
+    if let Some(key) = format::V2_RULE_KEYS
+        .iter()
+        .find(|k| message == format::needs_v2(k))
+    {
+        return rule_key_line(text, None, key);
     }
     for (needs, marker) in [
         (format::NEEDS_FACT, "${fact:"),
@@ -140,6 +198,36 @@ fn document_line(text: &str, message: &str) -> Option<usize> {
         .map(|(i, _)| i + 1)
 }
 
+/// The 1-based line of the first `<key>:` at or after the line of the rule `rule` (the first
+/// rule when None), where the key follows the start of the line, whitespace, `{` or `,`.
+fn rule_key_line(text: &str, rule: Option<&str>, key: &str) -> Option<usize> {
+    let is_id = |l: &str| {
+        let l = l.trim_start().trim_start_matches("- ").trim_start();
+        l.strip_prefix("id:").is_some_and(|v| {
+            let v = v.trim().trim_matches(|c| c == '"' || c == '\'');
+            rule.is_none_or(|r| v == r)
+        })
+    };
+    let needle = format!("{key}:");
+    let start = text.lines().position(is_id)?;
+    text.lines()
+        .enumerate()
+        .skip(start)
+        .find(|(_, l)| {
+            if l.trim_start().starts_with('#') {
+                return false;
+            }
+            l.match_indices(&needle).any(|(i, _)| {
+                i == 0
+                    || l[..i]
+                        .chars()
+                        .next_back()
+                        .is_some_and(|c| c.is_whitespace() || c == '{' || c == ',')
+            })
+        })
+        .map(|(i, _)| i + 1)
+}
+
 impl ProfileSet {
     pub fn empty() -> ProfileSet {
         ProfileSet::default()
@@ -158,10 +246,31 @@ impl ProfileSet {
         builtins: &[(&str, &str)],
         previous: &BTreeMap<String, String>,
     ) -> LoadReport {
+        ProfileSet::load_full(project_dir, builtins, previous, &[])
+    }
+
+    /// As [`ProfileSet::load_keeping`], also validating every `bind.normalise` against
+    /// `normalisers` (an unknown id refuses the file at the line of its `normalise:` key),
+    /// dropping a built-in whose `profile` name equals a loaded project file's, and keeping the
+    /// normalisers for [`ProfileSet::apply`] and [`ProfileSet::hash_for`].
+    pub fn load_full(
+        project_dir: &Utf8Path,
+        builtins: &[(&str, &str)],
+        previous: &BTreeMap<String, String>,
+        normalisers: &[&'static dyn KeyNormaliser],
+    ) -> LoadReport {
         let mut report = LoadReport::default();
+        report.set.norms = Norms(normalisers.to_vec());
+        let norms = report.set.norms.clone();
+        // Parse and validate one file against the known normalisers.
+        let read = |file: &str, text: &str| -> Result<ProfileDoc, ProfileError> {
+            let doc = parse(file, text)?;
+            check_normalisers(file, text, &doc, &norms)?;
+            Ok(doc)
+        };
         for (name, text) in builtins {
             let file = format!("builtin:{name}");
-            match parse(&file, text) {
+            match read(&file, text) {
                 Ok(doc) => report.set.loaded.push(Loaded {
                     file,
                     source: (*text).to_string(),
@@ -184,7 +293,7 @@ impl ProfileSet {
         for name in names {
             let file = format!("{PROFILES_DIR}/{name}");
             let parsed = match std::fs::read_to_string(dir.join(&name)) {
-                Ok(text) => parse(&file, &text).map(|doc| (text, doc)),
+                Ok(text) => read(&file, &text).map(|doc| (text, doc)),
                 Err(e) => Err(ProfileError {
                     file: file.clone(),
                     line: None,
@@ -198,7 +307,7 @@ impl ProfileSet {
                     report.errors.push(e);
                     previous
                         .get(&file)
-                        .and_then(|old| parse(&file, old).ok().map(|doc| (old.clone(), doc)))
+                        .and_then(|old| read(&file, old).ok().map(|doc| (old.clone(), doc)))
                 }
             };
             if let Some((source, doc)) = chosen {
@@ -206,7 +315,35 @@ impl ProfileSet {
                 report.set.loaded.push(Loaded { file, source, doc });
             }
         }
+        // A project file replaces the built-in of the same profile name (ADR-0020).
+        let set = &mut report.set;
+        let mut overridden = Vec::new();
+        let project: Vec<(String, String)> = set
+            .loaded
+            .iter()
+            .filter(|l| !l.file.starts_with("builtin:"))
+            .map(|l| (l.file.clone(), l.doc.profile.clone()))
+            .collect();
+        set.loaded.retain(|l| {
+            if !l.file.starts_with("builtin:") {
+                return true;
+            }
+            match project.iter().find(|(_, p)| *p == l.doc.profile) {
+                Some((pf, _)) => {
+                    overridden.push((pf.clone(), l.file.clone()));
+                    false
+                }
+                None => true,
+            }
+        });
+        overridden.sort();
+        set.overridden = overridden;
         report
+    }
+
+    /// `(project file, built-in file)` for each built-in a project file replaced by name.
+    pub fn overridden(&self) -> &[(String, String)] {
+        &self.overridden
     }
 
     /// Profile names in application order.
@@ -231,8 +368,9 @@ impl ProfileSet {
             .rules()
             .any(|(_, r)| r.uses_scope())
             .then(|| eval::ScopeIndex::build(f));
+        let mut cx = eval::Cx::new(scope, f, self.rules().any(|(_, r)| r.has_holder()));
         for (profile, rule) in self.rules() {
-            eval::apply_rule(profile, rule, f, scope.as_ref());
+            eval::apply_rule(profile, rule, f, &mut cx, &self.norms.0);
         }
     }
 
@@ -277,6 +415,25 @@ impl ProfileSet {
                 h.update(l.file.as_bytes());
                 h.update((l.source.len() as u64).to_le_bytes());
                 h.update(l.source.as_bytes());
+                // The normalisers a rule of this extension names take part, so a change in
+                // their output rescans (ADR-0020).
+                for r in &l.doc.rules {
+                    if r.when.extension.as_deref().is_some_and(|e| e != extension) {
+                        continue;
+                    }
+                    let Some(n) = r
+                        .emit
+                        .bind
+                        .as_ref()
+                        .and_then(|b| b.normalise.as_deref())
+                        .and_then(|id| self.norms.find(id))
+                    else {
+                        continue;
+                    };
+                    h.update((n.id().len() as u64).to_le_bytes());
+                    h.update(n.id().as_bytes());
+                    h.update(n.version().to_le_bytes());
+                }
             }
         }
         any.then(|| h.finalize().into())

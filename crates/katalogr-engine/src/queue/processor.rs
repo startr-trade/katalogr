@@ -489,7 +489,8 @@ impl<'a> Processor<'a> {
             .iter()
             .map(|(n, t)| (n.as_str(), t.as_str()))
             .collect();
-        let report = ProfileSet::load_keeping(engine.dir().root(), &builtins, &previous);
+        let normalisers = engine.registry().normalisers();
+        let report = ProfileSet::load_full(engine.dir().root(), &builtins, &previous, &normalisers);
         self.profiles = Some(report.set.clone());
         let good =
             serde_json::to_vec(&report.good).map_err(|e| EngineError::Queue(e.to_string()))?;

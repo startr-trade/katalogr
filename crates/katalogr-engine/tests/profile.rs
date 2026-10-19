@@ -507,4 +507,303 @@ rules:
         assert!(profiles::parse("p.yaml", BASE).is_ok());
         assert!(profiles::parse("p.yaml", EXAMPLE).is_ok());
     }
+
+    // ---- FEAT-014: per-element rules, normalisers, holders, overrides
+
+    use katalogr_model::{Binding, Confidence, ExtractInput, Extractor, Fragment, RelPath};
+    use std::collections::BTreeMap;
+
+    /// Load `profile` as the built-in `p.yaml` with the given normalisers.
+    fn load_set(
+        profile: &str,
+        norms: &[&'static dyn katalogr_model::KeyNormaliser],
+    ) -> profiles::LoadReport {
+        let dir = tempfile::tempdir().unwrap();
+        let root = Utf8PathBuf::from_path_buf(dir.path().to_path_buf()).unwrap();
+        profiles::ProfileSet::load_full(&root, &[("p.yaml", profile)], &BTreeMap::new(), norms)
+    }
+
+    fn fragment(path: &str, text: &str) -> Fragment {
+        let path = RelPath::new(path).unwrap();
+        support::TestExtractor
+            .extract(&ExtractInput {
+                repo: "r",
+                path: &path,
+                revision: "ce013625030ba8dba906f756967f9e9ca394464a",
+                content: text.as_bytes(),
+                context: &[],
+            })
+            .unwrap()
+    }
+
+    fn sym_id(f: &Fragment, name: &str) -> katalogr_model::Id {
+        f.symbols
+            .iter()
+            .find(|s| s.name.segments.last().unwrap().name == name)
+            .unwrap_or_else(|| panic!("no symbol {name}"))
+            .name
+            .id()
+    }
+
+    fn contract_keys(f: &Fragment) -> Vec<String> {
+        let mut v: Vec<String> = f.bindings.iter().map(|b| b.contract.key.clone()).collect();
+        v.sort();
+        v
+    }
+
+    const EACH_ROUTE: &str = "\
+profile: p
+version: 2
+rules:
+  - id: route
+    when: { extension: test, on: all, each: str_calls, matches: '^r\\.(get|post)\\(\"([^\"]*)\"' }
+    emit: { bind: { contract: { kind: route, key: '$1 $2' }, role: provides } }
+";
+
+    #[test]
+    fn each_rule_binds_per_element() {
+        let e = env(&[(
+            "a.tx",
+            "sym fn reg\nstrcall reg r.get(\"/a\")\nstrcall reg r.post(\"/b\")\nstrcall reg log(\"x\")\n",
+        )]);
+        e.write_profile("route.yaml", EACH_ROUTE);
+        full_index(&e.engine);
+        assert!(e.contract("route", "get /a").is_some());
+        assert!(e.contract("route", "post /b").is_some());
+        assert!(e.contract("route", "log /x").is_none());
+        // Each binding carries its element's span.
+        let reg = fragment("a.tx", "sym fn reg\n").symbols[0].name.id();
+        let snap = e.engine.cache().read().unwrap();
+        let span_of = |key: &str| {
+            let c = ContractName {
+                kind: "route".into(),
+                key: key.into(),
+            }
+            .id();
+            snap.link(&katalogr_store::LinkKey {
+                from: reg,
+                kind: katalogr_model::LinkKind("provides".into()),
+                to: c,
+            })
+            .unwrap()
+            .unwrap()
+            .entries[0]
+                .span
+                .unwrap()
+        };
+        assert_eq!(span_of("get /a").start_line, 2);
+        assert_eq!(span_of("post /b").start_line, 3);
+    }
+
+    #[test]
+    fn artifact_target_rules() {
+        let set = |on: &str| {
+            let r = load_set(
+                &format!(
+                    "profile: p\nversion: 2\nrules:\n  - id: route\n    when: {{ extension: test, on: {on}, each: str_calls, matches: '^r\\.get\\(\"([^\"]*)\"' }}\n    emit: {{ bind: {{ contract: {{ kind: route, key: '$1' }}, role: provides }} }}\n"
+                ),
+                &[],
+            );
+            assert!(r.errors.is_empty(), "{:?}", r.errors);
+            r.set
+        };
+        let text = "sym fn reg\nstrcall reg r.get(\"/s\")\nstrcall @ r.get(\"/top\")\n";
+        // Symbols only: the artifact's call is not seen.
+        let mut f = fragment("a.tx", text);
+        set("symbols").apply(&mut f);
+        assert_eq!(contract_keys(&f), vec!["/s"]);
+        // Artifact only: bound by the artifact itself.
+        let mut f = fragment("a.tx", text);
+        set("artifact").apply(&mut f);
+        assert_eq!(contract_keys(&f), vec!["/top"]);
+        assert_eq!(f.bindings[0].symbol, f.artifact.name.id());
+        // All: both.
+        let mut f = fragment("a.tx", text);
+        set("all").apply(&mut f);
+        assert_eq!(contract_keys(&f), vec!["/s", "/top"]);
+    }
+
+    const UPPER_RULE: &str = "\
+profile: p
+version: 2
+rules:
+  - id: shout
+    when: { extension: test, on: all, each: str_calls, matches: '^k\\(([^)]*)\\)' }
+    emit: { bind: { contract: { kind: route, key: '$1' }, role: provides, normalise: upper } }
+";
+
+    #[test]
+    fn normaliser_applied() {
+        let r = load_set(UPPER_RULE, &[&support::UPPER]);
+        assert!(r.errors.is_empty(), "{:?}", r.errors);
+        let mut f = fragment(
+            "a.tx",
+            "sym fn reg\nstrcall reg k(get /a)\nstrcall reg k()\n",
+        );
+        r.set.apply(&mut f);
+        // The key is upper-cased; the empty key produced no binding.
+        assert_eq!(contract_keys(&f), vec!["GET /A"]);
+        // A normaliser version change alters the hash of the extension it applies to.
+        let v2 = load_set(UPPER_RULE, &[&support::UPPER_V2]);
+        assert_ne!(r.set.hash_for("test"), v2.set.hash_for("test"));
+        assert_eq!(
+            r.set.hash_for("test"),
+            load_set(UPPER_RULE, &[&support::UPPER])
+                .set
+                .hash_for("test")
+        );
+    }
+
+    #[test]
+    fn unknown_normaliser_refused_with_location() {
+        let r = load_set(UPPER_RULE, &[]);
+        assert_eq!(r.errors.len(), 1, "{:?}", r.errors);
+        let err = &r.errors[0];
+        assert_eq!(err.line, Some(6), "{err}");
+        assert!(
+            err.message.contains("unknown normaliser \"upper\""),
+            "{err}"
+        );
+        assert!(r.set.is_empty());
+    }
+
+    #[test]
+    fn project_profile_replaces_builtin() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = Utf8PathBuf::from_path_buf(dir.path().to_path_buf()).unwrap();
+        std::fs::create_dir_all(root.join("profiles")).unwrap();
+        std::fs::write(
+            root.join("profiles/mine.yaml"),
+            "profile: base\nversion: 1\nrules:\n  - id: other\n    when: { kind: fn }\n    emit:\n      fact: { x: 1 }\n",
+        )
+        .unwrap();
+        let r = profiles::ProfileSet::load_full(
+            &root,
+            &[("generic.yaml", GENERIC), ("base.yaml", BASE)],
+            &BTreeMap::new(),
+            &[],
+        );
+        assert!(r.errors.is_empty(), "{:?}", r.errors);
+        // The built-in `base` is gone, the project's file stands in its place.
+        assert_eq!(r.set.names(), vec!["generic", "base"]);
+        let rules: Vec<_> = r.set.rules().map(|(p, r)| (p, r.id.as_str())).collect();
+        assert_eq!(rules, vec![("base", "other")]);
+        assert_eq!(
+            r.set.overridden(),
+            &[(
+                "profiles/mine.yaml".to_string(),
+                "builtin:base.yaml".to_string()
+            )]
+        );
+    }
+
+    const HOLDER: &str = "\
+profile: p
+version: 2
+rules:
+  - id: route
+    when: { extension: test, on: all, each: str_calls, matches: '^r\\.get\\(\"([^\"]*)\"(?:, ([a-z]*))?\\)' }
+    emit: { bind: { contract: { kind: route, key: '$1' }, role: provides, holder: '$2' } }
+";
+
+    fn held(text: &str) -> Fragment {
+        let r = load_set(HOLDER, &[]);
+        assert!(r.errors.is_empty(), "{:?}", r.errors);
+        let mut f = fragment("a.tx", text);
+        r.set.apply(&mut f);
+        f
+    }
+
+    #[test]
+    fn holder_binds_local_symbol() {
+        let f = held(
+            "sym fn reg\nsym fn show\nstrcall reg r.get(\"/a\", show)\nargref reg show local:fn:show\n",
+        );
+        assert_eq!(f.bindings.len(), 1, "{:?}", f.bindings);
+        let b: &Binding = &f.bindings[0];
+        assert_eq!(b.symbol, sym_id(&f, "show"));
+        assert_eq!(b.confidence, Confidence::Declared);
+        assert!(f.refs.is_empty());
+    }
+
+    #[test]
+    fn holder_emits_bound_reference() {
+        let f = held("sym fn reg\nstrcall reg r.get(\"/a\", show)\nargref reg show item:show\n");
+        assert!(f.bindings.is_empty(), "{:?}", f.bindings);
+        assert_eq!(f.refs.len(), 1);
+        let r = &f.refs[0];
+        assert_eq!(r.from, sym_id(&f, "reg"));
+        assert_eq!(r.kind.0, "provides");
+        assert_eq!(r.candidates[0].namespace, "item");
+        assert_eq!(r.candidates[0].key, "show");
+        assert_eq!(r.confidence, Confidence::Declared);
+        let b = r.binds.as_ref().expect("holds a binding");
+        assert_eq!(b.contract.canonical(), "contract:route:%2Fa");
+        assert_eq!(b.role, katalogr_model::ContractRole::Provides);
+        // An inferred argument reference lowers the confidence.
+        let f = held("sym fn reg\nstrcall reg r.get(\"/a\", show)\nargref reg show item:show!\n");
+        assert_eq!(f.refs[0].confidence, Confidence::Inferred);
+    }
+
+    #[test]
+    fn holder_fallback_inferred() {
+        let check = |f: &Fragment| {
+            assert_eq!(f.bindings.len(), 1, "{:?}", f.bindings);
+            assert_eq!(f.bindings[0].symbol, sym_id(f, "reg"));
+            assert_eq!(f.bindings[0].confidence, Confidence::Inferred);
+            assert!(f.refs.is_empty());
+        };
+        // An empty capture (a closure renders `_`, which the regex does not capture).
+        check(&held("sym fn reg\nstrcall reg r.get(\"/a\")\n"));
+        // A name with no `refs` entry.
+        check(&held("sym fn reg\nstrcall reg r.get(\"/a\", show)\n"));
+        // A local name that is not a symbol of the fragment.
+        check(&held(
+            "sym fn reg\nstrcall reg r.get(\"/a\", show)\nargref reg show local:fn:gone\n",
+        ));
+    }
+
+    #[test]
+    fn holder_without_each_refused() {
+        let text = "profile: p\nversion: 2\nrules:\n  - id: a\n    when: { kind: fn }\n    emit:\n      bind: { contract: { kind: k, key: x }, role: provides, holder: '$1' }\n";
+        let err = profiles::parse("p.yaml", text).expect_err("refused");
+        assert!(err.message.contains("'holder' needs 'each'"), "{err}");
+        assert!(err.line.is_some(), "{err}");
+    }
+
+    #[test]
+    fn version_1_still_reads() {
+        assert!(profiles::parse("p.yaml", BASE).is_ok());
+        assert!(profiles::parse("p.yaml", EXAMPLE).is_ok());
+        assert!(profiles::parse("p.yaml", GENERIC).is_ok());
+        // Version 1 stays accepted next to 2.
+        assert_eq!(profiles::format::FORMAT_VERSIONS, &[1, 2]);
+    }
+
+    #[test]
+    fn v2_keys_refused_in_v1() {
+        let rule = |when: &str, bind: &str| {
+            format!(
+                "profile: p\nversion: 1\nrules:\n  - id: a\n    when: {{ {when} }}\n    emit:\n      bind: {{ contract: {{ kind: k, key: x }}, role: provides{bind} }}\n"
+            )
+        };
+        for (text, key, line) in [
+            (rule("each: str_calls", ""), "each", 5),
+            (rule("on: artifact", ""), "on", 5),
+            (rule("kind: fn", ", normalise: upper"), "normalise", 7),
+            (rule("kind: fn", ", confidence: inferred"), "confidence", 7),
+        ] {
+            let (l, why) = refused(&text);
+            assert_eq!(l, line, "{key}: {why}");
+            assert!(
+                why.contains(&format!("`{key}` needs version: 2")),
+                "{key}: {why}"
+            );
+            // The same text is read in version 2 (a holder needs `each` there).
+            if key != "holder" {
+                let v2 = text.replace("version: 1", "version: 2");
+                assert!(profiles::parse("p.yaml", &v2).is_ok(), "{key}");
+            }
+        }
+    }
 }

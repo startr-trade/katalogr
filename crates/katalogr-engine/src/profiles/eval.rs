@@ -1,12 +1,13 @@
 //! Rule evaluation: pure and deterministic. A rule runs over the symbols of one fragment; what
 //! it emits is stored in the shard like extractor output (ADR-0017).
 
-use super::format::{FactSpec, Piece, Rule, Template, Var};
+use super::format::{FactSpec, On, Piece, Rule, Template, Var};
+use katalogr_model::calls::{ArgRef, arg_ref_of};
 use katalogr_model::{
-    Binding, Confidence, ContractName, ExportKey, Fact, Fragment, LinkKind, Name, OutRef,
-    SymbolNode,
+    Binding, Confidence, ContractName, ExportKey, Fact, Fragment, Id, KeyNormaliser, LinkKind,
+    Name, OutRef, RefBinding, Span, SymbolNode,
 };
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 
 /// The symbols of one fragment by the list of their segment names (kinds ignored), for
 /// `${scope:..}` lookups. Built once per fragment, only when a rule needs it. Keyed by a hash
@@ -170,8 +171,78 @@ pub fn origin(profile: &str, rule: &Rule) -> String {
     format!("profile:{profile}#{}", rule.id)
 }
 
-/// Run one rule over every symbol of `f`, adding bindings, references and facts.
-pub fn apply_rule(profile: &str, rule: &Rule, f: &mut Fragment, scope: Option<&ScopeIndex>) {
+/// Per-fragment lookups built once and shared by every rule.
+pub struct Cx {
+    scope: Option<ScopeIndex>,
+    /// Symbols by their name relative to the artifact (the canonical name after the first `#`),
+    /// built only when a rule has a `holder`.
+    locals: Option<HashMap<String, Id>>,
+}
+
+impl Cx {
+    pub fn new(scope: Option<ScopeIndex>, f: &Fragment, holders: bool) -> Cx {
+        let locals = holders.then(|| {
+            let mut m: HashMap<String, Id> = HashMap::new();
+            for s in &f.symbols {
+                let canon = s.name.canonical();
+                if let Some((_, rel)) = canon.split_once('#') {
+                    m.entry(rel.to_string()).or_insert_with(|| s.name.id());
+                }
+            }
+            m
+        });
+        Cx { scope, locals }
+    }
+}
+
+/// One element of a list fact: its text and span.
+fn element_of(e: &Fact) -> Option<(&str, Option<Span>)> {
+    match e {
+        Fact::Str(s) => Some((s, None)),
+        Fact::Map(m) => {
+            let Some(Fact::Str(text)) = m.get("text") else {
+                return None;
+            };
+            let int = |k: &str| match m.get(k) {
+                Some(Fact::Int(n)) => u32::try_from(*n).ok(),
+                _ => None,
+            };
+            let span = match (int("line"), int("col"), int("end_line"), int("end_col")) {
+                (Some(a), Some(b), Some(c), Some(d)) => Some(Span {
+                    start_line: a,
+                    start_col: b,
+                    end_line: c,
+                    end_col: d,
+                }),
+                _ => None,
+            };
+            Some((text, span))
+        }
+        _ => None,
+    }
+}
+
+/// The matched node: kind, last name, facts, segment names, id and span.
+type Node<'a> = (
+    &'a str,
+    String,
+    &'a BTreeMap<String, Fact>,
+    Vec<String>,
+    Id,
+    Option<Span>,
+);
+
+/// One evaluation of a rule: the element, the regex captures and the span to emit at.
+type Pass<'a> = (Option<&'a Fact>, Option<Vec<String>>, Option<Span>);
+
+/// Run one rule over the nodes it visits in `f`, adding bindings, references and facts.
+pub fn apply_rule(
+    profile: &str,
+    rule: &Rule,
+    f: &mut Fragment,
+    cx: &mut Cx,
+    norms: &[&'static dyn KeyNormaliser],
+) {
     let w = &rule.when;
     if w.extension.as_ref().is_some_and(|e| *e != f.extension) {
         return;
@@ -182,120 +253,264 @@ pub fn apply_rule(profile: &str, rule: &Rule, f: &mut Fragment, scope: Option<&S
     }
     let repo = f.provenance.repo.clone();
     let origin = origin(profile, rule);
-    for i in 0..f.symbols.len() {
-        let s = &f.symbols[i];
-        if w.kind.as_ref().is_some_and(|k| *k != s.kind) {
+    let on = w.on.unwrap_or(On::Symbols);
+    let artifact_id = f.artifact.name.id();
+    let file_name = path.rsplit('/').next().unwrap_or("").to_string();
+    let targets: Vec<Option<usize>> = (if matches!(on, On::Symbols | On::All) {
+        0..f.symbols.len()
+    } else {
+        0..0
+    })
+    .map(Some)
+    .chain(matches!(on, On::Artifact | On::All).then_some(None))
+    .collect();
+    for t in targets {
+        // The matched node: its kind, last name, facts, segment names and id.
+        let (kind, last, facts, names, id, node_span): Node = match t {
+            Some(i) => {
+                let s = &f.symbols[i];
+                (
+                    s.kind.as_str(),
+                    s.name
+                        .segments
+                        .last()
+                        .map_or(String::new(), |g| g.name.clone()),
+                    &s.facts,
+                    s.name.segments.iter().map(|g| g.name.clone()).collect(),
+                    s.name.id(),
+                    Some(s.span),
+                )
+            }
+            None => (
+                "artifact",
+                file_name.clone(),
+                &f.artifact.facts,
+                Vec::new(),
+                artifact_id,
+                None,
+            ),
+        };
+        if w.kind.as_ref().is_some_and(|k| k != kind) {
             continue;
         }
-        let last_ref = s.name.segments.last().map_or("", |g| g.name.as_str());
-        let mut caps: Option<Vec<String>> = None;
+        let mut name_caps: Option<Vec<String>> = None;
         if let Some(n) = &w.name {
-            match captures_of(&n.re, last_ref) {
-                Some(c) => caps = Some(c),
+            match captures_of(&n.re, &last) {
+                Some(c) => name_caps = Some(c),
                 None => continue,
             }
         }
-        if let Some(fact) = &w.fact {
-            let Some(value) = s.facts.get(fact) else {
+        // The passes: one per element of an `each` list, else exactly one.
+        let mut passes: Vec<Pass> = Vec::new();
+        if let Some(each) = &w.each {
+            let Some(Fact::List(items)) = facts.get(each) else {
                 continue;
             };
-            if let Some(m) = &w.matches {
-                let Fact::Str(text) = value else { continue };
-                match captures_of(&m.re, text) {
-                    Some(c) => caps = Some(c),
-                    None => continue,
+            for el in items {
+                let Some((text, span)) = element_of(el) else {
+                    continue;
+                };
+                let caps = match &w.matches {
+                    Some(m) => match captures_of(&m.re, text) {
+                        Some(c) => Some(c),
+                        None => continue,
+                    },
+                    None => name_caps.clone(),
+                };
+                passes.push((Some(el), caps, span.or(node_span)));
+            }
+        } else {
+            let mut caps = name_caps;
+            if let Some(fact) = &w.fact {
+                let Some(value) = facts.get(fact) else {
+                    continue;
+                };
+                if let Some(m) = &w.matches {
+                    let Fact::Str(text) = value else { continue };
+                    match captures_of(&m.re, text) {
+                        Some(c) => caps = Some(c),
+                        None => continue,
+                    }
+                }
+            }
+            passes.push((None, caps, node_span));
+        }
+        let mut new_bindings: Vec<Binding> = Vec::new();
+        let mut new_refs: Vec<OutRef> = Vec::new();
+        let mut new_facts: BTreeMap<String, Fact> = BTreeMap::new();
+        for (element, caps, span) in passes {
+            let vars = Vars {
+                caps: caps.unwrap_or_else(|| vec![last.clone()]),
+                name: &last,
+                repo: &repo,
+                path: &path,
+                dir: dir_of(&path),
+                facts,
+                names: &names,
+                symbols: &f.symbols,
+                scope: cx.scope.as_ref(),
+            };
+            // Everything is expanded before anything is emitted: a rule whose template finds no
+            // value (or whose normaliser finds no key) does nothing for this pass.
+            let bind = match &rule.emit.bind {
+                Some(b) => {
+                    let (Some(kind), Some(mut key)) = (vars.expand(&b.kind), vars.expand(&b.key))
+                    else {
+                        continue;
+                    };
+                    if let Some(nid) = &b.normalise {
+                        let Some(n) = norms.iter().find(|n| n.id() == nid) else {
+                            continue;
+                        };
+                        let Some(k) = n.normalise(&key) else {
+                            continue;
+                        };
+                        key = k;
+                    }
+                    let holder = match &b.holder {
+                        Some(h) => match vars.expand(h) {
+                            Some(h) => Some(h),
+                            None => continue,
+                        },
+                        None => None,
+                    };
+                    Some((ContractName { kind, key }, b, holder))
+                }
+                None => None,
+            };
+            let reference = match &rule.emit.reference {
+                Some(r) => {
+                    let candidates: Option<Vec<ExportKey>> = r
+                        .candidates
+                        .iter()
+                        .map(|c| {
+                            Some(ExportKey {
+                                namespace: vars.expand(&c.ns)?,
+                                key: vars.expand(&c.key)?,
+                            })
+                        })
+                        .collect();
+                    let Some(candidates) = candidates else {
+                        continue;
+                    };
+                    Some((LinkKind(r.kind.clone()), candidates))
+                }
+                None => None,
+            };
+            let add: Option<BTreeMap<String, Fact>> = match &rule.emit.fact {
+                Some(fs) => {
+                    let m: Option<BTreeMap<String, Fact>> = fs
+                        .iter()
+                        .map(|(k, v)| Some((k.clone(), vars.fact(v)?)))
+                        .collect();
+                    let Some(m) = m else { continue };
+                    Some(m)
+                }
+                None => None,
+            };
+            if let Some((contract, b, holder)) = bind
+                && contract.validate().is_ok()
+            {
+                let confidence = b.confidence.unwrap_or(Confidence::Declared);
+                let held = hold(
+                    holder.as_deref(),
+                    element,
+                    cx.locals.as_ref(),
+                    id,
+                    confidence,
+                );
+                match held {
+                    Held::Symbol(symbol, confidence) => new_bindings.push(Binding {
+                        symbol,
+                        contract,
+                        role: b.role,
+                        span,
+                        confidence,
+                        origin: Some(origin.clone()),
+                    }),
+                    Held::Reference(candidates, confidence) => new_refs.push(OutRef {
+                        from: id,
+                        kind: LinkKind(b.role.as_str().to_string()),
+                        span,
+                        candidates,
+                        confidence,
+                        origin: Some(origin.clone()),
+                        binds: Some(RefBinding {
+                            contract,
+                            role: b.role,
+                        }),
+                    }),
+                }
+            }
+            if let Some((kind, candidates)) = reference {
+                new_refs.push(OutRef {
+                    from: id,
+                    kind,
+                    span,
+                    candidates,
+                    confidence: Confidence::Declared,
+                    origin: Some(origin.clone()),
+                    binds: None,
+                });
+            }
+            if let Some(add) = add {
+                for (k, v) in add {
+                    new_facts.entry(k).or_insert(v);
                 }
             }
         }
-        // Only a symbol the rule matches needs its id.
-        let (id, span, last) = (s.name.id(), s.span, last_ref.to_string());
-        let caps = caps.unwrap_or_else(|| vec![last.clone()]);
-        let names: Vec<String> = f.symbols[i]
-            .name
-            .segments
-            .iter()
-            .map(|g| g.name.clone())
-            .collect();
-        let vars = Vars {
-            caps,
-            name: &last,
-            repo: &repo,
-            path: &path,
-            dir: dir_of(&path),
-            facts: &f.symbols[i].facts,
-            names: &names,
-            symbols: &f.symbols,
-            scope,
+        f.bindings.extend(new_bindings);
+        f.refs.extend(new_refs);
+        let target = match t {
+            Some(i) => &mut f.symbols[i].facts,
+            None => &mut f.artifact.facts,
         };
-        // Everything is expanded before anything is emitted: a rule whose template finds no
-        // value does nothing for this symbol.
-        let bind = match &rule.emit.bind {
-            Some(b) => {
-                let (Some(kind), Some(key)) = (vars.expand(&b.kind), vars.expand(&b.key)) else {
-                    continue;
-                };
-                Some((ContractName { kind, key }, b.role))
-            }
-            None => None,
-        };
-        let reference = match &rule.emit.reference {
-            Some(r) => {
-                let candidates: Option<Vec<ExportKey>> = r
-                    .candidates
-                    .iter()
-                    .map(|c| {
-                        Some(ExportKey {
-                            namespace: vars.expand(&c.ns)?,
-                            key: vars.expand(&c.key)?,
-                        })
-                    })
-                    .collect();
-                let Some(candidates) = candidates else {
-                    continue;
-                };
-                Some((LinkKind(r.kind.clone()), candidates))
-            }
-            None => None,
-        };
-        let add: Option<BTreeMap<String, Fact>> = match &rule.emit.fact {
-            Some(facts) => {
-                let m: Option<BTreeMap<String, Fact>> = facts
-                    .iter()
-                    .map(|(k, v)| Some((k.clone(), vars.fact(v)?)))
-                    .collect();
-                let Some(m) = m else { continue };
-                Some(m)
-            }
-            None => None,
-        };
-        if let Some((contract, role)) = bind
-            && contract.validate().is_ok()
-        {
-            f.bindings.push(Binding {
-                symbol: id,
-                contract,
-                role,
-                span: Some(span),
-                confidence: Confidence::Declared,
-                origin: Some(origin.clone()),
-            });
+        for (k, v) in new_facts {
+            target.entry(k).or_insert(v);
         }
-        if let Some((kind, candidates)) = reference {
-            f.refs.push(OutRef {
-                from: id,
-                kind,
-                span: Some(span),
-                candidates,
-                confidence: Confidence::Declared,
-                origin: Some(origin.clone()),
-                binds: None,
-            });
-        }
-        if let Some(add) = add {
-            let target = &mut f.symbols[i].facts;
-            for (k, v) in add {
-                target.entry(k).or_insert(v);
-            }
-        }
+    }
+}
+
+/// Who holds a binding emitted by a rule.
+enum Held {
+    /// A symbol of the fragment.
+    Symbol(Id, Confidence),
+    /// Whatever the export candidates resolve to (a bound reference, ADR-0022).
+    Reference(Vec<ExportKey>, Confidence),
+}
+
+/// Decide the holder of a binding (ADR-0020, section 6.7). Without a `holder` the matched node
+/// holds it. With one, the argument it names is looked up in the element's `refs` entry: a local
+/// symbol holds it directly, export candidates hold it through a reference, and anything else
+/// (an empty name, no entry, a name absent from the fragment) falls back to the matched node,
+/// inferred.
+fn hold(
+    holder: Option<&str>,
+    element: Option<&Fact>,
+    locals: Option<&HashMap<String, Id>>,
+    target: Id,
+    confidence: Confidence,
+) -> Held {
+    let Some(h) = holder else {
+        return Held::Symbol(target, confidence);
+    };
+    let fallback = Held::Symbol(target, Confidence::Inferred);
+    if h.is_empty() {
+        return fallback;
+    }
+    let Some((r, inferred)) = element.and_then(|e| arg_ref_of(e, h)) else {
+        return fallback;
+    };
+    let confidence = if inferred {
+        Confidence::Inferred
+    } else {
+        confidence
+    };
+    match r {
+        ArgRef::Local(rel) => match locals.and_then(|m| m.get(&rel)) {
+            Some(id) => Held::Symbol(*id, confidence),
+            None => fallback,
+        },
+        ArgRef::Candidates(c) => Held::Reference(c, confidence),
     }
 }

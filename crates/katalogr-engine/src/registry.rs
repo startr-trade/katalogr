@@ -1,6 +1,6 @@
 //! Extension registry: maps a path to the extractor that handles it.
 
-use katalogr_model::{Extractor, RelPath};
+use katalogr_model::{Extractor, KeyNormaliser, RelPath};
 
 /// Extractors in registration order; the first one that handles a path wins.
 #[derive(Default)]
@@ -41,5 +41,19 @@ impl ExtensionRegistry {
     /// Extension ids in registration order.
     pub fn ids(&self) -> Vec<&'static str> {
         self.extractors.iter().map(|e| e.id()).collect()
+    }
+
+    /// Every key normaliser of the registered extractors, in registration order; a repeated id
+    /// keeps the first.
+    pub fn normalisers(&self) -> Vec<&'static dyn KeyNormaliser> {
+        let mut out: Vec<&'static dyn KeyNormaliser> = Vec::new();
+        for e in &self.extractors {
+            for n in e.key_normalisers() {
+                if !out.iter().any(|o| o.id() == n.id()) {
+                    out.push(*n);
+                }
+            }
+        }
+        out
     }
 }
