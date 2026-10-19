@@ -1182,9 +1182,9 @@ mod claude {
             katalogr_dist::SKILL_MD
         );
 
-        // --in-repo installs under the repository's .claude.
+        // --scope repo installs under the repository's .claude.
         let (_kx, repo) = setup(&tmp.path().join("p"));
-        let out = with_home(&repo, &home, &["skill", "install", "--in-repo"]);
+        let out = with_home(&repo, &home, &["skill", "install", "--scope", "repo"]);
         assert!(
             String::from_utf8_lossy(&out.stdout).starts_with("installed "),
             "{out:?}"

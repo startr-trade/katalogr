@@ -183,11 +183,17 @@ pub enum ClaudeAction {
 pub enum SkillAction {
     /// Install the katalogr skill (installed, updated or unchanged).
     Install {
-        /// Install into this repository's .claude instead of ~/.claude. (Spelled `--in-repo`
-        /// because the global `--project <NAME>` already owns that name.)
-        #[arg(long)]
-        in_repo: bool,
+        /// Where to install: `user` (~/.claude, the default) or `repo` (this repository's .claude).
+        #[arg(long, value_enum, default_value_t = SkillScope::User)]
+        scope: SkillScope,
     },
+}
+
+/// Where `skill install` writes the skill.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum SkillScope {
+    User,
+    Repo,
 }
 
 #[derive(Debug, Subcommand)]

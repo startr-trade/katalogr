@@ -1,15 +1,15 @@
-//! `katalogr skill install [--project]`.
+//! `katalogr skill install [--scope user|repo]`.
 
 use katalogr_dist::DistError;
 
-use crate::cli::{Cli, SkillAction};
+use crate::cli::{Cli, SkillAction, SkillScope};
 use crate::cmd::resolve;
 use crate::exit::ExitCode;
 
 pub fn run(cli: &Cli, action: &SkillAction) -> Result<ExitCode, DistError> {
     match action {
-        SkillAction::Install { in_repo } => {
-            let target = if *in_repo {
+        SkillAction::Install { scope } => {
+            let target = if *scope == SkillScope::Repo {
                 katalogr_dist::skill_path(resolve(cli)?.repo_root()?.as_std_path())
             } else {
                 katalogr_dist::user_skill_path()?
