@@ -21,7 +21,12 @@ impl Counter {
         self.n += 1;
     }
 
+    pub fn map(&self) -> u32 {
+        self.n
+    }
+
     pub fn run(&mut self) -> u32 {
+        let _ = [1u32].iter().map(|x| x + 1);
         self.bump();
         Self::new();
         Counter::new();

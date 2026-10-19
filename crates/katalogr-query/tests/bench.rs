@@ -111,6 +111,7 @@ fn query_refs_100k() {
                     confidence: Confidence::Extracted,
                     span: Some(span),
                     provenance: provenance.clone(),
+                    fanout: None,
                 }],
             },
         )
@@ -505,6 +506,7 @@ fn rank_100k() {
                         confidence: Confidence::Extracted,
                         span: Some(span),
                         provenance: provenance.clone(),
+                        fanout: None,
                     }],
                 },
             )

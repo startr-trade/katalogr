@@ -2,17 +2,26 @@
 
 use crate::resolve::hit;
 use crate::result::SymbolHit;
-use katalogr_model::Id;
-use katalogr_store::{LinkEntry, Reader, StoreError};
+use katalogr_model::{Confidence, Id};
+use katalogr_store::{LinkEntry, LinkRow, Reader, StoreError};
 use std::collections::BTreeMap;
 
 const DAMPING: f64 = 0.85;
 const ITERATIONS: usize = 30;
 
-/// The weight of one support entry of a link. Every link counts the same today; this is the
-/// one place to change when links are to be weighted (for example by confidence).
-pub fn link_weight(_entry: &LinkEntry) -> f64 {
-    1.0
+/// The weight of one support entry of a link: extracted and declared entries weigh 1; an
+/// inferred entry weighs `1 / fanout`, the share of the targets its reference resolved to
+/// (1 when the fanout was not recorded).
+pub fn link_weight(entry: &LinkEntry) -> f64 {
+    match (entry.confidence, entry.fanout) {
+        (Confidence::Inferred, Some(n)) if n > 1 => 1.0 / f64::from(n),
+        _ => 1.0,
+    }
+}
+
+/// The weight of a link row: the largest [`link_weight`] of its entries.
+pub fn row_weight(row: &LinkRow) -> f64 {
+    row.entries.iter().map(link_weight).fold(0.0f64, f64::max)
 }
 
 /// PageRank of every symbol: damping 0.85, 30 iterations, all link kinds, uniform teleport,
@@ -40,7 +49,7 @@ pub fn rank(tx: &impl Reader) -> Result<Vec<(SymbolHit, f64)>, StoreError> {
         if a == b {
             continue;
         }
-        let w = row.entries.iter().map(link_weight).fold(0.0f64, f64::max);
+        let w = row_weight(&row);
         if w <= 0.0 {
             continue;
         }
