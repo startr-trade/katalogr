@@ -39,7 +39,7 @@ pub use result::{
     ReplaceResult, Resolution, SearchHit, ShowResult, SymbolHit, Truncation, WhyResult,
 };
 pub use schema::schemas;
-pub use search::search;
+pub use search::{SearchParams, search, search_with};
 pub use why::{Blame, RATIONALE_KINDS, why};
 
 /// Re-exported so wrappers can bound on it without a direct dependency.

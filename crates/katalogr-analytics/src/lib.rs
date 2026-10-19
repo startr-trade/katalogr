@@ -3,6 +3,7 @@
 mod communities;
 mod cycles;
 mod dead;
+pub mod eval;
 mod graph;
 mod hints;
 mod hubs;
