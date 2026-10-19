@@ -1,0 +1,19 @@
+mode: subset
+symbols:
+- fx:crates/engine-core/Cargo.toml#crate:engine-core
+- fx:crates/engine-core/src/lib.rs#fn:run_engine
+- fx:crates/engine-core/src/lib.rs#fn:stop_engine
+- fx:package.json#package:engine-root
+- fx:web/main.ts#fn:start
+contracts:
+- contract:wasm_export:engine_core%2Frun_engine
+- contract:wasm_export:engine_core%2Fstop_engine
+links:
+- from: fx:crates/engine-core/src/lib.rs#fn:run_engine
+  kind: provides
+  to: contract:wasm_export:engine_core%2Frun_engine
+  confidence: Extracted
+- from: fx:crates/engine-core/src/lib.rs#fn:stop_engine
+  kind: provides
+  to: contract:wasm_export:engine_core%2Fstop_engine
+  confidence: Extracted

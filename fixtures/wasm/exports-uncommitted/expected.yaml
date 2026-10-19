@@ -1,0 +1,127 @@
+mode: subset
+symbols:
+- fx:Cargo.toml#crate:demo-wasm
+- fx:src/lib.rs#enum:Color
+- fx:src/lib.rs#enum:Color/variant:Green
+- fx:src/lib.rs#enum:Color/variant:Red
+- fx:src/lib.rs#fn:boot
+- fx:src/lib.rs#fn:greet
+- fx:src/lib.rs#fn:say_hi
+- fx:src/lib.rs#fn:tick
+- fx:src/lib.rs#fn:unused_export
+- fx:src/lib.rs#impl:Counter
+- fx:src/lib.rs#impl:Counter/fn:helper
+- fx:src/lib.rs#impl:Counter/fn:increment
+- fx:src/lib.rs#impl:Counter/fn:new
+- fx:src/lib.rs#impl:Counter/fn:set_value
+- fx:src/lib.rs#impl:Counter/fn:value
+- fx:src/lib.rs#impl:Default%20for%20Counter
+- fx:src/lib.rs#impl:Default%20for%20Counter/fn:default
+- fx:src/lib.rs#struct:Counter
+- fx:web/package.json#package:demo-web
+- fx:web/src/app.ts#fn:main
+- fx:web/src/rel.ts#fn:run
+contracts:
+- contract:wasm_export:demo_wasm%2FColor
+- contract:wasm_export:demo_wasm%2FColor.Green
+- contract:wasm_export:demo_wasm%2FColor.Red
+- contract:wasm_export:demo_wasm%2FCounter
+- contract:wasm_export:demo_wasm%2FCounter.increment
+- contract:wasm_export:demo_wasm%2FCounter.value
+- contract:wasm_export:demo_wasm%2Fgreet
+- contract:wasm_export:demo_wasm%2FsayHi
+- contract:wasm_export:demo_wasm%2Ftick
+- contract:wasm_export:demo_wasm%2Funused_export
+links:
+- from: fx:src/lib.rs#enum:Color
+  kind: contains
+  to: fx:src/lib.rs#enum:Color/variant:Green
+  confidence: Extracted
+- from: fx:src/lib.rs#enum:Color
+  kind: contains
+  to: fx:src/lib.rs#enum:Color/variant:Red
+  confidence: Extracted
+- from: fx:src/lib.rs#enum:Color
+  kind: provides
+  to: contract:wasm_export:demo_wasm%2FColor
+  confidence: Extracted
+- from: fx:src/lib.rs#enum:Color/variant:Green
+  kind: provides
+  to: contract:wasm_export:demo_wasm%2FColor.Green
+  confidence: Extracted
+- from: fx:src/lib.rs#enum:Color/variant:Red
+  kind: provides
+  to: contract:wasm_export:demo_wasm%2FColor.Red
+  confidence: Extracted
+- from: fx:src/lib.rs#fn:greet
+  kind: provides
+  to: contract:wasm_export:demo_wasm%2Fgreet
+  confidence: Extracted
+- from: fx:src/lib.rs#fn:say_hi
+  kind: provides
+  to: contract:wasm_export:demo_wasm%2FsayHi
+  confidence: Extracted
+- from: fx:src/lib.rs#fn:tick
+  kind: provides
+  to: contract:wasm_export:demo_wasm%2Ftick
+  confidence: Extracted
+- from: fx:src/lib.rs#fn:unused_export
+  kind: provides
+  to: contract:wasm_export:demo_wasm%2Funused_export
+  confidence: Extracted
+- from: fx:src/lib.rs#impl:Counter
+  kind: contains
+  to: fx:src/lib.rs#impl:Counter/fn:helper
+  confidence: Extracted
+- from: fx:src/lib.rs#impl:Counter
+  kind: contains
+  to: fx:src/lib.rs#impl:Counter/fn:increment
+  confidence: Extracted
+- from: fx:src/lib.rs#impl:Counter
+  kind: contains
+  to: fx:src/lib.rs#impl:Counter/fn:new
+  confidence: Extracted
+- from: fx:src/lib.rs#impl:Counter
+  kind: contains
+  to: fx:src/lib.rs#impl:Counter/fn:set_value
+  confidence: Extracted
+- from: fx:src/lib.rs#impl:Counter
+  kind: contains
+  to: fx:src/lib.rs#impl:Counter/fn:value
+  confidence: Extracted
+- from: fx:src/lib.rs#impl:Counter
+  kind: implements-for
+  to: fx:src/lib.rs#struct:Counter
+  confidence: Extracted
+- from: fx:src/lib.rs#impl:Counter/fn:increment
+  kind: provides
+  to: contract:wasm_export:demo_wasm%2FCounter.increment
+  confidence: Extracted
+- from: fx:src/lib.rs#impl:Counter/fn:new
+  kind: provides
+  to: contract:wasm_export:demo_wasm%2FCounter
+  confidence: Extracted
+- from: fx:src/lib.rs#impl:Counter/fn:set_value
+  kind: provides
+  to: contract:wasm_export:demo_wasm%2FCounter.value
+  confidence: Extracted
+- from: fx:src/lib.rs#impl:Counter/fn:value
+  kind: provides
+  to: contract:wasm_export:demo_wasm%2FCounter.value
+  confidence: Extracted
+- from: fx:src/lib.rs#impl:Default%20for%20Counter
+  kind: contains
+  to: fx:src/lib.rs#impl:Default%20for%20Counter/fn:default
+  confidence: Extracted
+- from: fx:src/lib.rs#impl:Default%20for%20Counter
+  kind: implements-for
+  to: fx:src/lib.rs#struct:Counter
+  confidence: Extracted
+- from: fx:src/lib.rs#impl:Default%20for%20Counter/fn:default
+  kind: calls
+  to: fx:src/lib.rs#impl:Counter/fn:new
+  confidence: Extracted
+- from: fx:src/lib.rs#struct:Counter
+  kind: provides
+  to: contract:wasm_export:demo_wasm%2FCounter
+  confidence: Extracted

@@ -44,7 +44,15 @@ impl Extractor for RustExtractor {
             "attributes",
             "annotations",
             "parse-error",
+            "wasm-export",
+            "wasm-extern",
         ]
+    }
+
+    /// Bumped when extraction output changes for unchanged input: `1` adds extern-block items
+    /// and the wasm-bindgen bindings (FEAT-016).
+    fn revision_salt(&self) -> &'static str {
+        "rust-extract-1"
     }
 
     /// The [`WorkspaceContext`] as compact JSON with sorted keys and vectors.

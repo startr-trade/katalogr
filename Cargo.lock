@@ -1673,6 +1673,7 @@ version = "0.1.0"
 dependencies = [
  "camino",
  "katalogr-engine",
+ "katalogr-ext-wasm",
  "katalogr-model",
  "katalogr-query",
  "katalogr-store",

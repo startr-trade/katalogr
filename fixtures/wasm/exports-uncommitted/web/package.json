@@ -1,0 +1,7 @@
+{
+  "name": "demo-web",
+  "version": "0.1.0",
+  "dependencies": {
+    "demo-wasm": "file:../pkg"
+  }
+}

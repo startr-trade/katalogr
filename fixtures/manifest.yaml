@@ -46,6 +46,11 @@ technologies:
       - rust/use-and-reexport
     use-resolution:
       - rust/use-and-reexport
+    wasm-export:
+      - wasm/exports-uncommitted
+      - wasm/scripts-out-dir
+    wasm-extern:
+      - wasm/extern-imports
   test:
     contracts:
       - test/contracts-bind

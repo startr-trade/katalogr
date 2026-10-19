@@ -1,0 +1,7 @@
+{
+  "name": "engine-root",
+  "private": true,
+  "scripts": {
+    "build:wasm": "wasm-pack build crates/engine-core --out-dir ../../web/gen --out-name engine --scope acme"
+  }
+}
