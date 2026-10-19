@@ -1,0 +1,98 @@
+mode: exact
+symbols:
+- fx:projects/demo/charter.yaml#goal:G-1
+- fx:projects/demo/charter.yaml#goal:G-2
+- fx:projects/demo/docs/decisions/0001-example.md#adr:ADR-0001
+- fx:projects/demo/docs/decisions/0001-example.md#section:example-decision
+- fx:projects/demo/docs/decisions/0001-example.md#section:example-decision/section:context
+- fx:projects/demo/docs/overview.md#section:overview
+- fx:projects/demo/features/Implementation/FEAT-002.yaml#item:FEAT-002
+- fx:projects/demo/features/Implementation/FEAT-002.yaml#item:FEAT-002/req:R-1
+- fx:projects/demo/features/Planned/FEAT-001.yaml#item:FEAT-001
+- fx:projects/demo/features/Planned/FEAT-001.yaml#item:FEAT-001/req:R-1
+- fx:projects/demo/features/Planned/FEAT-001.yaml#item:FEAT-001/req:R-2
+- fx:projects/demo/features/Planned/FEAT-001.yaml#item:FEAT-001/task:TL-001%2FT1
+- fx:projects/demo/features/Planned/FEAT-001.yaml#item:FEAT-001/task:TL-001%2FT2
+- fx:projects/demo/features/Planned/features-spec/FEAT-001.md#section:example-item
+- fx:projects/demo/features/Planned/features-spec/FEAT-001.md#section:example-item/section:design
+links:
+- from: fx:projects/demo/docs/decisions/0001-example.md#adr:ADR-0001
+  kind: affects
+  to: fx:projects/demo/features/Implementation/FEAT-002.yaml#item:FEAT-002
+  confidence: Extracted
+- from: fx:projects/demo/docs/decisions/0001-example.md#adr:ADR-0001
+  kind: affects
+  to: fx:projects/demo/features/Planned/FEAT-001.yaml#item:FEAT-001
+  confidence: Extracted
+- from: fx:projects/demo/docs/decisions/0001-example.md#section:example-decision
+  kind: contains
+  to: fx:projects/demo/docs/decisions/0001-example.md#section:example-decision/section:context
+  confidence: Extracted
+- from: fx:projects/demo/docs/decisions/0001-example.md#section:example-decision/section:context
+  kind: annotated-by
+  to: fx:projects/demo/features/Planned/FEAT-001.yaml#item:FEAT-001
+  confidence: Extracted
+- from: fx:projects/demo/docs/decisions/0001-example.md#section:example-decision/section:context
+  kind: links-to
+  to: fx:projects/demo/features/Planned/FEAT-001.yaml#item:FEAT-001
+  confidence: Extracted
+- from: fx:projects/demo/docs/overview.md#section:overview
+  kind: links-to
+  to: fx:projects/demo/features/Planned/FEAT-001.yaml#item:FEAT-001
+  confidence: Extracted
+- from: fx:projects/demo/features/Implementation/FEAT-002.yaml#item:FEAT-002
+  kind: contains
+  to: fx:projects/demo/features/Implementation/FEAT-002.yaml#item:FEAT-002/req:R-1
+  confidence: Extracted
+- from: fx:projects/demo/features/Implementation/FEAT-002.yaml#item:FEAT-002
+  kind: serves
+  to: fx:projects/demo/charter.yaml#goal:G-1
+  confidence: Extracted
+- from: fx:projects/demo/features/Implementation/FEAT-002.yaml#item:FEAT-002
+  kind: serves
+  to: fx:projects/demo/charter.yaml#goal:G-2
+  confidence: Extracted
+- from: fx:projects/demo/features/Planned/FEAT-001.yaml#item:FEAT-001
+  kind: contains
+  to: fx:projects/demo/features/Planned/FEAT-001.yaml#item:FEAT-001/req:R-1
+  confidence: Extracted
+- from: fx:projects/demo/features/Planned/FEAT-001.yaml#item:FEAT-001
+  kind: contains
+  to: fx:projects/demo/features/Planned/FEAT-001.yaml#item:FEAT-001/req:R-2
+  confidence: Extracted
+- from: fx:projects/demo/features/Planned/FEAT-001.yaml#item:FEAT-001
+  kind: contains
+  to: fx:projects/demo/features/Planned/FEAT-001.yaml#item:FEAT-001/task:TL-001%2FT1
+  confidence: Extracted
+- from: fx:projects/demo/features/Planned/FEAT-001.yaml#item:FEAT-001
+  kind: contains
+  to: fx:projects/demo/features/Planned/FEAT-001.yaml#item:FEAT-001/task:TL-001%2FT2
+  confidence: Extracted
+- from: fx:projects/demo/features/Planned/FEAT-001.yaml#item:FEAT-001
+  kind: serves
+  to: fx:projects/demo/charter.yaml#goal:G-1
+  confidence: Extracted
+- from: fx:projects/demo/features/Planned/features-spec/FEAT-001.md
+  kind: specifies
+  to: fx:projects/demo/features/Planned/FEAT-001.yaml#item:FEAT-001
+  confidence: Extracted
+- from: fx:projects/demo/features/Planned/features-spec/FEAT-001.md#section:example-item
+  kind: contains
+  to: fx:projects/demo/features/Planned/features-spec/FEAT-001.md#section:example-item/section:design
+  confidence: Extracted
+- from: fx:projects/demo/features/Planned/features-spec/FEAT-001.md#section:example-item/section:design
+  kind: annotated-by
+  to: fx:projects/demo/features/Implementation/FEAT-002.yaml#item:FEAT-002
+  confidence: Extracted
+- from: fx:projects/demo/features/Planned/features-spec/FEAT-001.md#section:example-item/section:design
+  kind: annotated-by
+  to: fx:projects/demo/features/Planned/FEAT-001.yaml#item:FEAT-001/req:R-1
+  confidence: Extracted
+- from: fx:projects/demo/features/Planned/features-spec/FEAT-001.md#section:example-item/section:design
+  kind: links-to
+  to: fx:projects/demo/docs/decisions/0001-example.md
+  confidence: Extracted
+- from: fx:projects/demo/features/Planned/features-spec/FEAT-001.md#section:example-item/section:design
+  kind: links-to
+  to: fx:projects/demo/features/Implementation/FEAT-002.yaml#item:FEAT-002
+  confidence: Extracted

@@ -1,5 +1,6 @@
 //! Technology-neutral model: names, ids, nodes, links, fragments and the extractor SPI (FEAT-001, ADR-0012).
 
+pub mod annotate;
 pub mod extract;
 pub mod fragment;
 pub mod graph;

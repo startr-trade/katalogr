@@ -18,6 +18,8 @@ katalogr-ext-rust = { path = "crates/katalogr-ext-rust", version = "0.1.0" }
 katalogr-query = { path = "crates/katalogr-query", version = "0.1.0" }
 katalogr-dist = { path = "crates/katalogr-dist", version = "0.1.0" }
 katalogr-ext-ts = { path = "crates/katalogr-ext-ts", version = "0.1.0" }
+katalogr-ext-md = { path = "crates/katalogr-ext-md", version = "0.1.0" }
+katalogr-ext-kanbanr = { path = "crates/katalogr-ext-kanbanr", version = "0.1.0" }
 oxc_parser = "=0.154.0"
 oxc_ast = "=0.154.0"
 oxc_span = "=0.154.0"
@@ -41,3 +43,5 @@ globset = "0.4"
 toml = "1.1"
 ra_ap_syntax = "=0.0.358"
 schemars = "1.2"
+pulldown-cmark = { version = "0.13", default-features = false }
+regex = "1"

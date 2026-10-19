@@ -43,6 +43,7 @@ impl Extractor for TsExtractor {
             "call-binding",
             "call-member",
             "require",
+            "annotations",
             "parse-error",
         ]
     }

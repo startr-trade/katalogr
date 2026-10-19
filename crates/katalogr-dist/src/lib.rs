@@ -10,10 +10,13 @@ mod test_extractor;
 
 pub use error::DistError;
 pub use katalogr_query as query;
-use katalogr_query::{CallerHit, MapEntry, RefHit, Resolution, SymbolHit, WhyResult};
+use katalogr_query::{
+    Blame, CallerHit, DanglingRef, MapEntry, RefHit, Resolution, SymbolHit, WhyResult,
+};
 pub use setup::{ProjectCreated, kindex_init, project_init};
 
 use camino::{Utf8Path, Utf8PathBuf};
+use katalogr_engine::history::{HISTORY_PREFIX, HistoryOptions, blame_commit, history_shas};
 use katalogr_engine::scan::{PathChange, changed_paths};
 use katalogr_engine::{
     Consistency as EngineConsistency, Engine, EventKind, NewEvent, QueryOptions, Scope,
@@ -95,6 +98,13 @@ impl Report {
     }
 }
 
+/// What `index --history` indexes: the commits with item trailers.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct HistoryScope {
+    /// Only commits after this revision (up to HEAD).
+    pub since: Option<String>,
+}
+
 /// The katalogr facade for one resolved project.
 pub struct Katalogr {
     project: ProjectDir,
@@ -109,6 +119,9 @@ fn build_registry() -> ExtensionRegistry {
     let mut registry = ExtensionRegistry::new();
     registry.register(Box::new(katalogr_ext_rust::RustExtractor));
     registry.register(Box::new(katalogr_ext_ts::TsExtractor));
+    // The board extension claims its own Markdown files before the general one.
+    registry.register(Box::new(katalogr_ext_kanbanr::BoardExtractor));
+    registry.register(Box::new(katalogr_ext_md::MarkdownExtractor));
     #[cfg(feature = "test-extractor")]
     registry.register(Box::new(test_extractor::TestExtractor));
     registry
@@ -266,10 +279,15 @@ impl Katalogr {
 
     /// Queue what changed (a revision range, every repo with `full`, else a rescan of the current
     /// repo), then bring the index to the requested consistency (default: wait-all).
+    ///
+    /// With `history`, the commits that carry item trailers are queued as `@history/<sha>`
+    /// paths (every repo with `full`, else the current repo), and the files are queued only
+    /// when `full` or `range` asks for them.
     pub fn index(
         &self,
         range: Option<String>,
         full: bool,
+        history: Option<&HistoryScope>,
         opts: &Options,
     ) -> Result<Report, DistError> {
         let timeout = opts.timeout()?;
@@ -300,9 +318,34 @@ impl Katalogr {
                     }
                 }
             }
-        } else {
+        } else if history.is_none() {
             let (repo, _) = self.current()?;
             events.push(NewEvent::rescan(repo));
+        }
+        if let Some(h) = history {
+            let mut repos: Vec<(String, Utf8PathBuf)> = Vec::new();
+            if full {
+                for r in &self.project.config().repos {
+                    if let Some(root) = self.roots.get(&r.name) {
+                        repos.push((r.name.clone(), root.clone()));
+                    }
+                }
+            } else {
+                let (repo, root) = self.current()?;
+                repos.push((repo.to_string(), root.to_owned()));
+            }
+            for (repo, root) in repos {
+                let shas = history_shas(
+                    root.as_std_path(),
+                    h.since.as_deref(),
+                    &HistoryOptions::default(),
+                )?;
+                for sha in shas {
+                    let path = RelPath::new(&format!("{HISTORY_PREFIX}{sha}"))
+                        .map_err(|e| DistError::usage(e.to_string()))?;
+                    events.push(NewEvent::file(&repo, &path, EventKind::Changed));
+                }
+            }
         }
         let inbox = engine.inbox();
         for ev in &events {
@@ -377,11 +420,37 @@ impl Katalogr {
             .ok_or_else(|| DistError::usage(format!("{spec:?}: expected FILE:LINE")))?;
         let (repo, root) = self.current()?;
         let path = rel_to_root(root, file)?;
+        // A directory that is not a git repository has no commits to blame, which is no failure.
+        let blame = if root.join(".git").exists() {
+            match blame_commit(root.as_std_path(), path.as_str(), line) {
+                Ok(sha) => Blame::Commit(sha),
+                Err(why) => Blame::Unavailable(why),
+            }
+        } else {
+            Blame::NotRequested
+        };
         self.query(opts, |tx| {
             Ok(from_resolution(
-                katalogr_query::why(tx, repo, &path, line)?,
+                katalogr_query::why(tx, repo, &path, line, &blame)?,
                 spec,
             ))
+        })
+    }
+
+    /// Unresolved references of the given kinds (default: Markdown links, annotations and
+    /// trailers), across the project.
+    pub fn dangling(
+        &self,
+        kinds: &[&str],
+        opts: &Options,
+    ) -> Result<Reply<Vec<DanglingRef>>, DistError> {
+        self.query(opts, |tx| {
+            let kinds = if kinds.is_empty() {
+                katalogr_query::DANGLING_KINDS
+            } else {
+                kinds
+            };
+            Ok(Outcome::Found(katalogr_query::dangling(tx, kinds)?))
         })
     }
 

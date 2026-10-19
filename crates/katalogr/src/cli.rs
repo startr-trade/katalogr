@@ -22,6 +22,25 @@ pub enum Consistency {
     StaleOk,
 }
 
+/// Link kinds `dangling` can report.
+#[derive(Debug, Clone, Copy, ValueEnum)]
+#[value(rename_all = "kebab-case")]
+pub enum DanglingKind {
+    LinksTo,
+    AnnotatedBy,
+    RefsItem,
+}
+
+impl DanglingKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            DanglingKind::LinksTo => "links-to",
+            DanglingKind::AnnotatedBy => "annotated-by",
+            DanglingKind::RefsItem => "refs-item",
+        }
+    }
+}
+
 /// Traceability for polyglot systems.
 #[derive(Debug, Parser)]
 #[command(name = "katalogr", version = VERSION.as_str(), about, long_about = None)]
@@ -102,15 +121,25 @@ pub enum Command {
     Map,
     /// Queue changes and bring the index up to date.
     Index {
-        /// Index changes since this revision (up to HEAD).
+        /// Index changes since this revision (up to HEAD). With `--history`, only the
+        /// commits after this revision are indexed.
         #[arg(long, value_name = "REV", conflicts_with_all = ["range", "full"])]
         since: Option<String>,
         /// Index changes in a revision range `a..b`.
-        #[arg(long, value_name = "A..B", conflicts_with = "full")]
+        #[arg(long, value_name = "A..B", conflicts_with_all = ["full", "history"])]
         range: Option<String>,
         /// Rescan every repository of the project.
         #[arg(long)]
         full: bool,
+        /// Index the commits that carry item trailers (`Refs:`).
+        #[arg(long)]
+        history: bool,
+    },
+    /// List references that name something that does not exist; exits 1 when any dangle.
+    Dangling {
+        /// Only this link kind (default: links-to, annotated-by and refs-item).
+        #[arg(long, value_enum)]
+        kind: Option<DanglingKind>,
     },
 }
 

@@ -4,8 +4,8 @@
 //! `kind  name  path:line  [confidence]`. JSON is the versioned envelope.
 
 use katalogr_dist::query::{
-    CallerHit, Envelope, MapEntry, RESULT_SCHEMA_VERSION, RefHit, Serialize, SymbolHit, Truncation,
-    WhyResult, budget,
+    CallerHit, DanglingRef, Envelope, MapEntry, RESULT_SCHEMA_VERSION, RefHit, Serialize,
+    SymbolHit, Truncation, WhyResult, budget,
 };
 use katalogr_dist::{Outcome, Reply, Report};
 
@@ -140,6 +140,32 @@ pub fn list<T: Serialize>(cli: &Cli, reply: Reply<Vec<T>>, line: fn(&T) -> Strin
     code
 }
 
+pub fn dangling_line(d: &DanglingRef) -> String {
+    format!(
+        "{}  {}  {}  wants {}",
+        d.kind,
+        d.from.name,
+        place(&d.from),
+        d.wanted.join(" | ")
+    )
+}
+
+/// Render `dangling`: one line per unresolved reference; exit 1 when there are any, so CI can
+/// gate on it.
+pub fn dangling(cli: &Cli, reply: Reply<Vec<DanglingRef>>) -> ExitCode {
+    let code = exit_for(&reply);
+    let any = matches!(&reply.outcome, Outcome::Found(v) if !v.is_empty());
+    match reply.outcome {
+        Outcome::Found(items) => print_list(cli, &reply.report, items, dangling_line),
+        other => other_outcomes(cli, &reply.report, other),
+    }
+    if code == ExitCode::Ok && any {
+        ExitCode::Error
+    } else {
+        code
+    }
+}
+
 /// Render `why`: the symbol, then its rationale.
 pub fn why(cli: &Cli, reply: Reply<WhyResult>) -> ExitCode {
     let code = exit_for(&reply);
@@ -171,8 +197,15 @@ pub fn why(cli: &Cli, reply: Reply<WhyResult>) -> ExitCode {
                 lines.extend(
                     w.rationale
                         .iter()
+                        .chain(w.goals.iter())
                         .map(|r| format!("  {}  {}  {}", r.kind, r.label, r.target)),
                 );
+                lines.extend(w.commits.iter().map(|c| {
+                    format!("  commit  {}  {}", &c.sha[..c.sha.len().min(12)], c.summary)
+                }));
+                if let Some(n) = &w.note {
+                    lines.push(format!("  note  {n}"));
+                }
                 print_lines(cli, lines);
             }
         }

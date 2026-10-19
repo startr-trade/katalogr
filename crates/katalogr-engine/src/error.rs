@@ -24,6 +24,8 @@ pub enum EngineError {
     Scan(#[from] crate::scan::ScanError),
     #[error("queue: {0}")]
     Queue(String),
+    #[error("history: {0}")]
+    History(String),
 }
 
 impl EngineError {

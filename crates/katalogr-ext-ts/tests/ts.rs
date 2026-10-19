@@ -270,7 +270,7 @@ mod ts {
             let name = format!("fx:k.{ext}");
             assert!(g.artifacts.contains_key(&name), "{name} indexed");
         }
-        assert!(!g.artifacts.contains_key("fx:notes.md"));
+        assert!(!g.artifacts.contains_key("fx:notes.txt"));
         assert!(g.artifacts.values().all(|a| a["extension"] == "ts"));
     }
 

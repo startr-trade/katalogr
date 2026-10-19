@@ -1,0 +1,5 @@
+purpose: Example purpose.
+goals:
+- id: G-1
+  statement: Example goal one.
+  measure: Example measure.

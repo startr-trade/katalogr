@@ -1,0 +1,15 @@
+code: FEAT-002
+title: Second example item
+status: Implementation
+milestone: MS-001
+kind: feature
+definition:
+  statement: Another example statement.
+  goals:
+  - G-1
+  - G-2
+  requirements:
+  - id: R-1
+    kind: functional
+    text: THE SYSTEM SHALL do an example thing.
+todo_lists: []

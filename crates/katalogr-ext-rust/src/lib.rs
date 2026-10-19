@@ -41,6 +41,7 @@ impl Extractor for RustExtractor {
             "call-path",
             "call-method",
             "attributes",
+            "annotations",
             "parse-error",
         ]
     }

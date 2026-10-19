@@ -1,5 +1,30 @@
 {
   "$defs": {
+    "CommitHit": {
+      "description": "A commit that introduced the line and the board items its trailers name.",
+      "properties": {
+        "items": {
+          "description": "Canonical names of the items and requirements the commit's trailers name.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "sha": {
+          "description": "Full commit id.",
+          "type": "string"
+        },
+        "summary": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "sha",
+        "summary",
+        "items"
+      ],
+      "type": "object"
+    },
     "RationaleLink": {
       "properties": {
         "kind": {
@@ -104,6 +129,27 @@
     },
     "WhyResult": {
       "properties": {
+        "commits": {
+          "description": "The commit that introduced the line, when it carries item trailers.",
+          "items": {
+            "$ref": "#/$defs/CommitHit"
+          },
+          "type": "array"
+        },
+        "goals": {
+          "description": "The goals served by the items and requirements reached (kind `serves`).",
+          "items": {
+            "$ref": "#/$defs/RationaleLink"
+          },
+          "type": "array"
+        },
+        "note": {
+          "description": "Why part of the answer is missing, for example that blame was unavailable.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "rationale": {
           "items": {
             "$ref": "#/$defs/RationaleLink"
@@ -116,7 +162,9 @@
       },
       "required": [
         "symbol",
-        "rationale"
+        "rationale",
+        "goals",
+        "commits"
       ],
       "type": "object"
     }

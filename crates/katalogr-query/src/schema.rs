@@ -1,6 +1,6 @@
 //! JSON Schemas of the `--json` output, one per command.
 
-use crate::result::{CallerHit, Envelope, MapEntry, RefHit, SymbolHit, WhyResult};
+use crate::result::{CallerHit, DanglingRef, Envelope, MapEntry, RefHit, SymbolHit, WhyResult};
 use schemars::schema_for;
 use serde_json::Value;
 use std::collections::BTreeMap;
@@ -14,5 +14,9 @@ pub fn schemas() -> BTreeMap<&'static str, Value> {
         ("callers", to_value(schema_for!(Envelope<Vec<CallerHit>>))),
         ("why", to_value(schema_for!(Envelope<WhyResult>))),
         ("map", to_value(schema_for!(Envelope<Vec<MapEntry>>))),
+        (
+            "dangling",
+            to_value(schema_for!(Envelope<Vec<DanglingRef>>)),
+        ),
     ])
 }

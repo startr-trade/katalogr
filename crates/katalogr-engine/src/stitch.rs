@@ -99,6 +99,11 @@ impl Stitcher {
         }
 
         let mut exports: Vec<Export> = f.exports.clone();
+        // Every artifact is reachable by its file key, whichever extension indexed it (ADR-0016).
+        exports.push(Export {
+            key: file_key(&f.artifact.name),
+            target: aid,
+        });
         exports.sort_by(|a, b| (&a.key, a.target).cmp(&(&b.key, b.target)));
         exports.dedup();
         let row = ArtifactRow {
@@ -216,6 +221,17 @@ impl Cx {
             links_removed: self.removed.difference(&self.added).cloned().collect(),
             refs_resolved: self.resolved.into_iter().collect(),
         }
+    }
+}
+
+/// Namespace of the implicit file export every artifact carries.
+pub const FILE_NS: &str = "file";
+
+/// `("file", "<repo>:<path>")`, the key under which an artifact is always exported.
+pub fn file_key(a: &ArtifactName) -> ExportKey {
+    ExportKey {
+        namespace: FILE_NS.to_string(),
+        key: format!("{}:{}", a.repo, a.path),
     }
 }
 

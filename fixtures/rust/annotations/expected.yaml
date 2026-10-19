@@ -1,0 +1,46 @@
+mode: exact
+symbols:
+- fx:Cargo.toml#crate:annotated
+- fx:projects/demo/charter.yaml#goal:G-1
+- fx:projects/demo/features/Planned/FEAT-001.yaml#item:FEAT-001
+- fx:projects/demo/features/Planned/FEAT-001.yaml#item:FEAT-001/req:R-1
+- fx:projects/demo/features/Planned/FEAT-001.yaml#item:FEAT-001/req:R-2
+- fx:projects/demo/features/Planned/FEAT-001.yaml#item:FEAT-001/task:TL-001%2FT1
+- fx:src/lib.rs#enum:Third
+- fx:src/lib.rs#enum:Third/variant:One
+- fx:src/lib.rs#fn:first
+- fx:src/lib.rs#fn:plain
+- fx:src/lib.rs#struct:Second
+links:
+- from: fx:projects/demo/features/Planned/FEAT-001.yaml#item:FEAT-001
+  kind: contains
+  to: fx:projects/demo/features/Planned/FEAT-001.yaml#item:FEAT-001/req:R-1
+  confidence: Extracted
+- from: fx:projects/demo/features/Planned/FEAT-001.yaml#item:FEAT-001
+  kind: contains
+  to: fx:projects/demo/features/Planned/FEAT-001.yaml#item:FEAT-001/req:R-2
+  confidence: Extracted
+- from: fx:projects/demo/features/Planned/FEAT-001.yaml#item:FEAT-001
+  kind: contains
+  to: fx:projects/demo/features/Planned/FEAT-001.yaml#item:FEAT-001/task:TL-001%2FT1
+  confidence: Extracted
+- from: fx:projects/demo/features/Planned/FEAT-001.yaml#item:FEAT-001
+  kind: serves
+  to: fx:projects/demo/charter.yaml#goal:G-1
+  confidence: Extracted
+- from: fx:src/lib.rs#enum:Third
+  kind: contains
+  to: fx:src/lib.rs#enum:Third/variant:One
+  confidence: Extracted
+- from: fx:src/lib.rs#enum:Third/variant:One
+  kind: annotated-by
+  to: fx:projects/demo/features/Planned/FEAT-001.yaml#item:FEAT-001
+  confidence: Extracted
+- from: fx:src/lib.rs#fn:first
+  kind: annotated-by
+  to: fx:projects/demo/features/Planned/FEAT-001.yaml#item:FEAT-001/req:R-1
+  confidence: Extracted
+- from: fx:src/lib.rs#struct:Second
+  kind: annotated-by
+  to: fx:projects/demo/features/Planned/FEAT-001.yaml#item:FEAT-001/req:R-2
+  confidence: Extracted

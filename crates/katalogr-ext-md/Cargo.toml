@@ -1,0 +1,12 @@
+[package]
+name = "katalogr-ext-md"
+description = "Markdown extension: sections and links."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+katalogr-model.workspace = true
+pulldown-cmark.workspace = true

@@ -4,6 +4,7 @@
 use crate::context::{self, CrateInfo, WorkspaceContext};
 use crate::lines::LineIndex;
 use crate::ownership::owner_of;
+use katalogr_model::annotate;
 use katalogr_model::{
     ArtifactName, ArtifactNode, Confidence, Export, ExportKey, ExtractError, ExtractInput, Fact,
     Fragment, Id, Link, LinkKind, Name, OutRef, Provenance, Segment, Span, SymbolName, SymbolNode,
@@ -302,7 +303,33 @@ impl Builder<'_> {
             span,
             facts,
         });
+        self.annotations(id, node);
         id
+    }
+
+    /// FEAT-019 T6: item annotations (`FEAT-001 R-1`) in the comments that lead the item (doc
+    /// comments included) become `annotated-by` references from the symbol.
+    fn annotations(&mut self, id: Id, node: &SyntaxNode) {
+        for el in node.children_with_tokens() {
+            match el.kind() {
+                SyntaxKind::COMMENT | SyntaxKind::DOC_COMMENT => {
+                    let range = el.text_range();
+                    let span = self.lines.span(range.start().into(), range.end().into());
+                    let text = el.to_string();
+                    for r in annotate::scan(&text) {
+                        let keys = annotate::keys(&r);
+                        let dup = self.refs.iter().any(|x| {
+                            x.from == id && x.kind.0 == "annotated-by" && x.candidates == keys
+                        });
+                        if !dup {
+                            self.add_ref(id, "annotated-by", span, keys, Confidence::Extracted);
+                        }
+                    }
+                }
+                SyntaxKind::WHITESPACE | SyntaxKind::ATTR => {}
+                _ => break,
+            }
+        }
     }
 
     pub(crate) fn enter(&mut self, kind: &str, name: &str, id: Id) {

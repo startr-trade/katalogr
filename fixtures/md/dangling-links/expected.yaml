@@ -1,0 +1,18 @@
+mode: exact
+symbols:
+- fx:index.md#section:index
+- fx:index.md#section:index/section:real
+- fx:present.md#section:present
+links:
+- from: fx:index.md#section:index
+  kind: contains
+  to: fx:index.md#section:index/section:real
+  confidence: Extracted
+- from: fx:index.md#section:index
+  kind: links-to
+  to: fx:present.md
+  confidence: Extracted
+- from: fx:present.md#section:present
+  kind: links-to
+  to: fx:index.md#section:index/section:real
+  confidence: Extracted

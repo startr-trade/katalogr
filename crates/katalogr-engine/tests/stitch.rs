@@ -199,6 +199,38 @@ mod stitch {
         assert_eq!(links[0].1.entries[0].confidence, Confidence::Extracted);
     }
 
+    /// FEAT-019 T1: every artifact is reachable through `("file", "<repo>:<path>")`.
+    #[test]
+    fn file_key_resolves() {
+        let e = env();
+        e.put("a.tx", "sym fn A\n");
+        e.put(
+            "sub/b.tx",
+            "sym fn B\nref B calls file:r:a.tx\nref B references file:r:nope.tx\n",
+        );
+        let b = sym("sub/b.tx", "B");
+        let rx = e.cache.read().unwrap();
+        let links = rx.links_out(b, None).unwrap();
+        assert_eq!(links.len(), 1, "{links:?}");
+        assert_eq!(links[0].0, lk(b, "calls", art("a.tx")));
+        assert_eq!(rx.unresolved_refs(None).unwrap().len(), 1);
+        drop(rx);
+
+        // Created after the reference: the reverse index picks it up.
+        e.put("nope.tx", "sym fn N\n");
+        let rx = e.cache.read().unwrap();
+        assert!(rx.unresolved_refs(None).unwrap().is_empty());
+        assert_eq!(rx.links_in(art("nope.tx")).unwrap().len(), 1);
+        drop(rx);
+
+        // Removed again: dangling again.
+        e.remove("nope.tx");
+        assert_eq!(
+            e.cache.read().unwrap().unresolved_refs(None).unwrap().len(),
+            1
+        );
+    }
+
     #[test]
     fn unresolved_ref_recorded() {
         let e = env();
