@@ -19,8 +19,8 @@ pub use claude::{
 pub use error::DistError;
 pub use katalogr_query as query;
 use katalogr_query::{
-    Blame, CallerHit, DanglingRef, Explain, MapEntry, PathStep, RefHit, Resolution, SearchHit,
-    SymbolHit, WhyResult,
+    Blame, CallerHit, DanglingRef, Diagnostic, Explain, MapEntry, PathStep, RefHit, Resolution,
+    SearchHit, SymbolHit, Trace, WhyResult,
 };
 pub use katalogr_query::{ReplaceResult, ShowResult};
 pub use setup::{ProjectCreated, kindex_init, project_init};
@@ -73,6 +73,8 @@ pub struct Options {
     pub consistency: Option<Consistency>,
     /// Seconds; may be fractional.
     pub timeout: Option<f64>,
+    /// Record a diagnostic trace of the query (FEAT-065).
+    pub diagnostic: bool,
 }
 
 impl Options {
@@ -163,10 +165,12 @@ pub enum Outcome<T> {
 }
 
 /// A query answer with what the read saw.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Reply<T> {
     pub outcome: Outcome<T>,
     pub report: Report,
+    /// The trace of the query: `Some` only for a traced command run with `Options::diagnostic`.
+    pub diagnostic: Option<Trace>,
 }
 
 fn found_or_none(items: Vec<SymbolHit>, text: &str) -> Outcome<Vec<SymbolHit>> {
@@ -175,6 +179,20 @@ fn found_or_none(items: Vec<SymbolHit>, text: &str) -> Outcome<Vec<SymbolHit>> {
     } else {
         Outcome::Found(items)
     }
+}
+
+/// [`on_target`], recording the routing into `diag`.
+pub(crate) fn on_target_traced<T>(
+    tx: &ReadTx,
+    text: &str,
+    diag: &mut Diagnostic,
+    f: impl FnOnce(&SymbolHit, &mut Diagnostic) -> Result<T, StoreError>,
+) -> Result<Outcome<T>, StoreError> {
+    Ok(match katalogr_query::resolve_traced(tx, text, diag)? {
+        Resolution::One(t) => Outcome::Found(f(&t, diag)?),
+        Resolution::Ambiguous(c) => Outcome::Ambiguous(c),
+        Resolution::None => Outcome::NoMatch(format!("no symbol matches {text:?}")),
+    })
 }
 
 /// Resolve `text` to one symbol and run `f` on it; several or no matches end the query.
@@ -396,6 +414,27 @@ impl Katalogr {
         opts: &Options,
         f: impl FnOnce(&ReadTx) -> Result<Outcome<T>, StoreError>,
     ) -> Result<Reply<T>, DistError> {
+        self.query_traced(
+            &Options {
+                diagnostic: false,
+                ..opts.clone()
+            },
+            |tx, _| f(tx),
+        )
+    }
+
+    /// Like [`Katalogr::query`], with a collector; its trace comes back in `Reply::diagnostic`
+    /// when `opts.diagnostic`.
+    pub(crate) fn query_traced<T>(
+        &self,
+        opts: &Options,
+        f: impl FnOnce(&ReadTx, &mut Diagnostic) -> Result<Outcome<T>, StoreError>,
+    ) -> Result<Reply<T>, DistError> {
+        let mut diag = if opts.diagnostic {
+            Diagnostic::on_new()
+        } else {
+            Diagnostic::off()
+        };
         let timeout = opts.timeout()?;
         let engine = self.engine(Instant::now() + timeout)?;
         let consistency = opts.consistency.unwrap_or(Consistency::Wait);
@@ -405,7 +444,7 @@ impl Katalogr {
                 timeout,
                 scope: Scope::Project,
             },
-            f,
+            |tx| f(tx, &mut diag),
         )?;
         Ok(Reply {
             outcome: a.value?,
@@ -417,6 +456,7 @@ impl Katalogr {
                 queued: 0,
                 warnings: Vec::new(),
             },
+            diagnostic: diag.finish(),
         })
     }
 
@@ -429,8 +469,10 @@ impl Katalogr {
 
     /// References to the symbol `text` names, through re-exports.
     pub fn refs(&self, text: &str, opts: &Options) -> Result<Reply<Vec<RefHit>>, DistError> {
-        self.query(opts, |tx| {
-            on_target(tx, text, |t| katalogr_query::refs(tx, t))
+        self.query_traced(opts, |tx, diag| {
+            on_target_traced(tx, text, diag, |t, diag| {
+                katalogr_query::refs_traced(tx, t, diag)
+            })
         })
     }
 
@@ -491,7 +533,9 @@ impl Katalogr {
 
     /// All symbols by PageRank.
     pub fn map(&self, opts: &Options) -> Result<Reply<Vec<MapEntry>>, DistError> {
-        self.query(opts, |tx| Ok(Outcome::Found(katalogr_query::map(tx)?)))
+        self.query_traced(opts, |tx, diag| {
+            Ok(Outcome::Found(katalogr_query::map_traced(tx, diag)?))
+        })
     }
 
     /// The best `limit` symbols for the words in `terms` (BM25 over names, docs, sections and
@@ -507,8 +551,8 @@ impl Katalogr {
                 "{terms:?}: no searchable word (words need two letters, or a digit)"
             )));
         }
-        self.query(opts, |tx| {
-            let hits = katalogr_query::search(tx, terms, limit)?;
+        self.query_traced(opts, |tx, diag| {
+            let hits = katalogr_query::search_traced(tx, terms, limit, diag)?;
             Ok(if hits.is_empty() {
                 Outcome::NoMatch(format!("nothing matches {terms:?}"))
             } else {

@@ -1222,6 +1222,207 @@ mod retrieval {
     }
 }
 
+mod diagnostic_cli {
+    use super::cli::{query_project, run_raw};
+    use serde_json::Value;
+    use std::path::Path;
+
+    const QUERIES: [&[&str]; 3] = [&["search", "caller"], &["map"], &["refs", "target"]];
+
+    fn json(repo: &Path, args: &[&str]) -> Value {
+        let mut full = vec!["--json"];
+        full.extend_from_slice(args);
+        let (code, out, err) = run_raw(repo, &full);
+        assert_eq!(code, 0, "{full:?}: {err}");
+        serde_json::from_str(&out).unwrap_or_else(|e| panic!("{full:?}: {e}: {out}"))
+    }
+
+    fn with_flag(args: &[&str]) -> Vec<String> {
+        let mut v: Vec<String> = args.iter().map(|s| s.to_string()).collect();
+        v.push("--diagnostic".into());
+        v
+    }
+
+    #[test]
+    fn flag_on_search_map_refs() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (_, repo) = query_project(tmp.path());
+        for args in QUERIES {
+            let plain = run_raw(&repo, args);
+            let flagged = with_flag(args);
+            let flagged: Vec<&str> = flagged.iter().map(String::as_str).collect();
+            let traced = run_raw(&repo, &flagged);
+            assert_eq!(plain.0, 0, "{args:?}: {}", plain.2);
+            assert_eq!(traced.0, plain.0, "{args:?}: {}", traced.2);
+            assert!(traced.2.contains("diagnostic: "), "{args:?}: {}", traced.2);
+            assert!(!plain.2.contains("diagnostic: "), "{args:?}");
+            let v = json(&repo, &flagged);
+            assert!(v["diagnostic"].is_object(), "{args:?}: {v}");
+        }
+        // An ambiguous refs still explains itself, and keeps its exit code.
+        let (code, out, err) = run_raw(&repo, &["refs", "dup", "--diagnostic"]);
+        assert_eq!(code, 3, "{out}{err}");
+        assert!(err.contains("diagnostic: route refs"), "{err}");
+        let (code, _, err) = run_raw(&repo, &["--json", "refs", "dup", "--diagnostic"]);
+        assert_eq!(code, 3);
+        assert!(err.contains("ambiguous"), "{err}");
+        let (code, out, err) = run_raw(&repo, &["--json", "refs", "nosuchthing", "--diagnostic"]);
+        assert_eq!(code, 4, "{out}");
+        assert!(err.contains("diagnostic: route refs"), "{err}");
+    }
+
+    #[test]
+    fn flag_rejected_elsewhere() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (_, repo) = query_project(tmp.path());
+        for args in [
+            &["callers", "target", "--diagnostic"][..],
+            &["find", "target", "--diagnostic"],
+            &["explain", "target", "--diagnostic"],
+            &["index", "--diagnostic"],
+            &["--diagnostic", "map"],
+        ] {
+            let (code, out, err) = run_raw(&repo, args);
+            assert_eq!(code, 2, "{args:?}: {out}{err}");
+            assert!(out.is_empty(), "{args:?}: {out}");
+        }
+    }
+
+    #[test]
+    fn stdout_identical() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (_, repo) = query_project(tmp.path());
+        for args in QUERIES {
+            for budget in [None, Some("12")] {
+                let mut base: Vec<&str> = args.to_vec();
+                if let Some(b) = budget {
+                    base.extend(["--budget", b]);
+                }
+                let mut flagged = base.clone();
+                flagged.push("--diagnostic");
+                let a = run_raw(&repo, &base);
+                let b = run_raw(&repo, &flagged);
+                assert_eq!(a.0, b.0, "{base:?}");
+                assert_eq!(a.1, b.1, "{base:?}: stdout differs");
+                assert!(b.2.contains("diagnostic: "), "{base:?}: {}", b.2);
+                if budget.is_some() && args[0] != "map" {
+                    assert!(
+                        b.2.contains("diagnostic: pack budget=12"),
+                        "{base:?}: {}",
+                        b.2
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn json_has_separate_field() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (_, repo) = query_project(tmp.path());
+        for args in QUERIES {
+            for budget in [None, Some("40")] {
+                let mut base: Vec<&str> = args.to_vec();
+                if let Some(b) = budget {
+                    base.extend(["--budget", b]);
+                }
+                let mut flagged = base.clone();
+                flagged.push("--diagnostic");
+                let plain = json(&repo, &base);
+                let traced = json(&repo, &flagged);
+                assert!(plain.get("diagnostic").is_none(), "{base:?}");
+                let d = &traced["diagnostic"];
+                assert!(d.is_object(), "{base:?}: {traced}");
+                for k in ["result", "next", "truncated", "schema", "stale"] {
+                    assert_eq!(plain.get(k), traced.get(k), "{base:?}: {k}");
+                }
+                if let Some(b) = budget {
+                    assert_eq!(
+                        d["packing"]["budget"],
+                        b.parse::<u64>().unwrap(),
+                        "{base:?}"
+                    );
+                } else {
+                    assert!(d.get("packing").is_none());
+                }
+            }
+        }
+        let v = json(&repo, &["search", "caller", "--diagnostic"]);
+        assert_eq!(v["diagnostic"]["routing"]["command"], "search");
+        assert!(v["diagnostic"]["ranking"][0]["parts"].is_array());
+    }
+
+    #[test]
+    fn schemas_current() {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../schema/v1");
+        for (name, schema) in katalogr_dist::query::schemas() {
+            let mut want = serde_json::to_string_pretty(&schema).unwrap();
+            want.push('\n');
+            let have = std::fs::read_to_string(dir.join(format!("{name}.schema.json"))).unwrap();
+            assert_eq!(have, want, "{name} schema is out of date");
+            let props = &schema["properties"];
+            assert!(
+                props.get("diagnostic").is_some(),
+                "{name}: no diagnostic field"
+            );
+            let required = schema["required"].as_array().unwrap();
+            assert!(
+                !required.iter().any(|r| r == "diagnostic"),
+                "{name}: diagnostic must be optional"
+            );
+        }
+    }
+}
+
+mod diagnostic {
+    use super::cli::{query_project, run_raw};
+    use std::path::Path;
+
+    fn traces(repo: &Path) -> Vec<String> {
+        [
+            &["search", "caller"][..],
+            &["refs", "target"],
+            &["refs", "dup"],
+            &["map"],
+        ]
+        .iter()
+        .map(|args| {
+            let mut full = vec!["--json"];
+            full.extend_from_slice(args);
+            full.push("--diagnostic");
+            let (_, out, err) = run_raw(repo, &full);
+            let v: serde_json::Value =
+                serde_json::from_str(&out).unwrap_or_else(|_| serde_json::json!({ "stderr": err }));
+            let mut d = v["diagnostic"].clone();
+            if d.is_null() {
+                return err;
+            }
+            // Whether the rank came from the cache depends on the cache, not on the snapshot.
+            d.as_object_mut().map(|o| o.remove("rank_source"));
+            serde_json::to_string(&d).unwrap()
+        })
+        .collect()
+    }
+
+    #[test]
+    fn trace_is_deterministic() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (_, repo) = query_project(tmp.path());
+        let first = traces(&repo);
+        assert_eq!(first, traces(&repo), "differs between runs");
+        assert!(first.iter().all(|t| !t.is_empty()));
+        // A cache rebuilt from the shards gives byte-identical traces.
+        let cache = std::fs::read_dir(repo.parent().unwrap().join("kx/projects/demo/.cache"))
+            .unwrap()
+            .flatten()
+            .map(|e| e.path())
+            .find(|p| p.file_name().is_some_and(|n| n == "index.redb"))
+            .expect("cache file");
+        std::fs::remove_file(cache).unwrap();
+        assert_eq!(first, traces(&repo), "differs after a cache rebuild");
+    }
+}
+
 mod claude {
     use super::cli::{katalogr, ok, query_project, run_raw, setup};
     use std::path::Path;

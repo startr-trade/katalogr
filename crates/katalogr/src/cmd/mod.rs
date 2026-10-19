@@ -50,6 +50,11 @@ pub fn overrides(cli: &Cli) -> Overrides {
 }
 
 pub fn options(cli: &Cli) -> Options {
+    options_with(cli, false)
+}
+
+/// The read options, with a diagnostic trace when `diagnostic` (a per-command flag).
+pub fn options_with(cli: &Cli, diagnostic: bool) -> Options {
     Options {
         consistency: cli.consistency.map(|c| match c {
             Consistency::Wait => katalogr_dist::Consistency::Wait,
@@ -57,6 +62,7 @@ pub fn options(cli: &Cli) -> Options {
             Consistency::StaleOk => katalogr_dist::Consistency::StaleOk,
         }),
         timeout: cli.timeout,
+        diagnostic,
     }
 }
 

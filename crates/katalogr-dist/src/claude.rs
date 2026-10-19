@@ -204,6 +204,7 @@ impl Katalogr {
         let opts = Options {
             consistency: Some(Consistency::StaleOk),
             timeout: Some(timeout),
+            ..Options::default()
         };
         let reply = self.query(&opts, |tx| Ok(Outcome::Found(katalogr_query::map(tx)?)))?;
         let Outcome::Found(entries) = reply.outcome else {

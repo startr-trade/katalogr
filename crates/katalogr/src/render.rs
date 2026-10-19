@@ -4,9 +4,9 @@
 //! `kind  name  path:line  [confidence]`. JSON is the versioned envelope.
 
 use katalogr_dist::query::{
-    CallerHit, DanglingRef, Direction, Envelope, Explain, HintSource, MapEntry, PathStep,
-    RESULT_SCHEMA_VERSION, RefHit, ReplaceResult, SearchHit, Serialize, ShowResult, SymbolHit,
-    Truncation, WhyResult, budget, hints,
+    CallerHit, DIAG_PACK, DanglingRef, Direction, Envelope, Explain, HintSource, MapEntry,
+    PathStep, RESULT_SCHEMA_VERSION, RefHit, ReplaceResult, SearchHit, Serialize, ShowResult,
+    SymbolHit, Trace, Truncation, WhyResult, budget, hints,
 };
 use katalogr_dist::{Outcome, Reply, Report};
 
@@ -85,6 +85,7 @@ fn envelope<T>(
     truncated: Option<Truncation>,
     result: T,
     next: Vec<String>,
+    diagnostic: Option<Trace>,
 ) -> Envelope<T> {
     Envelope {
         schema: RESULT_SCHEMA_VERSION,
@@ -94,7 +95,7 @@ fn envelope<T>(
         truncated,
         result,
         next,
-        diagnostic: None,
+        diagnostic,
     }
 }
 
@@ -125,6 +126,7 @@ fn print_list<T: Serialize>(
     items: Vec<T>,
     line: impl Fn(&T) -> String,
     command: &str,
+    mut trace: Option<Trace>,
 ) where
     Vec<T>: HintSource,
 {
@@ -138,6 +140,7 @@ fn print_list<T: Serialize>(
                     .map(|i| serde_json::to_string(i).expect("serialise result"))
                     .collect();
                 let fit = budget::fit_budget(&json, b);
+                set_packing(&mut trace, &json, b);
                 let truncated = (fit.omitted > 0).then_some(Truncation {
                     shown: fit.kept as u64,
                     omitted: fit.omitted as u64,
@@ -147,12 +150,169 @@ fn print_list<T: Serialize>(
             }
             None => (items, None),
         };
-        let e = envelope(report, truncated, items, next);
+        let e = envelope(report, truncated, items, next, trace);
         println!("{}", serde_json::to_string(&e).expect("serialise envelope"));
     } else {
-        print_lines(cli, items.iter().map(line).collect());
+        let lines: Vec<String> = items.iter().map(line).collect();
+        if let Some(b) = cli.budget {
+            set_packing(&mut trace, &lines, b);
+        }
+        print_lines(cli, lines);
         print_next(&next);
+        print_trace(trace.as_ref());
     }
+}
+
+/// Describe the packing of `strings` into `budget` in `trace`, on the strings given to
+/// `fit_budget`, so the trace describes the packing that happened.
+fn set_packing(trace: &mut Option<Trace>, strings: &[String], budget: u64) {
+    if let Some(t) = trace {
+        let pack = budget::pack_trace(strings, budget);
+        t.add_omitted("pack_entries", pack.kept.saturating_sub(DIAG_PACK as u64));
+        t.packing = Some(pack);
+    }
+}
+
+/// The trace as `diagnostic:` lines on stderr.
+fn print_trace(trace: Option<&Trace>) {
+    if let Some(t) = trace {
+        for l in diagnostic_text(t) {
+            eprintln!("{l}");
+        }
+    }
+}
+
+fn names(v: &[String]) -> String {
+    if v.is_empty() {
+        "-".to_string()
+    } else {
+        v.join(",")
+    }
+}
+
+/// One `diagnostic:` line per item of the trace; floats have six decimals.
+pub fn diagnostic_text(t: &Trace) -> Vec<String> {
+    let mut out = Vec::new();
+    if let Some(r) = &t.routing {
+        out.push(match r.command.as_str() {
+            "search" => format!(
+                "diagnostic: route search tokens={} dropped={}",
+                names(&r.tokens),
+                names(&r.dropped)
+            ),
+            "refs" => format!(
+                "diagnostic: route refs input={:?} kind={} tier={} candidates={} after_collapse={}",
+                r.input,
+                r.kind,
+                r.tier.as_deref().unwrap_or("-"),
+                r.candidates,
+                r.after_collapse
+            ),
+            c => format!("diagnostic: route {c}"),
+        });
+    }
+    for x in &t.terms {
+        let p = &x.prefix;
+        let prefix = if !p.attempted {
+            "not attempted".to_string()
+        } else {
+            let listed: Vec<String> = p
+                .terms
+                .iter()
+                .map(|e| format!("{}({})", e.term, e.postings))
+                .collect();
+            format!(
+                "{} expanded (cap {}): {}",
+                p.expanded,
+                if p.cap_hit { "hit" } else { "not hit" },
+                listed.join(" ")
+            )
+        };
+        out.push(format!(
+            "diagnostic: term {} exact_postings={} matching_docs={} idf={:.6} prefix={}",
+            x.token, x.exact_postings, x.matching_docs, x.idf, prefix
+        ));
+    }
+    for r in &t.ranking {
+        let parts: Vec<String> = r
+            .parts
+            .iter()
+            .map(|p| {
+                format!(
+                    "{}[{}:{} t={:.6} c={:.6}]",
+                    p.token, p.via, p.term, p.t, p.contribution
+                )
+            })
+            .collect();
+        out.push(format!(
+            "diagnostic: rank {} {} score={:.6}{} = {}",
+            r.position,
+            r.symbol,
+            r.score,
+            if r.tied_with_next {
+                " tied-with-next"
+            } else {
+                ""
+            },
+            parts.join(" + ")
+        ));
+    }
+    if let Some(s) = &t.rank_source {
+        out.push(format!(
+            "diagnostic: rank-source {} watermark={} rank_watermark={} damping={:.6} iterations={}",
+            s.source,
+            s.watermark,
+            s.rank_watermark.map_or("-".to_string(), |w| w.to_string()),
+            s.damping,
+            s.iterations
+        ));
+    }
+    for w in &t.weights {
+        out.push(format!(
+            "diagnostic: weight {} <- {} kind={} confidence={} fanout={} weight={:.6}",
+            w.to,
+            w.from,
+            w.kind,
+            w.confidence,
+            w.fanout.map_or("-".to_string(), |f| f.to_string()),
+            w.weight
+        ));
+    }
+    if let Some(p) = &t.packing {
+        out.push(format!(
+            "diagnostic: pack budget={} estimator={} considered={} kept={} omitted={} used={} next-needed={}",
+            p.budget,
+            p.estimator,
+            p.considered,
+            p.kept,
+            p.omitted,
+            p.used_tokens,
+            p.first_omitted_tokens.map_or("-".to_string(), |n| n.to_string())
+        ));
+        let entries: Vec<String> = p
+            .entries
+            .iter()
+            .map(|e| {
+                let mut s = format!("{}:{}", e.index, e.tokens);
+                if !e.kept {
+                    s.push_str("(omitted)");
+                }
+                if let Some(tier) = &e.tier {
+                    s.push_str(&format!(" tier={tier}"));
+                }
+                if let Some(reason) = &e.reason {
+                    s.push_str(&format!(" reason={reason}"));
+                }
+                s
+            })
+            .collect();
+        out.push(format!("diagnostic: pack-entries {}", entries.join(" ")));
+    }
+    if !t.omitted.is_empty() {
+        let cut: Vec<String> = t.omitted.iter().map(|(k, n)| format!("{k}={n}")).collect();
+        out.push(format!("diagnostic: omitted {}", cut.join(" ")));
+    }
+    out
 }
 
 fn print_lines(cli: &Cli, lines: Vec<String>) {
@@ -194,8 +354,10 @@ where
 {
     let code = exit_for(&reply);
     match reply.outcome {
-        Outcome::Found(items) => print_list(cli, &reply.report, items, line, command),
-        other => other_outcomes(cli, &reply.report, other),
+        Outcome::Found(items) => {
+            print_list(cli, &reply.report, items, line, command, reply.diagnostic);
+        }
+        other => other_outcomes(cli, &reply.report, other, reply.diagnostic),
     }
     code
 }
@@ -216,8 +378,8 @@ pub fn dangling(cli: &Cli, reply: Reply<Vec<DanglingRef>>) -> ExitCode {
     let code = exit_for(&reply);
     let any = matches!(&reply.outcome, Outcome::Found(v) if !v.is_empty());
     match reply.outcome {
-        Outcome::Found(items) => print_list(cli, &reply.report, items, dangling_line, ""),
-        other => other_outcomes(cli, &reply.report, other),
+        Outcome::Found(items) => print_list(cli, &reply.report, items, dangling_line, "", None),
+        other => other_outcomes(cli, &reply.report, other, None),
     }
     if code == ExitCode::Ok && any {
         ExitCode::Error
@@ -251,7 +413,7 @@ pub fn why(cli: &Cli, reply: Reply<WhyResult>) -> ExitCode {
                     }
                 }
                 let next = hints("why", &w);
-                let e = envelope(&reply.report, truncated, w, next);
+                let e = envelope(&reply.report, truncated, w, next, None);
                 println!("{}", serde_json::to_string(&e).expect("serialise envelope"));
             } else {
                 let mut lines = vec![symbol_line(&w.symbol)];
@@ -271,7 +433,7 @@ pub fn why(cli: &Cli, reply: Reply<WhyResult>) -> ExitCode {
                 print_next(&hints("why", &w));
             }
         }
-        other => other_outcomes(cli, &reply.report, other),
+        other => other_outcomes(cli, &reply.report, other, None),
     }
     code
 }
@@ -298,7 +460,7 @@ pub fn show(cli: &Cli, reply: Reply<ShowResult>) -> ExitCode {
                         r.text = lines.join("\n");
                     }
                 }
-                let e = envelope(&reply.report, truncated, r, next);
+                let e = envelope(&reply.report, truncated, r, next, None);
                 println!("{}", serde_json::to_string(&e).expect("serialise envelope"));
             } else {
                 lines.insert(0, format!("{}:{}-{}", r.file, r.lines.0, r.lines.1));
@@ -306,7 +468,7 @@ pub fn show(cli: &Cli, reply: Reply<ShowResult>) -> ExitCode {
                 print_next(&next);
             }
         }
-        other => other_outcomes(cli, &reply.report, other),
+        other => other_outcomes(cli, &reply.report, other, None),
     }
     code
 }
@@ -339,7 +501,7 @@ pub fn explain(cli: &Cli, reply: Reply<Explain>) -> ExitCode {
                         x.incoming.truncate(fit.kept - out_kept);
                     }
                 }
-                let e = envelope(&reply.report, truncated, x, next);
+                let e = envelope(&reply.report, truncated, x, next, None);
                 println!("{}", serde_json::to_string(&e).expect("serialise envelope"));
             } else {
                 let mut lines = vec![symbol_line(&x.symbol)];
@@ -377,7 +539,7 @@ pub fn explain(cli: &Cli, reply: Reply<Explain>) -> ExitCode {
                 print_next(&next);
             }
         }
-        other => other_outcomes(cli, &reply.report, other),
+        other => other_outcomes(cli, &reply.report, other, None),
     }
     code
 }
@@ -389,7 +551,7 @@ pub fn replace(cli: &Cli, reply: Reply<ReplaceResult>) -> ExitCode {
         Outcome::Found(r) => {
             note_stale(&reply.report);
             if cli.json {
-                let e = envelope(&reply.report, None, r, Vec::new());
+                let e = envelope(&reply.report, None, r, Vec::new(), None);
                 println!("{}", serde_json::to_string(&e).expect("serialise envelope"));
             } else {
                 println!(
@@ -398,18 +560,23 @@ pub fn replace(cli: &Cli, reply: Reply<ReplaceResult>) -> ExitCode {
                 );
             }
         }
-        other => other_outcomes(cli, &reply.report, other),
+        other => other_outcomes(cli, &reply.report, other, None),
     }
     code
 }
 
-fn other_outcomes<T>(cli: &Cli, report: &Report, outcome: Outcome<T>) {
+/// Ambiguous candidates print as a list (the trace rides in the envelope, or goes to stderr in
+/// text); no match and stale file have no envelope, so the trace goes to stderr in both modes.
+fn other_outcomes<T>(cli: &Cli, report: &Report, outcome: Outcome<T>, trace: Option<Trace>) {
     match outcome {
         Outcome::Ambiguous(candidates) => {
             eprintln!("katalogr: ambiguous: {} candidates", candidates.len());
-            print_list(cli, report, candidates, symbol_line, "");
+            print_list(cli, report, candidates, symbol_line, "", trace);
         }
-        Outcome::NoMatch(msg) | Outcome::StaleFile(msg) => eprintln!("katalogr: {msg}"),
+        Outcome::NoMatch(msg) | Outcome::StaleFile(msg) => {
+            eprintln!("katalogr: {msg}");
+            print_trace(trace.as_ref());
+        }
         Outcome::Found(_) => {}
     }
 }

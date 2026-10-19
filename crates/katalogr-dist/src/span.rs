@@ -105,6 +105,7 @@ impl Katalogr {
         Ok(Reply {
             outcome,
             report: reply.report,
+            diagnostic: None,
         })
     }
 
@@ -173,6 +174,7 @@ impl Katalogr {
         Ok(Reply {
             outcome,
             report: reply.report,
+            diagnostic: None,
         })
     }
 
