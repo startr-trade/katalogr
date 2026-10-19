@@ -16,6 +16,9 @@ fn run(cli: &Cli) -> Result<ExitCode, DistError> {
         Some(Command::Kindex { action }) => cmd::kindex::run(action),
         Some(Command::Project { action }) => cmd::project::run(cli, action),
         Some(Command::Notify { deleted, paths }) => cmd::notify::run(cli, *deleted, paths),
+        Some(Command::Claude { action }) => cmd::claude::run(cli, action),
+        Some(Command::Skill { action }) => cmd::skill::run(cli, action),
+        Some(Command::SessionStart) => cmd::session::run(cli),
         Some(Command::Index {
             since,
             range,

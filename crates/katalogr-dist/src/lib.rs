@@ -2,6 +2,7 @@
 //!
 //! All behaviour of the command-line wrapper lives here; the wrapper parses, calls and renders.
 
+mod claude;
 mod error;
 mod roots;
 mod setup;
@@ -9,6 +10,11 @@ mod span;
 #[cfg(feature = "test-extractor")]
 mod test_extractor;
 
+pub use claude::{
+    BEGIN_MARKER, DEFAULT_SESSION_BUDGET, END_MARKER, InstallOutcome, SESSION_BUDGET_KEY, SKILL_MD,
+    SyncOutcome, claude_block, claude_sync, session_start, skill_install, skill_path,
+    user_skill_path,
+};
 pub use error::DistError;
 pub use katalogr_query as query;
 use katalogr_query::{

@@ -479,6 +479,69 @@ mod cli {
         let err = validate(&schema, &schema, &v, "$").unwrap_err();
         assert!(err.contains("missing required key"), "{err}");
     }
+
+    /// Every query command ends 0 when answered, 3 when the text names several symbols and 4
+    /// when it names none (R-4). Commands whose answer is a list (`find`, `search`, `map`,
+    /// `why`) have no ambiguous case; `map` has no empty case here.
+    #[test]
+    fn exit_codes_consistent() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (_kx, repo) = query_project(tmp.path());
+        // (ok, ambiguous, none)
+        type Args = &'static [&'static str];
+        let table: &[(Args, Option<Args>, Option<Args>)] = &[
+            (&["find", "target"], None, Some(&["find", "zzz"])),
+            (&["search", "target"], None, Some(&["search", "zzzq"])),
+            (
+                &["show", "target"],
+                Some(&["show", "dup"]),
+                Some(&["show", "zzz"]),
+            ),
+            (
+                &["explain", "target"],
+                Some(&["explain", "dup"]),
+                Some(&["explain", "zzz"]),
+            ),
+            (
+                &["refs", "target"],
+                Some(&["refs", "dup"]),
+                Some(&["refs", "zzz"]),
+            ),
+            (
+                &["callers", "target"],
+                Some(&["callers", "dup"]),
+                Some(&["callers", "zzz"]),
+            ),
+            (
+                &["path", "caller_a", "target"],
+                Some(&["path", "dup", "target"]),
+                Some(&["path", "zzz", "target"]),
+            ),
+            (&["map"], None, None),
+            (&["why", "lib.tx:1"], None, Some(&["why", "lib.tx:99"])),
+        ];
+        for (good, ambiguous, none) in table {
+            for json in [false, true] {
+                for (args, want) in [(Some(good), 0), (ambiguous.as_ref(), 3), (none.as_ref(), 4)] {
+                    let Some(args) = args else { continue };
+                    let mut full: Vec<&str> = if json { vec!["--json"] } else { vec![] };
+                    full.extend_from_slice(args);
+                    let (code, out, err) = run_raw(&repo, &full);
+                    assert_eq!(code, want, "{full:?}: {out} {err}");
+                    if want == 4 {
+                        assert_eq!(out, "", "{full:?}");
+                        assert_eq!(err.lines().count(), 1, "{full:?}: {err}");
+                    }
+                    if want == 3 {
+                        assert!(
+                            out.lines().count() >= if json { 1 } else { 2 },
+                            "{full:?}: candidates on stdout"
+                        );
+                    }
+                }
+            }
+        }
+    }
 }
 
 mod query {
@@ -1024,5 +1087,179 @@ mod retrieval {
             assert_eq!(code, 0, "{args:?}");
             assert_eq!(out, want, "{args:?} differs after a cache rebuild");
         }
+    }
+}
+
+mod claude {
+    use super::cli::{katalogr, ok, query_project, run_raw, setup};
+    use std::path::Path;
+
+    const BEGIN: &str = "<!-- katalogr:begin -->";
+    const END: &str = "<!-- katalogr:end -->";
+
+    fn with_home(dir: &Path, home: &Path, args: &[&str]) -> std::process::Output {
+        std::process::Command::new(env!("CARGO_BIN_EXE_katalogr"))
+            .current_dir(dir)
+            .env("HOME", home)
+            .env_remove("KATALOGR_KINDEX")
+            .env_remove("KATALOGR_PROJECT")
+            .args(args)
+            .output()
+            .expect("run katalogr")
+    }
+
+    #[test]
+    fn sync_marked_block() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (_kx, repo) = setup(tmp.path());
+        let file = repo.join("CLAUDE.md");
+
+        // --show prints the block and writes nothing.
+        let shown = ok(&repo, &["claude", "sync", "--show"]);
+        assert!(
+            shown.starts_with(BEGIN) && shown.trim_end().ends_with(END),
+            "{shown}"
+        );
+        assert!(!file.exists());
+
+        // Creates the file.
+        assert!(ok(&repo, &["claude", "sync"]).starts_with("created "));
+        let created = std::fs::read_to_string(&file).unwrap();
+        assert_eq!(created, shown, "file is the block");
+        assert!(created.contains("katalogr skill install"));
+        assert!(ok(&repo, &["claude", "sync"]).starts_with("unchanged "));
+
+        // Refreshes a stale block and leaves the text outside the markers alone.
+        let stale = format!("# Mine\n\nbefore\n\n{BEGIN}\nold text\n{END}\n\nafter\n");
+        std::fs::write(&file, &stale).unwrap();
+        assert!(ok(&repo, &["claude", "sync"]).starts_with("updated "));
+        let now = std::fs::read_to_string(&file).unwrap();
+        assert!(now.starts_with("# Mine\n\nbefore\n\n"), "{now}");
+        assert!(now.ends_with("\n\nafter\n"), "{now}");
+        assert!(!now.contains("old text"));
+        assert_eq!(now.matches(BEGIN).count(), 1);
+
+        // Appends to a file with no markers, keeping its text.
+        std::fs::write(&file, "# Mine\nhello").unwrap();
+        ok(&repo, &["claude", "sync"]);
+        let now = std::fs::read_to_string(&file).unwrap();
+        assert!(
+            now.starts_with("# Mine\nhello\n\n") && now.contains(BEGIN),
+            "{now}"
+        );
+
+        // A lone marker is refused with exit 1 and the file is untouched.
+        for lone in [format!("x\n{BEGIN}\ny\n"), format!("x\n{END}\ny\n")] {
+            std::fs::write(&file, &lone).unwrap();
+            let out = katalogr(&repo, &["claude", "sync"]);
+            assert_eq!(out.status.code(), Some(1), "{out:?}");
+            assert!(String::from_utf8_lossy(&out.stderr).contains("marker"));
+            assert_eq!(std::fs::read_to_string(&file).unwrap(), lone);
+        }
+    }
+
+    #[test]
+    fn skill_installed() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path().join("home");
+        std::fs::create_dir_all(&home).unwrap();
+        let target = home.join(".claude/skills/katalogr/SKILL.md");
+        let run = |args: &[&str]| {
+            let out = with_home(tmp.path(), &home, args);
+            assert!(out.status.success(), "{out:?}");
+            String::from_utf8(out.stdout).unwrap()
+        };
+        assert!(run(&["skill", "install"]).starts_with("installed "));
+        assert_eq!(
+            std::fs::read_to_string(&target).unwrap(),
+            katalogr_dist::SKILL_MD
+        );
+        assert!(run(&["skill", "install"]).starts_with("unchanged "));
+        std::fs::write(&target, "edited").unwrap();
+        assert!(run(&["skill", "install"]).starts_with("updated "));
+        assert_eq!(
+            std::fs::read_to_string(&target).unwrap(),
+            katalogr_dist::SKILL_MD
+        );
+
+        // --scope repo installs under the repository's .claude.
+        let (_kx, repo) = setup(&tmp.path().join("p"));
+        let out = with_home(&repo, &home, &["skill", "install", "--scope", "repo"]);
+        assert!(
+            String::from_utf8_lossy(&out.stdout).starts_with("installed "),
+            "{out:?}"
+        );
+        assert!(repo.join(".claude/skills/katalogr/SKILL.md").is_file());
+    }
+
+    fn tokens(s: &str) -> u64 {
+        (s.chars().count() as u64).div_ceil(4)
+    }
+
+    #[test]
+    fn session_start_map_within_budget() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (_kx, repo) = query_project(tmp.path());
+        let (code, full, err) = run_raw(&repo, &["session-start"]);
+        assert_eq!(code, 0, "{err}");
+        assert!(
+            full.starts_with("katalogr: project demo (repos: app)"),
+            "{full}"
+        );
+        assert!(
+            full.contains("fn  app:lib.tx#fn:target  lib.tx:1"),
+            "{full}"
+        );
+        assert!(
+            full.trim_end()
+                .ends_with("(find, search, explain, show, refs, why)."),
+            "{full}"
+        );
+        for budget in [400u64, 120, 60] {
+            let (code, out, _) =
+                run_raw(&repo, &["session-start", "--budget", &budget.to_string()]);
+            assert_eq!(code, 0);
+            assert!(
+                tokens(&out) <= budget,
+                "{budget}: {} tokens\n{out}",
+                tokens(&out)
+            );
+            assert!(out.starts_with("katalogr: project demo"), "{out}");
+        }
+        // A smaller budget shows fewer symbols, the most central first.
+        let (_, small, _) = run_raw(&repo, &["session-start", "--budget", "60"]);
+        assert!(small.lines().count() < full.lines().count());
+
+        // No index yet: one line naming the setup command, exit 0.
+        let empty = tempfile::tempdir().unwrap();
+        let (_kx, repo2) = setup(empty.path());
+        let (code, out, _) = run_raw(&repo2, &["session-start"]);
+        assert_eq!(code, 0);
+        assert_eq!(out.lines().count(), 1, "{out}");
+        assert!(out.contains("katalogr index --full"), "{out}");
+        // No project at all: the same.
+        let bare = tempfile::tempdir().unwrap();
+        let (code, out, _) = run_raw(bare.path(), &["session-start"]);
+        assert_eq!(code, 0);
+        assert_eq!(out.lines().count(), 1, "{out}");
+        assert!(out.contains("katalogr project init"), "{out}");
+    }
+
+    #[test]
+    fn playbooks_present() {
+        let skill = katalogr_dist::SKILL_MD;
+        for h in [
+            "### 3.1", "### 3.2", "### 3.3", "### 3.4", "### 3.5", "### 3.6",
+        ] {
+            assert!(skill.lines().any(|l| l.starts_with(h)), "missing {h}");
+        }
+        for h in [
+            "## 2. Query craft",
+            "## 4. Cost routing",
+            "## 5. Output contract",
+        ] {
+            assert!(skill.lines().any(|l| l.starts_with(h)), "missing {h}");
+        }
+        assert!(skill.starts_with("---\nname: katalogr\n"));
     }
 }

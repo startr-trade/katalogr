@@ -1,6 +1,7 @@
 //! Subcommand implementations. Each command is a thin wrapper over katalogr-dist.
 
 pub mod callers;
+pub mod claude;
 pub mod dangling;
 pub mod explain;
 pub mod find;
@@ -13,7 +14,9 @@ pub mod project;
 pub mod refs;
 pub mod replace;
 pub mod search;
+pub mod session;
 pub mod show;
+pub mod skill;
 pub mod version;
 pub mod why;
 

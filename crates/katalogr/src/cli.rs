@@ -162,6 +162,18 @@ pub enum Command {
         #[arg(long, value_name = "PATH")]
         file: String,
     },
+    /// Claude Code project wiring.
+    Claude {
+        #[command(subcommand)]
+        action: ClaudeAction,
+    },
+    /// Manage the katalogr skill for Claude Code.
+    Skill {
+        #[command(subcommand)]
+        action: SkillAction,
+    },
+    /// Print a compact project map for Claude's SessionStart hook; never fails.
+    SessionStart,
     /// Queue changes and bring the index up to date.
     Index {
         /// Index changes since this revision (up to HEAD). With `--history`, only the
@@ -184,6 +196,33 @@ pub enum Command {
         #[arg(long, value_enum)]
         kind: Option<DanglingKind>,
     },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum ClaudeAction {
+    /// Write or refresh the katalogr block in the repository's CLAUDE.md.
+    Sync {
+        /// Print the block without writing.
+        #[arg(long)]
+        show: bool,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum SkillAction {
+    /// Install the katalogr skill (installed, updated or unchanged).
+    Install {
+        /// Where to install: `user` (~/.claude, the default) or `repo` (this repository's .claude).
+        #[arg(long, value_enum, default_value_t = SkillScope::User)]
+        scope: SkillScope,
+    },
+}
+
+/// Where `skill install` writes the skill.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum SkillScope {
+    User,
+    Repo,
 }
 
 #[derive(Debug, Subcommand)]
