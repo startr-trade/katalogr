@@ -642,8 +642,8 @@ mod query {
     #[test]
     fn schemas_current() {
         let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../schema/v1");
-        let fresh = katalogr_dist::query::schemas();
-        assert_eq!(fresh.len(), 10);
+        let fresh = katalogr_dist::schemas();
+        assert_eq!(fresh.len(), 15);
         for (name, schema) in fresh {
             let mut want = serde_json::to_string_pretty(&schema).unwrap();
             want.push('\n');
@@ -652,7 +652,7 @@ mod query {
                 .unwrap_or_else(|e| panic!("{}: {e}", file.display()));
             assert_eq!(
                 have, want,
-                "{name} schema is out of date: run `cargo run -p katalogr-query --bin gen-schema`"
+                "{name} schema is out of date: run `cargo run -p katalogr-dist --bin gen-schema`"
             );
         }
     }

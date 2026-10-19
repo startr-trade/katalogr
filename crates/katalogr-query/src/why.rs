@@ -126,6 +126,7 @@ pub fn why(
         goals,
         commits,
         note,
+        notes: Vec::new(),
     }))
 }
 

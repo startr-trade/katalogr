@@ -40,6 +40,20 @@ use std::collections::BTreeMap;
 use std::path::Path;
 use std::time::{Duration, Instant};
 
+/// Every `--json` schema: the query schemas merged with the analytics schemas.
+///
+/// Panics if a command name occurs in both (a programming error caught by `query::schemas_current`).
+pub fn schemas() -> BTreeMap<&'static str, serde_json::Value> {
+    let mut all = katalogr_query::schemas();
+    for (name, schema) in katalogr_analytics::schemas() {
+        assert!(
+            all.insert(name, schema).is_none(),
+            "schema name {name} is registered twice"
+        );
+    }
+    all
+}
+
 /// Seconds to wait for a fresh index when `--timeout` is not given (provisional).
 pub const DEFAULT_TIMEOUT_SECS: f64 = 30.0;
 
