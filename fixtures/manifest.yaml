@@ -69,6 +69,8 @@ technologies:
       - ts/commonjs
     constructor-call:
       - ts/new-calls
+    entry-root:
+      - ts/insight-roots
     esm-js-specifier:
       - ts/esm-js-specifiers
     extends-any-name:
@@ -76,12 +78,16 @@ technologies:
     items:
       - ts/items
       - ts/file-kinds
+    package-fact:
+      - ts/package-imports
     package-import:
       - ts/package-imports
     parse-error:
       - ts/broken-syntax
     path-alias:
       - ts/path-alias
+    rationale-comment:
+      - ts/rationale
     relative-import:
       - ts/relative-imports
       - ts/reexports

@@ -9,6 +9,8 @@ pub mod extract;
 pub mod items;
 pub mod lines;
 pub mod modules;
+pub mod rationale;
+pub mod roots;
 
 pub use context::{TsContext, TsProject};
 
@@ -55,7 +57,19 @@ impl Extractor for TsExtractor {
             "require",
             "annotations",
             "parse-error",
+            "entry-root",
+            "rationale-comment",
+            "package-fact",
         ]
+    }
+
+    fn code_kinds(&self) -> &'static [&'static str] {
+        roots::CODE_KINDS
+    }
+
+    /// Bumped when the insight facts (`root`, `package`, `rationale`) were added.
+    fn revision_salt(&self) -> &'static str {
+        "insights-1"
     }
 
     /// The [`TsContext`] as compact JSON with sorted keys and vectors.

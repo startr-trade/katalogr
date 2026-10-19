@@ -5,9 +5,11 @@
 use crate::context::{self, PACKAGE_JSON, TsContext};
 use crate::items::Builder;
 use crate::modules::{NS_FILE, NS_PACKAGE, key};
+use crate::roots;
+use katalogr_model::insight::{FACT_PACKAGE, FACT_RATIONALE, FACT_ROOT, ROOT_API, ROOT_TEST};
 use katalogr_model::{
     ArtifactName, ArtifactNode, Export, ExtractError, ExtractInput, Fact, Fragment, Name,
-    Provenance, Segment, Span, SymbolName, SymbolNode,
+    Provenance, Segment, Span, SymbolName, SymbolNode, annotate,
 };
 use oxc_allocator::Allocator;
 use oxc_parser::Parser;
@@ -72,7 +74,15 @@ fn source_fragment(
     b.finish_exports();
     b.walk_calls(pending);
 
-    let facts = BTreeMap::new();
+    let mut facts = BTreeMap::new();
+    if let Some(p) = roots::package_of(ctx, input.path.as_str()) {
+        facts.insert(FACT_PACKAGE.to_string(), Fact::Str(p.to_string()));
+    }
+    if roots::is_test_path(input.path.as_str()) {
+        facts.insert(FACT_ROOT.to_string(), Fact::Str(ROOT_TEST.to_string()));
+    } else if roots::is_entry(ctx, input.path.as_str()) {
+        facts.insert(FACT_ROOT.to_string(), Fact::Str(ROOT_API.to_string()));
+    }
     let errors: Vec<ExtractError> = ret
         .diagnostics
         .errors()
@@ -90,6 +100,23 @@ fn source_fragment(
     let _ = &ret.module_record;
 
     let mut symbols = std::mem::take(&mut b.symbols);
+    // Rationale markers go to the innermost symbol that holds the comment, else to the symbol
+    // that follows it, else to the file.
+    for (owner, markers) in
+        crate::rationale::collect(&ret.program.comments, text, &b.lines, &symbols)
+    {
+        let fact = annotate::rationale_fact(&markers);
+        match owner {
+            None => {
+                facts.insert(FACT_RATIONALE.to_string(), fact);
+            }
+            Some(id) => {
+                if let Some(s) = symbols.iter_mut().find(|s| s.name.id() == id) {
+                    s.facts.insert(FACT_RATIONALE.to_string(), fact);
+                }
+            }
+        }
+    }
     symbols.sort_by_key(|s| s.name.canonical());
     let fragment = Fragment {
         provenance: b.provenance.clone(),

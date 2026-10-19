@@ -1,0 +1,6 @@
+mode: exact
+symbols:
+- fx:src/notes.ts#fn:documented
+- fx:src/notes.ts#fn:leading
+- fx:src/notes.ts#fn:plain
+links: []
