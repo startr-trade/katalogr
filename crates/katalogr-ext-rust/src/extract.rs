@@ -270,8 +270,11 @@ impl Builder<'_> {
         kind: &str,
         name: &str,
         node: &SyntaxNode,
-        facts: BTreeMap<String, Fact>,
+        mut facts: BTreeMap<String, Fact>,
     ) -> Id {
+        if let Some(doc) = doc_first_paragraph(node) {
+            facts.insert("doc".to_string(), Fact::Str(doc));
+        }
         let segment = Segment {
             kind: kind.to_string(),
             name: name.to_string(),
@@ -373,6 +376,43 @@ impl Builder<'_> {
     }
 }
 
+/// The first paragraph of the outer doc comments of an item (`///` lines and `/** */` blocks),
+/// whitespace normalised to one line. `None` when the item has no doc comment or it is empty.
+pub(crate) fn doc_first_paragraph(node: &SyntaxNode) -> Option<String> {
+    let mut lines: Vec<String> = Vec::new();
+    for e in node.children_with_tokens() {
+        match e.kind() {
+            SyntaxKind::COMMENT | SyntaxKind::DOC_COMMENT => {
+                let text = e.to_string();
+                if let Some(rest) = text.strip_prefix("///") {
+                    if !rest.starts_with('/') {
+                        lines.push(rest.trim().to_string());
+                    }
+                } else if let Some(rest) = text.strip_prefix("/**")
+                    && !rest.starts_with(['*', '/'])
+                {
+                    let body = rest.strip_suffix("*/").unwrap_or(rest);
+                    for l in body.lines() {
+                        let l = l.trim();
+                        lines.push(l.strip_prefix('*').unwrap_or(l).trim().to_string());
+                    }
+                }
+            }
+            SyntaxKind::WHITESPACE | SyntaxKind::ATTR => {}
+            // The doc comments lead the item: stop at the first real token.
+            _ => break,
+        }
+    }
+    let paragraph: Vec<&str> = lines
+        .iter()
+        .map(String::as_str)
+        .skip_while(|l| l.is_empty())
+        .take_while(|l| !l.is_empty())
+        .collect();
+    let doc = paragraph.join(" ");
+    (!doc.is_empty()).then_some(doc)
+}
+
 /// Attribute texts without the `#[` `]` wrapper, whitespace normalised.
 pub(crate) fn attr_texts(attrs: ast::AstChildren<ast::Attr>) -> Vec<Fact> {
     attrs
@@ -408,7 +448,10 @@ pub(crate) fn trimmed(node: &SyntaxNode) -> (usize, usize) {
 pub(crate) fn signature(node: &SyntaxNode) -> String {
     let mut out = String::new();
     for e in node.children_with_tokens() {
-        if matches!(e.kind(), SyntaxKind::COMMENT | SyntaxKind::ATTR) {
+        if matches!(
+            e.kind(),
+            SyntaxKind::COMMENT | SyntaxKind::DOC_COMMENT | SyntaxKind::ATTR
+        ) {
             continue;
         }
         if matches!(

@@ -1,0 +1,134 @@
+{
+  "$defs": {
+    "Confidence": {
+      "description": "Schema-only mirror of [`katalogr_model::Confidence`].",
+      "enum": [
+        "Extracted",
+        "Inferred",
+        "Declared"
+      ],
+      "type": "string"
+    },
+    "Direction": {
+      "description": "Which way a link was followed.",
+      "oneOf": [
+        {
+          "const": "Forward",
+          "description": "The link points from `from` to `to`.",
+          "type": "string"
+        },
+        {
+          "const": "Backward",
+          "description": "The link points from `to` to `from`.",
+          "type": "string"
+        }
+      ]
+    },
+    "PathStep": {
+      "properties": {
+        "confidence": {
+          "$ref": "#/$defs/Confidence"
+        },
+        "direction": {
+          "$ref": "#/$defs/Direction"
+        },
+        "from": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "to": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "from",
+        "kind",
+        "direction",
+        "to",
+        "confidence"
+      ],
+      "type": "object"
+    },
+    "Truncation": {
+      "properties": {
+        "budget": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "omitted": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "shown": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "shown",
+        "omitted",
+        "budget"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "What `--json` prints.",
+  "properties": {
+    "next": {
+      "description": "Suggested follow-up commands, at most three.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "pending": {
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "result": {
+      "items": {
+        "$ref": "#/$defs/PathStep"
+      },
+      "type": "array"
+    },
+    "schema": {
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "stale": {
+      "type": "boolean"
+    },
+    "truncated": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Truncation"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "watermark": {
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "schema",
+    "watermark",
+    "pending",
+    "stale",
+    "result"
+  ],
+  "title": "Envelope",
+  "type": "object"
+}

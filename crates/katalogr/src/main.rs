@@ -28,6 +28,11 @@ fn run(cli: &Cli) -> Result<ExitCode, DistError> {
         Some(Command::Callers { text, depth }) => cmd::callers::run(cli, text, *depth),
         Some(Command::Why { location }) => cmd::why::run(cli, location),
         Some(Command::Map) => cmd::map::run(cli),
+        Some(Command::Search { terms, limit }) => cmd::search::run(cli, terms, *limit),
+        Some(Command::Show { symbol, signature }) => cmd::show::run(cli, symbol, *signature),
+        Some(Command::Path { from, to, max_len }) => cmd::path::run(cli, from, to, *max_len),
+        Some(Command::Explain { symbol, per_side }) => cmd::explain::run(cli, symbol, *per_side),
+        Some(Command::Replace { symbol, file }) => cmd::replace::run(cli, symbol, file),
         None => {
             // `--version` and `--help` are handled by clap and exit 0 before this.
             Cli::command().print_help().expect("write help to stdout");

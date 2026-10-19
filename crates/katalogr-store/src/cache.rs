@@ -23,7 +23,7 @@ use std::ops::Bound;
 use std::time::{Duration, Instant};
 
 /// Stored in `meta`; a different number rebuilds the cache from the shards.
-pub const CACHE_SCHEMA: u32 = 2;
+pub const CACHE_SCHEMA: u32 = 3;
 
 // ---------------------------------------------------------------- rows
 
@@ -93,6 +93,24 @@ pub struct ErrorRow {
     pub message: String,
 }
 
+/// Number of searchable fields per document (see `katalogr_model::Field`).
+pub const LEXICON_FIELDS: usize = 4;
+
+/// One posting: a term occurs `tf` times in `field` of `symbol`.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct Posting {
+    pub field: u8,
+    pub symbol: Id,
+    pub tf: u32,
+}
+
+/// Document count and per-field total lengths, for BM25.
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
+pub struct LexiconStats {
+    pub docs: u64,
+    pub total_len: [u64; LEXICON_FIELDS],
+}
+
 /// A queued path: the key of the `pending` table (FEAT-047 section 5).
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct PendingKey {
@@ -136,6 +154,46 @@ fn ext_context_key(repo: &str, extension: &str) -> Vec<u8> {
     lp(&mut k, repo);
     k.extend_from_slice(extension.as_bytes());
     k
+}
+
+/// Terms are alphanumeric, so a NUL ends the term; `term NUL` is an exact-term prefix.
+fn posting_prefix(term: &str) -> Vec<u8> {
+    let mut k = term.as_bytes().to_vec();
+    k.push(0);
+    k
+}
+
+fn posting_key(term: &str, field: u8, symbol: Id) -> Vec<u8> {
+    let mut k = posting_prefix(term);
+    k.push(field);
+    k.extend_from_slice(&symbol.0);
+    k
+}
+
+const STATS_KEY: &[u8] = b"stats";
+
+fn encode_stats(s: &LexiconStats) -> Vec<u8> {
+    let mut v = s.docs.to_le_bytes().to_vec();
+    for t in s.total_len {
+        v.extend_from_slice(&t.to_le_bytes());
+    }
+    v
+}
+
+fn decode_stats(v: &[u8]) -> Result<LexiconStats, StoreError> {
+    let bad = || StoreError::Row("bad lexicon stats".into());
+    if v.len() != 8 * (1 + LEXICON_FIELDS) {
+        return Err(bad());
+    }
+    let at = |i: usize| u64::from_le_bytes(v[i * 8..i * 8 + 8].try_into().expect("8 bytes"));
+    let mut total_len = [0u64; LEXICON_FIELDS];
+    for (i, t) in total_len.iter_mut().enumerate() {
+        *t = at(i + 1);
+    }
+    Ok(LexiconStats {
+        docs: at(0),
+        total_len,
+    })
 }
 
 fn split_lp(b: &[u8]) -> Result<(&str, &[u8]), StoreError> {
@@ -293,10 +351,13 @@ pub enum TableId {
     Watermark,
     Journal,
     ExtContext,
+    Postings,
+    DocLen,
+    LexiconStats,
 }
 
 impl TableId {
-    const ALL: [TableId; 17] = [
+    const ALL: [TableId; 20] = [
         TableId::Meta,
         TableId::ShardHashes,
         TableId::Artifacts,
@@ -314,6 +375,9 @@ impl TableId {
         TableId::Watermark,
         TableId::Journal,
         TableId::ExtContext,
+        TableId::Postings,
+        TableId::DocLen,
+        TableId::LexiconStats,
     ];
 
     /// The graph tables, in the order `dump_graph` reports them.
@@ -347,6 +411,9 @@ impl TableId {
             TableId::Watermark => "watermark",
             TableId::Journal => "journal",
             TableId::ExtContext => "ext_context",
+            TableId::Postings => "postings",
+            TableId::DocLen => "doc_len",
+            TableId::LexiconStats => "lexicon_stats",
         }
     }
 
@@ -484,6 +551,48 @@ pub trait Reader {
             *out.entry(Id(target)).or_default() += 1;
         }
         Ok(out)
+    }
+
+    /// Every link row, sorted by `(from, kind, to)` key bytes.
+    fn links_all(&self) -> Result<Vec<(LinkKey, LinkRow)>, StoreError> {
+        self.raw_scan(TableId::LinksOut, &[])?
+            .into_iter()
+            .map(|(k, v)| Ok((decode_link_key(&k)?, de(&v)?)))
+            .collect()
+    }
+
+    /// The postings of one exact term, sorted by `(field, symbol)`.
+    fn postings(&self, term: &str) -> Result<Vec<Posting>, StoreError> {
+        let prefix = posting_prefix(term);
+        self.raw_scan(TableId::Postings, &prefix)?
+            .into_iter()
+            .map(|(k, v)| {
+                let bad = || StoreError::Row("malformed posting".into());
+                let rest = &k[prefix.len()..];
+                if rest.len() != 17 {
+                    return Err(bad());
+                }
+                Ok(Posting {
+                    field: rest[0],
+                    symbol: Id(rest[1..].try_into().map_err(|_| bad())?),
+                    tf: u32::from_le_bytes(v.as_slice().try_into().map_err(|_| bad())?),
+                })
+            })
+            .collect()
+    }
+
+    /// Per-field token counts of one indexed symbol.
+    fn doc_len(&self, id: Id) -> Result<Option<[u32; LEXICON_FIELDS]>, StoreError> {
+        self.raw_get(TableId::DocLen, &id.0)?
+            .map(|v| decode_doc_len(&v))
+            .transpose()
+    }
+
+    fn lexicon_stats(&self) -> Result<LexiconStats, StoreError> {
+        match self.raw_get(TableId::LexiconStats, STATS_KEY)? {
+            Some(v) => decode_stats(&v),
+            None => Ok(LexiconStats::default()),
+        }
     }
 
     /// Keys of the links arriving at `to` (each is a `from -> to` link, reported in link direction).
@@ -643,6 +752,21 @@ pub trait Reader {
             .map(|t| Ok((t.name(), self.raw_scan(*t, &[])?)))
             .collect()
     }
+}
+
+fn encode_doc_len(l: &[u32; LEXICON_FIELDS]) -> Vec<u8> {
+    l.iter().flat_map(|n| n.to_le_bytes()).collect()
+}
+
+fn decode_doc_len(v: &[u8]) -> Result<[u32; LEXICON_FIELDS], StoreError> {
+    if v.len() != 4 * LEXICON_FIELDS {
+        return Err(StoreError::Row("bad doc_len row".into()));
+    }
+    let mut out = [0u32; LEXICON_FIELDS];
+    for (i, o) in out.iter_mut().enumerate() {
+        *o = u32::from_le_bytes(v[i * 4..i * 4 + 4].try_into().expect("4 bytes"));
+    }
+    Ok(out)
 }
 
 fn id_bytes(k: &[u8]) -> Result<[u8; 16], StoreError> {
@@ -862,6 +986,53 @@ impl WriteTx<'_> {
         let mut v = hash.to_vec();
         v.extend_from_slice(bytes);
         self.put(TableId::ExtContext, &ext_context_key(repo, extension), &v)
+    }
+
+    /// Index one symbol: its postings `(term, field, tf)` and per-field lengths. Adds the
+    /// lengths to the lexicon statistics. Call [`WriteTx::remove_doc_postings`] first when the
+    /// symbol is already indexed.
+    pub fn put_doc_postings(
+        &mut self,
+        id: Id,
+        lens: [u32; LEXICON_FIELDS],
+        terms: &[(String, u8, u32)],
+    ) -> Result<(), StoreError> {
+        for (term, field, tf) in terms {
+            self.put(
+                TableId::Postings,
+                &posting_key(term, *field, id),
+                &tf.to_le_bytes(),
+            )?;
+        }
+        self.put(TableId::DocLen, &id.0, &encode_doc_len(&lens))?;
+        let mut stats = self.lexicon_stats()?;
+        stats.docs += 1;
+        for (t, l) in stats.total_len.iter_mut().zip(lens) {
+            *t += u64::from(l);
+        }
+        self.put(TableId::LexiconStats, STATS_KEY, &encode_stats(&stats))
+    }
+
+    /// Remove the postings `(term, field)` of one symbol and its length row, subtracting the
+    /// lengths from the lexicon statistics. A symbol that is not indexed changes nothing.
+    pub fn remove_doc_postings(
+        &mut self,
+        id: Id,
+        terms: &[(String, u8)],
+    ) -> Result<(), StoreError> {
+        let Some(lens) = self.doc_len(id)? else {
+            return Ok(());
+        };
+        for (term, field) in terms {
+            self.del(TableId::Postings, &posting_key(term, *field, id))?;
+        }
+        self.del(TableId::DocLen, &id.0)?;
+        let mut stats = self.lexicon_stats()?;
+        stats.docs = stats.docs.saturating_sub(1);
+        for (t, l) in stats.total_len.iter_mut().zip(lens) {
+            *t = t.saturating_sub(u64::from(l));
+        }
+        self.put(TableId::LexiconStats, STATS_KEY, &encode_stats(&stats))
     }
 
     pub fn commit(self) -> Result<(), StoreError> {

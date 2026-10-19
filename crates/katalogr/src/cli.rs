@@ -117,8 +117,51 @@ pub enum Command {
         /// `FILE:LINE`, with FILE relative to the repository root.
         location: String,
     },
-    /// Outline the project: symbols by how often they are referenced.
+    /// Outline the project: symbols by PageRank over the reference graph.
     Map,
+    /// Rank symbols by BM25 over names, docs, sections and contract keys.
+    Search {
+        /// Words to look for; identifiers are split into words.
+        #[arg(required = true)]
+        terms: Vec<String>,
+        /// How many hits to return.
+        #[arg(long, default_value_t = 20, value_name = "N")]
+        limit: usize,
+    },
+    /// Print a symbol's lines (or, with --signature, its signature and doc).
+    Show {
+        /// Canonical name or plain name.
+        symbol: String,
+        /// Print only the signature and doc facts.
+        #[arg(long)]
+        signature: bool,
+    },
+    /// Find the shortest chain of links between two symbols.
+    Path {
+        /// Canonical name or plain name of the start.
+        from: String,
+        /// Canonical name or plain name of the end.
+        to: String,
+        /// Longest chain to look for.
+        #[arg(long, default_value_t = 6, value_name = "N")]
+        max_len: u32,
+    },
+    /// Describe a symbol: signature, doc, links and rationale.
+    Explain {
+        /// Canonical name or plain name.
+        symbol: String,
+        /// How many links to list on each side.
+        #[arg(long, default_value_t = 10, value_name = "N")]
+        per_side: usize,
+    },
+    /// Replace a symbol's lines with the content of a file, then reindex it.
+    Replace {
+        /// Canonical name or plain name.
+        symbol: String,
+        /// File holding the new text for exactly the symbol's lines.
+        #[arg(long, value_name = "PATH")]
+        file: String,
+    },
     /// Queue changes and bring the index up to date.
     Index {
         /// Index changes since this revision (up to HEAD). With `--history`, only the

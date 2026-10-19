@@ -104,10 +104,92 @@ pub struct DanglingRef {
     pub wanted: Vec<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]
 pub struct MapEntry {
     pub symbol: SymbolHit,
     pub in_degree: u64,
+    /// PageRank over all links, rounded to 6 decimal places.
+    pub rank: f64,
+}
+
+/// One term that matched, and the field it matched in (`name`, `doc`, `section`, `contract`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
+pub struct Matched {
+    pub term: String,
+    pub field: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]
+pub struct SearchHit {
+    pub symbol: SymbolHit,
+    /// BM25 score, rounded to 6 decimal places.
+    pub score: f64,
+    pub matched: Vec<Matched>,
+}
+
+/// Which way a link was followed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, JsonSchema)]
+pub enum Direction {
+    /// The link points from `from` to `to`.
+    Forward,
+    /// The link points from `to` to `from`.
+    Backward,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
+pub struct PathStep {
+    pub from: String,
+    pub kind: String,
+    pub direction: Direction,
+    pub to: String,
+    #[schemars(with = "ConfidenceSchema")]
+    pub confidence: Confidence,
+}
+
+/// One link of a symbol, seen from that symbol.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
+pub struct LinkBrief {
+    pub kind: String,
+    /// Canonical name of the other end (the hex id when it is not a known node).
+    pub other: String,
+    #[schemars(with = "ConfidenceSchema")]
+    pub confidence: Confidence,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
+pub struct Explain {
+    pub symbol: SymbolHit,
+    pub signature: Option<String>,
+    pub doc: Option<String>,
+    /// At most `per_side` links, sorted by kind then name.
+    pub outgoing: Vec<LinkBrief>,
+    pub outgoing_total: u64,
+    pub incoming: Vec<LinkBrief>,
+    pub incoming_total: u64,
+    /// Rationale targets (board items, documents, commits), sorted.
+    pub items: Vec<String>,
+}
+
+/// What `show` prints: the symbol's lines (or, for `--signature`, its signature and doc).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
+pub struct ShowResult {
+    pub symbol: SymbolHit,
+    /// Repository-relative path.
+    pub file: String,
+    /// First and last line of the span.
+    pub lines: (u32, u32),
+    pub text: String,
+}
+
+/// What `replace` did: the symbol and the line range it now occupies.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ReplaceResult {
+    pub symbol: SymbolHit,
+    pub file: String,
+    /// First and last line of the replaced span, before the change.
+    pub replaced: (u32, u32),
+    /// First and last line of the new text.
+    pub lines: (u32, u32),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
@@ -126,4 +208,7 @@ pub struct Envelope<T> {
     pub stale: bool,
     pub truncated: Option<Truncation>,
     pub result: T,
+    /// Suggested follow-up commands, at most three.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub next: Vec<String>,
 }

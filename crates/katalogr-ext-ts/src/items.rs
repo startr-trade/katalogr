@@ -121,13 +121,41 @@ impl<'s> Builder<'s> {
         one.trim_end_matches("=>").trim_end().to_string()
     }
 
+    /// The first paragraph of the JSDoc comment (`/** ... */`) that ends right before the line
+    /// `line` (1-based), whitespace normalised to one line.
+    fn doc_before(&self, line: u32) -> Option<String> {
+        let start = self.lines.line_start(line);
+        let before = self.text.get(..start)?.trim_end();
+        let inner = before.strip_suffix("*/")?;
+        let open = inner.rfind("/*")?;
+        let body = inner[open..].strip_prefix("/**")?;
+        if body.starts_with('*') {
+            return None;
+        }
+        let mut lines: Vec<&str> = Vec::new();
+        for l in body.lines() {
+            let l = l.trim();
+            lines.push(l.strip_prefix('*').unwrap_or(l).trim());
+        }
+        let paragraph: Vec<&str> = lines
+            .into_iter()
+            .skip_while(|l| l.is_empty() || l.starts_with('@'))
+            .take_while(|l| !l.is_empty() && !l.starts_with('@'))
+            .collect();
+        let doc = paragraph.join(" ");
+        (!doc.is_empty()).then_some(doc)
+    }
+
     pub(crate) fn add_symbol(
         &mut self,
         segments: Vec<Segment>,
         kind: &str,
         span: Span,
-        facts: BTreeMap<String, Fact>,
+        mut facts: BTreeMap<String, Fact>,
     ) -> Id {
+        if let Some(doc) = self.doc_before(span.start_line) {
+            facts.insert("doc".to_string(), Fact::Str(doc));
+        }
         let n = self.ordinals.entry(segments.clone()).or_insert(0);
         *n += 1;
         let name = SymbolName {

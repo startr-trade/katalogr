@@ -1,0 +1,177 @@
+{
+  "$defs": {
+    "ShowResult": {
+      "description": "What `show` prints: the symbol's lines (or, for `--signature`, its signature and doc).",
+      "properties": {
+        "file": {
+          "description": "Repository-relative path.",
+          "type": "string"
+        },
+        "lines": {
+          "description": "First and last line of the span.",
+          "maxItems": 2,
+          "minItems": 2,
+          "prefixItems": [
+            {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          ],
+          "type": "array"
+        },
+        "symbol": {
+          "$ref": "#/$defs/SymbolHit"
+        },
+        "text": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "symbol",
+        "file",
+        "lines",
+        "text"
+      ],
+      "type": "object"
+    },
+    "Span": {
+      "description": "Schema-only mirror of [`katalogr_model::Span`].",
+      "properties": {
+        "end_col": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "end_line": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "start_col": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "start_line": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "start_line",
+        "start_col",
+        "end_line",
+        "end_col"
+      ],
+      "type": "object"
+    },
+    "SymbolHit": {
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "name": {
+          "description": "Canonical name.",
+          "type": "string"
+        },
+        "path": {
+          "description": "Repository-relative path.",
+          "type": "string"
+        },
+        "span": {
+          "$ref": "#/$defs/Span"
+        }
+      },
+      "required": [
+        "name",
+        "kind",
+        "path",
+        "span"
+      ],
+      "type": "object"
+    },
+    "Truncation": {
+      "properties": {
+        "budget": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "omitted": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "shown": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "shown",
+        "omitted",
+        "budget"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "What `--json` prints.",
+  "properties": {
+    "next": {
+      "description": "Suggested follow-up commands, at most three.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "pending": {
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "result": {
+      "$ref": "#/$defs/ShowResult"
+    },
+    "schema": {
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "stale": {
+      "type": "boolean"
+    },
+    "truncated": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Truncation"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "watermark": {
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "schema",
+    "watermark",
+    "pending",
+    "stale",
+    "result"
+  ],
+  "title": "Envelope",
+  "type": "object"
+}
