@@ -3,7 +3,6 @@
 mod communities;
 mod cycles;
 mod dead;
-#[allow(dead_code)]
 mod graph;
 mod hints;
 mod hubs;

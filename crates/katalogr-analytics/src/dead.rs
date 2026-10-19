@@ -169,12 +169,12 @@ pub fn dead_code(tx: &impl Reader, opts: &DeadCodeOptions) -> Result<DeadCodeRep
 
     // The guard: code kinds declared and symbols present, but no entry point recorded.
     let mut unrooted: BTreeSet<&str> = BTreeSet::new();
-    for v in 0..sym_count {
+    for (v, (_, row)) in symbols.iter().enumerate() {
         let ext = extension_of(v);
         let Some(kinds) = opts.code_kinds.get(ext) else {
             continue;
         };
-        if kinds.contains(&symbols[v].1.kind) && !rooted_extensions.contains(ext) {
+        if kinds.contains(&row.kind) && !rooted_extensions.contains(ext) {
             unrooted.insert(ext);
         }
     }
@@ -200,8 +200,7 @@ pub fn dead_code(tx: &impl Reader, opts: &DeadCodeOptions) -> Result<DeadCodeRep
     let any = adjacency.reach(&roots, false);
     let is_root: BTreeSet<u32> = roots.iter().copied().collect();
     let mut found: Vec<(DeadConfidence, DeadClass, usize)> = Vec::new();
-    for v in 0..sym_count {
-        let (_, row) = &symbols[v];
+    for (v, (_, row)) in symbols.iter().enumerate() {
         let Some(kinds) = opts.code_kinds.get(extension_of(v)) else {
             continue;
         };

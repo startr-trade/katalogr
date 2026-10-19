@@ -43,6 +43,24 @@ impl DanglingKind {
     }
 }
 
+/// Granularity of the insight graph.
+#[derive(Debug, Clone, Copy, ValueEnum)]
+#[value(rename_all = "kebab-case")]
+pub enum LevelArg {
+    Symbol,
+    File,
+    Package,
+}
+
+/// How sure a dead-code candidate is.
+#[derive(Debug, Clone, Copy, ValueEnum)]
+#[value(rename_all = "kebab-case")]
+pub enum ConfidenceArg {
+    High,
+    Medium,
+    Low,
+}
+
 /// Traceability for polyglot systems.
 #[derive(Debug, Parser)]
 #[command(name = "katalogr", version = VERSION.as_str(), about, long_about = None)]
@@ -205,6 +223,95 @@ pub enum Command {
         /// Index the commits that carry item trailers (`Refs:`).
         #[arg(long)]
         history: bool,
+    },
+    /// List the hub nodes: those with the highest weighted degree (links in plus out).
+    Hubs {
+        /// Group nodes as symbols, files or packages.
+        #[arg(long, value_enum, default_value_t = LevelArg::Symbol)]
+        level: LevelArg,
+        /// Smallest weighted degree listed (default: the project's `insights.hub_min_degree`).
+        #[arg(long, value_name = "DEGREE")]
+        min_degree: Option<f64>,
+        /// How many hubs to list.
+        #[arg(long, default_value_t = 20, value_name = "N")]
+        limit: usize,
+        /// Leave out weak links (inferred, or resolved to several targets).
+        #[arg(long)]
+        strict: bool,
+    },
+    /// Find communities: groups of nodes that use each other more than the rest.
+    Communities {
+        /// Group nodes as symbols, files or packages.
+        #[arg(long, value_enum, default_value_t = LevelArg::File)]
+        level: LevelArg,
+        /// Seed of the search; the same seed gives the same communities.
+        #[arg(long, value_name = "SEED")]
+        seed: Option<u64>,
+        /// Modularity resolution: higher gives smaller communities.
+        #[arg(long, value_name = "GAMMA")]
+        resolution: Option<f64>,
+        /// Members listed per community.
+        #[arg(long, default_value_t = 5, value_name = "N")]
+        members: usize,
+        /// How many communities to list.
+        #[arg(long, default_value_t = 20, value_name = "N")]
+        limit: usize,
+        /// Only the community of this node (canonical name at the chosen level).
+        #[arg(long, value_name = "NAME")]
+        of: Option<String>,
+        /// Leave out weak links (inferred, or resolved to several targets).
+        #[arg(long)]
+        strict: bool,
+    },
+    /// List dependency cycles, each with one witness; exits 1 when any exist.
+    Cycles {
+        /// Group nodes as symbols, files or packages.
+        #[arg(long, value_enum, default_value_t = LevelArg::File)]
+        level: LevelArg,
+        /// Also follow inferred links (each cycle then shows its weakest confidence).
+        #[arg(long)]
+        include_inferred: bool,
+        /// Members listed per cycle.
+        #[arg(long, default_value_t = 10, value_name = "N")]
+        members: usize,
+        /// How many cycles to list.
+        #[arg(long, default_value_t = 20, value_name = "N")]
+        limit: usize,
+    },
+    /// List dead-code candidates: code no entry point reaches. `high` means no link of any
+    /// confidence reaches it, not that it is certainly dead: string-keyed registries that no
+    /// profile models stay invisible.
+    DeadCode {
+        /// Do not count public-API roots as entry points.
+        #[arg(long)]
+        internal: bool,
+        /// Least confidence listed.
+        #[arg(long, value_enum, default_value_t = ConfidenceArg::Medium)]
+        min_confidence: ConfidenceArg,
+        /// Only symbols under this repository-relative path prefix.
+        #[arg(long, value_name = "PREFIX")]
+        path: Option<String>,
+        /// How many candidates to list.
+        #[arg(long, default_value_t = 50, value_name = "N")]
+        limit: usize,
+        /// Exit 1 when any candidate is listed.
+        #[arg(long)]
+        check: bool,
+    },
+    /// List the rationale of a symbol, a path or the top hubs: comment markers (NOTE:, WHY:,
+    /// RATIONALE:), ADR citations, board items and documents.
+    Rationale {
+        /// Canonical name or plain name of a symbol (its members are included).
+        symbol: Option<String>,
+        /// Only files under this repository-relative path prefix.
+        #[arg(long, value_name = "PREFIX", conflicts_with_all = ["symbol", "hubs"])]
+        path: Option<String>,
+        /// The top N hubs; those with no rationale are named.
+        #[arg(long, value_name = "N", conflicts_with = "symbol")]
+        hubs: Option<usize>,
+        /// How many entries to list.
+        #[arg(long, default_value_t = 100, value_name = "N")]
+        limit: usize,
     },
     /// List references that name something that does not exist; exits 1 when any dangle.
     Dangling {

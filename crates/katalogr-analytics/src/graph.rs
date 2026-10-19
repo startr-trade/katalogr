@@ -71,7 +71,9 @@ pub(crate) struct InsightGraph {
     sym_node: HashMap<String, u32>,
     /// Contracts too large to derive edges from.
     pub skipped_contracts: u64,
-    /// Package level: files without a `package` fact.
+    /// Package level: files without a `package` fact. Counted for diagnostics; no report
+    /// field carries it.
+    #[allow(dead_code)]
     pub ungrouped_files: u64,
 }
 
@@ -455,6 +457,7 @@ impl InsightGraph {
     }
 
     /// Edges in total.
+    #[cfg(test)]
     pub(crate) fn edge_count(&self) -> usize {
         self.out.len()
     }

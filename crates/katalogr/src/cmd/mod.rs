@@ -2,17 +2,22 @@
 
 pub mod callers;
 pub mod claude;
+pub mod communities;
+pub mod cycles;
 pub mod dangling;
+pub mod dead_code;
 pub mod explain;
 pub mod find;
 pub mod hook;
 pub mod hooks;
+pub mod hubs;
 pub mod index;
 pub mod kindex;
 pub mod map;
 pub mod notify;
 pub mod path;
 pub mod project;
+pub mod rationale;
 pub mod refs;
 pub mod replace;
 pub mod search;
@@ -47,6 +52,26 @@ pub fn overrides(cli: &Cli) -> Overrides {
         kindex: cli.kindex.clone(),
         project: cli.project.clone(),
     }
+}
+
+/// The insight graph options for `level`, with the project's excluded link kinds.
+pub fn graph_options(
+    level: crate::cli::LevelArg,
+    include_inferred: bool,
+    settings: &katalogr_dist::InsightSettings,
+) -> katalogr_dist::analytics::GraphOptions {
+    use crate::cli::LevelArg;
+    use katalogr_dist::analytics::Level;
+    let mut g = katalogr_dist::analytics::GraphOptions::new(
+        match level {
+            LevelArg::Symbol => Level::Symbol,
+            LevelArg::File => Level::File,
+            LevelArg::Package => Level::Package,
+        },
+        include_inferred,
+    );
+    g.exclude_kinds = settings.exclude_kinds.clone();
+    g
 }
 
 pub fn options(cli: &Cli) -> Options {
