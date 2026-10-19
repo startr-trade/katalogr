@@ -7,6 +7,7 @@ mod graph;
 mod hints;
 mod hubs;
 mod louvain;
+pub mod metrics;
 pub mod options;
 mod rationale;
 pub mod result;
