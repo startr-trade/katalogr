@@ -1,0 +1,9 @@
+mode: exact
+symbols:
+  - "fx:api.tx#fn:serve"
+  - "fx:app.tx#fn:handle"
+contracts:
+  - "contract:channel:orders"
+links:
+  - { from: "fx:api.tx#fn:serve", kind: provides, to: "contract:channel:orders", confidence: Extracted }
+  - { from: "fx:app.tx#fn:handle", kind: consumes, to: "contract:channel:orders", confidence: Extracted }
