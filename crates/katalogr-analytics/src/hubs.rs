@@ -29,7 +29,7 @@ fn z_score(degree: f64, mean: f64, sigma: f64) -> f64 {
 
 /// Nodes whose weighted degree (in plus out) reaches `min_degree`, ordered by degree, then
 /// rank, then name; the first `limit`.
-pub fn hubs(tx: &impl Reader, opts: &HubOptions) -> Result<HubReport, StoreError> {
+pub fn hubs(tx: &(impl Reader + Sync), opts: &HubOptions) -> Result<HubReport, StoreError> {
     let g = InsightGraph::load(tx, &opts.graph)?;
     let n = g.len();
     let mut in_w = vec![0.0f64; n];

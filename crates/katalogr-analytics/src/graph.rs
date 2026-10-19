@@ -5,7 +5,10 @@ use crate::options::{CONTRACT_EDGE_CAP, CONTRACT_EDGE_KIND, GraphOptions};
 use crate::result::{Level, NodeHit};
 use katalogr_model::insight::FACT_PACKAGE;
 use katalogr_model::{Confidence, Fact, Id, Name};
-use katalogr_store::{LinkRow, Reader, StoreError, row_weight};
+use katalogr_store::{
+    ArtifactRow, ContractRow, LinkKey, LinkRow, RANK_CONTEXT, Reader, StoreError, SymbolRow,
+    pagerank, row_weight,
+};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 /// How much an edge is trusted. Ordered: weak is less than strong.
@@ -40,6 +43,32 @@ pub(crate) fn row_strength(row: &LinkRow) -> Strength {
     }
 }
 
+/// Everything the insights read from one snapshot.
+pub(crate) struct Snapshotted {
+    pub symbols: Vec<(Id, SymbolRow)>,
+    pub artifacts: Vec<(Id, ArtifactRow)>,
+    pub links: Vec<(LinkKey, LinkRow)>,
+    pub contracts: Vec<(Id, ContractRow)>,
+}
+
+/// Read the symbols, artifacts, links and contracts of the snapshot, the four reads running
+/// side by side (decoding the rows dominates the cost of an insight).
+pub(crate) fn read_all(tx: &(impl Reader + Sync)) -> Result<Snapshotted, StoreError> {
+    std::thread::scope(|scope| {
+        let artifacts = scope.spawn(|| tx.artifacts());
+        let links = scope.spawn(|| tx.links_all());
+        let contracts = scope.spawn(|| tx.contracts());
+        let symbols = tx.symbols();
+        const PANIC: &str = "a reader thread panicked";
+        Ok(Snapshotted {
+            symbols: symbols?,
+            artifacts: artifacts.join().expect(PANIC)?,
+            links: links.join().expect(PANIC)?,
+            contracts: contracts.join().expect(PANIC)?,
+        })
+    })
+}
+
 /// One merged edge. In the forward lists `to` is the target; in the reverse lists it is the
 /// source.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -67,8 +96,10 @@ pub(crate) struct InsightGraph {
     pub file_count: Vec<u32>,
     /// Symbol level only: the index of each node's file among the distinct files.
     pub file_of: Vec<u32>,
-    /// File and package level: canonical symbol name to the node holding it.
-    sym_node: HashMap<String, u32>,
+    /// The node of every symbol (and, above symbol level, every file).
+    node_of: HashMap<Id, u32>,
+    /// Every symbol of the snapshot, to check that a stored rank covers them.
+    symbol_ids: Vec<Id>,
     /// Contracts too large to derive edges from.
     pub skipped_contracts: u64,
     /// Package level: files without a `package` fact. Counted for diagnostics; no report
@@ -155,11 +186,16 @@ pub(crate) fn common_dir<'a>(
 
 impl InsightGraph {
     /// One read of the symbols, artifacts, links and contracts of the snapshot.
-    pub(crate) fn load(tx: &impl Reader, opts: &GraphOptions) -> Result<InsightGraph, StoreError> {
-        let symbols = tx.symbols()?;
-        let artifacts = tx.artifacts()?;
-        let links = tx.links_all()?;
-        let contracts = tx.contracts()?;
+    pub(crate) fn load(
+        tx: &(impl Reader + Sync),
+        opts: &GraphOptions,
+    ) -> Result<InsightGraph, StoreError> {
+        let Snapshotted {
+            symbols,
+            artifacts,
+            links,
+            contracts,
+        } = read_all(tx)?;
 
         let package_of = |facts: &BTreeMap<String, Fact>| match facts.get(FACT_PACKAGE) {
             Some(Fact::Str(p)) => Some(p.clone()),
@@ -172,7 +208,6 @@ impl InsightGraph {
         let mut file_count: Vec<u32>;
         let mut file_of: Vec<u32> = Vec::new();
         let mut node_of: HashMap<Id, u32> = HashMap::new();
-        let mut sym_node: HashMap<String, u32> = HashMap::new();
         let mut ungrouped_files = 0u64;
         match opts.level {
             Level::Symbol => {
@@ -205,11 +240,6 @@ impl InsightGraph {
                     members.push(row.symbols.len() as u64);
                 }
                 file_count = vec![1; nodes.len()];
-                for (_, row) in &symbols {
-                    if let Some(&n) = node_of.get(&row.artifact) {
-                        sym_node.insert(row.name.canonical(), n);
-                    }
-                }
             }
             Level::Package => {
                 let mut names: BTreeSet<String> = BTreeSet::new();
@@ -247,11 +277,6 @@ impl InsightGraph {
                         path: common_dir(dirs[i].iter().copied()),
                         line: None,
                     });
-                }
-                for (_, row) in &symbols {
-                    if let Some(&n) = node_of.get(&row.artifact) {
-                        sym_node.insert(row.name.canonical(), n);
-                    }
                 }
             }
         }
@@ -388,7 +413,8 @@ impl InsightGraph {
             members,
             file_count,
             file_of,
-            sym_node,
+            node_of,
+            symbol_ids: symbols.iter().map(|(id, _)| *id).collect(),
             skipped_contracts,
             ungrouped_files,
         })
@@ -436,7 +462,8 @@ impl InsightGraph {
             members: vec![1; n],
             file_count: vec![1; n],
             file_of: (0..n as u32).collect(),
-            sym_node: HashMap::new(),
+            node_of: HashMap::new(),
+            symbol_ids: Vec::new(),
             skipped_contracts: 0,
             ungrouped_files: 0,
         }
@@ -463,38 +490,27 @@ impl InsightGraph {
     }
 
     /// PageRank of every node: the symbol's score at symbol level, the sum over the symbols of
-    /// the node otherwise. Uses the cached rank when it is current.
+    /// the node otherwise. Uses the stored rank when it is current and covers every symbol,
+    /// else the rank computed now; both give the same scores.
     pub(crate) fn node_ranks(&self, tx: &impl Reader) -> Result<Vec<f64>, StoreError> {
-        let ranked = katalogr_query::rank_cached_or_live(tx)?;
-        let mut out = vec![0.0f64; self.len()];
-        if self.level == Level::Symbol {
-            let index: HashMap<&str, usize> = self
-                .nodes
-                .iter()
-                .enumerate()
-                .map(|(i, n)| (n.name.as_str(), i))
-                .collect();
-            for (hit, score) in &ranked {
-                if let Some(&i) = index.get(hit.name.as_str()) {
-                    out[i] = *score;
-                }
+        let stored = tx
+            .cached_rank(RANK_CONTEXT)?
+            .filter(|m| self.symbol_ids.iter().all(|id| m.contains_key(id)));
+        let scores = match stored {
+            Some(m) => m,
+            None => {
+                let symbols = tx.symbols()?;
+                let live = pagerank(tx, &symbols)?;
+                symbols.iter().map(|(id, _)| *id).zip(live).collect()
             }
-        } else {
-            for (hit, score) in &ranked {
-                if let Some(n) = self.node_of_symbol(&hit.name) {
-                    out[n as usize] += *score;
-                }
+        };
+        let mut out = vec![0.0f64; self.len()];
+        for (id, score) in &scores {
+            if let Some(&n) = self.node_of.get(id) {
+                out[n as usize] += *score;
             }
         }
         Ok(out)
-    }
-
-    /// The node that holds the symbol with canonical name `name` (file and package level).
-    pub(crate) fn node_of_symbol(&self, name: &str) -> Option<u32> {
-        match self.level {
-            Level::Symbol => None,
-            _ => self.sym_node.get(name).copied(),
-        }
     }
 
     /// The undirected graph: the weights of both directions added.
@@ -661,7 +677,7 @@ mod tests {
             ]
         );
         assert_eq!(g.members, [2, 1]);
-        assert_eq!(g.node_of_symbol("r:f1.tx#fn:a"), Some(0));
+        assert_eq!(g.node_of.len(), 3 + 2);
 
         let g = InsightGraph::load(&tx, &opts(Level::Package, false)).unwrap();
         assert_eq!(

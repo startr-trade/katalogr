@@ -298,8 +298,8 @@ pub enum Command {
         #[arg(long)]
         check: bool,
     },
-    /// List the rationale of a symbol, a path or the top hubs: comment markers (NOTE:, WHY:,
-    /// RATIONALE:), ADR citations, board items and documents.
+    /// List the rationale of a symbol, a path or the top hubs: comment markers, ADR citations,
+    /// board items and documents that explain it.
     Rationale {
         /// Canonical name or plain name of a symbol (its members are included).
         symbol: Option<String>,

@@ -3,7 +3,7 @@
 //! only, and over all links; the difference is what is reached only through inferred or
 //! fan-out links.
 
-use crate::graph::{Strength, row_strength};
+use crate::graph::{Snapshotted, Strength, read_all, row_strength};
 use crate::options::DeadCodeOptions;
 use crate::result::{DeadCandidate, DeadClass, DeadCodeReport, DeadConfidence};
 use katalogr_model::insight::{FACT_ROOT, ROOT_API};
@@ -72,10 +72,16 @@ fn root_reason(facts: &BTreeMap<String, Fact>) -> Option<&str> {
 /// Candidates of the code kinds in `opts.code_kinds`, with the counts by confidence. When an
 /// extension that declares code kinds has symbols but the index records no entry point for it,
 /// the report holds no candidates and says to re-extract.
-pub fn dead_code(tx: &impl Reader, opts: &DeadCodeOptions) -> Result<DeadCodeReport, StoreError> {
-    let symbols = tx.symbols()?;
-    let artifacts = tx.artifacts()?;
-    let links = tx.links_all()?;
+pub fn dead_code(
+    tx: &(impl Reader + Sync),
+    opts: &DeadCodeOptions,
+) -> Result<DeadCodeReport, StoreError> {
+    let Snapshotted {
+        symbols,
+        artifacts,
+        links,
+        ..
+    } = read_all(tx)?;
     let sym_count = symbols.len();
     let mut index: HashMap<Id, u32> = HashMap::with_capacity(sym_count + artifacts.len());
     for (i, (id, _)) in symbols.iter().enumerate() {

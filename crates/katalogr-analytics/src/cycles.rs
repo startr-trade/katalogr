@@ -12,7 +12,7 @@ use katalogr_store::{Reader, StoreError};
 /// Strongly connected components of size two or more, largest first, with a witness cycle
 /// each. The report's `confidence` is the weakest on the witness, so a cycle built only from
 /// extracted links is `extracted`.
-pub fn cycles(tx: &impl Reader, opts: &CycleOptions) -> Result<CycleReport, StoreError> {
+pub fn cycles(tx: &(impl Reader + Sync), opts: &CycleOptions) -> Result<CycleReport, StoreError> {
     let g = InsightGraph::load(tx, &opts.graph)?;
     let name = |v: u32| g.nodes[v as usize].name.as_str();
     let mut comps = tarjan(&g);

@@ -76,7 +76,8 @@ pub struct InsightSettings {
 impl Default for InsightSettings {
     fn default() -> Self {
         InsightSettings {
-            hub_min_degree: 10.0,
+            // Calibrated on katalogr's own index: at 15 about 1.7% of symbols are hubs.
+            hub_min_degree: 15.0,
             seed: DEFAULT_SEED,
             resolution: 1.0,
             community_min_size: 3,

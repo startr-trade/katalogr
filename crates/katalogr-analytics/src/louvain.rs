@@ -6,9 +6,9 @@ use crate::graph::Undirected;
 use crate::options::DEFAULT_SEED;
 
 /// Most local-moving passes per level.
-pub(crate) const MAX_PASSES: usize = 20;
+pub(crate) const MAX_PASSES: usize = 56;
 /// Most aggregation levels.
-pub(crate) const MAX_LEVELS: usize = 10;
+pub(crate) const MAX_LEVELS: usize = 12;
 /// A move must gain more than this.
 pub(crate) const EPS: f64 = 1e-12;
 

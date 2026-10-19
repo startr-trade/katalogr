@@ -16,7 +16,7 @@ pub(crate) fn round(x: f64, dp: i32) -> f64 {
 /// The communities of the usage graph at the chosen level, with the modularity of the
 /// partition. A community is connected; isolated nodes belong to none.
 pub fn communities(
-    tx: &impl Reader,
+    tx: &(impl Reader + Sync),
     opts: &CommunityOptions,
 ) -> Result<CommunityReport, StoreError> {
     communities_with_stats(tx, opts).map(|(report, _)| report)
@@ -25,7 +25,7 @@ pub fn communities(
 /// Like [`communities`], also returning how much work the clustering took.
 #[doc(hidden)]
 pub fn communities_with_stats(
-    tx: &impl Reader,
+    tx: &(impl Reader + Sync),
     opts: &CommunityOptions,
 ) -> Result<(CommunityReport, LouvainStats), StoreError> {
     let g = InsightGraph::load(tx, &opts.graph)?;

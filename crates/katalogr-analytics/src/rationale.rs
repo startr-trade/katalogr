@@ -1,6 +1,7 @@
 //! Rationale: the comment markers, ADR citations, board-item references and documents that
 //! explain a symbol, a path or the top hubs (FEAT-030 section 6.7).
 
+use crate::graph::{Snapshotted, read_all};
 use crate::hubs::hubs;
 use crate::options::{GraphOptions, HubOptions, RationaleScope};
 use crate::result::{Level, RationaleEntry, RationaleReport};
@@ -31,12 +32,16 @@ fn line_span(line: u32) -> Span {
 /// The entries of the nodes in `scope`, in file and line order, at most `limit`. For the hubs
 /// scope, `uncovered` names the hubs without any entry.
 pub fn rationale(
-    tx: &impl Reader,
+    tx: &(impl Reader + Sync),
     scope: &RationaleScope,
     limit: usize,
 ) -> Result<RationaleReport, StoreError> {
-    let symbols = tx.symbols()?;
-    let artifacts = tx.artifacts()?;
+    let Snapshotted {
+        symbols,
+        artifacts,
+        links,
+        ..
+    } = read_all(tx)?;
 
     // Every node by id.
     let mut nodes: HashMap<Id, Node> = HashMap::with_capacity(symbols.len() + artifacts.len());
@@ -167,7 +172,7 @@ pub fn rationale(
             None => (id.to_hex(), id.to_hex()),
         }
     };
-    for (key, row) in tx.links_all()? {
+    for (key, row) in links {
         let kind = key.kind.0.as_str();
         if RATIONALE_KINDS.contains(&kind) && in_scope.contains(&key.from) {
             let class = if adrs.contains(&key.to) {
