@@ -26,6 +26,26 @@ fn git_sha() -> Option<String> {
     (!sha.is_empty()).then_some(sha)
 }
 
+/// Resolves each name with `git rev-parse --git-path`, which follows a worktree's `.git` file
+/// to its own HEAD and the shared refs.
+fn git_paths(names: &[&str]) -> Vec<std::path::PathBuf> {
+    let dir = std::env::var("CARGO_MANIFEST_DIR").unwrap_or_else(|_| ".".into());
+    let mut args = vec!["rev-parse", "--path-format=absolute"];
+    for n in names {
+        args.extend(["--git-path", n]);
+    }
+    let Ok(out) = Command::new("git").args(&args).current_dir(dir).output() else {
+        return Vec::new();
+    };
+    if !out.status.success() {
+        return Vec::new();
+    }
+    String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .map(|l| std::path::PathBuf::from(l.trim()))
+        .collect()
+}
+
 /// Seconds since the Unix epoch, from `SOURCE_DATE_EPOCH` or the clock.
 fn epoch_seconds() -> Option<i64> {
     if let Ok(v) = std::env::var("SOURCE_DATE_EPOCH") {
@@ -63,10 +83,11 @@ fn build_date() -> String {
 }
 
 fn main() {
-    // Re-run when HEAD moves, so a new commit never keeps a stale sha. Missing paths are fine.
-    for p in ["../../.git/HEAD", "../../.git/refs/heads"] {
-        if std::path::Path::new(p).exists() {
-            println!("cargo:rerun-if-changed={p}");
+    // Re-run when HEAD moves, so a new commit never keeps a stale sha. Paths come from git so a
+    // worktree (where `.git` is a file) is covered too. Missing paths are fine.
+    for p in git_paths(&["HEAD", "refs/heads", "packed-refs"]) {
+        if p.exists() {
+            println!("cargo:rerun-if-changed={}", p.display());
         }
     }
     println!("cargo:rerun-if-env-changed=KATALOGR_GIT_SHA");
