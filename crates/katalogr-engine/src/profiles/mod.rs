@@ -112,6 +112,17 @@ fn document_line(text: &str, message: &str) -> Option<usize> {
     if message.starts_with("unsupported version") {
         return key_line("version");
     }
+    if message == format::NEEDS_SELECT {
+        return key_line("select");
+    }
+    for (needs, marker) in [
+        (format::NEEDS_FACT, "${fact:"),
+        (format::NEEDS_SCOPE, "${scope:"),
+    ] {
+        if message == needs {
+            return text.lines().position(|l| l.contains(marker)).map(|i| i + 1);
+        }
+    }
     if message.starts_with("profile name") {
         return key_line("profile");
     }
@@ -216,23 +227,50 @@ impl ProfileSet {
 
     /// Run every rule, in order, on `f`.
     pub fn apply(&self, f: &mut Fragment) {
+        let scope = self
+            .rules()
+            .any(|(_, r)| r.uses_scope())
+            .then(|| eval::ScopeIndex::build(f));
         for (profile, rule) in self.rules() {
-            eval::apply_rule(profile, rule, f);
+            eval::apply_rule(profile, rule, f, scope.as_ref());
         }
     }
 
+    /// The extension id named by the first `select` entry (in application order) whose glob
+    /// matches `path`; None when no entry matches.
+    pub fn route(&self, path: &katalogr_model::RelPath) -> Option<&str> {
+        self.loaded
+            .iter()
+            .flat_map(|l| l.doc.select.iter())
+            .find(|s| s.path.matcher.is_match(path.as_str()))
+            .map(|s| s.extension.as_str())
+    }
+
+    /// Every select entry, in application order: (profile, extension, glob source).
+    pub fn selects(&self) -> impl Iterator<Item = (&str, &str, &str)> {
+        self.loaded.iter().flat_map(|l| {
+            l.doc.select.iter().map(|s| {
+                (
+                    l.doc.profile.as_str(),
+                    s.extension.as_str(),
+                    s.path.source.as_str(),
+                )
+            })
+        })
+    }
+
     /// A hash of the files that hold a rule that can apply to `extension` (a rule that names no
-    /// extension applies to all): their names and bytes, in application order. `None` when no
+    /// extension applies to all) or a `select` entry that names it: their names and bytes, in application order. `None` when no
     /// such rule exists, so a project without profiles keeps its revisions.
     pub fn hash_for(&self, extension: &str) -> Option<[u8; 32]> {
         let mut h = Sha256::new();
         let mut any = false;
         for l in &self.loaded {
-            let hit = l
-                .doc
-                .rules
-                .iter()
-                .any(|r| r.when.extension.as_deref().is_none_or(|e| e == extension));
+            let hit = l.doc.select.iter().any(|s| s.extension == extension)
+                || l.doc
+                    .rules
+                    .iter()
+                    .any(|r| r.when.extension.as_deref().is_none_or(|e| e == extension));
             if hit {
                 any = true;
                 h.update((l.file.len() as u64).to_le_bytes());

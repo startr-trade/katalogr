@@ -1,0 +1,22 @@
+[package]
+name = "katalogr-ext-data"
+description = "Data documents: JSON, YAML and XML as a key tree."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+katalogr-model.workspace = true
+quick-xml.workspace = true
+saphyr-parser.workspace = true
+
+[dev-dependencies]
+katalogr-acceptance = { path = "../katalogr-acceptance" }
+serde_json.workspace = true
+katalogr-engine.workspace = true
+katalogr-store.workspace = true
+camino.workspace = true
+tempfile.workspace = true
+proptest.workspace = true

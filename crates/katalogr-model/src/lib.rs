@@ -7,6 +7,7 @@ pub mod graph;
 pub mod lexicon;
 pub mod name;
 pub mod relpath;
+pub mod structure;
 
 pub use extract::{ExtractError, ExtractInput, Extractor};
 pub use fragment::{Binding, ContractRole, Export, ExportKey, Fragment, OutRef};

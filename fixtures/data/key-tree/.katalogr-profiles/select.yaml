@@ -1,0 +1,7 @@
+profile: select-docs
+version: 2
+select:
+  - { extension: data, path: 'docs/*.json' }
+  - { extension: data, path: 'docs/*.yaml' }
+  - { extension: data, path: 'docs/*.xml' }
+rules: []

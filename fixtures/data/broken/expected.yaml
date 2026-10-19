@@ -1,0 +1,56 @@
+mode: exact
+symbols:
+- fx:docs/bad.json#doc:bad
+- fx:docs/bad.json#doc:bad/key:a
+- fx:docs/bad.json#doc:bad/key:b
+- fx:docs/bad.json#doc:bad/key:b/item:0
+- fx:docs/bad.json#doc:bad/key:b/item:1
+- fx:docs/bad.xml#doc:bad
+- fx:docs/bad.xml#doc:bad/key:a
+- fx:docs/bad.xml#doc:bad/key:a/key:b
+- fx:docs/bad.xml#doc:bad/key:a/key:c
+- fx:docs/bad.yaml#doc:bad
+- fx:docs/bad.yaml#doc:bad/key:a
+- fx:docs/bad.yaml#doc:bad/key:b
+- fx:docs/bad.yaml#doc:bad/key:b/item:0
+links:
+- from: fx:docs/bad.json#doc:bad
+  kind: contains
+  to: fx:docs/bad.json#doc:bad/key:a
+  confidence: Extracted
+- from: fx:docs/bad.json#doc:bad
+  kind: contains
+  to: fx:docs/bad.json#doc:bad/key:b
+  confidence: Extracted
+- from: fx:docs/bad.json#doc:bad/key:b
+  kind: contains
+  to: fx:docs/bad.json#doc:bad/key:b/item:0
+  confidence: Extracted
+- from: fx:docs/bad.json#doc:bad/key:b
+  kind: contains
+  to: fx:docs/bad.json#doc:bad/key:b/item:1
+  confidence: Extracted
+- from: fx:docs/bad.xml#doc:bad
+  kind: contains
+  to: fx:docs/bad.xml#doc:bad/key:a
+  confidence: Extracted
+- from: fx:docs/bad.xml#doc:bad/key:a
+  kind: contains
+  to: fx:docs/bad.xml#doc:bad/key:a/key:b
+  confidence: Extracted
+- from: fx:docs/bad.xml#doc:bad/key:a
+  kind: contains
+  to: fx:docs/bad.xml#doc:bad/key:a/key:c
+  confidence: Extracted
+- from: fx:docs/bad.yaml#doc:bad
+  kind: contains
+  to: fx:docs/bad.yaml#doc:bad/key:a
+  confidence: Extracted
+- from: fx:docs/bad.yaml#doc:bad
+  kind: contains
+  to: fx:docs/bad.yaml#doc:bad/key:b
+  confidence: Extracted
+- from: fx:docs/bad.yaml#doc:bad/key:b
+  kind: contains
+  to: fx:docs/bad.yaml#doc:bad/key:b/item:0
+  confidence: Extracted
