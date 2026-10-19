@@ -1745,6 +1745,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "katalogr-ext-text"
+version = "0.1.0"
+dependencies = [
+ "katalogr-model",
+ "katalogr-store",
+ "proptest",
+]
+
+[[package]]
 name = "katalogr-ext-ts"
 version = "0.1.0"
 dependencies = [
