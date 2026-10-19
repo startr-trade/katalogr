@@ -3,6 +3,10 @@
 //! Text is for people and carries no compatibility promise: one line per hit,
 //! `kind  name  path:line  [confidence]`. JSON is the versioned envelope.
 
+use katalogr_dist::analytics::{
+    Community, CommunityReport, Cycle, CycleReport, DeadCandidate, DeadCodeReport, HubEntry,
+    HubReport, Itemized, RationaleEntry, RationaleReport,
+};
 use katalogr_dist::query::{
     CallerHit, DanglingRef, Direction, Envelope, Explain, FieldShape, HintSource, MapEntry,
     MirrorDrift, PathStep, RESULT_SCHEMA_VERSION, RefHit, ReplaceResult, SearchHit, Serialize,
@@ -319,6 +323,11 @@ pub fn why(cli: &Cli, reply: Reply<WhyResult>) -> ExitCode {
                 lines.extend(w.commits.iter().map(|c| {
                     format!("  commit  {}  {}", &c.sha[..c.sha.len().min(12)], c.summary)
                 }));
+                lines.extend(
+                    w.notes
+                        .iter()
+                        .map(|n| format!("  {}  line {}  {}", n.marker, n.line, n.text)),
+                );
                 if let Some(n) = &w.note {
                     lines.push(format!("  note  {n}"));
                 }
@@ -467,4 +476,237 @@ fn other_outcomes<T>(cli: &Cli, report: &Report, outcome: Outcome<T>) {
         Outcome::NoMatch(msg) | Outcome::StaleFile(msg) => eprintln!("katalogr: {msg}"),
         Outcome::Found(_) => {}
     }
+}
+
+/// How one insight report prints as text, and when it fails the command.
+pub struct Shape<R: Itemized> {
+    /// Summary lines, always shown.
+    pub header: fn(&R) -> Vec<String>,
+    /// One line per item.
+    pub line: fn(&R::Item) -> String,
+    /// Lines after the items.
+    pub footer: fn(&R) -> Vec<String>,
+    /// True when the report makes the command exit 1.
+    pub fails: fn(&R) -> bool,
+}
+
+fn no_lines<R>(_: &R) -> Vec<String> {
+    Vec::new()
+}
+
+fn never<R>(_: &R) -> bool {
+    false
+}
+
+fn level_name(l: katalogr_dist::analytics::Level) -> &'static str {
+    use katalogr_dist::analytics::Level;
+    match l {
+        Level::Symbol => "symbol",
+        Level::File => "file",
+        Level::Package => "package",
+    }
+}
+
+fn node_place(n: &katalogr_dist::analytics::NodeHit) -> String {
+    match (&n.path, n.line) {
+        (Some(p), Some(l)) => format!("  {p}:{l}"),
+        (Some(p), None) => format!("  {p}"),
+        _ => String::new(),
+    }
+}
+
+pub const HUBS: Shape<HubReport> = Shape {
+    header: |r| {
+        vec![format!(
+            "{} level: {} nodes, mean degree {:.2}",
+            level_name(r.level),
+            r.nodes,
+            r.mean_degree
+        )]
+    },
+    line: |h: &HubEntry| {
+        format!(
+            "{:>8.2}  in {:.2}  out {:.2}  {}  {}{}",
+            h.degree,
+            h.in_degree,
+            h.out_degree,
+            h.node.kind,
+            h.node.name,
+            node_place(&h.node)
+        )
+    },
+    footer: no_lines,
+    fails: never,
+};
+
+pub const COMMUNITIES: Shape<CommunityReport> = Shape {
+    header: |r| {
+        let mut v = vec![format!(
+            "modularity {:.4}  {} communities  {} unclustered",
+            r.modularity, r.communities_total, r.unclustered
+        )];
+        v.extend(r.note.iter().cloned());
+        v
+    },
+    line: |c: &Community| {
+        let top: Vec<&str> = c.top.iter().map(|n| n.name.as_str()).collect();
+        format!(
+            "#{}  {} members  cohesion {:.3}  {}  top: {}",
+            c.id,
+            c.size,
+            c.cohesion,
+            c.dir.as_deref().unwrap_or("-"),
+            top.join(", ")
+        )
+    },
+    footer: no_lines,
+    fails: never,
+};
+
+pub const CYCLES: Shape<CycleReport> = Shape {
+    header: |r| {
+        let mut v = vec![format!(
+            "{} cycles, {} {} level nodes in cycles",
+            r.cycles_total,
+            r.cyclic_nodes,
+            level_name(r.level)
+        )];
+        if r.skipped_contracts > 0 {
+            v.push(format!(
+                "{} contracts skipped: too many consumers and providers",
+                r.skipped_contracts
+            ));
+        }
+        v
+    },
+    line: |c: &Cycle| {
+        let mut path = String::new();
+        for (i, s) in c.witness.iter().enumerate() {
+            if i == 0 {
+                path.push_str(&s.from);
+            }
+            path.push_str(&format!(" -{}-> {}", s.kind, s.to));
+        }
+        format!("#{}  size {}  [{:?}]  {path}", c.id, c.size, c.confidence)
+    },
+    footer: no_lines,
+    fails: |r| r.cycles_total > 0,
+};
+
+fn dead_header(r: &DeadCodeReport) -> Vec<String> {
+    let mut v = vec![format!(
+        "{} entry points; {} high, {} medium, {} low",
+        r.roots, r.high, r.medium, r.low
+    )];
+    v.extend(r.note.iter().cloned());
+    v
+}
+
+fn dead_line(c: &DeadCandidate) -> String {
+    format!(
+        "{}  {}  {}  {}  {}:{}  in {}",
+        kebab(&format!("{:?}", c.confidence)),
+        kebab(&format!("{:?}", c.class)),
+        c.symbol.kind,
+        c.symbol.name,
+        c.symbol.path,
+        c.symbol.span.start_line,
+        c.incoming
+    )
+}
+
+/// `WeaklyReached` as `weakly-reached`.
+fn kebab(s: &str) -> String {
+    let mut out = String::new();
+    for (i, c) in s.chars().enumerate() {
+        if c.is_uppercase() && i > 0 {
+            out.push('-');
+        }
+        out.extend(c.to_lowercase());
+    }
+    out
+}
+
+pub const DEAD_CODE: Shape<DeadCodeReport> = Shape {
+    header: dead_header,
+    line: dead_line,
+    footer: no_lines,
+    fails: never,
+};
+
+/// With `--check`, any listed candidate fails the command.
+pub const DEAD_CODE_CHECK: Shape<DeadCodeReport> = Shape {
+    header: dead_header,
+    line: dead_line,
+    footer: no_lines,
+    fails: |r| !r.items.is_empty(),
+};
+
+pub const RATIONALE: Shape<RationaleReport> = Shape {
+    header: no_lines,
+    line: |e: &RationaleEntry| {
+        format!(
+            "{}  {}  {}:{}  {}",
+            e.kind, e.node.name, e.node.path, e.line, e.text
+        )
+    },
+    footer: |r| {
+        r.uncovered
+            .iter()
+            .map(|h| format!("no rationale: {}", h.name))
+            .collect()
+    },
+    fails: never,
+};
+
+/// Render an insight report as text or a JSON envelope. The budget trims whole `items`; the
+/// summary stays and the envelope records the truncation.
+pub fn insight<R>(cli: &Cli, reply: Reply<R>, command: &str, shape: &Shape<R>) -> ExitCode
+where
+    R: Itemized + Serialize + HintSource,
+{
+    let code = exit_for(&reply);
+    match reply.outcome {
+        Outcome::Found(mut r) => {
+            note_stale(&reply.report);
+            let failing = (shape.fails)(&r);
+            let next = hints(command, &r);
+            let lines: Vec<String> = r.items_mut().iter().map(|i| (shape.line)(i)).collect();
+            if cli.json {
+                let mut truncated = None;
+                if let Some(b) = cli.budget {
+                    let json: Vec<String> = r
+                        .items_mut()
+                        .iter()
+                        .map(|i| serde_json::to_string(i).expect("serialise result"))
+                        .collect();
+                    let fit = budget::fit_budget(&json, b);
+                    if fit.omitted > 0 {
+                        truncated = Some(Truncation {
+                            shown: fit.kept as u64,
+                            omitted: fit.omitted as u64,
+                            budget: b,
+                        });
+                        r.items_mut().truncate(fit.kept);
+                    }
+                }
+                let e = envelope(&reply.report, truncated, r, next);
+                println!("{}", serde_json::to_string(&e).expect("serialise envelope"));
+            } else {
+                for l in (shape.header)(&r) {
+                    println!("{l}");
+                }
+                print_lines(cli, lines);
+                for l in (shape.footer)(&r) {
+                    println!("{l}");
+                }
+                print_next(&next);
+            }
+            if code == ExitCode::Ok && failing {
+                return ExitCode::Error;
+            }
+        }
+        other => other_outcomes(cli, &reply.report, other),
+    }
+    code
 }

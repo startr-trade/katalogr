@@ -17,6 +17,7 @@ katalogr-engine = { path = "crates/katalogr-engine", version = "0.1.0" }
 katalogr-ext-rust = { path = "crates/katalogr-ext-rust", version = "0.1.0" }
 katalogr-ext-wasm = { path = "crates/katalogr-ext-wasm", version = "0.1.0" }
 katalogr-query = { path = "crates/katalogr-query", version = "0.1.0" }
+katalogr-analytics = { path = "crates/katalogr-analytics", version = "0.1.0" }
 katalogr-dist = { path = "crates/katalogr-dist", version = "0.1.0" }
 katalogr-ext-ts = { path = "crates/katalogr-ext-ts", version = "0.1.0" }
 katalogr-ext-sql = { path = "crates/katalogr-ext-sql", version = "0.1.0" }

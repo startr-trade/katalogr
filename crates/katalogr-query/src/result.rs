@@ -84,6 +84,15 @@ pub struct CommitHit {
     pub items: Vec<String>,
 }
 
+/// A rationale marker (`NOTE:`, `WHY:`, `RATIONALE:`) recorded on the symbol.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
+pub struct Note {
+    /// `NOTE`, `WHY` or `RATIONALE`.
+    pub marker: String,
+    pub line: u32,
+    pub text: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
 pub struct WhyResult {
     pub symbol: SymbolHit,
@@ -94,6 +103,9 @@ pub struct WhyResult {
     pub commits: Vec<CommitHit>,
     /// Why part of the answer is missing, for example that blame was unavailable.
     pub note: Option<String>,
+    /// The comment markers recorded on the symbol, in line order.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub notes: Vec<Note>,
 }
 
 /// A reference that names something no artifact exports.

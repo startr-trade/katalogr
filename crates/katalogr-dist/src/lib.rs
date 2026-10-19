@@ -17,6 +17,7 @@ pub use claude::{
     user_skill_path,
 };
 pub use error::DistError;
+pub use katalogr_analytics as analytics;
 pub use katalogr_query as query;
 use katalogr_query::{
     Blame, CallerHit, DanglingRef, Explain, MapEntry, MirrorDrift, PathStep, RefHit, Resolution,
@@ -26,18 +27,64 @@ pub use katalogr_query::{ReplaceResult, ShowResult};
 pub use setup::{ProjectCreated, kindex_init, project_init};
 
 use camino::{Utf8Path, Utf8PathBuf};
+use katalogr_analytics::{
+    CommunityOptions, CommunityReport, CycleOptions, CycleReport, DEFAULT_SEED, DeadCodeOptions,
+    DeadCodeReport, HubOptions, HubReport, RationaleReport, RationaleScope, STRUCTURAL_KINDS,
+};
 use katalogr_engine::history::{HISTORY_PREFIX, HistoryOptions, blame_commit, history_shas};
 use katalogr_engine::scan::{PathChange, changed_paths};
 use katalogr_engine::{
     Consistency as EngineConsistency, Engine, EventKind, NewEvent, QueryOptions, Scope,
     registry::ExtensionRegistry,
 };
-use katalogr_model::RelPath;
+use katalogr_model::{Name, RelPath};
 use katalogr_store::marker::{self, Overrides as StoreOverrides};
 use katalogr_store::{Kindex, ProjectDir, ProjectName, ReadTx, StoreError};
 use std::collections::BTreeMap;
 use std::path::Path;
 use std::time::{Duration, Instant};
+
+/// Every `--json` schema: the query schemas merged with the analytics schemas.
+///
+/// Panics if a command name occurs in both (a programming error caught by `query::schemas_current`).
+pub fn schemas() -> BTreeMap<&'static str, serde_json::Value> {
+    let mut all = katalogr_query::schemas();
+    for (name, schema) in katalogr_analytics::schemas() {
+        assert!(
+            all.insert(name, schema).is_none(),
+            "schema name {name} is registered twice"
+        );
+    }
+    all
+}
+
+/// The project settings that tune the insights (`insights.*`), with their defaults.
+#[derive(Debug, Clone, PartialEq)]
+pub struct InsightSettings {
+    /// `insights.hub_min_degree`: smallest weighted degree of a hub.
+    pub hub_min_degree: f64,
+    /// `insights.seed`: seed of the community search.
+    pub seed: u64,
+    /// `insights.resolution`: modularity resolution.
+    pub resolution: f64,
+    /// `insights.community_min_size`: smallest community reported.
+    pub community_min_size: usize,
+    /// `insights.exclude_kinds`: link kinds that are not usage.
+    pub exclude_kinds: Vec<String>,
+}
+
+impl Default for InsightSettings {
+    fn default() -> Self {
+        InsightSettings {
+            // Calibrated on katalogr's own index: at 15 about 1.7% of symbols are hubs.
+            hub_min_degree: 15.0,
+            seed: DEFAULT_SEED,
+            resolution: 1.0,
+            community_min_size: 3,
+            exclude_kinds: STRUCTURAL_KINDS.iter().map(|k| k.to_string()).collect(),
+        }
+    }
+}
 
 /// Seconds to wait for a fresh index when `--timeout` is not given (provisional).
 pub const DEFAULT_TIMEOUT_SECS: f64 = 30.0;
@@ -569,6 +616,128 @@ impl Katalogr {
     ) -> Result<Reply<Explain>, DistError> {
         self.query(opts, |tx| {
             on_target(tx, text, |t| katalogr_query::explain(tx, t, per_side))
+        })
+    }
+
+    /// The insight defaults from the project settings (`insights.*`); a missing or malformed
+    /// value keeps its default.
+    pub fn insight_settings(&self) -> InsightSettings {
+        let settings = &self.project.config().settings;
+        let d = InsightSettings::default();
+        InsightSettings {
+            hub_min_degree: settings
+                .get("insights.hub_min_degree")
+                .and_then(|v| v.as_f64())
+                .unwrap_or(d.hub_min_degree),
+            seed: settings
+                .get("insights.seed")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(d.seed),
+            resolution: settings
+                .get("insights.resolution")
+                .and_then(|v| v.as_f64())
+                .unwrap_or(d.resolution),
+            community_min_size: settings
+                .get("insights.community_min_size")
+                .and_then(|v| v.as_u64())
+                .map_or(d.community_min_size, |n| n as usize),
+            exclude_kinds: settings
+                .get("insights.exclude_kinds")
+                .and_then(|v| v.as_sequence())
+                .map(|seq| {
+                    seq.iter()
+                        .filter_map(|x| x.as_str().map(str::to_string))
+                        .collect()
+                })
+                .unwrap_or(d.exclude_kinds),
+        }
+    }
+
+    /// Hubs: the nodes with the highest weighted degree.
+    pub fn hubs(&self, opts: &HubOptions, o: &Options) -> Result<Reply<HubReport>, DistError> {
+        self.query(o, |tx| {
+            Ok(Outcome::Found(katalogr_analytics::hubs(tx, opts)?))
+        })
+    }
+
+    /// Communities of the usage graph.
+    pub fn communities(
+        &self,
+        opts: &CommunityOptions,
+        o: &Options,
+    ) -> Result<Reply<CommunityReport>, DistError> {
+        self.query(o, |tx| {
+            Ok(Outcome::Found(katalogr_analytics::communities(tx, opts)?))
+        })
+    }
+
+    /// Dependency cycles.
+    pub fn cycles(
+        &self,
+        opts: &CycleOptions,
+        o: &Options,
+    ) -> Result<Reply<CycleReport>, DistError> {
+        self.query(o, |tx| {
+            Ok(Outcome::Found(katalogr_analytics::cycles(tx, opts)?))
+        })
+    }
+
+    /// Dead-code candidates. Fills `opts.code_kinds` from the registered extensions first.
+    pub fn dead_code(
+        &self,
+        mut opts: DeadCodeOptions,
+        o: &Options,
+    ) -> Result<Reply<DeadCodeReport>, DistError> {
+        opts.code_kinds = build_registry()
+            .extractors()
+            .map(|e| {
+                (
+                    e.id().to_string(),
+                    e.code_kinds().iter().map(|k| k.to_string()).collect(),
+                )
+            })
+            .filter(|(_, kinds): &(String, std::collections::BTreeSet<String>)| !kinds.is_empty())
+            .collect();
+        self.query(o, |tx| {
+            Ok(Outcome::Found(katalogr_analytics::dead_code(tx, &opts)?))
+        })
+    }
+
+    /// Rationale of one symbol, a path prefix, the top `hubs` hubs, or (none given) everything.
+    /// `symbol` is resolved like `explain`.
+    pub fn rationale(
+        &self,
+        symbol: Option<&str>,
+        path: Option<&str>,
+        hubs: Option<usize>,
+        limit: usize,
+        o: &Options,
+    ) -> Result<Reply<RationaleReport>, DistError> {
+        let given = [symbol.is_some(), path.is_some(), hubs.is_some()];
+        if given.iter().filter(|g| **g).count() > 1 {
+            return Err(DistError::usage(
+                "give one of SYMBOL, --path and --hubs".to_string(),
+            ));
+        }
+        self.query(o, |tx| {
+            let scope = if let Some(text) = symbol {
+                match katalogr_query::resolve(tx, text)? {
+                    Resolution::One(h) => match katalogr_model::parse_name(&h.name) {
+                        Ok(name) => RationaleScope::Symbol(name.id()),
+                        Err(e) => return Ok(Outcome::NoMatch(e.to_string())),
+                    },
+                    other => return Ok(unresolved(other, text)),
+                }
+            } else if let Some(prefix) = path {
+                RationaleScope::Path(prefix.to_string())
+            } else if let Some(n) = hubs {
+                RationaleScope::Hubs(n)
+            } else {
+                RationaleScope::All
+            };
+            Ok(Outcome::Found(katalogr_analytics::rationale(
+                tx, &scope, limit,
+            )?))
         })
     }
 

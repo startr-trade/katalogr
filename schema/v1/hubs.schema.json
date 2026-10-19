@@ -1,0 +1,201 @@
+{
+  "$defs": {
+    "HubEntry": {
+      "properties": {
+        "degree": {
+          "description": "In plus out, 2 decimal places.",
+          "format": "double",
+          "type": "number"
+        },
+        "in_degree": {
+          "description": "Weighted in-degree, 2 decimal places.",
+          "format": "double",
+          "type": "number"
+        },
+        "members": {
+          "description": "Symbols in the node (1 at symbol level).",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "node": {
+          "$ref": "#/$defs/NodeHit"
+        },
+        "out_degree": {
+          "description": "Weighted out-degree, 2 decimal places.",
+          "format": "double",
+          "type": "number"
+        },
+        "rank": {
+          "description": "PageRank score (summed over the symbols of a file or package), 6 decimal places.",
+          "format": "double",
+          "type": "number"
+        },
+        "z": {
+          "description": "Degree z-score over the nodes that have links, 2 decimal places.",
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "node",
+        "in_degree",
+        "out_degree",
+        "degree",
+        "z",
+        "rank",
+        "members"
+      ],
+      "type": "object"
+    },
+    "HubReport": {
+      "properties": {
+        "items": {
+          "items": {
+            "$ref": "#/$defs/HubEntry"
+          },
+          "type": "array"
+        },
+        "level": {
+          "$ref": "#/$defs/Level"
+        },
+        "mean_degree": {
+          "format": "double",
+          "type": "number"
+        },
+        "nodes": {
+          "description": "Nodes of the graph at this level.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "level",
+        "nodes",
+        "mean_degree",
+        "items"
+      ],
+      "type": "object"
+    },
+    "Level": {
+      "description": "The granularity at which nodes are grouped.",
+      "enum": [
+        "symbol",
+        "file",
+        "package"
+      ],
+      "type": "string"
+    },
+    "NodeHit": {
+      "description": "A node of the insight graph at some [`Level`].\n\nSymbol: canonical name, symbol kind, path, start line. File: artifact canonical name,\n`artifact`, path, no line. Package: the package fact value, `package`, the longest common\ndirectory of its files when they share a repository (else none), no line.",
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "level": {
+          "$ref": "#/$defs/Level"
+        },
+        "line": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "name": {
+          "type": "string"
+        },
+        "path": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "level",
+        "name",
+        "kind"
+      ],
+      "type": "object"
+    },
+    "Truncation": {
+      "properties": {
+        "budget": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "omitted": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "shown": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "shown",
+        "omitted",
+        "budget"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "What `--json` prints.",
+  "properties": {
+    "next": {
+      "description": "Suggested follow-up commands, at most three.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "pending": {
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "result": {
+      "$ref": "#/$defs/HubReport"
+    },
+    "schema": {
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "stale": {
+      "type": "boolean"
+    },
+    "truncated": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Truncation"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "watermark": {
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "schema",
+    "watermark",
+    "pending",
+    "stale",
+    "result"
+  ],
+  "title": "Envelope",
+  "type": "object"
+}

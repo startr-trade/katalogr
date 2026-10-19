@@ -10,6 +10,8 @@ pub mod items;
 pub mod lines;
 pub mod literals;
 pub mod modules;
+pub mod rationale;
+pub mod roots;
 pub(crate) mod wasm;
 
 pub use context::{TsContext, TsProject};
@@ -68,14 +70,22 @@ impl Extractor for TsExtractor {
             "wasm-import",
             "wasm-glue",
             "embedded-literals",
+            "entry-root",
+            "rationale-comment",
+            "package-fact",
         ]
+    }
+
+    fn code_kinds(&self) -> &'static [&'static str] {
+        roots::CODE_KINDS
     }
 
     /// Bumped when extraction output changes for unchanged input: `1` adds the wasm package
     /// bindings (FEAT-016); `2` offers string literals to guest
-    /// extensions (FEAT-017).
+    /// extensions (FEAT-017); `3` adds the `root`, `package` and `rationale`
+    /// facts (FEAT-030).
     fn revision_salt(&self) -> &'static str {
-        "ts-extract-2"
+        "ts-extract-3"
     }
 
     /// The [`TsContext`] as compact JSON with sorted keys and vectors.

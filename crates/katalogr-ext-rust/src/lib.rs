@@ -11,6 +11,8 @@ pub mod lines;
 pub mod literals;
 pub mod manifest;
 pub mod ownership;
+pub mod rationale;
+pub mod roots;
 
 pub use context::{CrateInfo, Dep, Target, TargetKind, WorkspaceContext};
 
@@ -48,14 +50,22 @@ impl Extractor for RustExtractor {
             "wasm-export",
             "wasm-extern",
             "embedded-literals",
+            "entry-root",
+            "rationale-comment",
+            "package-fact",
         ]
+    }
+
+    fn code_kinds(&self) -> &'static [&'static str] {
+        roots::CODE_KINDS
     }
 
     /// Bumped when extraction output changes for unchanged input: `1` adds extern-block items
     /// and the wasm-bindgen bindings (FEAT-016); `2` offers string literals to guest
-    /// extensions (FEAT-017).
+    /// extensions (FEAT-017); `3` adds the `root`, `package` and `rationale`
+    /// facts (FEAT-030).
     fn revision_salt(&self) -> &'static str {
-        "rust-extract-2"
+        "rust-extract-3"
     }
 
     /// The [`WorkspaceContext`] as compact JSON with sorted keys and vectors.

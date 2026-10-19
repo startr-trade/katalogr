@@ -322,4 +322,117 @@ mod ts {
                 .all(|a| a["facts"].get("parse_errors").is_none())
         );
     }
+
+    fn root(g: &Graph, name: &str) -> Option<String> {
+        g.nodes[&format!("fx:{name}")]["facts"]["root"]["Str"]
+            .as_str()
+            .map(str::to_string)
+    }
+
+    #[test]
+    fn entry_roots_marked() {
+        let g = check("insight-roots");
+        let r = |n: &str| root(&g, n);
+        // Exported symbols are the API; private ones are not roots.
+        assert_eq!(r("src/index.ts#fn:start").as_deref(), Some("api"));
+        assert_eq!(r("src/util.ts#fn:used").as_deref(), Some("api"));
+        assert_eq!(r("src/util.ts#const:arrow").as_deref(), Some("api"));
+        assert_eq!(r("src/util.ts#fn:hidden"), None);
+        assert_eq!(r("src/shapes.ts#interface:Shape"), None);
+        // Test files: every symbol, whether exported or not; and the file itself.
+        assert_eq!(r("src/util.test.ts#fn:check").as_deref(), Some("test"));
+        assert_eq!(r("test/helpers.ts#fn:help").as_deref(), Some("test"));
+        let art = |p: &str| {
+            g.artifacts[&format!("fx:{p}")]["facts"]["root"]["Str"]
+                .as_str()
+                .map(str::to_string)
+        };
+        assert_eq!(art("src/util.test.ts").as_deref(), Some("test"));
+        // The package entry file is an API root; other files are not roots.
+        assert_eq!(art("src/index.ts").as_deref(), Some("api"));
+        assert_eq!(art("src/util.ts"), None);
+        // A method of a class that implements or extends something is reached through dispatch.
+        assert_eq!(r("src/shapes.ts#class:Circle").as_deref(), Some("api"));
+        assert_eq!(
+            r("src/shapes.ts#class:Circle/method:area").as_deref(),
+            Some("impl")
+        );
+        assert_eq!(
+            r("src/shapes.ts#class:Child/method:run").as_deref(),
+            Some("impl")
+        );
+        assert_eq!(r("src/shapes.ts#class:Base/method:run"), None);
+        assert_eq!(r("src/shapes.ts#class:Child"), None);
+    }
+
+    #[test]
+    fn rationale_markers_recorded() {
+        let g = check("rationale");
+        let entries = |v: &Value| -> Vec<(String, u64, String)> {
+            v["List"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|e| {
+                    let m = &e["Map"];
+                    (
+                        m["marker"]["Str"].as_str().unwrap().to_string(),
+                        m["line"]["Int"].as_u64().unwrap(),
+                        m["text"]["Str"].as_str().unwrap().to_string(),
+                    )
+                })
+                .collect()
+        };
+        let t = |m: &str, l: u64, x: &str| (m.to_string(), l, x.to_string());
+        let node = |n: &str| &g.nodes[&format!("fx:src/notes.ts#{n}")]["facts"]["rationale"];
+        // A comment before a symbol belongs to it, and so does one inside its body.
+        assert_eq!(
+            entries(node("fn:leading")),
+            [
+                t(
+                    "WHY",
+                    1,
+                    "a leading comment explains why the function exists."
+                ),
+                t(
+                    "NOTE",
+                    3,
+                    "a body comment belongs to the function that holds it."
+                ),
+            ]
+        );
+        // A block comment is one comment.
+        assert_eq!(
+            entries(node("fn:documented")),
+            [t("NOTE", 8, "a block comment continues over two lines.")]
+        );
+        // Prose is no marker.
+        assert!(node("fn:plain").is_null());
+        // A comment with nothing after it belongs to the file.
+        let file = &g.artifacts["fx:src/notes.ts"]["facts"]["rationale"];
+        assert_eq!(
+            entries(file),
+            [t(
+                "RATIONALE",
+                16,
+                "nothing follows, so this one belongs to the file."
+            )]
+        );
+    }
+
+    #[test]
+    fn package_fact_recorded() {
+        let g = check("package-imports");
+        let package = |p: &str| {
+            g.artifacts[&format!("fx:{p}")]["facts"]["package"]["Str"]
+                .as_str()
+                .map(str::to_string)
+        };
+        // The innermost project that holds the file names its package.
+        assert_eq!(
+            package("packages/util/src/main.ts").as_deref(),
+            Some("@fx/util")
+        );
+        assert_eq!(package("app.ts").as_deref(), Some("fx-root"));
+    }
 }

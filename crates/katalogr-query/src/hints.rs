@@ -86,7 +86,9 @@ pub fn hints(command: &str, result: &impl HintSource) -> Vec<String> {
         return Vec::new();
     };
     let next: &[&str] = match command {
-        "find" | "search" | "map" | "why" => &["explain", "show", "refs"],
+        "find" | "search" | "map" | "why" | "hubs" | "communities" | "rationale" => {
+            &["explain", "show", "refs"]
+        }
         "refs" | "callers" => &["explain", "show"],
         "explain" => &["show", "refs", "callers"],
         "show" => &["explain", "refs", "callers"],
