@@ -1,10 +1,14 @@
 {
   "$defs": {
     "Matched": {
-      "description": "One term that matched, and the field it matched in (`name`, `doc`, `section`, `contract`).",
+      "description": "One query term that matched, and the field it matched in (`name`, `doc`, `section`,\n`contract`).",
       "properties": {
         "field": {
           "type": "string"
+        },
+        "prefix": {
+          "description": "The match is through an indexed term that `term` prefixes, not the term itself.",
+          "type": "boolean"
         },
         "term": {
           "type": "string"
@@ -12,7 +16,8 @@
       },
       "required": [
         "term",
-        "field"
+        "field",
+        "prefix"
       ],
       "type": "object"
     },

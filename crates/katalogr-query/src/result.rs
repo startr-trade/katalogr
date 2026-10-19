@@ -112,11 +112,14 @@ pub struct MapEntry {
     pub rank: f64,
 }
 
-/// One term that matched, and the field it matched in (`name`, `doc`, `section`, `contract`).
+/// One query term that matched, and the field it matched in (`name`, `doc`, `section`,
+/// `contract`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
 pub struct Matched {
     pub term: String,
     pub field: String,
+    /// The match is through an indexed term that `term` prefixes, not the term itself.
+    pub prefix: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]

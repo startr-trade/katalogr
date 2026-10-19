@@ -590,6 +590,42 @@ pub trait Reader {
             .collect()
     }
 
+    /// The postings of the indexed terms that `prefix` strictly prefixes (the exact term
+    /// `prefix` is excluded; use [`Reader::postings`] for it), at most `limit` terms: those with
+    /// the highest total term frequency first, ties by term. Each term's postings are sorted by
+    /// `(field, symbol)`; the returned terms are in that selection order.
+    fn postings_prefix(
+        &self,
+        prefix: &str,
+        limit: usize,
+    ) -> Result<Vec<(String, Vec<Posting>)>, StoreError> {
+        let bad = || StoreError::Row("malformed posting".into());
+        let mut by_term: BTreeMap<String, (u64, Vec<Posting>)> = BTreeMap::new();
+        for (k, v) in self.raw_scan(TableId::Postings, prefix.as_bytes())? {
+            let nul = k.iter().position(|b| *b == 0).ok_or_else(bad)?;
+            let rest = &k[nul + 1..];
+            if rest.len() != 17 {
+                return Err(bad());
+            }
+            if nul == prefix.len() {
+                continue;
+            }
+            let term = String::from_utf8(k[..nul].to_vec()).map_err(|_| bad())?;
+            let tf = u32::from_le_bytes(v.as_slice().try_into().map_err(|_| bad())?);
+            let entry = by_term.entry(term).or_default();
+            entry.0 += u64::from(tf);
+            entry.1.push(Posting {
+                field: rest[0],
+                symbol: Id(rest[1..].try_into().map_err(|_| bad())?),
+                tf,
+            });
+        }
+        let mut terms: Vec<(String, (u64, Vec<Posting>))> = by_term.into_iter().collect();
+        terms.sort_by(|a, b| b.1.0.cmp(&a.1.0).then_with(|| a.0.cmp(&b.0)));
+        terms.truncate(limit);
+        Ok(terms.into_iter().map(|(t, (_, p))| (t, p)).collect())
+    }
+
     /// Per-field token counts of one indexed symbol.
     fn doc_len(&self, id: Id) -> Result<Option<[u32; LEXICON_FIELDS]>, StoreError> {
         self.raw_get(TableId::DocLen, &id.0)?

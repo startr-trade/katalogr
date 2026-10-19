@@ -793,6 +793,69 @@ mod retrieval {
     }
 
     #[test]
+    fn prefix_terms_match() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (_kx, repo) = setup(tmp.path());
+        std::fs::write(repo.join("s.tx"), "sym fn Stitcher\nsym fn unrelated\n").unwrap();
+        ok(&repo, &["index"]);
+        let (code, out, _) = run(&repo, &["search", "stitc"]);
+        assert_eq!(code, 0, "{out}");
+        assert_eq!(out.lines().count(), 1, "{out}");
+        assert!(out.contains("app:s.tx#fn:Stitcher"), "{out}");
+        // Below three characters there is no expansion.
+        let (code, _, _) = run(&repo, &["search", "st"]);
+        assert_eq!(code, 4);
+        // The expansion is capped at the 50 most frequent terms, in a stable order.
+        let mut src = String::new();
+        for i in 0..60u8 {
+            let (a, b) = (char::from(b'a' + i / 26), char::from(b'a' + i % 26));
+            src.push_str(&format!("sym fn man{a}{b}\n"));
+        }
+        std::fs::write(repo.join("many.tx"), src).unwrap();
+        ok(&repo, &["index"]);
+        let (_, a, _) = run(&repo, &["search", "man", "--limit", "100"]);
+        let (_, b, _) = run(&repo, &["search", "man", "--limit", "100"]);
+        assert_eq!(a.lines().count(), 50, "{a}");
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn exact_beats_prefix() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (_kx, repo) = setup(tmp.path());
+        // Same field, same term frequency and length; `rates` only matches `rate` as a prefix.
+        std::fs::write(repo.join("r.tx"), "sym fn rates\nsym fn rate\n").unwrap();
+        ok(&repo, &["index"]);
+        let v = json(&repo, &["search", "rate"]);
+        let hits = v["result"].as_array().unwrap();
+        assert_eq!(hits.len(), 2, "{v}");
+        assert_eq!(hits[0]["symbol"]["name"], "app:r.tx#fn:rate");
+        assert_eq!(hits[1]["symbol"]["name"], "app:r.tx#fn:rates");
+        let (exact, prefix) = (
+            hits[0]["score"].as_f64().unwrap(),
+            hits[1]["score"].as_f64().unwrap(),
+        );
+        assert!((prefix - 0.5 * exact).abs() < 1e-5, "{exact} {prefix}");
+    }
+
+    #[test]
+    fn prefix_marked_in_explanation() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (_kx, repo) = setup(tmp.path());
+        std::fs::write(repo.join("r.tx"), "sym fn rates\nsym fn rate\n").unwrap();
+        ok(&repo, &["index"]);
+        let v = json(&repo, &["search", "rate"]);
+        let hits = v["result"].as_array().unwrap();
+        assert_eq!(hits[0]["matched"][0]["prefix"], false, "{v}");
+        assert_eq!(hits[1]["matched"][0]["prefix"], true, "{v}");
+        assert_eq!(hits[1]["matched"][0]["term"], "rate");
+        let (_, out, _) = run(&repo, &["search", "rate"]);
+        let lines: Vec<&str> = out.lines().collect();
+        assert!(lines[0].ends_with("[rate@name]"), "{out}");
+        assert!(lines[1].ends_with("[rate*@name]"), "{out}");
+    }
+
+    #[test]
     fn hit_explains_match() {
         let tmp = tempfile::tempdir().unwrap();
         let repo = project_with_rust(tmp.path());
