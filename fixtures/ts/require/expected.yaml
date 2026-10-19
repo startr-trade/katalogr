@@ -1,0 +1,35 @@
+mode: exact
+symbols:
+- fx:late.js#const:late
+- fx:m.js#fn:f
+- fx:m.js#fn:g
+- fx:main.js#fn:go
+links:
+- from: fx:main.js
+  kind: imports
+  to: fx:late.js
+  confidence: Extracted
+- from: fx:main.js
+  kind: imports
+  to: fx:m.js
+  confidence: Extracted
+- from: fx:main.js
+  kind: imports
+  to: fx:m.js#fn:f
+  confidence: Extracted
+- from: fx:main.js
+  kind: imports
+  to: fx:m.js#fn:g
+  confidence: Extracted
+- from: fx:main.js
+  kind: imports
+  to: fx:side.js
+  confidence: Extracted
+- from: fx:main.js#fn:go
+  kind: calls
+  to: fx:m.js#fn:f
+  confidence: Extracted
+- from: fx:main.js#fn:go
+  kind: calls
+  to: fx:m.js#fn:g
+  confidence: Extracted

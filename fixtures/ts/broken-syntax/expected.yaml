@@ -1,0 +1,12 @@
+mode: exact
+symbols:
+- fx:broken.ts#class:Half
+- fx:broken.ts#class:Half/method:run
+- fx:broken.ts#fn:after
+- fx:broken.ts#fn:before
+- fx:ok.ts#fn:fine
+links:
+- from: fx:broken.ts#class:Half
+  kind: contains
+  to: fx:broken.ts#class:Half/method:run
+  confidence: Extracted

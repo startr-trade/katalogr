@@ -1,0 +1,38 @@
+mode: exact
+symbols:
+- fx:src/app/thing.ts#fn:thing
+- fx:src/shared/helper.ts#fn:helper
+- fx:src/utils/index.ts#fn:util
+links:
+- from: fx:packages/web/src/page.ts
+  kind: imports
+  to: fx:src/utils/index.ts
+  confidence: Extracted
+- from: fx:packages/web/src/page.ts
+  kind: imports
+  to: fx:src/utils/index.ts#fn:util
+  confidence: Extracted
+- from: fx:src/main.ts
+  kind: imports
+  to: fx:src/app/thing.ts
+  confidence: Extracted
+- from: fx:src/main.ts
+  kind: imports
+  to: fx:src/app/thing.ts#fn:thing
+  confidence: Extracted
+- from: fx:src/main.ts
+  kind: imports
+  to: fx:src/shared/helper.ts
+  confidence: Extracted
+- from: fx:src/main.ts
+  kind: imports
+  to: fx:src/shared/helper.ts#fn:helper
+  confidence: Extracted
+- from: fx:src/main.ts
+  kind: imports
+  to: fx:src/utils/index.ts
+  confidence: Extracted
+- from: fx:src/main.ts
+  kind: imports
+  to: fx:src/utils/index.ts#fn:util
+  confidence: Extracted

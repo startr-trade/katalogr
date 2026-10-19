@@ -1,0 +1,61 @@
+mode: exact
+symbols:
+- fx:impl.ts#fn:a
+- fx:impl.ts#fn:b
+- fx:impl.ts#fn:d
+- fx:index.ts#fn:local
+- fx:index.ts#reexport:*
+- fx:index.ts#reexport:a
+- fx:index.ts#reexport:c
+- fx:index.ts#reexport:d
+- fx:index.ts#reexport:ns
+- fx:more.ts#fn:m
+links:
+- from: fx:consumer.ts
+  kind: calls
+  to: fx:index.ts#fn:local
+  confidence: Extracted
+- from: fx:consumer.ts
+  kind: calls
+  to: fx:index.ts#reexport:c
+  confidence: Extracted
+- from: fx:consumer.ts
+  kind: imports
+  to: fx:index.ts
+  confidence: Extracted
+- from: fx:consumer.ts
+  kind: imports
+  to: fx:index.ts#fn:local
+  confidence: Extracted
+- from: fx:consumer.ts
+  kind: imports
+  to: fx:index.ts#reexport:c
+  confidence: Extracted
+- from: fx:index.ts
+  kind: imports
+  to: fx:impl.ts
+  confidence: Extracted
+- from: fx:index.ts
+  kind: imports
+  to: fx:impl.ts#fn:d
+  confidence: Extracted
+- from: fx:index.ts#reexport:*
+  kind: reexports
+  to: fx:more.ts
+  confidence: Extracted
+- from: fx:index.ts#reexport:a
+  kind: reexports
+  to: fx:impl.ts#fn:a
+  confidence: Extracted
+- from: fx:index.ts#reexport:c
+  kind: reexports
+  to: fx:impl.ts#fn:b
+  confidence: Extracted
+- from: fx:index.ts#reexport:d
+  kind: reexports
+  to: fx:impl.ts#fn:d
+  confidence: Extracted
+- from: fx:index.ts#reexport:ns
+  kind: reexports
+  to: fx:more.ts
+  confidence: Extracted

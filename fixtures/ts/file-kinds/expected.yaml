@@ -1,0 +1,12 @@
+mode: exact
+symbols:
+- fx:k.cjs#fn:fcjs
+- fx:k.cts#fn:fcts
+- fx:k.d.ts#fn:fdts
+- fx:k.js#fn:fjs
+- fx:k.jsx#const:Cjsx
+- fx:k.mjs#fn:fmjs
+- fx:k.mts#fn:fmts
+- fx:k.ts#fn:fts
+- fx:k.tsx#const:Ctsx
+links: []
