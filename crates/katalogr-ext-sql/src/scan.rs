@@ -587,10 +587,7 @@ fn scan_into(text: &str, schema: &str, refs: &mut Refs, recurse: bool) {
                     "merge" => seen_merge = true,
                     "from" => {
                         let mut j = i + 1;
-                        loop {
-                            let Some((parts, mut next)) = table_at(j, false) else {
-                                break;
-                            };
+                        while let Some((parts, mut next)) = table_at(j, false) {
                             add_table(&parts, refs);
                             // optional [AS] alias
                             if kw(next, "as") {

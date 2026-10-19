@@ -450,8 +450,8 @@ impl<'a> Builder<'a> {
                 origin: None,
             })
             .collect();
-        bindings.sort_by_key(|b| (b.contract.canonical(), b.role, b.symbol));
-        symbols.sort_by_key(|s| s.name.canonical());
+        bindings.sort_by_cached_key(|b| (b.contract.canonical(), b.role, b.symbol));
+        symbols.sort_by_cached_key(|s| s.name.canonical());
         links.sort_by(|a, b| (a.from, &a.kind, a.to).cmp(&(b.from, &b.kind, b.to)));
 
         let (fdialect, fsource) = resolve(input.path.as_str(), ctx);

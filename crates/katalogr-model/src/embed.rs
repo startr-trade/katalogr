@@ -40,10 +40,12 @@ pub struct EmbeddedText {
 ///   - tagged template: the tag rendered as for a path or method call, with `arg` 0;
 ///   - generic arguments (`::<T>`, `<T>`) and comments are removed;
 ///   - at most `CALL_CALLEE_MAX` bytes, cut at a char boundary.
+///
 ///   This is the same callee rule as FEAT-014's `render_call` at depth 0, so guests and REST
 ///   profiles see one spelling.
 /// - `arg` is the zero-based position of the argument among the call's arguments; a method's
 ///   receiver is not counted; for a macro, top-level commas in its token tree are counted.
+///
 /// Guests may match `callee` text, but must treat it as untyped syntax: no host resolves names.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CallContext {

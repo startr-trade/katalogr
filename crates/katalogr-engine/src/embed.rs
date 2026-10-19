@@ -101,7 +101,7 @@ pub(crate) fn signature(registry: &ExtensionRegistry) -> Option<[u8; 32]> {
         h.update(id.as_bytes());
         h.update([0]);
         h.update(v.as_bytes());
-        h.update([b'\n']);
+        h.update(*b"\n");
     }
     Some(h.finalize().into())
 }
