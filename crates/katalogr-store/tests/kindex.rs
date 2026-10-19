@@ -343,4 +343,141 @@ mod kindex {
             Err(StoreError::NotConfigured)
         ));
     }
+
+    fn git(root: &Utf8Path, args: &[&str]) {
+        let out = std::process::Command::new("git")
+            .args([
+                "-c",
+                "user.name=t",
+                "-c",
+                "user.email=t@t",
+                "-c",
+                "commit.gpgsign=false",
+            ])
+            .args(args)
+            .current_dir(root)
+            .output()
+            .expect("run git");
+        assert!(
+            out.status.success(),
+            "{args:?}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+
+    fn frag(path: &str) -> Fragment {
+        let art = ArtifactName::new("r", path).unwrap();
+        Fragment {
+            provenance: prov(path),
+            extension: "ext".into(),
+            artifact: ArtifactNode {
+                name: art,
+                facts: BTreeMap::new(),
+            },
+            symbols: vec![],
+            links: vec![],
+            refs: vec![],
+            exports: vec![],
+            bindings: vec![],
+        }
+    }
+
+    fn key(path: &str) -> (String, RelPath) {
+        ("r".to_string(), RelPath::new(path).unwrap())
+    }
+
+    #[test]
+    fn git_state_variants() {
+        use katalogr_store::GitState;
+        let t = tempfile::tempdir().unwrap();
+        let r = root(&t);
+        let kx = Kindex::init(&r).unwrap();
+        let dir = kx
+            .create_project(
+                &pname("p"),
+                ProjectConfig {
+                    repos: vec![RepoConfig::new("r")],
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        for p in ["a.txt", "b.txt", "c.txt"] {
+            dir.write_shard(&frag(p)).unwrap();
+        }
+
+        // A repository with no commit.
+        assert_eq!(
+            dir.git_state().unwrap(),
+            GitState::NoCommits { shard_files: 3 }
+        );
+
+        // Clean.
+        git(&r, &["add", "-A"]);
+        git(&r, &["commit", "-m", "index"]);
+        match dir.git_state().unwrap() {
+            GitState::Repo {
+                head,
+                modified,
+                added,
+                deleted,
+            } => {
+                assert_eq!(head.len(), 40);
+                assert!(modified.is_empty() && added.is_empty() && deleted.is_empty());
+            }
+            other => panic!("{other:?}"),
+        }
+
+        // Dirty: one edited, one added, one removed.
+        let mut edited = frag("a.txt");
+        edited.extension = "other".into();
+        dir.write_shard(&edited).unwrap();
+        dir.write_shard(&frag("d.txt")).unwrap();
+        std::fs::remove_file(dir.shard_path("r", &RelPath::new("c.txt").unwrap())).unwrap();
+        match dir.git_state().unwrap() {
+            GitState::Repo {
+                modified,
+                added,
+                deleted,
+                ..
+            } => {
+                assert_eq!(modified, vec![key("a.txt")]);
+                assert_eq!(added, vec![key("d.txt")]);
+                assert_eq!(deleted, vec![key("c.txt")]);
+            }
+            other => panic!("{other:?}"),
+        }
+
+        // Not a repository.
+        std::fs::remove_dir_all(r.join(".git")).unwrap();
+        assert_eq!(dir.git_state().unwrap(), GitState::NotARepo);
+    }
+
+    #[test]
+    fn format_file_reads_without_version_check() {
+        let t = tempfile::tempdir().unwrap();
+        let r = root(&t);
+        let kx = Kindex::init(&r).unwrap();
+        kx.create_project(&pname("p"), ProjectConfig::default())
+            .unwrap();
+        assert_eq!(
+            kx.format_file(&pname("p")).unwrap().shard_format,
+            SHARD_FORMAT
+        );
+        std::fs::write(
+            r.join("projects/p/format.json"),
+            r#"{"min_katalogr":"9.9.9","shard_format":99}"#,
+        )
+        .unwrap();
+        assert!(matches!(
+            kx.project(&pname("p")),
+            Err(StoreError::FormatTooNew { .. })
+        ));
+        let f = kx.format_file(&pname("p")).unwrap();
+        assert_eq!((f.shard_format, f.min_katalogr.as_str()), (99, "9.9.9"));
+        std::fs::write(r.join("projects/p/format.json"), "{").unwrap();
+        assert!(matches!(
+            kx.format_file(&pname("p")),
+            Err(StoreError::Parse { .. })
+        ));
+    }
 }
