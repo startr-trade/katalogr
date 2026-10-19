@@ -1,0 +1,2 @@
+sym fn handle
+bind handle consumes channel:orders

@@ -85,14 +85,20 @@ pub struct ExpectedLink {
     pub to: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub confidence: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub produced_by: Option<String>,
 }
 
 impl ExpectedLink {
     fn describe(&self) -> String {
-        match &self.confidence {
-            Some(c) => format!("{} -{}-> {} [{c}]", self.from, self.kind, self.to),
-            None => format!("{} -{}-> {}", self.from, self.kind, self.to),
+        let mut out = format!("{} -{}-> {}", self.from, self.kind, self.to);
+        if let Some(c) = &self.confidence {
+            out.push_str(&format!(" [{c}]"));
         }
+        if let Some(p) = &self.produced_by {
+            out.push_str(&format!(" [produced_by={p}]"));
+        }
+        out
     }
 }
 
@@ -100,6 +106,7 @@ impl ExpectedLink {
 pub struct Expected {
     pub mode: MatchMode,
     pub symbols: BTreeSet<String>,
+    pub contracts: BTreeSet<String>,
     pub links: BTreeSet<ExpectedLink>,
 }
 
@@ -109,6 +116,8 @@ struct RawExpected {
     mode: MatchMode,
     #[serde(default)]
     symbols: Vec<String>,
+    #[serde(default)]
+    contracts: Vec<String>,
     #[serde(default)]
     links: Vec<ExpectedLink>,
 }
@@ -126,12 +135,19 @@ impl Expected {
         if !strictly_sorted(&raw.symbols) {
             return Err(AccError::format(path, "symbols are not sorted and unique"));
         }
+        if !strictly_sorted(&raw.contracts) {
+            return Err(AccError::format(
+                path,
+                "contracts are not sorted and unique",
+            ));
+        }
         if !strictly_sorted(&raw.links) {
             return Err(AccError::format(path, "links are not sorted and unique"));
         }
         Ok(Expected {
             mode: raw.mode,
             symbols: raw.symbols.into_iter().collect(),
+            contracts: raw.contracts.into_iter().collect(),
             links: raw.links.into_iter().collect(),
         })
     }
@@ -142,6 +158,8 @@ pub struct Report {
     pub case: String,
     pub missing_symbols: Vec<String>,
     pub unexpected_symbols: Vec<String>,
+    pub missing_contracts: Vec<String>,
+    pub unexpected_contracts: Vec<String>,
     pub missing_links: Vec<ExpectedLink>,
     pub unexpected_links: Vec<ExpectedLink>,
 }
@@ -150,6 +168,8 @@ impl Report {
     pub fn passed(&self) -> bool {
         self.missing_symbols.is_empty()
             && self.unexpected_symbols.is_empty()
+            && self.missing_contracts.is_empty()
+            && self.unexpected_contracts.is_empty()
             && self.missing_links.is_empty()
             && self.unexpected_links.is_empty()
     }
@@ -166,6 +186,12 @@ impl Report {
         }
         for s in &self.unexpected_symbols {
             out.push_str(&format!("  unexpected symbol: {s}\n"));
+        }
+        for s in &self.missing_contracts {
+            out.push_str(&format!("  missing contract: {s}\n"));
+        }
+        for s in &self.unexpected_contracts {
+            out.push_str(&format!("  unexpected contract: {s}\n"));
         }
         for l in &self.missing_links {
             out.push_str(&format!("  missing link: {}\n", l.describe()));
@@ -184,27 +210,41 @@ pub fn load_manifest(root: &Utf8Path) -> Result<Manifest, AccError> {
     serde_yaml_ng::from_str(&text).map_err(|e| AccError::format(&path, e.to_string()))
 }
 
-type Graph = (BTreeSet<String>, BTreeSet<ExpectedLink>);
+/// What a canonical graph holds, for comparison.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ParsedGraph {
+    pub symbols: BTreeSet<String>,
+    pub contracts: BTreeSet<String>,
+    pub links: BTreeSet<ExpectedLink>,
+}
 
-/// The symbols and links of a canonical graph export.
-pub fn parse_graph(graph: &str) -> Result<Graph, AccError> {
+/// The symbols, contracts and links of a canonical graph export.
+pub fn parse_graph(graph: &str) -> Result<ParsedGraph, AccError> {
     let mut symbols = BTreeSet::new();
+    let mut contracts = BTreeSet::new();
     let mut links = BTreeSet::new();
     for line in graph.lines() {
         let v: serde_json::Value = serde_json::from_str(line).map_err(AccError::run)?;
         let s = |k: &str| v[k].as_str().map(str::to_string);
         if v["node"] == "symbol" {
             symbols.extend(s("name"));
+        } else if v["node"] == "contract" {
+            contracts.extend(s("name"));
         } else if v["link"] == true {
             links.insert(ExpectedLink {
                 from: s("from").unwrap_or_default(),
                 kind: s("kind").unwrap_or_default(),
                 to: s("to").unwrap_or_default(),
                 confidence: s("confidence"),
+                produced_by: s("produced_by"),
             });
         }
     }
-    Ok((symbols, links))
+    Ok(ParsedGraph {
+        symbols,
+        contracts,
+        links,
+    })
 }
 
 fn matches(expected: &ExpectedLink, actual: &ExpectedLink) -> bool {
@@ -216,23 +256,38 @@ fn matches(expected: &ExpectedLink, actual: &ExpectedLink) -> bool {
             (Some(e), Some(a)) => e.eq_ignore_ascii_case(a),
             (Some(_), None) => false,
         }
+        && match (&expected.produced_by, &actual.produced_by) {
+            (None, _) => true,
+            (Some(e), Some(a)) => e == a,
+            (Some(_), None) => false,
+        }
 }
 
 /// Set differences on canonical strings (design section 6). An expected link without a
 /// confidence matches any confidence; confidences compare ignoring case (the Rust fixtures
-/// spell them in lower case).
-pub fn compare(
-    case: &str,
-    expected: &Expected,
-    symbols: &BTreeSet<String>,
-    links: &BTreeSet<ExpectedLink>,
-) -> Report {
+/// spell them in lower case). An expected link without `produced_by` matches any provenance.
+pub fn compare(case: &str, expected: &Expected, actual: &ParsedGraph) -> Report {
+    let (symbols, links) = (&actual.symbols, &actual.links);
     let exact = expected.mode == MatchMode::Exact;
     Report {
         case: case.to_string(),
         missing_symbols: expected.symbols.difference(symbols).cloned().collect(),
         unexpected_symbols: if exact {
             symbols.difference(&expected.symbols).cloned().collect()
+        } else {
+            Vec::new()
+        },
+        missing_contracts: expected
+            .contracts
+            .difference(&actual.contracts)
+            .cloned()
+            .collect(),
+        unexpected_contracts: if exact {
+            actual
+                .contracts
+                .difference(&expected.contracts)
+                .cloned()
+                .collect()
         } else {
             Vec::new()
         },
@@ -278,6 +333,7 @@ pub fn index_case(
             )
         })
         .map_err(AccError::run)?;
+    copy_case_profiles(&case_dir, &dir)?;
     let roots = BTreeMap::from([(REPO.to_string(), case_dir)]);
     let engine = Engine::open(
         dir,
@@ -308,6 +364,32 @@ pub fn index_case(
     Ok(answer.value)
 }
 
+/// Copy `<case>/_profiles/*.yaml` into the temporary project's profiles directory.
+fn copy_case_profiles(
+    case_dir: &Utf8Path,
+    dir: &katalogr_store::ProjectDir,
+) -> Result<(), AccError> {
+    let src = case_dir.join("_profiles");
+    if !src.is_dir() {
+        return Ok(());
+    }
+    let dest = dir.root().join(katalogr_engine::profiles::PROFILES_DIR);
+    std::fs::create_dir_all(&dest).map_err(|e| AccError::io(&dest, e))?;
+    for entry in std::fs::read_dir(&src).map_err(|e| AccError::io(&src, e))? {
+        let path = entry.map_err(|e| AccError::io(&src, e))?.path();
+        if path.extension().is_some_and(|x| x == "yaml") {
+            let target = dest.join(
+                path.file_name()
+                    .expect("file name")
+                    .to_string_lossy()
+                    .as_ref(),
+            );
+            std::fs::copy(&path, &target).map_err(|e| AccError::io(target, e))?;
+        }
+    }
+    Ok(())
+}
+
 /// Index the case, wait-all, export the canonical graph and compare it with `expected.yaml`.
 pub fn run_case(
     make_registry: &dyn Fn() -> ExtensionRegistry,
@@ -315,17 +397,16 @@ pub fn run_case(
 ) -> Result<Report, AccError> {
     let expected = Expected::load(&case_dir.join("expected.yaml"))?;
     let graph = index_case(make_registry, case_dir)?;
-    let (symbols, links) = parse_graph(&graph)?;
+    let actual = parse_graph(&graph)?;
     if std::env::var_os("KATALOGR_BLESS").is_some_and(|v| v == "1") {
-        bless(case_dir, expected.mode, &symbols, &links)?;
+        bless(case_dir, expected.mode, &actual)?;
         return Ok(compare(
             &label_of(case_dir),
             &Expected::load(&case_dir.join("expected.yaml"))?,
-            &symbols,
-            &links,
+            &actual,
         ));
     }
-    Ok(compare(&label_of(case_dir), &expected, &symbols, &links))
+    Ok(compare(&label_of(case_dir), &expected, &actual))
 }
 
 fn label_of(case_dir: &Utf8Path) -> String {
@@ -344,20 +425,18 @@ fn label_of(case_dir: &Utf8Path) -> String {
 struct OutExpected<'a> {
     mode: MatchMode,
     symbols: Vec<&'a String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    contracts: Vec<&'a String>,
     links: Vec<&'a ExpectedLink>,
 }
 
 /// Rewrite `expected.yaml` from the actual result; lists come out sorted (sets are ordered).
-fn bless(
-    case_dir: &Utf8Path,
-    mode: MatchMode,
-    symbols: &BTreeSet<String>,
-    links: &BTreeSet<ExpectedLink>,
-) -> Result<(), AccError> {
+fn bless(case_dir: &Utf8Path, mode: MatchMode, actual: &ParsedGraph) -> Result<(), AccError> {
     let out = OutExpected {
         mode,
-        symbols: symbols.iter().collect(),
-        links: links.iter().collect(),
+        symbols: actual.symbols.iter().collect(),
+        contracts: actual.contracts.iter().collect(),
+        links: actual.links.iter().collect(),
     };
     let path = case_dir.join("expected.yaml");
     let text =

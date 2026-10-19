@@ -1,0 +1,2 @@
+sym fn serve
+bind serve provides channel:orders

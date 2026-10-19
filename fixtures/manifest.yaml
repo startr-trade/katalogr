@@ -44,6 +44,10 @@ technologies:
     use-resolution:
       - rust/use-and-reexport
   test:
+    contracts:
+      - test/contracts-bind
+    profile-provenance:
+      - test/contracts-profile
     refs-ambiguous:
       - test/refs-ambiguous
     refs-resolve:

@@ -1,0 +1,15 @@
+profile: example
+version: 1
+rules:
+  - id: tag-handlers
+    when: { extension: test, kind: fn, name: '^handle_(.+)$' }
+    emit:
+      fact: { implementation: 'channel:$1' }
+  - id: bind-channel
+    when:
+      extension: test
+      kind: fn
+      fact: implementation
+      matches: '^channel:(.+)$'
+    emit:
+      bind: { contract: { kind: channel, key: '$1' }, role: consumes }

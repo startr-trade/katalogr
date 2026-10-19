@@ -97,4 +97,22 @@ mod fixtures {
         assert!(errs.iter().all(|e| !e.contains(term)));
         assert!(privacy::lint_file(&file, &BTreeSet::new()).is_ok());
     }
+
+    #[test]
+    fn all_cases_match() {
+        let fx = workspace().join("fixtures");
+        let manifest = load_manifest(&fx).unwrap();
+        let mut failed = Vec::new();
+        for case in manifest
+            .technologies
+            .values()
+            .flat_map(|p| p.values().flatten())
+        {
+            let report = katalogr_acceptance::run_case(&full_registry, &fx.join(case)).unwrap();
+            if !report.passed() {
+                failed.push(report.render());
+            }
+        }
+        assert!(failed.is_empty(), "{}", failed.join("\n"));
+    }
 }

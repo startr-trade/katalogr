@@ -1,0 +1,7 @@
+mode: exact
+symbols:
+  - "fx:a.tx#fn:serve"
+contracts:
+  - "contract:channel:other"
+links:
+  - { from: "fx:a.tx#fn:serve", kind: provides, to: "contract:channel:orders", confidence: Extracted }
