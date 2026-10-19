@@ -24,6 +24,8 @@ struct Graph {
     text: String,
     /// Index-error rows by repo-relative path (only paths that have rows).
     errors: BTreeMap<String, Vec<ErrorRow>>,
+    /// Symbol names in `map` order (rank descending).
+    map: Vec<(String, f64)>,
 }
 
 impl Graph {
@@ -125,19 +127,26 @@ fn index_case(case: &str) -> Graph {
                     errors.insert(path.as_str().to_string(), rows);
                 }
             }
-            (graph, errors)
+            let map: Vec<(String, f64)> = katalogr_query::map(tx)
+                .unwrap()
+                .into_iter()
+                .map(|e| (e.symbol.name, e.in_degree))
+                .collect();
+            (graph, errors, map)
         })
         .unwrap();
     assert!(!answer.stale, "queue drained");
-    let (text, errors) = answer.value;
+    let (text, errors, map) = answer.value;
     let mut g = parse_graph(text);
     g.errors = errors;
+    g.map = map;
     g
 }
 
 fn parse_graph(text: String) -> Graph {
     let mut g = Graph {
         errors: BTreeMap::new(),
+        map: Vec::new(),
         symbols: BTreeMap::new(),
         links: BTreeSet::new(),
         artifacts: BTreeMap::new(),
@@ -600,6 +609,42 @@ mod rust {
     }
 
     #[test]
+    fn std_names_not_inferred() {
+        let g = index_case("std-names");
+        assert_expected("std-names", &g);
+        for (from, kind, to, _) in &g.links {
+            if kind == "calls" {
+                for n in ["fn:path", "fn:find", "fn:read", "fn:write"] {
+                    assert!(!to.ends_with(n), "{from} -> {to}");
+                }
+            }
+        }
+        // A name off the list is still inferred.
+        assert!(g.has_link(
+            "src/lib.rs#fn:user_01",
+            "calls",
+            "src/lib.rs#impl:Repo/fn:publish",
+            "inferred"
+        ));
+    }
+
+    #[test]
+    fn map_top_not_std_collision() {
+        let g = index_case("std-names");
+        let top = &g.map.first().expect("map has entries").0;
+        assert!(top.ends_with("fn:score"), "top of map: {top}");
+        // The std-named workspace methods receive only the `contains` link of their impl (weight
+        // 1), no calls; ties sort by name, so they may still sit near the top.
+        for (name, in_degree) in &g.map {
+            for n in ["fn:path", "fn:find", "fn:read", "fn:write"] {
+                if name.ends_with(n) {
+                    assert!(*in_degree <= 1.0, "{name}: {in_degree}");
+                }
+            }
+        }
+    }
+
+    #[test]
     fn std_method_names_not_inferred() {
         let g = index_case("calls");
         let run = "src/lib.rs#impl:Counter/fn:run";
@@ -676,5 +721,60 @@ mod rust {
                 .all(|r| r.span.is_some() && !r.message.is_empty())
         );
         assert!(!g.errors.contains_key("Cargo.toml"));
+    }
+}
+
+mod bench {
+    use super::*;
+
+    fn rs_files(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+        for e in std::fs::read_dir(dir).unwrap() {
+            let p = e.unwrap().path();
+            if p.is_dir() {
+                if p.file_name().is_some_and(|n| n != "target") {
+                    rs_files(&p, out);
+                }
+            } else if p.extension().is_some_and(|x| x == "rs") {
+                out.push(p);
+            }
+        }
+    }
+
+    /// R-4 (FEAT-058): extract every `.rs` under katalogr's `crates/` in under 5 s (release).
+    #[test]
+    #[ignore]
+    fn rust_extract_workspace() {
+        let crates = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+        let mut paths = Vec::new();
+        rs_files(&crates, &mut paths);
+        assert!(paths.len() > 20, "{} files", paths.len());
+        let inputs: Vec<(RelPath, Vec<u8>)> = paths
+            .iter()
+            .map(|p| {
+                let rel = p
+                    .strip_prefix(&crates)
+                    .unwrap()
+                    .to_string_lossy()
+                    .replace('\\', "/");
+                (RelPath::new(&rel).unwrap(), std::fs::read(p).unwrap())
+            })
+            .collect();
+        let start = Instant::now();
+        for (path, bytes) in &inputs {
+            let input = ExtractInput {
+                repo: REPO,
+                path,
+                revision: "bench",
+                content: bytes,
+                context: &[],
+            };
+            let _ = RustExtractor.extract(&input);
+        }
+        let took = start.elapsed();
+        eprintln!(
+            "bench rust_extract_workspace: {} files in {took:?}",
+            inputs.len()
+        );
+        assert!(took < Duration::from_millis(5000), "{took:?}");
     }
 }

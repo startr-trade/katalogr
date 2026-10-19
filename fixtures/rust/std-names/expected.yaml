@@ -1,0 +1,39 @@
+mode: exact
+symbols:
+  - "fx:Cargo.toml#crate:std-names"
+  - "fx:src/lib.rs#fn:score"
+  - "fx:src/lib.rs#fn:user_01"
+  - "fx:src/lib.rs#fn:user_02"
+  - "fx:src/lib.rs#fn:user_03"
+  - "fx:src/lib.rs#fn:user_04"
+  - "fx:src/lib.rs#fn:user_05"
+  - "fx:src/lib.rs#fn:user_06"
+  - "fx:src/lib.rs#fn:user_07"
+  - "fx:src/lib.rs#fn:user_08"
+  - "fx:src/lib.rs#fn:user_09"
+  - "fx:src/lib.rs#fn:user_10"
+  - "fx:src/lib.rs#impl:Repo"
+  - "fx:src/lib.rs#impl:Repo/fn:find"
+  - "fx:src/lib.rs#impl:Repo/fn:path"
+  - "fx:src/lib.rs#impl:Repo/fn:publish"
+  - "fx:src/lib.rs#impl:Repo/fn:read"
+  - "fx:src/lib.rs#impl:Repo/fn:write"
+  - "fx:src/lib.rs#struct:Repo"
+links:
+  - { from: "fx:src/lib.rs#fn:user_01", kind: calls, to: "fx:src/lib.rs#fn:score", confidence: extracted }
+  - { from: "fx:src/lib.rs#fn:user_01", kind: calls, to: "fx:src/lib.rs#impl:Repo/fn:publish", confidence: inferred }
+  - { from: "fx:src/lib.rs#fn:user_02", kind: calls, to: "fx:src/lib.rs#fn:score", confidence: extracted }
+  - { from: "fx:src/lib.rs#fn:user_02", kind: calls, to: "fx:src/lib.rs#impl:Repo/fn:publish", confidence: inferred }
+  - { from: "fx:src/lib.rs#fn:user_03", kind: calls, to: "fx:src/lib.rs#fn:score", confidence: extracted }
+  - { from: "fx:src/lib.rs#fn:user_03", kind: calls, to: "fx:src/lib.rs#impl:Repo/fn:publish", confidence: inferred }
+  - { from: "fx:src/lib.rs#fn:user_04", kind: calls, to: "fx:src/lib.rs#fn:score", confidence: extracted }
+  - { from: "fx:src/lib.rs#fn:user_04", kind: calls, to: "fx:src/lib.rs#impl:Repo/fn:publish", confidence: inferred }
+  - { from: "fx:src/lib.rs#fn:user_05", kind: calls, to: "fx:src/lib.rs#fn:score", confidence: extracted }
+  - { from: "fx:src/lib.rs#fn:user_05", kind: calls, to: "fx:src/lib.rs#impl:Repo/fn:publish", confidence: inferred }
+  - { from: "fx:src/lib.rs#fn:user_06", kind: calls, to: "fx:src/lib.rs#fn:score", confidence: extracted }
+  - { from: "fx:src/lib.rs#impl:Repo", kind: contains, to: "fx:src/lib.rs#impl:Repo/fn:find", confidence: extracted }
+  - { from: "fx:src/lib.rs#impl:Repo", kind: contains, to: "fx:src/lib.rs#impl:Repo/fn:path", confidence: extracted }
+  - { from: "fx:src/lib.rs#impl:Repo", kind: contains, to: "fx:src/lib.rs#impl:Repo/fn:publish", confidence: extracted }
+  - { from: "fx:src/lib.rs#impl:Repo", kind: contains, to: "fx:src/lib.rs#impl:Repo/fn:read", confidence: extracted }
+  - { from: "fx:src/lib.rs#impl:Repo", kind: contains, to: "fx:src/lib.rs#impl:Repo/fn:write", confidence: extracted }
+  - { from: "fx:src/lib.rs#impl:Repo", kind: implements-for, to: "fx:src/lib.rs#struct:Repo", confidence: extracted }

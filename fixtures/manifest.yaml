@@ -29,6 +29,7 @@ technologies:
       - rust/attributes
     call-method:
       - rust/calls
+      - rust/std-names
     call-path:
       - rust/calls
     crate-deps:
