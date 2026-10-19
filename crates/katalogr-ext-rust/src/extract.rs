@@ -262,6 +262,7 @@ impl Builder<'_> {
             span: Some(span),
             candidates: seen,
             confidence,
+            origin: None,
         });
     }
 

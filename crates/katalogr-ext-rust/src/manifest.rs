@@ -103,6 +103,7 @@ pub fn extract(input: &ExtractInput) -> Result<Fragment, ExtractError> {
                 span: None,
                 candidates: vec![candidate],
                 confidence: Confidence::Extracted,
+                origin: None,
             });
         }
     }

@@ -249,6 +249,7 @@ impl<'a> Build<'a> {
             span,
             candidates: keys,
             confidence: Confidence::Extracted,
+            origin: None,
         });
     }
 

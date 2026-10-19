@@ -6,6 +6,7 @@ pub mod export;
 pub(crate) mod failpoint;
 pub mod history;
 pub mod lexicon;
+pub mod profiles;
 pub mod queue;
 pub mod registry;
 pub mod scan;

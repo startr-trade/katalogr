@@ -157,6 +157,9 @@ pub struct LinkBrief {
     pub other: String,
     #[schemars(with = "ConfidenceSchema")]
     pub confidence: Confidence,
+    /// The profile rule (`profile:<name>#<rule id>`) that produced the link, when one did.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub origin: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]

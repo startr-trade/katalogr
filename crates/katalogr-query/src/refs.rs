@@ -14,6 +14,13 @@ pub(crate) fn link_confidence(tx: &impl Reader, key: &LinkKey) -> Result<Confide
         .ok_or_else(|| StoreError::Row("link without entries".into()))
 }
 
+/// The rule that produced a link (`profile:<name>#<id>`), when one did.
+pub(crate) fn link_origin(tx: &impl Reader, key: &LinkKey) -> Result<Option<String>, StoreError> {
+    Ok(tx
+        .link(key)?
+        .and_then(|r| r.entries.into_iter().find_map(|e| e.produced_by)))
+}
+
 /// Links arriving at `target` (any kind), plus those arriving at anything that re-exports it,
 /// transitively. Each hit names the re-export chain it came through. Cycle-safe. Sorted by
 /// chain length, then referrer name, then link kind.

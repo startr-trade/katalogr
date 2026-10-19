@@ -162,6 +162,7 @@ pub fn history_fragment(
             span: None,
             candidates: annotate::keys(r),
             confidence: Confidence::Extracted,
+            origin: None,
         });
     }
     let changed = changed_files(&repo, &commit)?;
@@ -176,6 +177,7 @@ pub fn history_fragment(
                 key: format!("{repo_name}:{file}"),
             }],
             confidence: Confidence::Extracted,
+            origin: None,
         });
         hunks.insert(
             file.clone(),

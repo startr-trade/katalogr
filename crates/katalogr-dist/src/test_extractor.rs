@@ -96,6 +96,7 @@ impl Extractor for TestExtractor {
                     span: Some(span),
                     candidates: vec![key(target)?],
                     confidence: Confidence::Extracted,
+                    origin: None,
                 }),
                 ["export", k, sym] => exports.push(Export {
                     key: key(k)?,
@@ -128,6 +129,7 @@ impl Extractor for TestExtractor {
                         role,
                         span: Some(span),
                         confidence: Confidence::Extracted,
+                        origin: None,
                     });
                 }
                 _ => return Err(bad(Some(span), format!("unknown directive {trimmed:?}"))),

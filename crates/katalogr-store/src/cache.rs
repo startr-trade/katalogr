@@ -23,7 +23,7 @@ use std::ops::Bound;
 use std::time::{Duration, Instant};
 
 /// Stored in `meta`; a different number rebuilds the cache from the shards.
-pub const CACHE_SCHEMA: u32 = 5;
+pub const CACHE_SCHEMA: u32 = 6;
 
 // ---------------------------------------------------------------- rows
 
@@ -102,6 +102,10 @@ pub struct LinkEntry {
     /// For an inferred link: how many targets its reference resolved to. `None` on rows
     /// written before this field existed, and on links that are not inferred.
     pub fanout: Option<u32>,
+    /// What produced the link when it was not an extractor, for example a profile rule
+    /// (`profile:<name>#<rule id>`). `None` on rows written before this field existed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub produced_by: Option<String>,
 }
 
 /// One row per `(from, kind, to)`; several origins can support the same row.

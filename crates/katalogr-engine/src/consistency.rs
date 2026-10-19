@@ -71,6 +71,8 @@ pub struct Engine {
     roots: BTreeMap<String, Utf8PathBuf>,
     /// Per repo `(include, exclude)` globs; a repo not listed uses the defaults.
     filters: BTreeMap<String, (Vec<String>, Vec<String>)>,
+    /// Embedded profiles: `(file name, text)`, applied before the project's own.
+    builtin_profiles: Vec<(String, String)>,
 }
 
 impl Engine {
@@ -91,7 +93,18 @@ impl Engine {
             stitcher,
             roots,
             filters: BTreeMap::new(),
+            builtin_profiles: Vec::new(),
         })
+    }
+
+    /// Set the built-in profiles, as `(file name, text)` pairs.
+    pub fn set_builtin_profiles(&mut self, profiles: Vec<(String, String)>) {
+        self.builtin_profiles = profiles;
+    }
+
+    /// The built-in profiles, as `(file name, text)` pairs.
+    pub fn builtin_profiles(&self) -> &[(String, String)] {
+        &self.builtin_profiles
     }
 
     /// Set the include and exclude globs used to list a repo's files (default: those of
@@ -173,6 +186,12 @@ impl Engine {
             _ => o.scope.clone(),
         };
         let mut backoff = POLL_START;
+        if o.consistency != Consistency::StaleOk
+            && let Some(mut p) = Processor::try_acquire(self)?
+        {
+            // A changed profile queues the files it can affect before pending is counted.
+            p.refresh_profiles()?;
+        }
         loop {
             let snap = self.cache.read()?;
             let pending = self.pending_in(&snap, &scope)?;

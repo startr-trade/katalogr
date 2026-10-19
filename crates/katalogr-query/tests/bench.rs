@@ -112,6 +112,7 @@ fn query_refs_100k() {
                     span: Some(span),
                     provenance: provenance.clone(),
                     fanout: None,
+                    produced_by: None,
                 }],
             },
         )
@@ -507,6 +508,7 @@ fn rank_100k() {
                         span: Some(span),
                         provenance: provenance.clone(),
                         fanout: None,
+                        produced_by: None,
                     }],
                 },
             )

@@ -138,6 +138,7 @@ impl Stitcher {
                     span: l.span,
                     provenance: l.provenance.clone(),
                     fanout: None,
+                    produced_by: None,
                 },
             )?;
         }
@@ -352,6 +353,7 @@ fn add_bindings(
                 span: b.span,
                 provenance: provenance.clone(),
                 fanout: None,
+                produced_by: b.origin.clone(),
             },
         )?;
         rows.push(BindingRow {
@@ -488,6 +490,7 @@ fn resolve(tx: &mut WriteTx, cx: &mut Cx, rid: RefId) -> Result<(), EngineError>
                 span: r.span,
                 provenance: provenance.clone(),
                 fanout: (confidence == Confidence::Inferred).then_some(fanout),
+                produced_by: r.origin.clone(),
             },
         )?;
     }

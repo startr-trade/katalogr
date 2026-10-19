@@ -1,6 +1,6 @@
 //! `explain`: one symbol, compactly: signature, doc, its links and the rationale behind it.
 
-use crate::refs::link_confidence;
+use crate::refs::{link_confidence, link_origin};
 use crate::resolve::hit;
 use crate::result::{Explain, LinkBrief, SymbolHit};
 use crate::show::fact_text;
@@ -39,6 +39,7 @@ pub fn explain(tx: &impl Reader, s: &SymbolHit, per_side: usize) -> Result<Expla
         }
         outgoing.push(LinkBrief {
             confidence: link_confidence(tx, &key)?,
+            origin: link_origin(tx, &key)?,
             kind: key.kind.0,
             other,
         });
@@ -46,15 +47,14 @@ pub fn explain(tx: &impl Reader, s: &SymbolHit, per_side: usize) -> Result<Expla
     let mut incoming: Vec<LinkBrief> = Vec::new();
     for key in tx.links_in(id)? {
         let other = node_name(tx, key.from)?;
+        let full = LinkKey {
+            from: key.from,
+            kind: key.kind.clone(),
+            to: key.to,
+        };
         incoming.push(LinkBrief {
-            confidence: link_confidence(
-                tx,
-                &LinkKey {
-                    from: key.from,
-                    kind: key.kind.clone(),
-                    to: key.to,
-                },
-            )?,
+            confidence: link_confidence(tx, &full)?,
+            origin: link_origin(tx, &full)?,
             kind: key.kind.0,
             other,
         });

@@ -124,6 +124,18 @@ pub struct Katalogr {
     roots: BTreeMap<String, Utf8PathBuf>,
 }
 
+/// Profiles embedded in the binary, applied before the project's own: `(file name, text)`.
+const BUILTIN_PROFILES: &[(&str, &str)] =
+    &[("generic.yaml", include_str!("../profiles/generic.yaml"))];
+
+/// The built-in profiles as the engine takes them.
+fn builtin_profiles() -> Vec<(String, String)> {
+    BUILTIN_PROFILES
+        .iter()
+        .map(|(n, t)| (n.to_string(), t.to_string()))
+        .collect()
+}
+
 /// Extension registration point. Register extractors here as they are written.
 fn build_registry() -> ExtensionRegistry {
     let mut registry = ExtensionRegistry::new();
@@ -255,6 +267,7 @@ impl Katalogr {
             self.roots.clone(),
             deadline,
         )?;
+        engine.set_builtin_profiles(builtin_profiles());
         for repo in &self.project.config().repos {
             engine.set_repo_filters(&repo.name, repo.include.clone(), repo.exclude.clone());
         }
@@ -548,7 +561,7 @@ impl Katalogr {
         consistency: Consistency,
         timeout: Duration,
         queued: usize,
-        warnings: Vec<String>,
+        mut warnings: Vec<String>,
     ) -> Result<Report, DistError> {
         let a = engine.with_consistency(
             &QueryOptions {
@@ -556,8 +569,9 @@ impl Katalogr {
                 timeout,
                 scope: Scope::Project,
             },
-            |_| (),
+            |tx| katalogr_engine::profiles::stored_errors(tx),
         )?;
+        warnings.extend(a.value.iter().map(|e| format!("profile refused: {e}")));
         Ok(Report {
             watermark: a.watermark.0,
             pending: a.pending,
@@ -586,4 +600,15 @@ fn rel_to_root(root: &Utf8Path, p: &str) -> Result<RelPath, DistError> {
         p.strip_prefix("./").unwrap_or(p)
     };
     RelPath::new(rel).map_err(|e| DistError::usage(e.to_string()))
+}
+
+#[cfg(test)]
+mod profile_tests {
+    #[test]
+    fn builtin_profiles_are_valid() {
+        for (name, text) in super::BUILTIN_PROFILES {
+            katalogr_engine::profiles::parse(&format!("builtin:{name}"), text)
+                .unwrap_or_else(|e| panic!("{e}"));
+        }
+    }
 }

@@ -194,6 +194,7 @@ impl Builder<'_> {
             span,
             candidates,
             confidence,
+            origin: None,
         });
     }
 

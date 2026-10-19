@@ -1,0 +1,6 @@
+# Generic rules that ship with the binary and apply to every project. None yet: conventions
+# that are specific to an engine or a project live in the project's kindex, under
+# projects/<project>/profiles/.
+profile: generic
+version: 1
+rules: []

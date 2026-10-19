@@ -30,6 +30,10 @@ pub struct OutRef {
     pub candidates: Vec<ExportKey>,
     /// As seen by the extractor; the stitcher may lower it.
     pub confidence: Confidence,
+    /// What produced the reference when it was not the extractor, for example a profile rule
+    /// (`profile:<name>#<rule id>`). Absent in shards written before profiles existed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub origin: Option<String>,
 }
 
 /// How a symbol relates to a contract node.
@@ -62,6 +66,10 @@ pub struct Binding {
     pub role: ContractRole,
     pub span: Option<Span>,
     pub confidence: Confidence,
+    /// What produced the binding when it was not the extractor, for example a profile rule
+    /// (`profile:<name>#<rule id>`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub origin: Option<String>,
 }
 
 /// Everything one file contributes. Holds intra-file links only.

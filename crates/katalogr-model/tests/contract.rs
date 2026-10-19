@@ -46,6 +46,7 @@ mod contract {
                 end_col: 9,
             }),
             confidence: Confidence::Declared,
+            origin: None,
         }
     }
 
