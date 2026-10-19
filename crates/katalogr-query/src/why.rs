@@ -1,7 +1,8 @@
 //! `why`: the symbol at a line, and the rationale linked to it.
 
 use crate::resolve::hit;
-use crate::result::{CommitHit, RationaleLink, Resolution, SymbolHit, WhyResult};
+use crate::result::{CommitHit, Note, RationaleLink, Resolution, SymbolHit, WhyResult};
+use katalogr_model::insight::FACT_RATIONALE;
 use katalogr_model::{ArtifactName, Fact, Id, LinkKind, Name, RelPath, SymbolName};
 use katalogr_store::{Reader, StoreError};
 use std::collections::BTreeSet;
@@ -126,8 +127,34 @@ pub fn why(
         goals,
         commits,
         note,
-        notes: Vec::new(),
+        notes: notes_of(&sym.facts),
     }))
+}
+
+/// The rationale markers recorded on a symbol, in line order. Entries of the wrong shape are
+/// skipped.
+fn notes_of(facts: &std::collections::BTreeMap<String, Fact>) -> Vec<Note> {
+    let Some(Fact::List(entries)) = facts.get(FACT_RATIONALE) else {
+        return Vec::new();
+    };
+    let mut notes: Vec<Note> = entries
+        .iter()
+        .filter_map(|e| {
+            let Fact::Map(m) = e else { return None };
+            let (Some(Fact::Str(marker)), Some(Fact::Int(line)), Some(Fact::Str(text))) =
+                (m.get("marker"), m.get("line"), m.get("text"))
+            else {
+                return None;
+            };
+            Some(Note {
+                marker: marker.clone(),
+                line: u32::try_from(*line).ok()?,
+                text: text.clone(),
+            })
+        })
+        .collect();
+    notes.sort_by_key(|a| a.line);
+    notes
 }
 
 /// The goals the items among `reached` serve. A requirement stands for its item.

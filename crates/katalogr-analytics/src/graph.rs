@@ -114,21 +114,12 @@ fn build_csr(n: usize, merged: &[(u32, u32, Edge)]) -> (Vec<u32>, Vec<Edge>, Vec
     (out_start, out, in_start, inn)
 }
 
-/// Longest directory that holds every `repo:path` of `files`; none when the repositories
-/// differ or nothing is shared.
-pub(crate) fn common_dir<'a>(
-    files: impl IntoIterator<Item = (&'a str, &'a str)>,
-) -> Option<String> {
-    let mut repo: Option<&str> = None;
+/// The longest directory that is a prefix (by whole components) of every directory in `dirs`;
+/// none when there is none, or nothing to compare.
+pub(crate) fn common_prefix<'a>(dirs: impl IntoIterator<Item = &'a str>) -> Option<String> {
     let mut common: Option<Vec<&str>> = None;
-    for (r, path) in files {
-        match repo {
-            None => repo = Some(r),
-            Some(x) if x != r => return None,
-            _ => {}
-        }
-        let mut parts: Vec<&str> = path.split('/').collect();
-        parts.pop();
+    for dir in dirs {
+        let parts: Vec<&str> = dir.split('/').filter(|p| !p.is_empty()).collect();
         common = Some(match common {
             None => parts,
             Some(c) => c
@@ -140,6 +131,24 @@ pub(crate) fn common_dir<'a>(
         });
     }
     common.filter(|c| !c.is_empty()).map(|c| c.join("/"))
+}
+
+/// Longest directory that holds every `(repo, path)` of `files`; none when the repositories
+/// differ or nothing is shared.
+pub(crate) fn common_dir<'a>(
+    files: impl IntoIterator<Item = (&'a str, &'a str)>,
+) -> Option<String> {
+    let mut repo: Option<&str> = None;
+    let mut dirs: Vec<&str> = Vec::new();
+    for (r, path) in files {
+        match repo {
+            None => repo = Some(r),
+            Some(x) if x != r => return None,
+            _ => {}
+        }
+        dirs.push(path.rsplit_once('/').map_or("", |(d, _)| d));
+    }
+    common_prefix(dirs)
 }
 
 impl InsightGraph {
@@ -448,6 +457,33 @@ impl InsightGraph {
     /// Edges in total.
     pub(crate) fn edge_count(&self) -> usize {
         self.out.len()
+    }
+
+    /// PageRank of every node: the symbol's score at symbol level, the sum over the symbols of
+    /// the node otherwise. Uses the cached rank when it is current.
+    pub(crate) fn node_ranks(&self, tx: &impl Reader) -> Result<Vec<f64>, StoreError> {
+        let ranked = katalogr_query::rank_cached_or_live(tx)?;
+        let mut out = vec![0.0f64; self.len()];
+        if self.level == Level::Symbol {
+            let index: HashMap<&str, usize> = self
+                .nodes
+                .iter()
+                .enumerate()
+                .map(|(i, n)| (n.name.as_str(), i))
+                .collect();
+            for (hit, score) in &ranked {
+                if let Some(&i) = index.get(hit.name.as_str()) {
+                    out[i] = *score;
+                }
+            }
+        } else {
+            for (hit, score) in &ranked {
+                if let Some(n) = self.node_of_symbol(&hit.name) {
+                    out[n as usize] += *score;
+                }
+            }
+        }
+        Ok(out)
     }
 
     /// The node that holds the symbol with canonical name `name` (file and package level).

@@ -3,8 +3,8 @@
 
 use camino::Utf8PathBuf;
 use katalogr_model::{
-    ArtifactName, Confidence, ContractName, Fact, Fragment, Id, LinkKind, Name, Provenance,
-    RelPath, Segment, Span, SymbolName,
+    ArtifactName, Confidence, ContractName, ExportKey, Fact, Fragment, Id, LinkKind, Name,
+    Provenance, RelPath, Segment, Span, SymbolName,
 };
 use katalogr_store::{
     ArtifactRow, Cache, ContractRow, Kindex, LinkEntry, LinkKey, LinkOrigin, LinkRow,
@@ -37,6 +37,7 @@ pub struct Fx {
     symbols: BTreeMap<Id, SymbolRow>,
     links: BTreeMap<LinkKey, LinkRow>,
     contracts: BTreeMap<Id, ContractRow>,
+    exports: BTreeMap<ExportKey, Vec<Id>>,
 }
 
 pub struct Built {
@@ -142,6 +143,34 @@ impl Fx {
             .insert(key.into(), value);
     }
 
+    /// Append a rationale marker (`NOTE`, `WHY`, `RATIONALE`) at `line` to a symbol.
+    pub fn note(&mut self, sym: Id, marker: &str, line: u32, text: &str) {
+        let entry = Fact::Map(BTreeMap::from([
+            ("marker".to_string(), Fact::Str(marker.into())),
+            ("line".to_string(), Fact::Int(i64::from(line))),
+            ("text".to_string(), Fact::Str(text.into())),
+        ]));
+        let facts = &mut self.symbols.get_mut(&sym).unwrap().facts;
+        match facts
+            .entry("rationale".to_string())
+            .or_insert(Fact::List(Vec::new()))
+        {
+            Fact::List(l) => l.push(entry),
+            _ => unreachable!(),
+        }
+    }
+
+    /// Export `target` under `namespace:key`.
+    pub fn export(&mut self, namespace: &str, key: &str, target: Id) {
+        self.exports
+            .entry(ExportKey {
+                namespace: namespace.into(),
+                key: key.into(),
+            })
+            .or_default()
+            .push(target);
+    }
+
     /// A string fact (`root`, for one).
     pub fn sym_str(&mut self, sym: Id, key: &str, value: &str) {
         self.sym_fact(sym, key, Fact::Str(value.into()));
@@ -232,6 +261,9 @@ impl Fx {
         }
         for (id, row) in &self.contracts {
             tx.put_contract(*id, row).unwrap();
+        }
+        for (key, targets) in &self.exports {
+            tx.put_exports(key, targets).unwrap();
         }
         tx.commit().unwrap();
         Built { _tmp: tmp, cache }
