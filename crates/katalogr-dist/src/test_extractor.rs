@@ -1,11 +1,16 @@
 //! Test-only extractor over a tiny line format (`.tx` files), registered only with the
 //! `test-extractor` feature so integration tests have symbols to query.
 //! Directives: `sym <kind> <name>`, `ref <from> <kind> <ns:key>`, `export <ns:key> <sym>`,
-//! `link <from> <kind> <to>`, `bind <sym> <provides|consumes|declares> <kind>:<key>`; `#` starts a comment line.
+//! `link <from> <kind> <to>`, `bind <sym> <provides|consumes|declares> <kind>:<key>`,
+//! `iref <from> <kind> <ns:key>` (an inferred reference),
+//! `fact <sym|@> <key> <value...>` (a string fact on a symbol or, with `@`, on the artifact; the
+//! value is the rest of the line), `note <sym|@> <MARKER> <text...>` (appends a rationale entry
+//! at this line); `#` starts a comment line. Code kinds: `fn` and `type`.
 
+use katalogr_model::insight::FACT_RATIONALE;
 use katalogr_model::{
     ArtifactName, Binding, Confidence, ContractName, ContractRole, Export, ExportKey, ExtractError,
-    ExtractInput, Extractor, Fragment, Id, Link, LinkKind, Name, OutRef, Provenance, RelPath,
+    ExtractInput, Extractor, Fact, Fragment, Id, Link, LinkKind, Name, OutRef, Provenance, RelPath,
     Segment, Span, SymbolName, SymbolNode,
 };
 use std::collections::BTreeMap;
@@ -19,6 +24,10 @@ impl Extractor for TestExtractor {
 
     fn handles(&self, path: &RelPath) -> bool {
         path.as_str().ends_with(".tx")
+    }
+
+    fn code_kinds(&self) -> &'static [&'static str] {
+        &["fn", "type"]
     }
 
     fn extract(&self, input: &ExtractInput) -> Result<Fragment, ExtractError> {
@@ -39,6 +48,7 @@ impl Extractor for TestExtractor {
         let mut refs = Vec::new();
         let mut exports = Vec::new();
         let mut bindings = Vec::new();
+        let mut artifact_facts: BTreeMap<String, Fact> = BTreeMap::new();
 
         for (idx, line) in text.lines().enumerate() {
             let trimmed = line.trim();
@@ -68,6 +78,47 @@ impl Extractor for TestExtractor {
                     })
                     .ok_or_else(|| bad(Some(span), format!("bad key {s:?}")))
             };
+            // `fact` and `note` take the rest of the line as their value.
+            if matches!(words.first(), Some(&"fact") | Some(&"note")) {
+                let mut parts = trimmed.splitn(4, char::is_whitespace);
+                let directive = parts.next().unwrap_or("");
+                let (Some(target), Some(word), Some(value)) = (
+                    parts.next(),
+                    parts.next(),
+                    parts.next().map(str::trim).filter(|v| !v.is_empty()),
+                ) else {
+                    return Err(bad(Some(span), format!("incomplete directive {trimmed:?}")));
+                };
+                let facts = if target == "@" {
+                    &mut artifact_facts
+                } else {
+                    let at = symbols
+                        .iter()
+                        .position(|s| s.name.segments[0].name == target)
+                        .ok_or_else(|| bad(Some(span), format!("undeclared symbol {target:?}")))?;
+                    &mut symbols[at].facts
+                };
+                if directive == "fact" {
+                    facts.insert(word.to_string(), Fact::Str(value.to_string()));
+                } else {
+                    let entry = Fact::Map(BTreeMap::from([
+                        ("marker".to_string(), Fact::Str(word.to_string())),
+                        ("line".to_string(), Fact::Int(i64::from(line_no))),
+                        ("text".to_string(), Fact::Str(value.to_string())),
+                    ]));
+                    match facts.entry(FACT_RATIONALE.to_string()) {
+                        std::collections::btree_map::Entry::Occupied(mut o) => {
+                            if let Fact::List(l) = o.get_mut() {
+                                l.push(entry);
+                            }
+                        }
+                        std::collections::btree_map::Entry::Vacant(v) => {
+                            v.insert(Fact::List(vec![entry]));
+                        }
+                    }
+                }
+                continue;
+            }
             match words.as_slice() {
                 ["sym", kind, name] => {
                     let segments = vec![Segment {
@@ -96,6 +147,14 @@ impl Extractor for TestExtractor {
                     span: Some(span),
                     candidates: vec![key(target)?],
                     confidence: Confidence::Extracted,
+                    origin: None,
+                }),
+                ["iref", from, kind, target] => refs.push(OutRef {
+                    from: find(from)?,
+                    kind: LinkKind(kind.to_string()),
+                    span: Some(span),
+                    candidates: vec![key(target)?],
+                    confidence: Confidence::Inferred,
                     origin: None,
                 }),
                 ["export", k, sym] => exports.push(Export {
@@ -141,7 +200,7 @@ impl Extractor for TestExtractor {
             extension: self.id().to_string(),
             artifact: katalogr_model::ArtifactNode {
                 name: artifact,
-                facts: BTreeMap::new(),
+                facts: artifact_facts,
             },
             symbols,
             links,
@@ -149,5 +208,47 @@ impl Extractor for TestExtractor {
             exports,
             bindings,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn extract(text: &str) -> Result<Fragment, ExtractError> {
+        let path = RelPath::new("a.tx").unwrap();
+        TestExtractor.extract(&ExtractInput {
+            repo: "r",
+            path: &path,
+            revision: "rev",
+            content: text.as_bytes(),
+            context: &[],
+        })
+    }
+
+    #[test]
+    fn directives_parse() {
+        let f = extract(
+            "sym fn a\nsym type T\nfact a root main\nfact @ package p1 and more\n\
+             note a WHY because of x\nnote a NOTE second\nnote @ RATIONALE file level\n\
+             iref a calls ns:key\n",
+        )
+        .unwrap();
+        assert_eq!(f.symbols[0].facts["root"], Fact::Str("main".into()));
+        assert_eq!(f.artifact.facts["package"], Fact::Str("p1 and more".into()));
+        let Fact::List(l) = &f.symbols[0].facts["rationale"] else {
+            panic!("list")
+        };
+        assert_eq!(l.len(), 2);
+        let Fact::Map(m) = &l[0] else { panic!("map") };
+        assert_eq!(m["marker"], Fact::Str("WHY".into()));
+        assert_eq!(m["line"], Fact::Int(5));
+        assert_eq!(m["text"], Fact::Str("because of x".into()));
+        assert!(f.artifact.facts.contains_key("rationale"));
+        assert_eq!(f.refs.len(), 1);
+        assert_eq!(f.refs[0].confidence, Confidence::Inferred);
+        assert_eq!(TestExtractor.code_kinds(), ["fn", "type"]);
+        assert!(extract("fact nope k v\n").is_err());
+        assert!(extract("sym fn a\nfact a k\n").is_err());
     }
 }

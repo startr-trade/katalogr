@@ -1,0 +1,21 @@
+[package]
+name = "katalogr-analytics"
+description = "Structure insights over the graph: hubs, communities, cycles, dead code and rationale."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+katalogr-model.workspace = true
+katalogr-store.workspace = true
+katalogr-query.workspace = true
+schemars.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+camino.workspace = true
+tempfile.workspace = true
+proptest.workspace = true

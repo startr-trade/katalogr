@@ -25,6 +25,29 @@
       ],
       "type": "object"
     },
+    "Note": {
+      "description": "A rationale marker (`NOTE:`, `WHY:`, `RATIONALE:`) recorded on the symbol.",
+      "properties": {
+        "line": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "marker": {
+          "description": "`NOTE`, `WHY` or `RATIONALE`.",
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "marker",
+        "line",
+        "text"
+      ],
+      "type": "object"
+    },
     "RationaleLink": {
       "properties": {
         "kind": {
@@ -149,6 +172,13 @@
             "string",
             "null"
           ]
+        },
+        "notes": {
+          "description": "The comment markers recorded on the symbol, in line order.",
+          "items": {
+            "$ref": "#/$defs/Note"
+          },
+          "type": "array"
         },
         "rationale": {
           "items": {

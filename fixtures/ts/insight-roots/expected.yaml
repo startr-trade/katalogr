@@ -1,0 +1,29 @@
+mode: exact
+symbols:
+- fx:package.json#package:roots-pkg
+- fx:src/index.ts#fn:start
+- fx:src/shapes.ts#class:Base
+- fx:src/shapes.ts#class:Base/method:run
+- fx:src/shapes.ts#class:Child
+- fx:src/shapes.ts#class:Child/method:run
+- fx:src/shapes.ts#class:Circle
+- fx:src/shapes.ts#class:Circle/method:area
+- fx:src/shapes.ts#interface:Shape
+- fx:src/util.test.ts#fn:check
+- fx:src/util.ts#const:arrow
+- fx:src/util.ts#fn:hidden
+- fx:src/util.ts#fn:used
+- fx:test/helpers.ts#fn:help
+links:
+- from: fx:src/shapes.ts#class:Base
+  kind: contains
+  to: fx:src/shapes.ts#class:Base/method:run
+  confidence: Extracted
+- from: fx:src/shapes.ts#class:Child
+  kind: contains
+  to: fx:src/shapes.ts#class:Child/method:run
+  confidence: Extracted
+- from: fx:src/shapes.ts#class:Circle
+  kind: contains
+  to: fx:src/shapes.ts#class:Circle/method:area
+  confidence: Extracted

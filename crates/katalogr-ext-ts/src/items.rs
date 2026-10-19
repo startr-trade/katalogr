@@ -8,7 +8,9 @@ use crate::modules::{
     NS_EXPORT, NS_FILE, NS_MEMBER, export_candidates, export_name, key, module_export_name,
     static_key,
 };
+use crate::roots::{self, RootCtx};
 use katalogr_model::annotate;
+use katalogr_model::insight::FACT_ROOT;
 use katalogr_model::{
     ArtifactName, Confidence, Export, ExportKey, Fact, Id, Link, LinkKind, Name, OutRef,
     Provenance, RelPath, Segment, Span, SymbolName, SymbolNode,
@@ -72,6 +74,8 @@ pub struct Builder<'s> {
     pub(crate) bindings: Vec<katalogr_model::Binding>,
     /// The package key when this file is generated wasm glue.
     pub(crate) glue: Option<String>,
+    /// Inside the methods of a class that implements or extends something.
+    in_derived_class: bool,
 }
 
 fn is_function(e: &Expression<'_>) -> bool {
@@ -119,6 +123,7 @@ impl<'s> Builder<'s> {
             wasm_instances: HashMap::new(),
             bindings: Vec::new(),
             glue: ctx.wasm.glue_of(path.as_str()).map(|p| p.key.clone()),
+            in_derived_class: false,
         }
     }
 
@@ -167,6 +172,15 @@ impl<'s> Builder<'s> {
     ) -> Id {
         if let Some(doc) = self.doc_before(span.start_line) {
             facts.insert("doc".to_string(), Fact::Str(doc));
+        }
+        let reason = roots::root_reason(&RootCtx {
+            kind,
+            test_file: roots::is_test_path(self.path.as_str()),
+            exported: matches!(facts.get("exported"), Some(Fact::Bool(true))),
+            in_derived_class: self.in_derived_class,
+        });
+        if let Some(r) = reason {
+            facts.insert(FACT_ROOT.to_string(), Fact::Str(r.to_string()));
         }
         let n = self.ordinals.entry(segments.clone()).or_insert(0);
         *n += 1;
@@ -625,6 +639,10 @@ impl<'s> Builder<'s> {
         self.decorators(&mut facts, &c.decorators);
         let cid = self.add_symbol(vec![Self::seg("class", &name)], "class", span, facts);
         self.register(&name, cid, true, exported, default);
+        let saved_derived = std::mem::replace(
+            &mut self.in_derived_class,
+            !c.implements.is_empty() || c.heritage.is_some(),
+        );
         for el in &c.body.body {
             match el {
                 ClassElement::MethodDefinition(m) => {
@@ -674,6 +692,7 @@ impl<'s> Builder<'s> {
                 _ => {}
             }
         }
+        self.in_derived_class = saved_derived;
         true
     }
 

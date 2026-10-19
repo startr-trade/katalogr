@@ -13,6 +13,7 @@ test-extractor = []
 
 [dependencies]
 katalogr-query.workspace = true
+katalogr-analytics.workspace = true
 katalogr-engine.workspace = true
 katalogr-ext-rust.workspace = true
 katalogr-ext-ts.workspace = true

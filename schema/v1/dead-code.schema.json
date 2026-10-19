@@ -1,0 +1,259 @@
+{
+  "$defs": {
+    "DeadCandidate": {
+      "properties": {
+        "class": {
+          "$ref": "#/$defs/DeadClass"
+        },
+        "confidence": {
+          "$ref": "#/$defs/DeadConfidence"
+        },
+        "incoming": {
+          "description": "Usage links into the symbol from other nodes.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "symbol": {
+          "$ref": "#/$defs/SymbolHit"
+        },
+        "weak_incoming": {
+          "description": "Of those, the weak ones.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "symbol",
+        "class",
+        "confidence",
+        "incoming",
+        "weak_incoming"
+      ],
+      "type": "object"
+    },
+    "DeadClass": {
+      "description": "Why a symbol is a dead-code candidate.",
+      "oneOf": [
+        {
+          "const": "unreferenced",
+          "description": "No usage link reaches it.",
+          "type": "string"
+        },
+        {
+          "const": "unreachable",
+          "description": "Only unreachable code uses it.",
+          "type": "string"
+        },
+        {
+          "const": "weakly-reached",
+          "description": "Reached only through inferred or fan-out links.",
+          "type": "string"
+        }
+      ]
+    },
+    "DeadCodeReport": {
+      "properties": {
+        "candidates_total": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "high": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "items": {
+          "items": {
+            "$ref": "#/$defs/DeadCandidate"
+          },
+          "type": "array"
+        },
+        "low": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "medium": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "note": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "roots": {
+          "description": "Entry points counted.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "roots_by_reason": {
+          "additionalProperties": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "type": "object"
+        }
+      },
+      "required": [
+        "roots",
+        "roots_by_reason",
+        "candidates_total",
+        "high",
+        "medium",
+        "low",
+        "items"
+      ],
+      "type": "object"
+    },
+    "DeadConfidence": {
+      "description": "How sure a candidate is. High is greater than medium, which is greater than low.",
+      "enum": [
+        "high",
+        "medium",
+        "low"
+      ],
+      "type": "string"
+    },
+    "Span": {
+      "description": "Schema-only mirror of [`katalogr_model::Span`].",
+      "properties": {
+        "end_col": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "end_line": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "start_col": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "start_line": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "start_line",
+        "start_col",
+        "end_line",
+        "end_col"
+      ],
+      "type": "object"
+    },
+    "SymbolHit": {
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "name": {
+          "description": "Canonical name.",
+          "type": "string"
+        },
+        "path": {
+          "description": "Repository-relative path.",
+          "type": "string"
+        },
+        "span": {
+          "$ref": "#/$defs/Span"
+        }
+      },
+      "required": [
+        "name",
+        "kind",
+        "path",
+        "span"
+      ],
+      "type": "object"
+    },
+    "Truncation": {
+      "properties": {
+        "budget": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "omitted": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "shown": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "shown",
+        "omitted",
+        "budget"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "What `--json` prints.",
+  "properties": {
+    "next": {
+      "description": "Suggested follow-up commands, at most three.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "pending": {
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "result": {
+      "$ref": "#/$defs/DeadCodeReport"
+    },
+    "schema": {
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "stale": {
+      "type": "boolean"
+    },
+    "truncated": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Truncation"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "watermark": {
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "schema",
+    "watermark",
+    "pending",
+    "stale",
+    "result"
+  ],
+  "title": "Envelope",
+  "type": "object"
+}

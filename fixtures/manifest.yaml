@@ -59,14 +59,20 @@ technologies:
       - rust/workspace-two-crates
     embedded-literals:
       - rust/embedded-sql
+    entry-root:
+      - rust/insight-roots
     extern-items:
       - rust/extern-items
     impl-links:
       - rust/impls
     items:
       - rust/items
+    package-fact:
+      - rust/workspace-two-crates
     parse-error:
       - rust/broken-syntax
+    rationale-comment:
+      - rust/rationale
     re-export:
       - rust/use-and-reexport
     use-resolution:
@@ -133,6 +139,8 @@ technologies:
       - ts/new-calls
     embedded-literals:
       - ts/embedded-sql
+    entry-root:
+      - ts/insight-roots
     esm-js-specifier:
       - ts/esm-js-specifiers
     extends-any-name:
@@ -140,12 +148,16 @@ technologies:
     items:
       - ts/items
       - ts/file-kinds
+    package-fact:
+      - ts/package-imports
     package-import:
       - ts/package-imports
     parse-error:
       - ts/broken-syntax
     path-alias:
       - ts/path-alias
+    rationale-comment:
+      - ts/rationale
     relative-import:
       - ts/relative-imports
       - ts/reexports

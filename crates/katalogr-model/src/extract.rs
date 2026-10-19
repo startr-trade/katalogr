@@ -41,6 +41,10 @@ pub trait Extractor: Send + Sync {
         let _ = files;
         Ok(Vec::new())
     }
+    /// Symbol kinds of this extension that are code (dead-code candidates). Default: none.
+    fn code_kinds(&self) -> &'static [&'static str] {
+        &[]
+    }
     /// Bumped by an extension whose output changes for unchanged input (new facts, new symbol
     /// kinds). It is mixed into the shard revision, so `index --full` re-extracts that
     /// extension's files once. Default: empty, which leaves every revision unchanged

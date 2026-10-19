@@ -3,7 +3,9 @@
 //! `CODE-n` ids fits the same helper.
 
 use crate::fragment::ExportKey;
+use crate::graph::Fact;
 use regex::Regex;
+use std::collections::BTreeMap;
 use std::sync::LazyLock;
 
 /// Namespace under which a board item is exported (`FEAT-046`).
@@ -123,6 +125,113 @@ pub fn keys(r: &ItemRef) -> Vec<ExportKey> {
     out
 }
 
+/// A `NOTE:`, `WHY:` or `RATIONALE:` marker found in one comment.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RationaleMarker {
+    /// `NOTE`, `WHY` or `RATIONALE`.
+    pub marker: String,
+    /// 0-based line offset inside the comment text where the marker starts.
+    pub line_offset: u32,
+    /// Marker text, whitespace-collapsed, at most 240 chars (then `…`).
+    pub text: String,
+}
+
+/// The marker words, upper case only (prose such as "Note that" is not a marker).
+pub const RATIONALE_MARKERS: &[&str] = &["NOTE", "WHY", "RATIONALE"];
+
+/// Longest marker text kept, in chars.
+const MARKER_TEXT_MAX: usize = 240;
+
+/// A comment line without its leading comment decoration (`/ * ! # -` and spaces) and any
+/// closing `*/`.
+fn strip_decoration(line: &str) -> &str {
+    let l = line.trim_start_matches(|c: char| c.is_whitespace() || "/*!#-".contains(c));
+    let l = l.trim_end();
+    l.strip_suffix("*/").unwrap_or(l).trim_end()
+}
+
+/// `(marker, rest)` when `line` (already stripped) starts a marker:
+/// `^(NOTE|WHY|RATIONALE)(\([^)]*\))?:\s*(.*)$`.
+fn marker_start(line: &str) -> Option<(&'static str, &str)> {
+    let word = RATIONALE_MARKERS.iter().find(|m| line.starts_with(**m))?;
+    let mut rest = &line[word.len()..];
+    if let Some(r) = rest.strip_prefix('(') {
+        let close = r.find(')')?;
+        rest = &r[close + 1..];
+    }
+    let rest = rest.strip_prefix(':')?;
+    Some((word, rest.trim_start()))
+}
+
+fn finish_marker(marker: &str, line_offset: u32, text: &str, out: &mut Vec<RationaleMarker>) {
+    let collapsed = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    if collapsed.is_empty() {
+        return;
+    }
+    let text = if collapsed.chars().count() > MARKER_TEXT_MAX {
+        let mut t: String = collapsed.chars().take(MARKER_TEXT_MAX).collect();
+        t.push('…');
+        t
+    } else {
+        collapsed
+    };
+    out.push(RationaleMarker {
+        marker: marker.to_string(),
+        line_offset,
+        text,
+    });
+}
+
+/// Markers in one comment's raw text (delimiters included). Each line is stripped of leading
+/// decoration; a marker's text continues over the following lines of the comment until a
+/// blank line, a closing `*/` alone or another marker. An empty text drops the marker.
+pub fn rationale_markers(comment: &str) -> Vec<RationaleMarker> {
+    let mut out = Vec::new();
+    // The marker being collected: (word, line offset, text so far).
+    let mut open: Option<(&'static str, u32, String)> = None;
+    for (idx, raw) in comment.lines().enumerate() {
+        let line = strip_decoration(raw);
+        if let Some((word, rest)) = marker_start(line) {
+            if let Some((m, off, text)) = open.take() {
+                finish_marker(m, off, &text, &mut out);
+            }
+            open = Some((word, idx as u32, rest.to_string()));
+        } else if line.is_empty() {
+            if let Some((m, off, text)) = open.take() {
+                finish_marker(m, off, &text, &mut out);
+            }
+        } else if let Some((_, _, text)) = open.as_mut() {
+            text.push(' ');
+            text.push_str(line);
+        }
+    }
+    if let Some((m, off, text)) = open.take() {
+        finish_marker(m, off, &text, &mut out);
+    }
+    out
+}
+
+/// The `rationale` fact value for `markers`: a list of `{marker, line, text}` maps in the
+/// order given. Each entry pairs the 1-based line of the comment's first line with its marker;
+/// the recorded `line` is that line plus the marker's `line_offset`.
+pub fn rationale_fact(markers: &[(u32, RationaleMarker)]) -> Fact {
+    Fact::List(
+        markers
+            .iter()
+            .map(|(line, m)| {
+                Fact::Map(BTreeMap::from([
+                    ("marker".to_string(), Fact::Str(m.marker.clone())),
+                    (
+                        "line".to_string(),
+                        Fact::Int(i64::from(*line) + i64::from(m.line_offset)),
+                    ),
+                    ("text".to_string(), Fact::Str(m.text.clone())),
+                ]))
+            })
+            .collect(),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -191,5 +300,36 @@ mod tests {
         let k = keys(&item("FEAT-046", None, Some("TL-001/T3")));
         assert_eq!(k.len(), 1);
         assert_eq!(k[0].namespace, "board-item");
+    }
+
+    #[test]
+    fn rationale_marker_grammar() {
+        let m = |c: &str| {
+            rationale_markers(c)
+                .into_iter()
+                .map(|m| (m.marker, m.line_offset, m.text))
+                .collect::<Vec<_>>()
+        };
+        let t = |a: &str, o: u32, b: &str| (a.to_string(), o, b.to_string());
+        assert_eq!(m("// WHY: x"), vec![t("WHY", 0, "x")]);
+        assert_eq!(m("/// NOTE(perf): a\n/// b"), vec![t("NOTE", 0, "a b")]);
+        assert!(m("// Note that this is prose").is_empty());
+        assert!(m("/* RATIONALE: */").is_empty());
+        let long = "x".repeat(300);
+        let got = m(&format!("// WHY: {long}"));
+        assert_eq!(got[0].2, format!("{}…", "x".repeat(240)));
+        assert_eq!(
+            m("/*\n * NOTE: one\n * two\n * WHY: three\n *\n * stray\n */"),
+            vec![t("NOTE", 1, "one two"), t("WHY", 3, "three")]
+        );
+        // Two markers in one comment are both found.
+        assert_eq!(m("// NOTE: a\n// RATIONALE: b").len(), 2);
+        // The fact carries absolute lines.
+        let mk = rationale_markers("// x\n// WHY: y");
+        let Fact::List(l) = rationale_fact(&[(10, mk[0].clone())]) else {
+            panic!("list")
+        };
+        let Fact::Map(e) = &l[0] else { panic!("map") };
+        assert_eq!(e["line"], Fact::Int(11));
     }
 }
