@@ -4,6 +4,7 @@ pub mod annotate;
 pub mod extract;
 pub mod fragment;
 pub mod graph;
+pub mod insight;
 pub mod lexicon;
 pub mod name;
 pub mod relpath;

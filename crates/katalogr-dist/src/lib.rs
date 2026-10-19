@@ -17,6 +17,7 @@ pub use claude::{
     user_skill_path,
 };
 pub use error::DistError;
+pub use katalogr_analytics as analytics;
 pub use katalogr_query as query;
 use katalogr_query::{
     Blame, CallerHit, DanglingRef, Explain, MapEntry, PathStep, RefHit, Resolution, SearchHit,

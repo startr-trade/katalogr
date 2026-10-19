@@ -1602,6 +1602,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "katalogr-analytics"
+version = "0.1.0"
+dependencies = [
+ "camino",
+ "katalogr-model",
+ "katalogr-query",
+ "katalogr-store",
+ "proptest",
+ "schemars",
+ "serde",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
 name = "katalogr-archtest"
 version = "0.1.0"
 dependencies = [
@@ -1615,6 +1630,7 @@ name = "katalogr-dist"
 version = "0.1.0"
 dependencies = [
  "camino",
+ "katalogr-analytics",
  "katalogr-engine",
  "katalogr-ext-kanbanr",
  "katalogr-ext-md",

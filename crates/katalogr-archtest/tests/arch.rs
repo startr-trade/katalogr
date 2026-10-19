@@ -1,4 +1,4 @@
-//! Architecture tests: neutrality of the core, thin wrappers, extension
+//! Architecture tests: neutrality of the core, analytics layering, thin wrappers, extension
 //! boundaries and absence of C build dependencies (ADR-0011, Compliance).
 
 mod archtest {
@@ -158,6 +158,7 @@ mod archtest {
             "katalogr-store",
             "katalogr-engine",
             "katalogr-query",
+            "katalogr-analytics",
         ]
         .iter()
         .filter_map(|n| workspace_package(md, n))
@@ -207,6 +208,52 @@ mod archtest {
         assert!(
             failures.is_empty(),
             "core is not neutral:\n{}",
+            failures.join("\n")
+        );
+    }
+
+    #[test]
+    fn analytics_layering() {
+        let md = metadata(false);
+        let mut failures = Vec::new();
+        // (a) Only katalogr-dist may depend on katalogr-analytics, whatever the kind.
+        for p in md.workspace_packages() {
+            if p.name.as_str() == "katalogr-dist" || p.name.as_str() == "katalogr-analytics" {
+                continue;
+            }
+            if p.dependencies
+                .iter()
+                .any(|d| d.name == "katalogr-analytics")
+            {
+                failures.push(format!("{} must not depend on katalogr-analytics", p.name));
+            }
+        }
+        // (b) Analytics depends on model, store and query only.
+        let allowed: BTreeSet<&str> = ["katalogr-model", "katalogr-store", "katalogr-query"]
+            .into_iter()
+            .collect();
+        match workspace_package(&md, "katalogr-analytics") {
+            None => failures.push("package katalogr-analytics not found".to_string()),
+            Some(a) => {
+                for d in normal_deps(a) {
+                    if d.starts_with("katalogr-") && !allowed.contains(d.as_str()) {
+                        failures.push(format!("katalogr-analytics depends on `{d}`"));
+                    }
+                }
+            }
+        }
+        // (c) Dist lists analytics as a normal dependency.
+        match workspace_package(&md, "katalogr-dist") {
+            None => failures.push("package katalogr-dist not found".to_string()),
+            Some(d) => {
+                if !normal_deps(d).contains("katalogr-analytics") {
+                    failures.push("katalogr-dist must depend on katalogr-analytics".to_string());
+                }
+            }
+        }
+        assert!(
+            failures.is_empty(),
+            "analytics layering violated:\n{}",
             failures.join("\n")
         );
     }
