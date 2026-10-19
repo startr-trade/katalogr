@@ -127,6 +127,11 @@ impl Builder<'_> {
         let Some(name) = m.name() else { return };
         let name = name.text().to_string();
         let facts = self.facts(m.visibility(), m.attrs(), m.syntax());
+        let is_test = m.attrs().any(|a| {
+            a.meta().is_some_and(|m| {
+                crate::roots::is_cfg_test(&normalise(&m.syntax().text().to_string()))
+            })
+        });
         let id = self.simple("mod", &name, m.syntax(), facts);
         if let Some(list) = m.item_list() {
             let mut path = self.module_path();
@@ -140,7 +145,9 @@ impl Builder<'_> {
                 globs: Vec::new(),
             });
             self.enter("mod", &name, id);
+            self.test_depth += u32::from(is_test);
             self.items(list.items().collect());
+            self.test_depth -= u32::from(is_test);
             self.leave();
             self.scopes.pop();
         } else {

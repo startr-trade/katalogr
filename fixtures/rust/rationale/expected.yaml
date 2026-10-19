@@ -1,0 +1,7 @@
+mode: exact
+symbols:
+- fx:Cargo.toml#crate:rationale
+- fx:src/lib.rs#fn:documented
+- fx:src/lib.rs#fn:leading
+- fx:src/lib.rs#fn:plain
+links: []

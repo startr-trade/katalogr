@@ -1,0 +1,33 @@
+mode: exact
+symbols:
+- fx:Cargo.toml#crate:insight-roots
+- fx:src/lib.rs#fn:a_test
+- fx:src/lib.rs#fn:abi_only
+- fx:src/lib.rs#fn:crate_visible
+- fx:src/lib.rs#fn:exported_by_name
+- fx:src/lib.rs#fn:private_helper
+- fx:src/lib.rs#fn:public_api
+- fx:src/lib.rs#impl:fmt%3A%3ADisplay%20for%20Thing
+- fx:src/lib.rs#impl:fmt%3A%3ADisplay%20for%20Thing/fn:fmt
+- fx:src/lib.rs#mod:tests
+- fx:src/lib.rs#mod:tests/fn:helper_in_tests
+- fx:src/lib.rs#struct:Thing
+- fx:src/main.rs#fn:helper
+- fx:src/main.rs#fn:main
+links:
+- from: fx:src/lib.rs#impl:fmt%3A%3ADisplay%20for%20Thing
+  kind: contains
+  to: fx:src/lib.rs#impl:fmt%3A%3ADisplay%20for%20Thing/fn:fmt
+  confidence: extracted
+- from: fx:src/lib.rs#impl:fmt%3A%3ADisplay%20for%20Thing
+  kind: implements-for
+  to: fx:src/lib.rs#struct:Thing
+  confidence: extracted
+- from: fx:src/lib.rs#mod:tests
+  kind: contains
+  to: fx:src/lib.rs#mod:tests/fn:helper_in_tests
+  confidence: extracted
+- from: fx:src/main.rs#fn:main
+  kind: calls
+  to: fx:src/main.rs#fn:helper
+  confidence: extracted

@@ -55,9 +55,11 @@ impl Builder<'_> {
         let owner = self_path.as_ref().and_then(|p| p.last().cloned());
         self.enter("impl", &name, id);
         let saved = std::mem::replace(&mut self.self_ident, owner.clone());
+        let saved_trait = std::mem::replace(&mut self.trait_impl, trait_ty.is_some());
         if let Some(list) = i.assoc_item_list() {
             self.assoc_items(list, owner.as_deref().unwrap_or(""));
         }
+        self.trait_impl = saved_trait;
         self.self_ident = saved;
         self.leave();
     }

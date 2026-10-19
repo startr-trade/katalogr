@@ -1,19 +1,21 @@
 //! Source-file extraction (FEAT-005 sections 4 and 8): one pass over the syntax tree builds a
 //! [`Fragment`]. A syntax error never fails the file: the tree keeps what parsed.
 
-use crate::context::{self, CrateInfo, WorkspaceContext};
+use crate::context::{self, CrateInfo, TargetKind, WorkspaceContext};
 use crate::lines::LineIndex;
 use crate::ownership::owner_of;
+use crate::roots::{self, RootCtx};
 use katalogr_model::annotate;
+use katalogr_model::insight::{FACT_PACKAGE, FACT_RATIONALE, FACT_ROOT};
 use katalogr_model::{
     ArtifactName, ArtifactNode, Confidence, Export, ExportKey, ExtractError, ExtractInput, Fact,
     Fragment, Id, Link, LinkKind, Name, OutRef, Provenance, Segment, Span, SymbolName, SymbolNode,
 };
 use ra_ap_syntax::{
-    AstNode, Edition, SourceFile, SyntaxElement, SyntaxKind, SyntaxNode,
+    AstNode, Edition, SourceFile, SyntaxElement, SyntaxKind, SyntaxNode, TextRange,
     ast::{self, HasAttrs, HasModuleItem},
 };
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 
 pub const NS_ITEM: &str = "rs-item";
 pub const NS_FILE: &str = "rs-file";
@@ -91,10 +93,30 @@ pub(crate) struct Builder<'a> {
     pub scopes: Vec<Scope>,
     /// Last path segment of the current impl's self type, or the trait name inside a trait.
     pub self_ident: Option<String>,
+    /// Kind of the target that owns the file.
+    pub target_kind: Option<TargetKind>,
+    /// The file is the root file of its target (so its top level is the target's root module).
+    pub target_root: bool,
+    /// Depth of enclosing `#[cfg(test)]` modules (the file counts when it is `#![cfg(test)]`).
+    pub test_depth: u32,
+    /// Inside the items of `impl Trait for Type`.
+    pub trait_impl: bool,
+    /// Node range of each symbol, to attribute comments.
+    pub ranges: HashMap<TextRange, Id>,
 }
 
 pub fn extract(input: &ExtractInput) -> Result<Fragment, ExtractError> {
     extract_with_errors(input).map(|(fragment, _)| fragment)
+}
+
+/// A single-file target under `src/bin` or `examples`: its module path is the file stem.
+fn conventional_root(owner: &crate::ownership::Owner<'_>, path: &str) -> bool {
+    let (Some(t), [stem]) = (&owner.target, owner.module.as_slice()) else {
+        return false;
+    };
+    let dir = context::parent_dir(path);
+    let file_ok = path.rsplit('/').next() == Some(&format!("{}.rs", t.name)) && *stem == t.name;
+    file_ok && (dir.ends_with("src/bin") || dir.ends_with("examples") || dir.ends_with("benches"))
 }
 
 /// The fragment plus one [`ExtractError::Parse`] (with span) per syntax error in the file.
@@ -151,6 +173,11 @@ pub fn extract_with_errors(
             globs: Vec::new(),
         }],
         self_ident: None,
+        target_kind: owner.target.as_ref().map(|t| t.kind),
+        target_root: owner.module.is_empty() || conventional_root(&owner, path),
+        test_depth: 0,
+        trait_impl: false,
+        ranges: HashMap::new(),
     };
 
     let mut facts: BTreeMap<String, Fact> = BTreeMap::new();
@@ -163,11 +190,20 @@ pub fn extract_with_errors(
     if owner.orphan {
         facts.insert("orphan".to_string(), Fact::Bool(true));
     }
+    if let Some(k) = owner.krate {
+        facts.insert(FACT_PACKAGE.to_string(), Fact::Str(k.name.clone()));
+    }
 
     // Syntax errors do not stop the walk; `ra_ap_syntax` keeps the tree it could build.
     let parse = SourceFile::parse(text, Edition::Edition2021);
     let tree = parse.tree();
     let inner = attr_texts(tree.attrs());
+    if inner
+        .iter()
+        .any(|a| matches!(a, Fact::Str(t) if roots::is_cfg_test(t)))
+    {
+        b.test_depth = 1;
+    }
     if !inner.is_empty() {
         facts.insert("attrs".to_string(), Fact::List(inner));
     }
@@ -179,6 +215,20 @@ pub fn extract_with_errors(
         artifact.id(),
     );
     b.items(tree.items().collect());
+    // Rationale markers go to the innermost symbol that holds the comment, else to the file.
+    for (owner_id, markers) in crate::rationale::collect(tree.syntax(), text, &b.lines, &b.ranges) {
+        let fact = annotate::rationale_fact(&markers);
+        match owner_id {
+            None => {
+                facts.insert(FACT_RATIONALE.to_string(), fact);
+            }
+            Some(id) => {
+                if let Some(sym) = b.symbols.iter_mut().find(|s| s.name.id() == id) {
+                    sym.facts.insert(FACT_RATIONALE.to_string(), fact);
+                }
+            }
+        }
+    }
     let errors = parse
         .errors()
         .iter()
@@ -274,6 +324,7 @@ impl Builder<'_> {
         node: &SyntaxNode,
         mut facts: BTreeMap<String, Fact>,
     ) -> Id {
+        self.root_fact(kind, name, node, &mut facts);
         if let Some(doc) = doc_first_paragraph(node) {
             facts.insert("doc".to_string(), Fact::Str(doc));
         }
@@ -308,8 +359,48 @@ impl Builder<'_> {
             span,
             facts,
         });
+        self.ranges.insert(node.text_range(), id);
         self.annotations(id, node);
         id
+    }
+
+    /// Set the `root` fact when the symbol is an entry point (see [`roots::root_reason`]).
+    fn root_fact(
+        &self,
+        kind: &str,
+        name: &str,
+        node: &SyntaxNode,
+        facts: &mut BTreeMap<String, Fact>,
+    ) {
+        let attrs: Vec<String> = match facts.get("attrs") {
+            Some(Fact::List(l)) => l
+                .iter()
+                .filter_map(|f| match f {
+                    Fact::Str(s) => Some(s.clone()),
+                    _ => None,
+                })
+                .collect(),
+            _ => Vec::new(),
+        };
+        let vis = match facts.get("vis") {
+            Some(Fact::Str(v)) => Some(v.as_str()),
+            _ => None,
+        };
+        let extern_abi = ast::Fn::cast(node.clone()).is_some_and(|f| f.abi().is_some());
+        let reason = roots::root_reason(&RootCtx {
+            kind,
+            name,
+            attrs: &attrs,
+            vis,
+            target: self.target_kind,
+            at_target_root: self.target_root && self.segs.is_empty(),
+            in_test_code: self.test_depth > 0,
+            in_trait_impl: self.trait_impl,
+            extern_abi,
+        });
+        if let Some(r) = reason {
+            facts.insert(FACT_ROOT.to_string(), Fact::Str(r.to_string()));
+        }
     }
 
     /// FEAT-019 T6: item annotations (`FEAT-001 R-1`) in the comments that lead the item (doc

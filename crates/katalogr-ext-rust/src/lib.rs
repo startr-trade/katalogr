@@ -10,6 +10,8 @@ pub mod items;
 pub mod lines;
 pub mod manifest;
 pub mod ownership;
+pub mod rationale;
+pub mod roots;
 
 pub use context::{CrateInfo, Dep, Target, TargetKind, WorkspaceContext};
 
@@ -43,7 +45,19 @@ impl Extractor for RustExtractor {
             "attributes",
             "annotations",
             "parse-error",
+            "entry-root",
+            "rationale-comment",
+            "package-fact",
         ]
+    }
+
+    fn code_kinds(&self) -> &'static [&'static str] {
+        roots::CODE_KINDS
+    }
+
+    /// Bumped when the insight facts (`root`, `package`, `rationale`) were added.
+    fn revision_salt(&self) -> &'static str {
+        "insights-1"
     }
 
     /// The [`WorkspaceContext`] as compact JSON with sorted keys and vectors.

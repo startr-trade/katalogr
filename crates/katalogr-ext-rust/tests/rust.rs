@@ -6,7 +6,7 @@ use camino::{Utf8Path, Utf8PathBuf};
 use katalogr_engine::registry::ExtensionRegistry;
 use katalogr_engine::{Consistency, Engine, NewEvent, QueryOptions, Scope};
 use katalogr_ext_rust::{RustExtractor, TargetKind, WorkspaceContext};
-use katalogr_model::{ExtractInput, Extractor, Name, RelPath};
+use katalogr_model::{ExtractInput, Extractor, Fact, Name, RelPath};
 use katalogr_store::{ErrorRow, Kindex, ProjectConfig, ProjectName, Reader, RepoConfig};
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
@@ -676,5 +676,146 @@ mod rust {
                 .all(|r| r.span.is_some() && !r.message.is_empty())
         );
         assert!(!g.errors.contains_key("Cargo.toml"));
+    }
+
+    fn root(g: &Graph, name: &str) -> Option<String> {
+        g.sym(name)["facts"]["root"]["Str"]
+            .as_str()
+            .map(str::to_string)
+    }
+
+    #[test]
+    fn entry_roots_marked() {
+        let g = index_case("insight-roots");
+        assert_expected("insight-roots", &g);
+        let r = |n: &str| root(&g, &format!("src/lib.rs#{n}"));
+        assert_eq!(r("fn:public_api").as_deref(), Some("api"));
+        assert_eq!(r("fn:private_helper"), None);
+        assert_eq!(r("fn:crate_visible"), None);
+        assert_eq!(r("fn:a_test").as_deref(), Some("test"));
+        assert_eq!(r("mod:tests/fn:helper_in_tests").as_deref(), Some("test"));
+        // `#[no_mangle]` wins over `pub`; an `extern "C"` ABI is external too.
+        assert_eq!(r("fn:exported_by_name").as_deref(), Some("external"));
+        assert_eq!(r("fn:abi_only").as_deref(), Some("external"));
+        // A trait impl method is reached through dispatch.
+        let fmt = "impl:fmt%3A%3ADisplay%20for%20Thing/fn:fmt";
+        assert_eq!(r(fmt).as_deref(), Some("impl"));
+        assert_eq!(r("struct:Thing").as_deref(), Some("api"));
+        // The binary's `main` is the program entry; its helper is not a root.
+        assert_eq!(root(&g, "src/main.rs#fn:main").as_deref(), Some("main"));
+        assert_eq!(root(&g, "src/main.rs#fn:helper"), None);
+        // Integration tests are test code, and an example's `main` is still `main`.
+        let a = |text: &str, path: &str| {
+            let input_path = RelPath::new(path).unwrap();
+            let ctx = RustExtractor
+                .build_context(&[file("Cargo.toml", "[package]\nname = \"x\"\n")])
+                .unwrap();
+            RustExtractor
+                .extract(&ExtractInput {
+                    repo: REPO,
+                    path: &input_path,
+                    revision: "r",
+                    content: text.as_bytes(),
+                    context: &ctx,
+                })
+                .unwrap()
+        };
+        let frag = a("fn main() {}\nfn other() {}\n", "examples/demo.rs");
+        let roots: Vec<_> = frag
+            .symbols
+            .iter()
+            .map(|s| {
+                (
+                    s.name.segments[0].name.clone(),
+                    s.facts.get("root").cloned(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            roots,
+            [
+                ("main".to_string(), Some(Fact::Str("main".into()))),
+                ("other".to_string(), Some(Fact::Str("test".into()))),
+            ]
+        );
+        let frag = a("fn it() {}\n", "tests/it.rs");
+        assert_eq!(frag.symbols[0].facts["root"], Fact::Str("test".into()));
+    }
+
+    #[test]
+    fn rationale_markers_recorded() {
+        let g = index_case("rationale");
+        assert_expected("rationale", &g);
+        let entries = |v: &Value| -> Vec<(String, u64, String)> {
+            v["List"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|e| {
+                    let m = &e["Map"];
+                    (
+                        m["marker"]["Str"].as_str().unwrap().to_string(),
+                        m["line"]["Int"].as_u64().unwrap(),
+                        m["text"]["Str"].as_str().unwrap().to_string(),
+                    )
+                })
+                .collect()
+        };
+        let t = |m: &str, l: u64, x: &str| (m.to_string(), l, x.to_string());
+        // Leading and body comments belong to the function that holds or follows them.
+        assert_eq!(
+            entries(&g.sym("src/lib.rs#fn:leading")["facts"]["rationale"]),
+            [
+                t(
+                    "WHY",
+                    3,
+                    "a leading comment explains why the function exists."
+                ),
+                t(
+                    "NOTE",
+                    5,
+                    "a body comment belongs to the function that holds it."
+                ),
+            ]
+        );
+        // A doc comment's lines are one comment.
+        assert_eq!(
+            entries(&g.sym("src/lib.rs#fn:documented")["facts"]["rationale"]),
+            [t("NOTE", 9, "a doc comment continues over two lines.")]
+        );
+        // Prose is no marker; the file-level comment goes to the file.
+        assert!(
+            g.sym("src/lib.rs#fn:plain")["facts"]
+                .get("rationale")
+                .is_none()
+        );
+        let file = &g.artifacts[&format!("{REPO}:src/lib.rs")];
+        assert_eq!(
+            entries(&file["facts"]["rationale"]),
+            [t(
+                "RATIONALE",
+                1,
+                "this file exists to show a file-level marker."
+            )]
+        );
+    }
+
+    #[test]
+    fn package_fact_recorded() {
+        let g = index_case("workspace-two-crates");
+        assert_expected("workspace-two-crates", &g);
+        let package = |path: &str| {
+            g.artifacts[&format!("{REPO}:{path}")]["facts"]["package"]["Str"]
+                .as_str()
+                .map(str::to_string)
+        };
+        assert_eq!(package("crates/app/src/main.rs").as_deref(), Some("app"));
+        assert_eq!(
+            package("crates/core-lib/src/lib.rs").as_deref(),
+            Some("core-lib")
+        );
+        // The root manifest is a virtual workspace: no package.
+        assert_eq!(package("Cargo.toml"), None);
+        let _ = fact;
     }
 }

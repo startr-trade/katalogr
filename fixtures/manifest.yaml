@@ -33,12 +33,18 @@ technologies:
       - rust/calls
     crate-deps:
       - rust/workspace-two-crates
+    entry-root:
+      - rust/insight-roots
     impl-links:
       - rust/impls
     items:
       - rust/items
+    package-fact:
+      - rust/workspace-two-crates
     parse-error:
       - rust/broken-syntax
+    rationale-comment:
+      - rust/rationale
     re-export:
       - rust/use-and-reexport
     use-resolution:
