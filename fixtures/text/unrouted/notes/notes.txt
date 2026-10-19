@@ -1,0 +1,8 @@
+# Ledger notes
+
+The ledger tracks pending invoices and their reminders.
+
+## Reminders
+
+Overdue invoices receive a reminder after fourteen days.
+The tortoise schedule runs weekly.

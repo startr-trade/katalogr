@@ -11,7 +11,7 @@ fn generate(headings: bool) -> String {
     let mut s = String::new();
     let mut h = 0;
     for i in 0..20_000 {
-        if headings && i % 7 == 0 && h < 3_000 {
+        if headings && i % 6 == 0 && h < 3_000 {
             s.push_str(&format!("## Section {h} heading text here\n"));
             h += 1;
             continue;
@@ -21,11 +21,11 @@ fn generate(headings: bool) -> String {
             continue;
         }
         s.push_str(&format!(
-            "line {i} of deterministic prose for the benchmark with several words to fill space ok\n"
+            "line {i} of deterministic prose for the benchmark\n"
         ));
     }
     while s.len() < 1024 * 1024 - 100 {
-        s.push_str("padding words to reach about one mebibyte of synthetic text\n");
+        s.push_str("padding words to reach about one mebibyte of synthetic text\n\n");
     }
     s.truncate(1024 * 1024);
     s
@@ -46,7 +46,11 @@ fn measure(name: &str, headings: bool, expect_chunks: std::ops::RangeInclusive<u
         let start = Instant::now();
         let (f, _) = TextExtractor.extract_with_errors(&input).unwrap();
         best = best.min(start.elapsed());
-        assert!(expect_chunks.contains(&f.symbols.len()), "{}", f.symbols.len());
+        assert!(
+            expect_chunks.contains(&f.symbols.len()),
+            "{}",
+            f.symbols.len()
+        );
     }
     println!("bench::{name}: {} bytes in {best:?}", text.len());
     assert!(best < Duration::from_millis(40), "took {best:?}");

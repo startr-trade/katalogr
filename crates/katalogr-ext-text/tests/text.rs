@@ -94,7 +94,11 @@ mod text {
     fn line_cap_splits_long_chunks() {
         let text: String = (1..=130).map(|i| format!("l{i}\n")).collect();
         let s = split(&text);
-        let v: Vec<_> = s.chunks.iter().map(|c| (c.start_line, c.end_line)).collect();
+        let v: Vec<_> = s
+            .chunks
+            .iter()
+            .map(|c| (c.start_line, c.end_line))
+            .collect();
         assert_eq!(v, vec![(1, 60), (61, 120), (121, 130)]);
         // Only the first piece of a heading chunk keeps the heading.
         let text = format!("# H\n{}", "x\n".repeat(100));
@@ -162,9 +166,15 @@ mod text {
             .chain("# Tïtle\nbody".encode_utf16().flat_map(|u| u.to_be_bytes()))
             .collect();
         let (t, enc, msg) = decode(&le);
-        assert_eq!((t.as_str(), enc, msg), ("# Tïtle\nbody", Encoding::Utf16Le, None));
+        assert_eq!(
+            (t.as_str(), enc, msg),
+            ("# Tïtle\nbody", Encoding::Utf16Le, None)
+        );
         let (t, enc, msg) = decode(&be);
-        assert_eq!((t.as_str(), enc, msg), ("# Tïtle\nbody", Encoding::Utf16Be, None));
+        assert_eq!(
+            (t.as_str(), enc, msg),
+            ("# Tïtle\nbody", Encoding::Utf16Be, None)
+        );
         // UTF-16 text is not binary although it holds NUL bytes.
         assert!(!is_binary(&le));
         let (f, errors) = run(&le);
@@ -185,7 +195,9 @@ mod text {
         assert!(msg.is_some());
         let (f, errors) = run(b"caf\xE9 au lait\n");
         assert_eq!(errors.len(), 1);
-        assert!(matches!(&errors[0], ExtractError::Parse { message, .. } if message.contains("Latin-1")));
+        assert!(
+            matches!(&errors[0], ExtractError::Parse { message, .. } if message.contains("Latin-1"))
+        );
         assert_eq!(str_fact(&f.artifact.facts, "encoding"), Some("latin-1"));
         assert_eq!(f.symbols.len(), 1);
     }
@@ -247,7 +259,11 @@ mod text {
         assert_eq!((s.span.end_line, s.span.end_col), (4, 16));
         assert_eq!(str_fact(&s.facts, "title"), Some("Title"));
         assert_eq!(s.facts.get("level"), Some(&Fact::Int(1)));
-        assert!(str_fact(&s.facts, "text").unwrap().contains("second block ccc"));
+        assert!(
+            str_fact(&s.facts, "text")
+                .unwrap()
+                .contains("second block ccc")
+        );
         assert_eq!(str_fact(&f.artifact.facts, "chunk_mode"), Some("headings"));
     }
 
@@ -255,7 +271,9 @@ mod text {
     fn shard_size_within_budget() {
         // Prose in blocks of ten lines of about 75 characters.
         let mut text = String::new();
-        let words = ["alpha", "bravo", "charlie", "delta", "echo", "foxtrot", "golf"];
+        let words = [
+            "alpha", "bravo", "charlie", "delta", "echo", "foxtrot", "golf",
+        ];
         let mut n = 0usize;
         while text.len() < 256 * 1024 {
             for _ in 0..10 {
@@ -269,7 +287,11 @@ mod text {
         let (f, _) = run(text.as_bytes());
         let shard = katalogr_store::shard::encode(&f).unwrap();
         let ratio = shard.len() as f64 / text.len() as f64;
-        println!("shard {} source {} ratio {ratio:.2}", shard.len(), text.len());
+        println!(
+            "shard {} source {} ratio {ratio:.2}",
+            shard.len(),
+            text.len()
+        );
         assert!(ratio <= 1.5, "ratio {ratio:.2}");
     }
 

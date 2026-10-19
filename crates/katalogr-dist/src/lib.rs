@@ -149,6 +149,8 @@ fn build_registry() -> ExtensionRegistry {
     // The board extension claims its own Markdown files before the general one.
     registry.register(Box::new(katalogr_ext_kanbanr::BoardExtractor));
     registry.register(Box::new(katalogr_ext_md::MarkdownExtractor));
+    // Claims no file by itself: a profile `select` routes unparsed formats to it.
+    registry.register(Box::new(katalogr_ext_text::TextExtractor));
     #[cfg(feature = "test-extractor")]
     registry.register(Box::new(test_extractor::TestExtractor));
     registry

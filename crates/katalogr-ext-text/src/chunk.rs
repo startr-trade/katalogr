@@ -78,6 +78,9 @@ pub fn cut(s: &mut String, max: usize) {
     }
 }
 
+/// A half-open range of 0-based line indexes and the heading that opens it.
+type Range = (usize, usize, Option<(u8, String)>);
+
 /// Split decoded text into chunks. Pure and deterministic.
 pub fn split(text: &str) -> Split {
     let lines = lines_of(text);
@@ -101,7 +104,7 @@ pub fn split(text: &str) -> Split {
         Mode::Blocks
     };
     // Ranges of 0-based line indexes, half-open, with the heading that opens them.
-    let mut ranges: Vec<(usize, usize, Option<(u8, String)>)> = Vec::new();
+    let mut ranges: Vec<Range> = Vec::new();
     match mode {
         Mode::Headings => {
             let mut start = 0;

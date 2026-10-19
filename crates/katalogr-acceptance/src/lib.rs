@@ -64,6 +64,7 @@ pub fn full_registry() -> ExtensionRegistry {
     // The board extension claims its own Markdown files before the general one.
     reg.register(Box::new(katalogr_ext_kanbanr::BoardExtractor));
     reg.register(Box::new(katalogr_ext_md::MarkdownExtractor));
+    reg.register(Box::new(katalogr_ext_text::TextExtractor));
     reg
 }
 

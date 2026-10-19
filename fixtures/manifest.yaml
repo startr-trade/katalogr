@@ -120,6 +120,19 @@ technologies:
       - test/refs-unresolved
     symbols:
       - test/symbols
+  text:
+    binary:
+      - text/binary
+    blocks:
+      - text/blocks
+    chunks:
+      - text/routed
+    encoding:
+      - text/latin1
+    headings:
+      - text/headings
+    size-cap:
+      - text/oversize
   ts:
     annotations:
       - ts/annotations

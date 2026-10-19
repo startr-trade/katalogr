@@ -1,0 +1,6 @@
+mode: exact
+symbols:
+- fx:logs/service.log#chunk:l1
+- fx:logs/service.log#chunk:l4
+- fx:logs/service.log#chunk:l7
+links: []

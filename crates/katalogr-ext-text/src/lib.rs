@@ -39,7 +39,9 @@ impl Extractor for TextExtractor {
     }
 
     fn patterns(&self) -> &'static [&'static str] {
-        &["chunks", "headings", "blocks", "binary", "encoding", "size-cap"]
+        &[
+            "chunks", "headings", "blocks", "binary", "encoding", "size-cap",
+        ]
     }
 
     fn extract(&self, input: &ExtractInput) -> Result<Fragment, ExtractError> {
@@ -132,7 +134,8 @@ impl Extractor for TextExtractor {
             for c in &split.chunks {
                 let start = offsets[c.start_line as usize - 1];
                 // End of the last line, exclusive of its newline.
-                let end = offsets[c.end_line as usize - 1] + line_list[c.end_line as usize - 1].len();
+                let end =
+                    offsets[c.end_line as usize - 1] + line_list[c.end_line as usize - 1].len();
                 let mut f = BTreeMap::new();
                 f.insert("text".to_string(), Fact::Str(c.text.clone()));
                 f.insert(

@@ -1,0 +1,18 @@
+Preface text before any heading.
+
+# Installation
+
+Run the installer.
+
+```sh
+# not a heading
+make install
+```
+
+## Configuration
+
+Edit the settings file.
+
+# Usage
+
+Start the service.
