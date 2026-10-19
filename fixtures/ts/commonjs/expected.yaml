@@ -1,0 +1,39 @@
+mode: exact
+symbols:
+- fx:lib.js#const:b
+- fx:lib.js#const:f
+- fx:lib.js#fn:a
+- fx:lib.js#fn:c
+- fx:lib.js#fn:e
+- fx:lib.js#fn:local
+- fx:lib.js#fn:other
+- fx:main.js#fn:go
+links:
+- from: fx:lib.js#fn:c
+  kind: calls
+  to: fx:lib.js#fn:other
+  confidence: Extracted
+- from: fx:main.js
+  kind: imports
+  to: fx:lib.js
+  confidence: Extracted
+- from: fx:main.js
+  kind: imports
+  to: fx:lib.js#fn:c
+  confidence: Extracted
+- from: fx:main.js
+  kind: imports
+  to: fx:lib.js#fn:other
+  confidence: Extracted
+- from: fx:main.js#fn:go
+  kind: calls
+  to: fx:lib.js#fn:a
+  confidence: Extracted
+- from: fx:main.js#fn:go
+  kind: calls
+  to: fx:lib.js#fn:c
+  confidence: Extracted
+- from: fx:main.js#fn:go
+  kind: calls
+  to: fx:lib.js#fn:other
+  confidence: Extracted

@@ -28,6 +28,13 @@ pub trait Extractor: Send + Sync {
     fn context_files(&self) -> &'static [&'static str] {
         &[]
     }
+    /// True when `path` is one of this extension's context files. Default: the last path
+    /// component equals one of [`Extractor::context_files`]. An extension overrides it to match
+    /// names that an exact list cannot express (for example a prefix rule).
+    fn is_context_file(&self, path: &RelPath) -> bool {
+        let name = path.as_str().rsplit('/').next().unwrap_or("");
+        self.context_files().contains(&name)
+    }
     /// Build deterministic context bytes from those files (sorted by path). Default: empty.
     fn build_context(&self, files: &[(RelPath, Vec<u8>)]) -> Result<Vec<u8>, ExtractError> {
         let _ = files;

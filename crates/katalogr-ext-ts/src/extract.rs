@@ -28,9 +28,11 @@ pub fn extract_with_errors(
         message: format!("not utf-8: {e}"),
     })?;
     let ctx = TsContext::from_bytes(input.context)?;
-    match context::file_name(input.path.as_str()) {
-        PACKAGE_JSON | context::TSCONFIG | context::JSCONFIG => Ok(config_fragment(input, text)),
-        _ => source_fragment(input, text, &ctx),
+    let name = context::file_name(input.path.as_str());
+    if name == PACKAGE_JSON || context::is_config_name(name) {
+        Ok(config_fragment(input, text))
+    } else {
+        source_fragment(input, text, &ctx)
     }
 }
 

@@ -309,7 +309,7 @@ impl<'a> Processor<'a> {
                 continue;
             }
             for ext in engine.registry().extractors() {
-                if !ext.context_files().is_empty() && context::is_context_file(ext, &key.path) {
+                if context::is_context_file(ext, &key.path) {
                     due.insert((key.repo.clone(), ext.id()));
                 }
             }

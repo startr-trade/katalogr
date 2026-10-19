@@ -33,6 +33,10 @@ links:
   kind: contains
   to: fx:src/items.ts#class:Widget/method:size
   confidence: Extracted
+- from: fx:src/items.ts#class:Widget/method:make
+  kind: calls
+  to: fx:src/items.ts#class:Widget
+  confidence: Extracted
 - from: fx:src/items.ts#class:Widget/method:render
   kind: calls
   to: fx:src/items.ts#fn:hidden

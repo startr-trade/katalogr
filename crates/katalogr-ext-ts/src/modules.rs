@@ -38,6 +38,20 @@ fn child(dir: &str, name: &str) -> String {
 /// The files a path without a known extension may name, in order.
 pub fn expand_file(p: &str) -> Vec<ExportKey> {
     let mut out = vec![p.to_string()];
+    // NodeNext: `./x.js` may name `x.ts` (and `.jsx`, `.mjs`, `.cjs` their TS counterparts),
+    // tried right after the exact path.
+    for (js, ts) in [
+        (".js", ".ts"),
+        (".jsx", ".tsx"),
+        (".mjs", ".mts"),
+        (".cjs", ".cts"),
+    ] {
+        if let Some(stem) = p.strip_suffix(js)
+            && !stem.is_empty()
+        {
+            out.push(format!("{stem}{ts}"));
+        }
+    }
     if !p.is_empty() {
         for ext in ["ts", "tsx", "d.ts", "js", "jsx", "mjs", "cjs"] {
             out.push(format!("{p}.{ext}"));

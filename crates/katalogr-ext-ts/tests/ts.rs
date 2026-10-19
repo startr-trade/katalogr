@@ -234,6 +234,26 @@ mod ts {
     }
 
     #[test]
+    fn esm_js_specifier_resolves_ts() {
+        check("esm-js-specifiers");
+    }
+
+    #[test]
+    fn commonjs_exports_recorded() {
+        check("commonjs");
+    }
+
+    #[test]
+    fn extends_any_name() {
+        check("extends-base");
+    }
+
+    #[test]
+    fn constructor_calls_recorded() {
+        check("new-calls");
+    }
+
+    #[test]
     fn tsconfig_paths() {
         check("path-alias");
     }

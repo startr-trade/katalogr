@@ -26,12 +26,18 @@ impl Extractor for TsExtractor {
 
     fn handles(&self, p: &RelPath) -> bool {
         let s = p.as_str();
-        SOURCE_EXTENSIONS.iter().any(|e| s.ends_with(e))
-            || self.context_files().contains(&context::file_name(s))
+        SOURCE_EXTENSIONS.iter().any(|e| s.ends_with(e)) || self.is_context_file(p)
     }
 
     fn context_files(&self) -> &'static [&'static str] {
         &[context::TSCONFIG, context::JSCONFIG, context::PACKAGE_JSON]
+    }
+
+    /// The exact names plus any `tsconfig*.json` / `jsconfig*.json`, so a config that another
+    /// one `extends` is found whatever its name.
+    fn is_context_file(&self, p: &RelPath) -> bool {
+        let name = context::file_name(p.as_str());
+        self.context_files().contains(&name) || context::is_config_name(name)
     }
 
     fn patterns(&self) -> &'static [&'static str] {
@@ -39,6 +45,10 @@ impl Extractor for TsExtractor {
             "items",
             "relative-import",
             "path-alias",
+            "esm-js-specifier",
+            "commonjs-export",
+            "extends-any-name",
+            "constructor-call",
             "package-import",
             "call-binding",
             "call-member",
