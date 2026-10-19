@@ -1,0 +1,4 @@
+sym fn alpha
+sym struct Widget
+sym fn alpha
+link Widget contains alpha

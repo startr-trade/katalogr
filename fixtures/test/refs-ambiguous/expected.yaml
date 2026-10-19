@@ -1,0 +1,8 @@
+mode: exact
+symbols:
+  - "fx:a.tx#fn:caller"
+  - "fx:b.tx#fn:one"
+  - "fx:c.tx#fn:two"
+links:
+  - { from: "fx:a.tx#fn:caller", kind: calls, to: "fx:b.tx#fn:one", confidence: Inferred }
+  - { from: "fx:a.tx#fn:caller", kind: calls, to: "fx:c.tx#fn:two", confidence: Inferred }
