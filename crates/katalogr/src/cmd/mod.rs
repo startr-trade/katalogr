@@ -3,6 +3,7 @@
 pub mod callers;
 pub mod claude;
 pub mod dangling;
+pub mod doctor;
 pub mod explain;
 pub mod find;
 pub mod hook;

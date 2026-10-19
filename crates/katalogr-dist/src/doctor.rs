@@ -24,6 +24,16 @@ fn unresolved(finding: Finding, versions: Versions, opts: &DoctorOptions) -> Rep
     Report::unresolved(vec![finding], versions, opts.fail_on)
 }
 
+fn format_unreadable() -> Finding {
+    Finding::new(
+        "KD-FMT-001",
+        Severity::Error,
+        "format",
+        "format.json is unreadable or invalid",
+    )
+    .fix("git -C <kindex-dir> checkout -- format.json")
+}
+
 fn marker_finding(code: &str, severity: Severity, message: &str, fix: &str) -> Finding {
     Finding::new(code, severity, "marker", message).fix(fix)
 }
@@ -134,19 +144,12 @@ pub fn doctor(
             return Ok(unresolved(format_too_new(found, &min_katalogr), v, opts));
         }
         Err(StoreError::NotAProject(_)) => {
-            return Ok(unresolved(
-                Finding::new(
-                    "KD-FMT-001",
-                    Severity::Error,
-                    "format",
-                    "format.json is unreadable or invalid",
-                )
-                .fix("git -C <kindex-dir> checkout -- format.json"),
-                versions(),
-                opts,
-            ));
+            return Ok(unresolved(format_unreadable(), versions(), opts));
         }
-        Err(StoreError::ProjectNotFound(_)) | Err(StoreError::Parse { .. }) | Err(_) => {
+        Err(StoreError::Parse { path, .. }) if path.ends_with("format.json") => {
+            return Ok(unresolved(format_unreadable(), versions(), opts));
+        }
+        Err(_) => {
             return Ok(unresolved(
                 marker_finding(
                     "KD-MRK-003",

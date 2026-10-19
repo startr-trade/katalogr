@@ -72,6 +72,7 @@ Reach for these before reading whole files:\n\
 - `katalogr show <symbol>`: just that symbol's lines\n\
 - `katalogr refs <symbol>`: what references it\n\
 - `katalogr why <file>:<line>`: why that line exists\n\
+- `katalogr doctor`: check the index and print fixes\n\
 \n\
 The katalogr skill has the query craft and playbooks. Install it with `katalogr skill install`. Regenerate this block with `katalogr claude sync`.\n\
 {END_MARKER}"

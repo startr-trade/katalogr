@@ -412,3 +412,78 @@ fn other_outcomes<T>(cli: &Cli, report: &Report, outcome: Outcome<T>) {
         Outcome::Found(_) => {}
     }
 }
+
+/// The `doctor` report: JSON with `--json`, else one line per finding with its fix.
+pub fn doctor(cli: &Cli, r: &katalogr_dist::doctor::Report) -> ExitCode {
+    if cli.json {
+        println!("{}", serde_json::to_string(r).expect("serialise report"));
+    } else {
+        print!("{}", doctor_text(r));
+    }
+    if r.exit_failing() {
+        ExitCode::Error
+    } else {
+        ExitCode::Ok
+    }
+}
+
+/// The text form of a doctor report.
+pub fn doctor_text(r: &katalogr_dist::doctor::Report) -> String {
+    use katalogr_dist::doctor::CheckStatus;
+    use std::fmt::Write;
+    let v = &r.versions;
+    let mut out = format!(
+        "katalogr doctor: katalogr {}, shard format {}",
+        v.katalogr, v.shard_format
+    );
+    if let Some(k) = v.kindex_shard_format.filter(|k| *k != v.shard_format) {
+        let _ = write!(out, " (kindex {k})");
+    }
+    let _ = write!(out, ", cache schema {}", v.cache_schema);
+    if let Some(s) = v.stored_cache_schema.filter(|s| *s != v.cache_schema) {
+        let _ = write!(out, " (stored {s})");
+    }
+    out.push('\n');
+    for f in &r.findings {
+        let _ = writeln!(out, "{:<7} {}  {}", f.severity.as_str(), f.code, f.message);
+        if let Some(fix) = &f.fix {
+            let _ = writeln!(out, "        fix: {fix}");
+        }
+        if !f.sample.is_empty() {
+            let _ = writeln!(out, "        keys: {}", f.sample.join(", "));
+        }
+    }
+    let n = r.checks.len();
+    if r.findings.is_empty() {
+        let _ = writeln!(out, "summary: healthy; {n} checks");
+    } else {
+        let with = r
+            .checks
+            .iter()
+            .filter(|c| c.status == CheckStatus::Findings)
+            .count();
+        let skipped = r
+            .checks
+            .iter()
+            .filter(|c| c.status == CheckStatus::Skipped)
+            .count();
+        let _ = writeln!(
+            out,
+            "summary: {} error, {} warning, {} info; {n} checks ({with} with findings, {skipped} skipped)",
+            r.summary.error, r.summary.warning, r.summary.info
+        );
+    }
+    let mut next: Vec<&str> = Vec::new();
+    for f in r.findings.iter().take(3) {
+        if let Some(fix) = f.fix.as_deref()
+            && (fix.starts_with("katalogr ") || fix.starts_with("git "))
+            && !next.contains(&fix)
+        {
+            next.push(fix);
+        }
+    }
+    if !next.is_empty() {
+        let _ = writeln!(out, "next: {}", next.join("; "));
+    }
+    out
+}
