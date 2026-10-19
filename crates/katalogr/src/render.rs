@@ -36,8 +36,13 @@ pub fn ref_line(r: &RefHit) -> String {
 }
 
 pub fn caller_line(c: &CallerHit) -> String {
+    let via = c
+        .via
+        .as_ref()
+        .map(|v| format!("  via {v}"))
+        .unwrap_or_default();
     format!(
-        "{}  {}  {}  [{:?}]  depth {}",
+        "{}  {}  {}  [{:?}]  depth {}{via}",
         c.caller.kind,
         c.caller.name,
         place(&c.caller),
@@ -355,11 +360,14 @@ pub fn explain(cli: &Cli, reply: Reply<Explain>) -> ExitCode {
                     } else {
                         lines.push(format!("{title} ({total}):"));
                     }
-                    lines.extend(
-                        links
-                            .iter()
-                            .map(|l| format!("  {}  {}  [{:?}]", l.kind, l.other, l.confidence)),
-                    );
+                    lines.extend(links.iter().map(|l| {
+                        let origin = l
+                            .origin
+                            .as_ref()
+                            .map(|o| format!("  origin {o}"))
+                            .unwrap_or_default();
+                        format!("  {}  {}  [{:?}]{origin}", l.kind, l.other, l.confidence)
+                    }));
                 }
                 if !x.items.is_empty() {
                     lines.push(format!("items: {}", x.items.join(", ")));

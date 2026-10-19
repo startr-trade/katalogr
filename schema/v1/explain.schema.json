@@ -76,6 +76,13 @@
         "kind": {
           "type": "string"
         },
+        "origin": {
+          "description": "The profile rule (`profile:<name>#<rule id>`) that produced the link, when one did.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "other": {
           "description": "Canonical name of the other end (the hex id when it is not a known node).",
           "type": "string"

@@ -61,6 +61,9 @@ pub struct CallerHit {
     pub depth: u32,
     #[schemars(with = "ConfidenceSchema")]
     pub confidence: Confidence,
+    /// The contract (`contract:<kind>:<key>`) the call goes through, when it does.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub via: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
@@ -157,6 +160,9 @@ pub struct LinkBrief {
     pub other: String,
     #[schemars(with = "ConfidenceSchema")]
     pub confidence: Confidence,
+    /// The profile rule (`profile:<name>#<rule id>`) that produced the link, when one did.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub origin: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]

@@ -215,6 +215,7 @@ pub fn parse(repo: &str, path: &RelPath, revision: &str, text: &str) -> Parsed {
                                 span: Some(span),
                                 candidates: keys,
                                 confidence: Confidence::Extracted,
+                                origin: None,
                             });
                         }
                     }
@@ -231,6 +232,7 @@ pub fn parse(repo: &str, path: &RelPath, revision: &str, text: &str) -> Parsed {
                             span: Some(span),
                             candidates: keys,
                             confidence: Confidence::Extracted,
+                            origin: None,
                         });
                     }
                 }

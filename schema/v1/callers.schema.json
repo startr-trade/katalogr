@@ -12,6 +12,13 @@
           "format": "uint32",
           "minimum": 0,
           "type": "integer"
+        },
+        "via": {
+          "description": "The contract (`contract:<kind>:<key>`) the call goes through, when it does.",
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "required": [

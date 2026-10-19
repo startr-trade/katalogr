@@ -61,6 +61,7 @@ impl Extractor for MarkdownExtractor {
             links: parsed.links,
             refs: parsed.refs,
             exports: parsed.exports,
+            bindings: Vec::new(),
         })
     }
 }

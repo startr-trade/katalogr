@@ -14,6 +14,9 @@ pub const DEFAULT_KINDS: &[&str] = &["links-to", "annotated-by", "refs-item"];
 /// itself (then the span is the reference's own, or the first line).
 pub fn dangling(tx: &impl Reader, kinds: &[&str]) -> Result<Vec<DanglingRef>, StoreError> {
     let mut out = Vec::new();
+    if kinds.contains(&CONTRACT_KIND) {
+        dangling_contracts(tx, &mut out)?;
+    }
     let prefixes: BTreeSet<String> = tx
         .exports_in(annotate::PREFIX_NS)?
         .into_iter()
@@ -45,6 +48,42 @@ pub fn dangling(tx: &impl Reader, kinds: &[&str]) -> Result<Vec<DanglingRef>, St
     out.sort_by(|a, b| (&a.from.name, &a.kind, &a.wanted).cmp(&(&b.from.name, &b.kind, &b.wanted)));
     out.dedup();
     Ok(out)
+}
+
+/// The kind that selects dangling contracts rather than unresolved references.
+pub const CONTRACT_KIND: &str = "contract";
+
+/// Contracts with providers but no consumers, or consumers but no providers. One entry per
+/// binding on the side that exists: `kind` is its role (`provides` or `consumes`) and `wanted`
+/// the contract. A declaration counts as neither side.
+fn dangling_contracts(tx: &impl Reader, out: &mut Vec<DanglingRef>) -> Result<(), StoreError> {
+    for (cid, row) in tx.contracts()? {
+        if (row.providers > 0) == (row.consumers > 0) {
+            continue;
+        }
+        let present = if row.providers > 0 {
+            "provides"
+        } else {
+            "consumes"
+        };
+        for key in tx.links_in(cid)? {
+            if key.kind.0 != present {
+                continue;
+            }
+            let span = tx
+                .link(&key)?
+                .and_then(|r| r.entries.first().and_then(|e| e.span));
+            let Some(from) = referrer(tx, key.from, span)? else {
+                continue;
+            };
+            out.push(DanglingRef {
+                from,
+                kind: present.to_string(),
+                wanted: vec![row.name.canonical()],
+            });
+        }
+    }
+    Ok(())
 }
 
 /// An unresolved annotation or trailer reference is dangling only when its code looks like

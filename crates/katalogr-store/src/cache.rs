@@ -8,8 +8,8 @@ use crate::error::StoreError;
 use crate::kindex::ProjectDir;
 use camino::Utf8PathBuf;
 use katalogr_model::{
-    ArtifactName, Confidence, Export, ExportKey, Fact, Fragment, Id, LinkKind, OutRef, Provenance,
-    RelPath, Span, SymbolName,
+    ArtifactName, Confidence, ContractName, ContractRole, Export, ExportKey, Fact, Fragment, Id,
+    LinkKind, OutRef, Provenance, RelPath, Span, SymbolName,
 };
 use redb::{
     Database, DatabaseError, ReadTransaction, ReadableDatabase, ReadableTable, StorageError,
@@ -23,7 +23,7 @@ use std::ops::Bound;
 use std::time::{Duration, Instant};
 
 /// Stored in `meta`; a different number rebuilds the cache from the shards.
-pub const CACHE_SCHEMA: u32 = 5;
+pub const CACHE_SCHEMA: u32 = 7;
 
 /// `meta` key: the watermark the stored rank reflects.
 const RANK_WATERMARK_META: &str = "rank_watermark";
@@ -54,6 +54,41 @@ pub struct SymbolRow {
     pub facts: BTreeMap<String, Fact>,
 }
 
+/// A contract node: how many bindings of each role name it. The row exists while the sum is
+/// positive.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ContractRow {
+    pub name: ContractName,
+    pub providers: u32,
+    pub consumers: u32,
+    pub declarers: u32,
+}
+
+impl ContractRow {
+    pub fn is_empty(&self) -> bool {
+        self.providers + self.consumers + self.declarers == 0
+    }
+
+    /// Adjust the count of `role` by `delta` (saturating at 0).
+    pub fn adjust(&mut self, role: ContractRole, delta: i32) {
+        let n = match role {
+            ContractRole::Provides => &mut self.providers,
+            ContractRole::Consumes => &mut self.consumers,
+            ContractRole::Declares => &mut self.declarers,
+        };
+        *n = n.saturating_add_signed(delta);
+    }
+}
+
+/// One binding of an artifact as the cache remembers it, so the artifact's old bindings can be
+/// withdrawn without its shard.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct BindingRow {
+    pub symbol: Id,
+    pub contract: Id,
+    pub role: ContractRole,
+}
+
 /// Where a link came from: a link inside the file, or the resolution of the file's n-th ref.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum LinkOrigin {
@@ -70,6 +105,10 @@ pub struct LinkEntry {
     /// For an inferred link: how many targets its reference resolved to. `None` on rows
     /// written before this field existed, and on links that are not inferred.
     pub fanout: Option<u32>,
+    /// What produced the link when it was not an extractor, for example a profile rule
+    /// (`profile:<name>#<rule id>`). `None` on rows written before this field existed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub produced_by: Option<String>,
 }
 
 /// One row per `(from, kind, to)`; several origins can support the same row.
@@ -361,10 +400,12 @@ pub enum TableId {
     DocLen,
     LexiconStats,
     Rank,
+    Contracts,
+    BindingsByArtifact,
 }
 
 impl TableId {
-    const ALL: [TableId; 21] = [
+    const ALL: [TableId; 23] = [
         TableId::Meta,
         TableId::ShardHashes,
         TableId::Artifacts,
@@ -386,10 +427,12 @@ impl TableId {
         TableId::DocLen,
         TableId::LexiconStats,
         TableId::Rank,
+        TableId::Contracts,
+        TableId::BindingsByArtifact,
     ];
 
     /// The graph tables, in the order `dump_graph` reports them.
-    const GRAPH: [TableId; 8] = [
+    const GRAPH: [TableId; 10] = [
         TableId::Artifacts,
         TableId::Symbols,
         TableId::LinksOut,
@@ -398,6 +441,8 @@ impl TableId {
         TableId::RefsByKey,
         TableId::RefsUnresolved,
         TableId::IndexErrors,
+        TableId::Contracts,
+        TableId::BindingsByArtifact,
     ];
 
     fn name(self) -> &'static str {
@@ -423,6 +468,8 @@ impl TableId {
             TableId::DocLen => "doc_len",
             TableId::LexiconStats => "lexicon_stats",
             TableId::Rank => "rank",
+            TableId::Contracts => "contracts",
+            TableId::BindingsByArtifact => "bindings_by_artifact",
         }
     }
 
@@ -653,6 +700,30 @@ pub trait Reader {
                 })
             })
             .collect()
+    }
+
+    /// The contract node `id` names, if any binding still does.
+    fn contract(&self, id: Id) -> Result<Option<ContractRow>, StoreError> {
+        self.raw_get(TableId::Contracts, &id.0)?
+            .map(|v| de(&v))
+            .transpose()
+    }
+
+    /// Every contract node, sorted by id.
+    fn contracts(&self) -> Result<Vec<(Id, ContractRow)>, StoreError> {
+        self.raw_scan(TableId::Contracts, &[])?
+            .into_iter()
+            .map(|(k, v)| Ok((Id(id_bytes(&k)?), de(&v)?)))
+            .collect()
+    }
+
+    /// The bindings one artifact contributed (empty when none).
+    fn bindings_of(&self, artifact: Id) -> Result<Vec<BindingRow>, StoreError> {
+        Ok(self
+            .raw_get(TableId::BindingsByArtifact, &artifact.0)?
+            .map(|v| de(&v))
+            .transpose()?
+            .unwrap_or_default())
     }
 
     /// Targets exported under `key` (empty when none), sorted.
@@ -966,6 +1037,23 @@ impl WriteTx<'_> {
         self.touch_link(key)?;
         self.del(TableId::LinksOut, &link_out_key(key))?;
         self.del(TableId::LinksIn, &link_in_key(key))
+    }
+
+    pub fn put_contract(&mut self, id: Id, row: &ContractRow) -> Result<(), StoreError> {
+        self.put(TableId::Contracts, &id.0, &ser(row)?)
+    }
+
+    pub fn remove_contract(&mut self, id: Id) -> Result<(), StoreError> {
+        self.del(TableId::Contracts, &id.0)
+    }
+
+    /// An empty list removes the row.
+    pub fn put_bindings(&mut self, artifact: Id, rows: &[BindingRow]) -> Result<(), StoreError> {
+        if rows.is_empty() {
+            self.del(TableId::BindingsByArtifact, &artifact.0)
+        } else {
+            self.put(TableId::BindingsByArtifact, &artifact.0, &ser(&rows)?)
+        }
     }
 
     /// An empty set removes the row.

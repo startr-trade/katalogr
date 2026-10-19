@@ -102,6 +102,7 @@ fn source_fragment(
         links: std::mem::take(&mut b.links),
         refs: std::mem::take(&mut b.refs),
         exports: std::mem::take(&mut b.exports),
+        bindings: Vec::new(),
     };
     Ok((fragment, errors))
 }
@@ -181,6 +182,7 @@ fn config_fragment(input: &ExtractInput, text: &str) -> (Fragment, Vec<ExtractEr
         links: Vec::new(),
         refs: Vec::new(),
         exports,
+        bindings: Vec::new(),
     };
     (fragment, errors)
 }

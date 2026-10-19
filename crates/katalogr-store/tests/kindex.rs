@@ -96,6 +96,7 @@ mod kindex {
                 span: None,
                 candidates: vec![key("y"), key("z")],
                 confidence: Confidence::Extracted,
+                origin: None,
             },
             OutRef {
                 from: ids[0],
@@ -103,6 +104,7 @@ mod kindex {
                 span: None,
                 candidates: vec![key("x")],
                 confidence: Confidence::Extracted,
+                origin: None,
             },
         ];
         let exports = vec![
@@ -126,6 +128,7 @@ mod kindex {
             links,
             refs,
             exports,
+            bindings: Vec::new(),
         }
     }
 

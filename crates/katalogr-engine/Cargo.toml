@@ -19,8 +19,10 @@ thiserror = "2.0"
 camino.workspace = true
 fs4.workspace = true
 globset.workspace = true
+regex.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+serde_yaml_ng.workspace = true
 sha2.workspace = true
 tempfile.workspace = true
 

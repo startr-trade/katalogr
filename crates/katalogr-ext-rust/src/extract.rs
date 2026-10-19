@@ -203,6 +203,7 @@ pub fn extract_with_errors(
             links: b.links,
             refs: b.refs,
             exports: b.exports,
+            bindings: Vec::new(),
         },
         errors,
     ))
@@ -261,6 +262,7 @@ impl Builder<'_> {
             span: Some(span),
             candidates: seen,
             confidence,
+            origin: None,
         });
     }
 

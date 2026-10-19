@@ -85,6 +85,7 @@ mod rank {
                         span: Some(span),
                         provenance: provenance.clone(),
                         fanout,
+                        produced_by: None,
                     }],
                 },
             )

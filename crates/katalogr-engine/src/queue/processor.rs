@@ -7,14 +7,17 @@ use crate::consistency::{Engine, Scope};
 use crate::context;
 use crate::error::EngineError;
 use crate::failpoint::fail;
+use crate::profiles::{self, ProfileSet};
 use crate::scan;
 use camino::{Utf8Path, Utf8PathBuf};
 use fs4::FileExt;
 use katalogr_model::{ArtifactName, ExtractError, ExtractInput, Fragment, RelPath};
 use katalogr_store::blob::git_blob_id;
-use katalogr_store::{ErrorRow, JournalEntry, PendingKey, RANK_CONTEXT, ReadTx, Reader, pagerank};
+use katalogr_store::{
+    ErrorRow, JournalEntry, PendingKey, RANK_CONTEXT, ReadTx, Reader, WriteTx, pagerank,
+};
 use sha2::{Digest, Sha256};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs::File;
 use std::time::Instant;
 
@@ -209,6 +212,7 @@ impl<'a> Processor<'a> {
         let engine = self.engine;
         let dir = engine.dir();
         self.refresh_contexts()?;
+        let profiles = self.refresh_profiles()?;
         let snap = engine.cache().read()?;
         let pending = snap.pending_entries(None)?;
         let (mut first, rest): (Vec<_>, Vec<_>) = pending
@@ -222,7 +226,7 @@ impl<'a> Processor<'a> {
             if Instant::now() >= deadline && !planned.is_empty() {
                 break;
             }
-            let action = self.plan(&snap, &key, seq)?;
+            let action = self.plan(&snap, &key, seq, &profiles)?;
             planned.push(Planned { key, seq, action });
         }
         if planned.is_empty() {
@@ -367,29 +371,7 @@ impl<'a> Processor<'a> {
             tx.put_ext_context(&repo, id, &new, &bytes)?;
             changed = true;
             if old != new {
-                let ctx = Context::WORKTREE;
-                let seq = tx.last_seq(ctx)? + 1;
-                tx.set_last_seq(ctx, seq)?;
-                let ev = ChangeEvent {
-                    id: format!("context-{id}-{seq}"),
-                    context: Context::worktree(),
-                    repo: repo.clone(),
-                    path: None,
-                    kind: EventKind::Rescan,
-                };
-                let json =
-                    serde_json::to_vec(&ev).map_err(|e| EngineError::Queue(e.to_string()))?;
-                tx.put_event(ctx, seq, &json)?;
-                for path in self.expand_rescan(&tx, &ev)? {
-                    tx.put_pending(
-                        &PendingKey {
-                            context: ctx.to_string(),
-                            repo: repo.clone(),
-                            path,
-                        },
-                        seq,
-                    )?;
-                }
+                self.queue_rescan(&mut tx, &repo, &format!("context-{id}"))?;
             }
         }
         if changed {
@@ -398,8 +380,102 @@ impl<'a> Processor<'a> {
         Ok(())
     }
 
+    /// Record a rescan of `repo` as a worktree event named `<label>-<seq>` and queue every path
+    /// it expands to, in the caller's transaction.
+    fn queue_rescan(&self, tx: &mut WriteTx, repo: &str, label: &str) -> Result<(), EngineError> {
+        let ctx = Context::WORKTREE;
+        let seq = tx.last_seq(ctx)? + 1;
+        tx.set_last_seq(ctx, seq)?;
+        let ev = ChangeEvent {
+            id: format!("{label}-{seq}"),
+            context: Context::worktree(),
+            repo: repo.to_string(),
+            path: None,
+            kind: EventKind::Rescan,
+        };
+        let json = serde_json::to_vec(&ev).map_err(|e| EngineError::Queue(e.to_string()))?;
+        tx.put_event(ctx, seq, &json)?;
+        for path in self.expand_rescan(tx, &ev)? {
+            tx.put_pending(
+                &PendingKey {
+                    context: ctx.to_string(),
+                    repo: repo.to_string(),
+                    path,
+                },
+                seq,
+            )?;
+        }
+        Ok(())
+    }
+
+    /// Load the profiles in force (built-ins, then the project's `profiles/` folder; a refused
+    /// file keeps its last valid text). The valid texts and the refusals are stored in the
+    /// cache. For each extension whose profile hash differs from the stored one, every
+    /// repository is queued for a rescan in the same transaction, so the files the changed
+    /// profile can affect are extracted and profiled again.
+    pub fn refresh_profiles(&mut self) -> Result<ProfileSet, EngineError> {
+        let engine = self.engine;
+        let snap = engine.cache().read()?;
+        let previous: BTreeMap<String, String> = snap
+            .meta(profiles::META_GOOD)?
+            .and_then(|b| serde_json::from_slice(&b).ok())
+            .unwrap_or_default();
+        let builtins: Vec<(&str, &str)> = engine
+            .builtin_profiles()
+            .iter()
+            .map(|(n, t)| (n.as_str(), t.as_str()))
+            .collect();
+        let report = ProfileSet::load_keeping(engine.dir().root(), &builtins, &previous);
+        let good =
+            serde_json::to_vec(&report.good).map_err(|e| EngineError::Queue(e.to_string()))?;
+        let errors =
+            serde_json::to_vec(&report.errors).map_err(|e| EngineError::Queue(e.to_string()))?;
+        let mut changed: Vec<(String, Vec<u8>)> = Vec::new();
+        for id in engine.registry().ids() {
+            let key = format!("profile_hash:{id}");
+            let new = report
+                .set
+                .hash_for(id)
+                .map(|h| h.to_vec())
+                .unwrap_or_default();
+            let stored = snap.meta(&key)?.unwrap_or_default();
+            if stored != new {
+                changed.push((key, new));
+            }
+        }
+        let same =
+            |key: &str, bytes: &[u8]| snap.meta(key).ok().flatten().as_deref() == Some(bytes);
+        if changed.is_empty()
+            && same(profiles::META_GOOD, &good)
+            && same(profiles::META_ERRORS, &errors)
+        {
+            return Ok(report.set);
+        }
+        drop(snap);
+        let mut tx = engine.cache().write()?;
+        tx.set_meta(profiles::META_GOOD, &good)?;
+        tx.set_meta(profiles::META_ERRORS, &errors)?;
+        if !changed.is_empty() {
+            for (key, hash) in &changed {
+                tx.set_meta(key, hash)?;
+            }
+            let repos: Vec<String> = engine.roots().keys().cloned().collect();
+            for repo in repos {
+                self.queue_rescan(&mut tx, &repo, "profiles")?;
+            }
+        }
+        tx.commit()?;
+        Ok(report.set)
+    }
+
     /// Decide what one queued path needs, from the file's current content.
-    fn plan(&self, snap: &ReadTx, key: &PendingKey, seq: u64) -> Result<Action, EngineError> {
+    fn plan(
+        &self,
+        snap: &ReadTx,
+        key: &PendingKey,
+        seq: u64,
+        profiles: &ProfileSet,
+    ) -> Result<Action, EngineError> {
         let engine = self.engine;
         let dir = engine.dir();
         let Some(root) = engine.roots().get(&key.repo) else {
@@ -433,7 +509,12 @@ impl<'a> Processor<'a> {
             .ext_context(&key.repo, extractor.id())?
             .map(|(_, bytes)| bytes)
             .unwrap_or_default();
-        let revision = context::revision(&git_blob_id(&content), &ctx);
+        // The profiles that can apply to this extension are part of what the shard depends on.
+        let mut keyed = ctx.clone();
+        if let Some(h) = profiles.hash_for(extractor.id()) {
+            keyed.extend_from_slice(&h);
+        }
+        let revision = context::revision(&git_blob_id(&content), &keyed);
         if existing.is_some_and(|f| f.provenance.revision == revision) {
             return Ok(Action::Skip);
         }
@@ -444,7 +525,8 @@ impl<'a> Processor<'a> {
             content: &content,
             context: &ctx,
         }) {
-            Ok((fragment, errors)) => {
+            Ok((mut fragment, errors)) => {
+                profiles.apply(&mut fragment);
                 let errors = errors
                     .into_iter()
                     .map(|e| ErrorRow {

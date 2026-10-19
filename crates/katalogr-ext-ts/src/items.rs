@@ -214,6 +214,7 @@ impl<'s> Builder<'s> {
                         span: Some(at),
                         candidates: keys,
                         confidence: Confidence::Extracted,
+                        origin: None,
                     });
                 }
             }

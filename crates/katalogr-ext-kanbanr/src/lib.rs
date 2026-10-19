@@ -249,6 +249,7 @@ impl<'a> Build<'a> {
             span,
             candidates: keys,
             confidence: Confidence::Extracted,
+            origin: None,
         });
     }
 
@@ -284,6 +285,7 @@ impl<'a> Build<'a> {
             links: self.links,
             refs: self.refs,
             exports: self.exports,
+            bindings: Vec::new(),
         }
     }
 }
