@@ -142,6 +142,19 @@ fn code_and_board(tmp: &Path) -> PathBuf {
     code
 }
 
+/// An empty git repository `code` and a `board` repo holding a copy of the fixture board,
+/// both marked in a project; nothing indexed yet.
+fn bare_code_and_board(tmp: &Path) -> PathBuf {
+    let code = tmp.join("code");
+    let board = tmp.join("board");
+    std::fs::create_dir_all(code.join("src")).unwrap();
+    copy_dir(&fixtures().join("kanbanr/board"), &board);
+    std::fs::remove_file(board.join("expected.yaml")).unwrap();
+    git(&code, &["init", "-q"]);
+    project(tmp, &[("code", &code), ("board", &board)]);
+    code
+}
+
 mod md {
     use super::*;
 
@@ -392,6 +405,96 @@ mod kanbanr {
             out.contains("\"wanted\":[\"board-item:FEAT-099\"]"),
             "{out}"
         );
+    }
+
+    #[test]
+    fn history_includes_merged_branches() {
+        let tmp = tempfile::tempdir().unwrap();
+        let code = bare_code_and_board(tmp.path());
+        std::fs::write(code.join("src/a.tx"), "sym fn alpha\nsym fn beta\n").unwrap();
+        git(&code, &["add", "src"]);
+        git(&code, &["commit", "-q", "-m", "chore: base"]);
+        git(&code, &["checkout", "-q", "-b", "side"]);
+        std::fs::write(
+            code.join("src/a.tx"),
+            "sym fn alpha\nsym fn beta\nsym fn gamma\n",
+        )
+        .unwrap();
+        git(&code, &["add", "src"]);
+        git(
+            &code,
+            &[
+                "commit",
+                "-q",
+                "-m",
+                "feat: add gamma\n\nRefs: kanbanr:FEAT-001/R-1, kanbanr:FEAT-002",
+            ],
+        );
+        git(&code, &["checkout", "-q", "main"]);
+        std::fs::write(code.join("src/b.tx"), "sym fn delta\n").unwrap();
+        git(&code, &["add", "src"]);
+        git(&code, &["commit", "-q", "-m", "chore: unrelated"]);
+        git(
+            &code,
+            &["merge", "-q", "--no-ff", "-m", "merge: side", "side"],
+        );
+        ok(&code, &["index", "--full"]);
+        ok(&code, &["index", "--history"]);
+
+        let (c, out, err) = katalogr(&code, &["why", "src/a.tx:3"]);
+        assert_eq!(c, 0, "{err}");
+        assert!(out.contains("feat: add gamma"), "{out}");
+        assert!(out.contains("  changed-by  FEAT-001/R-1  board:"), "{out}");
+        assert!(out.contains("  changed-by  FEAT-002  board:"), "{out}");
+    }
+
+    #[test]
+    fn dangling_ignores_non_item_ids() {
+        let tmp = tempfile::tempdir().unwrap();
+        let code = bare_code_and_board(tmp.path());
+        std::fs::write(
+            code.join("src/lib.rs"),
+            "// SP-001 and MS-001 are not items.\npub fn a() {}\n\n\
+             /// Encoded as UTF-8, see R-1.\npub fn b() {}\n\n\
+             /// Unknown item FEAT-999.\npub fn c() {}\n\n\
+             /// Known FEAT-001.\npub fn d() {}\n",
+        )
+        .unwrap();
+        git(&code, &["add", "src"]);
+        git(
+            &code,
+            &["commit", "-q", "-m", "feat: code\n\nRefs: kanbanr:SP-001"],
+        );
+        ok(&code, &["index", "--full"]);
+        ok(&code, &["index", "--history"]);
+        let (c, out, _) = katalogr(&code, &["dangling"]);
+        assert_eq!(c, 1, "{out}");
+        assert_eq!(out.lines().count(), 1, "only FEAT-999 dangles: {out}");
+        assert!(out.contains("wants board-item:FEAT-999"), "{out}");
+    }
+
+    #[test]
+    fn adr_mentions_resolve() {
+        let tmp = tempfile::tempdir().unwrap();
+        let code = bare_code_and_board(tmp.path());
+        std::fs::write(
+            code.join("src/lib.rs"),
+            "/// Decided in ADR-0001.\npub fn a() {}\n\n/// See ADR-0099.\npub fn b() {}\n",
+        )
+        .unwrap();
+        git(&code, &["add", "src"]);
+        git(&code, &["commit", "-q", "-m", "feat: code"]);
+        ok(&code, &["index", "--full"]);
+        let (c, out, err) = katalogr(&code, &["why", "src/lib.rs:2"]);
+        assert_eq!(c, 0, "{err}");
+        assert!(
+            out.contains("  annotated-by  ADR-0001  board:projects/demo/docs/decisions/0001-example.md#adr:ADR-0001"),
+            "{out}"
+        );
+        let (c, out, _) = katalogr(&code, &["dangling"]);
+        assert_eq!(c, 1, "{out}");
+        assert_eq!(out.lines().count(), 1, "{out}");
+        assert!(out.contains("wants board-adr:ADR-0099"), "{out}");
     }
 
     #[test]

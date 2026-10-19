@@ -1,7 +1,7 @@
 //! Items and the charter: YAML files of the board.
 
 use crate::{Build, find_line, str_fact};
-use katalogr_model::annotate::{GOAL_NS, ITEM_NS, REQ_NS};
+use katalogr_model::annotate::{GOAL_NS, ITEM_NS, PREFIX_NS, REQ_NS};
 use katalogr_model::{ExportKey, ExtractError, Fact, Segment, Span};
 use serde_yaml_ng::Value;
 use std::collections::BTreeMap;
@@ -52,6 +52,11 @@ pub(crate) fn extract(b: &mut Build<'_>) -> Result<(), ExtractError> {
     b.facts = facts.clone();
     let (item, item_segs) = b.symbol(&[], "item", &code, whole, facts);
     b.export(ITEM_NS, code.clone(), item);
+    b.export(
+        PREFIX_NS,
+        katalogr_model::annotate::prefix_of(&code).to_string(),
+        item,
+    );
 
     let definition = doc.get("definition");
 

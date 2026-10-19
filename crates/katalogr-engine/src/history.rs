@@ -65,9 +65,10 @@ fn trailer_refs(message: &str, o: &HistoryOptions) -> Vec<annotate::ItemRef> {
     out
 }
 
-/// Commit ids (hex, newest first) on the first-parent history of HEAD, excluding `since` and
-/// its ancestors, whose message carries an item trailer. At most `max_commits` commits are
-/// examined.
+/// Commit ids (hex) among all ancestors of HEAD (merged branches included, each commit once),
+/// excluding `since` and its ancestors, whose message carries an item trailer. At most
+/// `max_commits` commits are visited, newest first by commit time; the result is ordered by
+/// commit time descending, then id.
 pub fn history_shas(
     root: &Path,
     since: Option<&str>,
@@ -75,12 +76,16 @@ pub fn history_shas(
 ) -> Result<Vec<String>, EngineError> {
     let repo = open(root)?;
     let head = repo.head_commit().map_err(err)?;
-    let mut walk = head.ancestors().first_parent_only();
+    let mut walk = head
+        .ancestors()
+        .sorting(gix::revision::walk::Sorting::ByCommitTime(
+            gix::traverse::commit::simple::CommitTimeOrder::NewestFirst,
+        ));
     if let Some(rev) = since {
         let id = repo.rev_parse_single(rev).map_err(err)?;
         walk = walk.with_hidden([id.detach()]);
     }
-    let mut out = Vec::new();
+    let mut found: Vec<(i64, String)> = Vec::new();
     for info in walk.all().map_err(err)?.take(o.max_commits) {
         let info = info.map_err(err)?;
         let commit = repo.find_commit(info.id).map_err(err)?;
@@ -90,10 +95,17 @@ pub fn history_shas(
             .to_str_lossy()
             .into_owned();
         if !trailer_refs(&message, o).is_empty() {
-            out.push(info.id.to_string());
+            let time = commit
+                .committer()
+                .map_err(err)?
+                .time()
+                .map_err(err)?
+                .seconds;
+            found.push((time, info.id.to_string()));
         }
     }
-    Ok(out)
+    found.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
+    Ok(found.into_iter().map(|(_, sha)| sha).collect())
 }
 
 /// The fragment of one commit, or `None` when it is not in the repository or carries no item

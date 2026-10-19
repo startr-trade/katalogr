@@ -1,7 +1,7 @@
 //! Architecture decision records: `projects/<p>/docs/decisions/*.md` with YAML front matter.
 
 use crate::{Build, find_line, str_fact};
-use katalogr_model::annotate::ITEM_NS;
+use katalogr_model::annotate::{ADR_NS, ITEM_NS};
 use katalogr_model::{ExportKey, ExtractError, Fact};
 use serde_yaml_ng::Value;
 use std::collections::BTreeMap;
@@ -29,6 +29,7 @@ pub(crate) fn extract(b: &mut Build<'_>) -> Result<(), ExtractError> {
     }
     let whole = b.whole();
     let (adr, _) = b.symbol(&[], "adr", &id, whole, facts);
+    b.export(ADR_NS, id.clone(), adr);
     let affects_line = find_line(b.text, 1, "affects:").unwrap_or(1);
     for code in doc
         .get("affects")

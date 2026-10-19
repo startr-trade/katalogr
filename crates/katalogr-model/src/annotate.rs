@@ -10,6 +10,10 @@ use std::sync::LazyLock;
 pub const ITEM_NS: &str = "board-item";
 /// Namespace under which a requirement is exported (`FEAT-046/R-2`).
 pub const REQ_NS: &str = "board-req";
+/// Namespace under which an architecture decision record is exported (`ADR-0016`).
+pub const ADR_NS: &str = "board-adr";
+/// Namespace under which each item-code prefix the board uses is exported (`FEAT`).
+pub const PREFIX_NS: &str = "board-prefix";
 /// Namespace under which a charter goal is exported (`G-1`).
 pub const GOAL_NS: &str = "board-goal";
 
@@ -85,10 +89,26 @@ pub fn scan(text: &str) -> Vec<ItemRef> {
     out
 }
 
+/// True for a decision-record id (`ADR-0016`).
+pub fn is_adr(code: &str) -> bool {
+    code.starts_with("ADR-")
+}
+
+/// The prefix of an item code: `FEAT` for `FEAT-046`.
+pub fn prefix_of(code: &str) -> &str {
+    code.rsplit_once('-').map_or(code, |(p, _)| p)
+}
+
 /// The export keys that can resolve the reference, most specific first:
 /// `[("board-req", "FEAT-046/R-2"), ("board-item", "FEAT-046")]`. A task reference resolves to
 /// its item.
 pub fn keys(r: &ItemRef) -> Vec<ExportKey> {
+    if is_adr(&r.code) {
+        return vec![ExportKey {
+            namespace: ADR_NS.to_string(),
+            key: r.code.clone(),
+        }];
+    }
     let mut out = Vec::new();
     if let Some(req) = &r.req {
         out.push(ExportKey {
