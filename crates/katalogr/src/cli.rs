@@ -235,6 +235,19 @@ pub enum Command {
     },
     /// Show the index watermark, pending changes and staleness.
     Status,
+    /// Serve katalogr's queries over MCP (stdio) for non-Claude agent hosts.
+    #[cfg(feature = "mcp")]
+    Mcp {
+        /// Directory the project is found from (default: the current directory).
+        #[arg(long, value_name = "DIR")]
+        root: Option<String>,
+        /// Include each query tool's `schema/v1` file as its `outputSchema`.
+        #[arg(long)]
+        output_schemas: bool,
+        /// Milliseconds between progress notifications.
+        #[arg(long, default_value_t = 1000, hide = true)]
+        progress_ms: u64,
+    },
     /// List the hub nodes: those with the highest weighted degree (links in plus out).
     Hubs {
         /// Group nodes as symbols, files or packages.

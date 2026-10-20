@@ -16,6 +16,8 @@ pub mod hubs;
 pub mod index;
 pub mod kindex;
 pub mod map;
+#[cfg(feature = "mcp")]
+pub mod mcp;
 pub mod mirrors;
 pub mod notify;
 pub mod path;

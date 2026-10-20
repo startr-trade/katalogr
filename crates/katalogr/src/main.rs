@@ -3,7 +3,16 @@
 mod cli;
 mod cmd;
 mod exit;
+#[cfg(feature = "mcp")]
+mod mcp;
+// Unit tests of the MCP wrapper, as crate-level modules named after what they test.
 mod render;
+#[cfg(all(test, feature = "mcp"))]
+#[path = "mcp/tools_tests.rs"]
+mod tools;
+#[cfg(all(test, feature = "mcp"))]
+#[path = "mcp/transport_tests.rs"]
+mod transport;
 
 use clap::{CommandFactory, Parser};
 use katalogr_dist::DistError;
@@ -32,6 +41,12 @@ fn run(cli: &Cli) -> Result<ExitCode, DistError> {
             history,
         }) => cmd::index::run(cli, since.as_ref(), range.as_ref(), *full, *history),
         Some(Command::Status) => cmd::status::run(cli),
+        #[cfg(feature = "mcp")]
+        Some(Command::Mcp {
+            root,
+            output_schemas,
+            progress_ms,
+        }) => cmd::mcp::run(cli, root.as_deref(), *output_schemas, *progress_ms),
         Some(Command::Doctor {
             fail_on,
             skip_git,
