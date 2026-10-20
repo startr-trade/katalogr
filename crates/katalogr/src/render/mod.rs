@@ -1,21 +1,44 @@
 //! Text and JSON output of query results, and their exit codes.
 //!
 //! Text is for people and carries no compatibility promise: one line per hit,
-//! `kind  name  path:line  [confidence]`. JSON is the versioned envelope.
+//! `kind  name  path:line  [confidence]`. JSON is the versioned envelope, built by [`json`]
+//! (shared with the MCP server) and printed by [`emit`].
+
+pub mod json;
 
 use katalogr_dist::analytics::{
     Community, CommunityReport, CoverageCounts, CoverageReport, CoverageRow, Cycle, CycleReport,
     DeadCandidate, DeadCodeReport, HubEntry, HubReport, Itemized, RationaleEntry, RationaleReport,
 };
 use katalogr_dist::query::{
-    CallerHit, DIAG_PACK, DanglingRef, Direction, Envelope, Explain, FieldShape, HintSource,
-    MapEntry, MirrorDrift, Partial, PathStep, RESULT_SCHEMA_VERSION, RefHit, ReplaceResult,
-    SearchHit, Serialize, ShowResult, SymbolHit, Trace, Truncation, WhyResult, budget, cap, hints,
+    CallerHit, DanglingRef, Direction, Explain, FieldShape, HintSource, MapEntry, MirrorDrift,
+    Partial, PathStep, RefHit, ReplaceResult, SearchHit, Serialize, ShowResult, SymbolHit, Trace,
+    WhyResult, budget, hints,
 };
 use katalogr_dist::{Outcome, Reply, Report};
 
 use crate::cli::Cli;
 use crate::exit::ExitCode;
+
+use self::json::{JsonAnswer, budget_partial, exit_for, set_packing, stale_warnings};
+
+/// Print a [`JsonAnswer`] as the CLI does: warnings to stderr, the stdout line, then the
+/// message (and any diagnostic lines) to stderr.
+pub fn emit(a: &JsonAnswer) -> ExitCode {
+    for w in &a.warnings {
+        eprintln!("katalogr: warning: {w}");
+    }
+    if let Some(out) = &a.stdout {
+        println!("{out}");
+    }
+    if let Some(m) = &a.message {
+        eprintln!("katalogr: {m}");
+    }
+    for l in &a.diagnostic {
+        eprintln!("{l}");
+    }
+    a.exit
+}
 
 fn place(h: &SymbolHit) -> String {
     format!("{}:{}", h.path, h.span.start_line)
@@ -84,37 +107,6 @@ pub fn path_line(s: &PathStep) -> String {
     format!("{} {} {}  [{:?}]", s.from, link, s.to, s.confidence)
 }
 
-fn envelope<T>(
-    report: &Report,
-    truncated: Option<Truncation>,
-    partial: Vec<Partial>,
-    result: T,
-    next: Vec<String>,
-    diagnostic: Option<Trace>,
-) -> Envelope<T> {
-    Envelope {
-        schema: RESULT_SCHEMA_VERSION,
-        watermark: report.watermark,
-        pending: report.pending,
-        stale: report.stale,
-        truncated,
-        partial,
-        result,
-        next,
-        diagnostic,
-    }
-}
-
-/// The marker of an answer a token budget cut: `kept` of `kept + omitted` items remain.
-fn budget_partial(budget: u64, kept: usize, omitted: usize) -> Partial {
-    Partial::new(
-        cap::BUDGET,
-        budget,
-        kept as u64,
-        Some((kept + omitted) as u64),
-    )
-}
-
 /// The `partial:` lines of text output, after the items and before `next:`.
 fn print_partial(partial: &[Partial]) {
     for p in partial {
@@ -130,19 +122,13 @@ fn print_next(next: &[String]) {
 }
 
 fn note_stale(report: &Report) {
-    for w in &report.warnings {
+    for w in stale_warnings(report) {
         eprintln!("katalogr: warning: {w}");
-    }
-    if report.stale {
-        eprintln!(
-            "katalogr: warning: answer may be stale ({} change(s) pending)",
-            report.pending
-        );
     }
 }
 
-/// Print `items` as text lines or a JSON envelope, within the budget, with the hints for
-/// `command` (none when `command` is empty).
+/// Print `items` as text lines within the budget, with the hints for `command` (none when
+/// `command` is empty). JSON goes through [`json`].
 fn print_list<T: Serialize>(
     cli: &Cli,
     report: &Report,
@@ -156,49 +142,14 @@ fn print_list<T: Serialize>(
 {
     note_stale(report);
     let next = hints(command, &items);
-    if cli.json {
-        let (items, truncated) = match cli.budget {
-            Some(b) => {
-                let json: Vec<String> = items
-                    .iter()
-                    .map(|i| serde_json::to_string(i).expect("serialise result"))
-                    .collect();
-                let fit = budget::fit_budget(&json, b);
-                set_packing(&mut trace, &json, b);
-                let truncated = (fit.omitted > 0).then_some(Truncation {
-                    shown: fit.kept as u64,
-                    omitted: fit.omitted as u64,
-                    budget: b,
-                });
-                if truncated.is_some() {
-                    partial.push(budget_partial(b, fit.kept, fit.omitted));
-                }
-                (items.into_iter().take(fit.kept).collect(), truncated)
-            }
-            None => (items, None),
-        };
-        let e = envelope(report, truncated, partial, items, next, trace);
-        println!("{}", serde_json::to_string(&e).expect("serialise envelope"));
-    } else {
-        let lines: Vec<String> = items.iter().map(line).collect();
-        if let Some(b) = cli.budget {
-            set_packing(&mut trace, &lines, b);
-        }
-        print_lines(cli, lines, &mut partial);
-        print_partial(&partial);
-        print_next(&next);
-        print_trace(trace.as_ref());
+    let lines: Vec<String> = items.iter().map(line).collect();
+    if let Some(b) = cli.budget {
+        set_packing(&mut trace, &lines, b);
     }
-}
-
-/// Describe the packing of `strings` into `budget` in `trace`, on the strings given to
-/// `fit_budget`, so the trace describes the packing that happened.
-fn set_packing(trace: &mut Option<Trace>, strings: &[String], budget: u64) {
-    if let Some(t) = trace {
-        let pack = budget::pack_trace(strings, budget);
-        t.add_omitted("pack_entries", pack.kept.saturating_sub(DIAG_PACK as u64));
-        t.packing = Some(pack);
-    }
+    print_lines(cli, lines, &mut partial);
+    print_partial(&partial);
+    print_next(&next);
+    print_trace(trace.as_ref());
 }
 
 /// The trace as `diagnostic:` lines on stderr.
@@ -363,16 +314,6 @@ fn print_lines(cli: &Cli, lines: Vec<String>, partial: &mut Vec<Partial>) {
     }
 }
 
-fn exit_for<T>(reply: &Reply<T>) -> ExitCode {
-    match &reply.outcome {
-        Outcome::Ambiguous(_) => ExitCode::Ambiguous,
-        Outcome::NoMatch(_) => ExitCode::NoMatch,
-        Outcome::StaleFile(_) => ExitCode::Stale,
-        Outcome::Found(_) if reply.report.timed_out => ExitCode::Stale,
-        Outcome::Found(_) => ExitCode::Ok,
-    }
-}
-
 /// Render a command whose answer is a list; ambiguity prints the candidates and exits 3,
 /// no match prints one line on stderr and exits 4.
 pub fn list<T: Serialize>(
@@ -384,6 +325,9 @@ pub fn list<T: Serialize>(
 where
     Vec<T>: HintSource,
 {
+    if cli.json {
+        return emit(&json::list(reply, cli.budget, command));
+    }
     let code = exit_for(&reply);
     match reply.outcome {
         Outcome::Found(items) => {
@@ -415,6 +359,9 @@ pub fn dangling_line(d: &DanglingRef) -> String {
 /// Render `dangling`: one line per unresolved reference; exit 1 when there are any, so CI can
 /// gate on it.
 pub fn dangling(cli: &Cli, reply: Reply<Vec<DanglingRef>>) -> ExitCode {
+    if cli.json {
+        return emit(&json::dangling(reply, cli.budget));
+    }
     let code = exit_for(&reply);
     let any = matches!(&reply.outcome, Outcome::Found(v) if !v.is_empty());
     match reply.outcome {
@@ -479,6 +426,9 @@ pub fn mirror_block(d: &MirrorDrift) -> String {
 /// Render `mirrors`: exit 1 when a comparable pair differs, so CI can gate on it. Pairs that
 /// cannot be compared are notes and leave the exit code alone.
 pub fn mirrors(cli: &Cli, reply: Reply<Vec<MirrorDrift>>) -> ExitCode {
+    if cli.json {
+        return emit(&json::mirrors(reply, cli.budget));
+    }
     let code = exit_for(&reply);
     let any = matches!(&reply.outcome, Outcome::Found(v) if v.iter().any(|d| d.comparable));
     match reply.outcome {
@@ -502,56 +452,37 @@ pub fn mirrors(cli: &Cli, reply: Reply<Vec<MirrorDrift>>) -> ExitCode {
 
 /// Render `why`: the symbol, then its rationale.
 pub fn why(cli: &Cli, reply: Reply<WhyResult>) -> ExitCode {
+    if cli.json {
+        return emit(&json::why(reply, cli.budget));
+    }
     let code = exit_for(&reply);
     match reply.outcome {
-        Outcome::Found(mut w) => {
+        Outcome::Found(w) => {
             note_stale(&reply.report);
             let mut partial = reply.partial;
-            if cli.json {
-                let mut truncated = None;
-                if let Some(b) = cli.budget {
-                    let json: Vec<String> = w
-                        .rationale
-                        .iter()
-                        .map(|r| serde_json::to_string(r).expect("serialise result"))
-                        .collect();
-                    let fit = budget::fit_budget(&json, b);
-                    if fit.omitted > 0 {
-                        truncated = Some(Truncation {
-                            shown: fit.kept as u64,
-                            omitted: fit.omitted as u64,
-                            budget: b,
-                        });
-                        partial.push(budget_partial(b, fit.kept, fit.omitted));
-                        w.rationale.truncate(fit.kept);
-                    }
-                }
-                let next = hints("why", &w);
-                let e = envelope(&reply.report, truncated, partial, w, next, None);
-                println!("{}", serde_json::to_string(&e).expect("serialise envelope"));
-            } else {
-                let mut lines = vec![symbol_line(&w.symbol)];
-                lines.extend(
-                    w.rationale
-                        .iter()
-                        .chain(w.goals.iter())
-                        .map(|r| format!("  {}  {}  {}", r.kind, r.label, r.target)),
-                );
-                lines.extend(w.commits.iter().map(|c| {
-                    format!("  commit  {}  {}", &c.sha[..c.sha.len().min(12)], c.summary)
-                }));
-                lines.extend(
-                    w.notes
-                        .iter()
-                        .map(|n| format!("  {}  line {}  {}", n.marker, n.line, n.text)),
-                );
-                if let Some(n) = &w.note {
-                    lines.push(format!("  note  {n}"));
-                }
-                print_lines(cli, lines, &mut partial);
-                print_partial(&partial);
-                print_next(&hints("why", &w));
+            let mut lines = vec![symbol_line(&w.symbol)];
+            lines.extend(
+                w.rationale
+                    .iter()
+                    .chain(w.goals.iter())
+                    .map(|r| format!("  {}  {}  {}", r.kind, r.label, r.target)),
+            );
+            lines.extend(
+                w.commits
+                    .iter()
+                    .map(|c| format!("  commit  {}  {}", &c.sha[..c.sha.len().min(12)], c.summary)),
+            );
+            lines.extend(
+                w.notes
+                    .iter()
+                    .map(|n| format!("  {}  line {}  {}", n.marker, n.line, n.text)),
+            );
+            if let Some(n) = &w.note {
+                lines.push(format!("  note  {n}"));
             }
+            print_lines(cli, lines, &mut partial);
+            print_partial(&partial);
+            print_next(&hints("why", &w));
         }
         other => other_outcomes(cli, &reply.report, other, None),
     }
@@ -560,36 +491,20 @@ pub fn why(cli: &Cli, reply: Reply<WhyResult>) -> ExitCode {
 
 /// Render `show`: a `path:start-end` header, then the text.
 pub fn show(cli: &Cli, reply: Reply<ShowResult>) -> ExitCode {
+    if cli.json {
+        return emit(&json::show(reply, cli.budget));
+    }
     let code = exit_for(&reply);
     match reply.outcome {
-        Outcome::Found(mut r) => {
+        Outcome::Found(r) => {
             note_stale(&reply.report);
             let next = hints("show", &r);
             let mut partial = reply.partial;
             let mut lines: Vec<String> = r.text.lines().map(str::to_string).collect();
-            if cli.json {
-                let mut truncated = None;
-                if let Some(b) = cli.budget {
-                    let fit = budget::fit_budget(&lines, b);
-                    if fit.omitted > 0 {
-                        truncated = Some(Truncation {
-                            shown: fit.kept as u64,
-                            omitted: fit.omitted as u64,
-                            budget: b,
-                        });
-                        partial.push(budget_partial(b, fit.kept, fit.omitted));
-                        lines.truncate(fit.kept);
-                        r.text = lines.join("\n");
-                    }
-                }
-                let e = envelope(&reply.report, truncated, partial, r, next, None);
-                println!("{}", serde_json::to_string(&e).expect("serialise envelope"));
-            } else {
-                lines.insert(0, format!("{}:{}-{}", r.file, r.lines.0, r.lines.1));
-                print_lines(cli, lines, &mut partial);
-                print_partial(&partial);
-                print_next(&next);
-            }
+            lines.insert(0, format!("{}:{}-{}", r.file, r.lines.0, r.lines.1));
+            print_lines(cli, lines, &mut partial);
+            print_partial(&partial);
+            print_next(&next);
         }
         other => other_outcomes(cli, &reply.report, other, None),
     }
@@ -598,72 +513,49 @@ pub fn show(cli: &Cli, reply: Reply<ShowResult>) -> ExitCode {
 
 /// Render `explain`: the symbol, its signature and doc, then its links.
 pub fn explain(cli: &Cli, reply: Reply<Explain>) -> ExitCode {
+    if cli.json {
+        return emit(&json::explain(reply, cli.budget));
+    }
     let code = exit_for(&reply);
     match reply.outcome {
-        Outcome::Found(mut x) => {
+        Outcome::Found(x) => {
             note_stale(&reply.report);
             let next = hints("explain", &x);
             let mut partial = reply.partial;
-            if cli.json {
-                let mut truncated = None;
-                if let Some(b) = cli.budget {
-                    let json: Vec<String> = x
-                        .outgoing
-                        .iter()
-                        .chain(x.incoming.iter())
-                        .map(|l| serde_json::to_string(l).expect("serialise result"))
-                        .collect();
-                    let fit = budget::fit_budget(&json, b);
-                    if fit.omitted > 0 {
-                        truncated = Some(Truncation {
-                            shown: fit.kept as u64,
-                            omitted: fit.omitted as u64,
-                            budget: b,
-                        });
-                        partial.push(budget_partial(b, fit.kept, fit.omitted));
-                        let out_kept = fit.kept.min(x.outgoing.len());
-                        x.outgoing.truncate(out_kept);
-                        x.incoming.truncate(fit.kept - out_kept);
-                    }
-                }
-                let e = envelope(&reply.report, truncated, partial, x, next, None);
-                println!("{}", serde_json::to_string(&e).expect("serialise envelope"));
-            } else {
-                let mut lines = vec![symbol_line(&x.symbol)];
-                if let Some(s) = &x.signature {
-                    lines.push(format!("signature: {s}"));
-                }
-                if let Some(d) = &x.doc {
-                    lines.push(format!("doc: {d}"));
-                }
-                for (title, links, total) in [
-                    ("outgoing", &x.outgoing, x.outgoing_total),
-                    ("incoming", &x.incoming, x.incoming_total),
-                ] {
-                    if links.is_empty() {
-                        continue;
-                    }
-                    if total as usize > links.len() {
-                        lines.push(format!("{title} (first {} of {total}):", links.len()));
-                    } else {
-                        lines.push(format!("{title} ({total}):"));
-                    }
-                    lines.extend(links.iter().map(|l| {
-                        let origin = l
-                            .origin
-                            .as_ref()
-                            .map(|o| format!("  origin {o}"))
-                            .unwrap_or_default();
-                        format!("  {}  {}  [{:?}]{origin}", l.kind, l.other, l.confidence)
-                    }));
-                }
-                if !x.items.is_empty() {
-                    lines.push(format!("items: {}", x.items.join(", ")));
-                }
-                print_lines(cli, lines, &mut partial);
-                print_partial(&partial);
-                print_next(&next);
+            let mut lines = vec![symbol_line(&x.symbol)];
+            if let Some(s) = &x.signature {
+                lines.push(format!("signature: {s}"));
             }
+            if let Some(d) = &x.doc {
+                lines.push(format!("doc: {d}"));
+            }
+            for (title, links, total) in [
+                ("outgoing", &x.outgoing, x.outgoing_total),
+                ("incoming", &x.incoming, x.incoming_total),
+            ] {
+                if links.is_empty() {
+                    continue;
+                }
+                if total as usize > links.len() {
+                    lines.push(format!("{title} (first {} of {total}):", links.len()));
+                } else {
+                    lines.push(format!("{title} ({total}):"));
+                }
+                lines.extend(links.iter().map(|l| {
+                    let origin = l
+                        .origin
+                        .as_ref()
+                        .map(|o| format!("  origin {o}"))
+                        .unwrap_or_default();
+                    format!("  {}  {}  [{:?}]{origin}", l.kind, l.other, l.confidence)
+                }));
+            }
+            if !x.items.is_empty() {
+                lines.push(format!("items: {}", x.items.join(", ")));
+            }
+            print_lines(cli, lines, &mut partial);
+            print_partial(&partial);
+            print_next(&next);
         }
         other => other_outcomes(cli, &reply.report, other, None),
     }
@@ -672,19 +564,17 @@ pub fn explain(cli: &Cli, reply: Reply<Explain>) -> ExitCode {
 
 /// Render `replace`: the range replaced and the range now held.
 pub fn replace(cli: &Cli, reply: Reply<ReplaceResult>) -> ExitCode {
+    if cli.json {
+        return emit(&json::replace(reply, cli.budget));
+    }
     let code = exit_for(&reply);
     match reply.outcome {
         Outcome::Found(r) => {
             note_stale(&reply.report);
-            if cli.json {
-                let e = envelope(&reply.report, None, Vec::new(), r, Vec::new(), None);
-                println!("{}", serde_json::to_string(&e).expect("serialise envelope"));
-            } else {
-                println!(
-                    "replaced {}:{}-{} with {}:{}-{}",
-                    r.file, r.replaced.0, r.replaced.1, r.file, r.lines.0, r.lines.1
-                );
-            }
+            println!(
+                "replaced {}:{}-{} with {}:{}-{}",
+                r.file, r.replaced.0, r.replaced.1, r.file, r.lines.0, r.lines.1
+            );
         }
         other => other_outcomes(cli, &reply.report, other, None),
     }
@@ -984,6 +874,9 @@ pub fn insight<R>(cli: &Cli, reply: Reply<R>, command: &str, shape: &Shape<R>) -
 where
     R: Itemized + Serialize + HintSource,
 {
+    if cli.json {
+        return emit(&json::insight(reply, cli.budget, command, shape.fails));
+    }
     let code = exit_for(&reply);
     match reply.outcome {
         Outcome::Found(mut r) => {
@@ -992,38 +885,15 @@ where
             let next = hints(command, &r);
             let mut partial = reply.partial;
             let lines: Vec<String> = r.items_mut().iter().map(|i| (shape.line)(i)).collect();
-            if cli.json {
-                let mut truncated = None;
-                if let Some(b) = cli.budget {
-                    let json: Vec<String> = r
-                        .items_mut()
-                        .iter()
-                        .map(|i| serde_json::to_string(i).expect("serialise result"))
-                        .collect();
-                    let fit = budget::fit_budget(&json, b);
-                    if fit.omitted > 0 {
-                        truncated = Some(Truncation {
-                            shown: fit.kept as u64,
-                            omitted: fit.omitted as u64,
-                            budget: b,
-                        });
-                        partial.push(budget_partial(b, fit.kept, fit.omitted));
-                        r.items_mut().truncate(fit.kept);
-                    }
-                }
-                let e = envelope(&reply.report, truncated, partial, r, next, None);
-                println!("{}", serde_json::to_string(&e).expect("serialise envelope"));
-            } else {
-                for l in (shape.header)(&r) {
-                    println!("{l}");
-                }
-                print_lines(cli, lines, &mut partial);
-                for l in (shape.footer)(&r) {
-                    println!("{l}");
-                }
-                print_partial(&partial);
-                print_next(&next);
+            for l in (shape.header)(&r) {
+                println!("{l}");
             }
+            print_lines(cli, lines, &mut partial);
+            for l in (shape.footer)(&r) {
+                println!("{l}");
+            }
+            print_partial(&partial);
+            print_next(&next);
             if code == ExitCode::Ok && failing {
                 return ExitCode::Error;
             }

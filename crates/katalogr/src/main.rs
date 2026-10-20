@@ -31,6 +31,7 @@ fn run(cli: &Cli) -> Result<ExitCode, DistError> {
             full,
             history,
         }) => cmd::index::run(cli, since.as_ref(), range.as_ref(), *full, *history),
+        Some(Command::Status) => cmd::status::run(cli),
         Some(Command::Doctor {
             fail_on,
             skip_git,

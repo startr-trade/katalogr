@@ -233,6 +233,8 @@ pub enum Command {
         #[arg(long)]
         history: bool,
     },
+    /// Show the index watermark, pending changes and staleness.
+    Status,
     /// List the hub nodes: those with the highest weighted degree (links in plus out).
     Hubs {
         /// Group nodes as symbols, files or packages.

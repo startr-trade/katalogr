@@ -275,6 +275,25 @@ mod cli {
         }
     }
 
+    /// R-8. `katalogr status` reports the watermark `index` reached, with nothing pending.
+    #[test]
+    fn status_reports_watermark() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (_kx, repo) = query_project(tmp.path());
+        let (code, indexed, _) = run_raw(&repo, &["--json", "index"]);
+        assert_eq!(code, 0, "{indexed}");
+        let (code, out, err) = run_raw(&repo, &["--json", "status"]);
+        assert_eq!(code, 0, "{err}");
+        let status: serde_json::Value = serde_json::from_str(out.trim()).expect("status JSON");
+        let indexed: serde_json::Value = serde_json::from_str(indexed.trim()).expect("index JSON");
+        assert_eq!(status["watermark"], indexed["watermark"]);
+        assert_eq!(status["pending"], 0);
+        assert_eq!(status["stale"], false);
+        let (code, text, _) = run_raw(&repo, &["status"]);
+        assert_eq!(code, 0);
+        assert!(text.starts_with("index status; watermark "), "{text}");
+    }
+
     #[test]
     fn find_lists_matches() {
         let tmp = tempfile::tempdir().unwrap();
@@ -1713,5 +1732,28 @@ mod claude {
             assert!(skill.lines().any(|l| l.starts_with(h)), "missing {h}");
         }
         assert!(skill.starts_with("---\nname: katalogr\n"));
+    }
+}
+
+mod render_json {
+    use super::cli::{query_project, run_raw};
+
+    /// Golden stdout of `--json find call`, captured before the JSON renderer moved to
+    /// `render/json.rs` (FEAT-067).
+    const FIND_CALL: &str = "{\"schema\":1,\"watermark\":2,\"pending\":0,\"stale\":false,\"truncated\":null,\"result\":[{\"name\":\"app:user.tx#fn:caller_a\",\"kind\":\"fn\",\"path\":\"user.tx\",\"span\":{\"start_line\":1,\"start_col\":1,\"end_line\":1,\"end_col\":15}},{\"name\":\"app:user.tx#fn:caller_b\",\"kind\":\"fn\",\"path\":\"user.tx\",\"span\":{\"start_line\":2,\"start_col\":1,\"end_line\":2,\"end_col\":15}}],\"next\":[\"katalogr explain app:user.tx#fn:caller_a\",\"katalogr show app:user.tx#fn:caller_a\",\"katalogr refs app:user.tx#fn:caller_a\"]}\n";
+    /// Golden stdout of `--json refs dup` (an ambiguous answer: the candidates).
+    const REFS_DUP: &str = "{\"schema\":1,\"watermark\":2,\"pending\":0,\"stale\":false,\"truncated\":null,\"result\":[{\"name\":\"app:lib.tx#fn:dup\",\"kind\":\"fn\",\"path\":\"lib.tx\",\"span\":{\"start_line\":6,\"start_col\":1,\"end_line\":6,\"end_col\":10}},{\"name\":\"app:user.tx#fn:dup\",\"kind\":\"fn\",\"path\":\"user.tx\",\"span\":{\"start_line\":10,\"start_col\":1,\"end_line\":10,\"end_col\":10}}]}\n";
+
+    /// R-4. The JSON the CLI prints is unchanged by the shared-renderer refactor.
+    #[test]
+    fn cli_json_unchanged() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (_kx, repo) = query_project(tmp.path());
+        let (code, out, _) = run_raw(&repo, &["--json", "find", "call"]);
+        assert_eq!(code, 0);
+        assert_eq!(out, FIND_CALL, "find call");
+        let (code, out, _) = run_raw(&repo, &["--json", "refs", "dup"]);
+        assert_eq!(code, 3);
+        assert_eq!(out, REFS_DUP, "refs dup");
     }
 }
