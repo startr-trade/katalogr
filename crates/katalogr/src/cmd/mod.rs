@@ -13,6 +13,7 @@ pub mod map;
 pub mod mirrors;
 pub mod notify;
 pub mod path;
+pub mod profiles;
 pub mod project;
 pub mod refs;
 pub mod replace;

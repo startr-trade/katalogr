@@ -125,8 +125,48 @@ pub struct Katalogr {
 }
 
 /// Profiles embedded in the binary, applied before the project's own: `(file name, text)`.
-const BUILTIN_PROFILES: &[(&str, &str)] =
-    &[("generic.yaml", include_str!("../profiles/generic.yaml"))];
+const BUILTIN_PROFILES: &[(&str, &str)] = &[
+    ("generic.yaml", include_str!("../profiles/generic.yaml")),
+    ("http-rust.yaml", include_str!("../profiles/http-rust.yaml")),
+    ("http-ts.yaml", include_str!("../profiles/http-ts.yaml")),
+];
+
+/// The profiles in force, for `katalogr profiles list`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProfileListing {
+    /// Built-in files (`builtin:<name>.yaml`) in application order, including any a project
+    /// file replaced.
+    pub builtins: Vec<String>,
+    /// Project files in force (`profiles/<file>`).
+    pub project: Vec<ProjectProfile>,
+    /// Project files that are refused, with their file, line and reason.
+    pub refused: Vec<katalogr_engine::profiles::ProfileError>,
+}
+
+/// One project profile file in force.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProjectProfile {
+    pub file: String,
+    /// The built-in file it replaces by profile name.
+    pub replaces: Option<String>,
+}
+
+/// Built-in profile names (file names without `.yaml`), in application order.
+pub fn builtin_profile_names() -> Vec<&'static str> {
+    BUILTIN_PROFILES
+        .iter()
+        .map(|(n, _)| n.strip_suffix(".yaml").unwrap_or(n))
+        .collect()
+}
+
+/// A built-in profile's text by name (`http-ts` or `http-ts.yaml`).
+pub fn builtin_profile(name: &str) -> Option<&'static str> {
+    let name = name.strip_suffix(".yaml").unwrap_or(name);
+    BUILTIN_PROFILES
+        .iter()
+        .find(|(n, _)| n.strip_suffix(".yaml").unwrap_or(n) == name)
+        .map(|(_, t)| *t)
+}
 
 /// The built-in profiles as the engine takes them.
 fn builtin_profiles() -> Vec<(String, String)> {
@@ -215,6 +255,62 @@ fn unresolved<T>(r: Resolution<SymbolHit>, what: &str) -> Outcome<T> {
 }
 
 impl Katalogr {
+    /// Built-in profile names (file names without `.yaml`), in application order.
+    pub fn builtin_profile_names() -> Vec<&'static str> {
+        builtin_profile_names()
+    }
+
+    /// A built-in profile's text by name (`http-ts` or `http-ts.yaml`).
+    pub fn builtin_profile(name: &str) -> Option<&'static str> {
+        builtin_profile(name)
+    }
+
+    /// The built-in profiles, the project's profile files in force, which built-ins they replace,
+    /// and the files that are refused.
+    pub fn profile_listing(&self) -> ProfileListing {
+        let builtins: Vec<(&str, &str)> = BUILTIN_PROFILES.to_vec();
+        let report = katalogr_engine::profiles::ProfileSet::load_full(
+            self.project.root(),
+            &builtins,
+            &BTreeMap::new(),
+            &build_registry().normalisers(),
+        );
+        let overridden = report.set.overridden();
+        let project = report
+            .set
+            .files()
+            .into_iter()
+            .filter(|(f, _)| !f.starts_with("builtin:"))
+            .map(|(f, _)| ProjectProfile {
+                file: f.to_string(),
+                replaces: overridden
+                    .iter()
+                    .find(|(pf, _)| pf == f)
+                    .map(|(_, b)| b.clone()),
+            })
+            .collect();
+        ProfileListing {
+            builtins: BUILTIN_PROFILES
+                .iter()
+                .map(|(n, _)| format!("builtin:{n}"))
+                .collect(),
+            project,
+            refused: report.errors,
+        }
+    }
+
+    /// Only the built-ins: what `profile_listing` returns outside any project.
+    pub fn builtin_listing() -> ProfileListing {
+        ProfileListing {
+            builtins: BUILTIN_PROFILES
+                .iter()
+                .map(|(n, _)| format!("builtin:{n}"))
+                .collect(),
+            project: Vec::new(),
+            refused: Vec::new(),
+        }
+    }
+
     /// Resolve the kindex and project from flags, environment and the nearest `.katalogr`
     /// marker found walking up from `start_dir`.
     pub fn resolve(start_dir: &Path, overrides: &Overrides) -> Result<Katalogr, DistError> {
@@ -630,6 +726,27 @@ mod profile_tests {
             katalogr_engine::profiles::parse(&format!("builtin:{name}"), text)
                 .unwrap_or_else(|e| panic!("{e}"));
         }
+    }
+
+    /// The built-ins load with the registered normalisers, and `generic` stays version 1.
+    #[test]
+    fn builtin_profiles_load_with_normalisers() {
+        let dir = std::env::temp_dir();
+        let dir = camino::Utf8Path::from_path(&dir).unwrap();
+        let r = katalogr_engine::profiles::ProfileSet::load_full(
+            &dir.join("katalogr-no-such-project"),
+            super::BUILTIN_PROFILES,
+            &Default::default(),
+            &super::build_registry().normalisers(),
+        );
+        assert!(r.errors.is_empty(), "{:?}", r.errors);
+        assert_eq!(r.set.names(), ["generic", "http-rust", "http-ts"]);
+        let generic = katalogr_engine::profiles::parse(
+            "builtin:generic.yaml",
+            super::builtin_profile("generic").unwrap(),
+        )
+        .unwrap();
+        assert_eq!(generic.version, 1);
     }
 }
 

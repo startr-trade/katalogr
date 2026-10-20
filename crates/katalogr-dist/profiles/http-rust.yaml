@@ -1,0 +1,50 @@
+# Built-in REST conventions for Rust (FEAT-014, ADR-0020). They read the `str_calls` fact that
+# the Rust extension records and bind routes to `http_route` contracts, so that a handler, the
+# OpenAPI operation that documents it and the clients that call it meet on one key.
+#
+# Copy this file into the project's `profiles/` folder (`katalogr profiles show http-rust`)
+# to change it: a project file with the same `profile:` name replaces this one. A mounted
+# router's prefix (axum `.nest`) is not followed; add `path:`-scoped rules whose key carries it.
+profile: http-rust
+version: 2
+rules:
+  # axum: .route("/p", get(h).post(h2)) on `Router::new()`, `app` or `self.router`.
+  # One rule per method, so chained method routers bind each handler. The handler is the first
+  # path after `<method>(`; a closure renders `_` and falls back to the registering function.
+  - id: axum-get
+    when: { extension: rust, on: all, each: str_calls, matches: '^(?:[A-Za-z_][A-Za-z0-9_.]*)?\.route\("([^"]*)", (?:.*[^A-Za-z0-9_])?get\((?:([A-Za-z_][A-Za-z0-9_]*(?:::[A-Za-z_][A-Za-z0-9_]*)*)\))?' }
+    emit: { bind: { contract: { kind: http_route, key: 'GET $1' }, role: provides, normalise: http_route, holder: '$2' } }
+  - id: axum-post
+    when: { extension: rust, on: all, each: str_calls, matches: '^(?:[A-Za-z_][A-Za-z0-9_.]*)?\.route\("([^"]*)", (?:.*[^A-Za-z0-9_])?post\((?:([A-Za-z_][A-Za-z0-9_]*(?:::[A-Za-z_][A-Za-z0-9_]*)*)\))?' }
+    emit: { bind: { contract: { kind: http_route, key: 'POST $1' }, role: provides, normalise: http_route, holder: '$2' } }
+  - id: axum-put
+    when: { extension: rust, on: all, each: str_calls, matches: '^(?:[A-Za-z_][A-Za-z0-9_.]*)?\.route\("([^"]*)", (?:.*[^A-Za-z0-9_])?put\((?:([A-Za-z_][A-Za-z0-9_]*(?:::[A-Za-z_][A-Za-z0-9_]*)*)\))?' }
+    emit: { bind: { contract: { kind: http_route, key: 'PUT $1' }, role: provides, normalise: http_route, holder: '$2' } }
+  - id: axum-delete
+    when: { extension: rust, on: all, each: str_calls, matches: '^(?:[A-Za-z_][A-Za-z0-9_.]*)?\.route\("([^"]*)", (?:.*[^A-Za-z0-9_])?delete\((?:([A-Za-z_][A-Za-z0-9_]*(?:::[A-Za-z_][A-Za-z0-9_]*)*)\))?' }
+    emit: { bind: { contract: { kind: http_route, key: 'DELETE $1' }, role: provides, normalise: http_route, holder: '$2' } }
+  - id: axum-patch
+    when: { extension: rust, on: all, each: str_calls, matches: '^(?:[A-Za-z_][A-Za-z0-9_.]*)?\.route\("([^"]*)", (?:.*[^A-Za-z0-9_])?patch\((?:([A-Za-z_][A-Za-z0-9_]*(?:::[A-Za-z_][A-Za-z0-9_]*)*)\))?' }
+    emit: { bind: { contract: { kind: http_route, key: 'PATCH $1' }, role: provides, normalise: http_route, holder: '$2' } }
+  - id: axum-head
+    when: { extension: rust, on: all, each: str_calls, matches: '^(?:[A-Za-z_][A-Za-z0-9_.]*)?\.route\("([^"]*)", (?:.*[^A-Za-z0-9_])?head\((?:([A-Za-z_][A-Za-z0-9_]*(?:::[A-Za-z_][A-Za-z0-9_]*)*)\))?' }
+    emit: { bind: { contract: { kind: http_route, key: 'HEAD $1' }, role: provides, normalise: http_route, holder: '$2' } }
+  - id: axum-options
+    when: { extension: rust, on: all, each: str_calls, matches: '^(?:[A-Za-z_][A-Za-z0-9_.]*)?\.route\("([^"]*)", (?:.*[^A-Za-z0-9_])?options\((?:([A-Za-z_][A-Za-z0-9_]*(?:::[A-Za-z_][A-Za-z0-9_]*)*)\))?' }
+    emit: { bind: { contract: { kind: http_route, key: 'OPTIONS $1' }, role: provides, normalise: http_route, holder: '$2' } }
+  - id: axum-trace
+    when: { extension: rust, on: all, each: str_calls, matches: '^(?:[A-Za-z_][A-Za-z0-9_.]*)?\.route\("([^"]*)", (?:.*[^A-Za-z0-9_])?trace\((?:([A-Za-z_][A-Za-z0-9_]*(?:::[A-Za-z_][A-Za-z0-9_]*)*)\))?' }
+    emit: { bind: { contract: { kind: http_route, key: 'TRACE $1' }, role: provides, normalise: http_route, holder: '$2' } }
+  - id: axum-any
+    when: { extension: rust, on: all, each: str_calls, matches: '^(?:[A-Za-z_][A-Za-z0-9_.]*)?\.route\("([^"]*)", (?:.*[^A-Za-z0-9_])?any\((?:([A-Za-z_][A-Za-z0-9_]*(?:::[A-Za-z_][A-Za-z0-9_]*)*)\))?' }
+    emit: { bind: { contract: { kind: http_route, key: '* $1' }, role: provides, normalise: http_route, holder: '$2' } }
+  # reqwest and reqwest-style clients. A receiver is matched by name, so those are inferred.
+  - id: reqwest-fn
+    when: { extension: rust, on: all, each: str_calls, matches: '^reqwest::(?:blocking::)?get\("([^"]*)"' }
+    emit: { bind: { contract: { kind: http_route, key: 'GET $1' }, role: consumes, normalise: http_route } }
+  - id: client-method
+    when: { extension: rust, on: all, each: str_calls, matches: '^(?:self\.)?[A-Za-z0-9_]*(?:client|http)\.(get|post|put|delete|patch|head)\("([^"]*)"' }
+    emit: { bind: { contract: { kind: http_route, key: '$1 $2' }, role: consumes, normalise: http_route, confidence: inferred } }
+  - id: client-request
+    when: { extension: rust, on: all, each: str_calls, matches: '^(?:self\.)?[A-Za-z0-9_]*(?:client|http)\.request\((?:[A-Za-z_]+::)*([A-Za-z]+), "([^"]*)"' }
+    emit: { bind: { contract: { kind: http_route, key: '$1 $2' }, role: consumes, normalise: http_route, confidence: inferred } }

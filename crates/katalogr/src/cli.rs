@@ -192,12 +192,30 @@ pub enum Command {
         #[arg(long, value_name = "KIND")]
         kind: Vec<String>,
     },
+    /// Show the profiles in force, or print a built-in profile so it can be copied.
+    Profiles {
+        #[command(subcommand)]
+        action: ProfilesAction,
+    },
     /// Compare mirrored copies of a structure: contracts with two or more declarers. Exits 1
     /// when a field is missing on one side or differs in type, required or many.
     Mirrors {
         /// Only contracts of this kind (for example `schema_type`); repeatable.
         #[arg(long, value_name = "KIND")]
         kind: Vec<String>,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum ProfilesAction {
+    /// List the built-in profiles, the project's profile files, which built-ins they replace,
+    /// and the files that are refused.
+    List,
+    /// Print a built-in profile's text (copy it into the project's `profiles/` folder to change
+    /// it; a file with the same `profile:` name replaces the built-in).
+    Show {
+        /// Profile name, for example `http-ts`.
+        name: String,
     },
 }
 

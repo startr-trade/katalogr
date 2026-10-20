@@ -341,6 +341,14 @@ impl ProfileSet {
         report
     }
 
+    /// The files in force, in application order: `(file, profile name)`.
+    pub fn files(&self) -> Vec<(&str, &str)> {
+        self.loaded
+            .iter()
+            .map(|l| (l.file.as_str(), l.doc.profile.as_str()))
+            .collect()
+    }
+
     /// `(project file, built-in file)` for each built-in a project file replaced by name.
     pub fn overridden(&self) -> &[(String, String)] {
         &self.overridden

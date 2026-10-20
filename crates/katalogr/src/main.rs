@@ -31,6 +31,7 @@ fn run(cli: &Cli) -> Result<ExitCode, DistError> {
             full,
             history,
         }) => cmd::index::run(cli, since.as_ref(), range.as_ref(), *full, *history),
+        Some(Command::Profiles { action }) => cmd::profiles::run(cli, action),
         Some(Command::Dangling { kind }) => cmd::dangling::run(cli, kind),
         Some(Command::Mirrors { kind }) => cmd::mirrors::run(cli, kind),
         Some(Command::Find { text }) => cmd::find::run(cli, text),

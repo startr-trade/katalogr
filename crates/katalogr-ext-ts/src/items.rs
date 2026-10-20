@@ -72,6 +72,8 @@ pub struct Builder<'s> {
     pub(crate) bindings: Vec<katalogr_model::Binding>,
     /// Calls that pass a token-like string, by the symbol (or artifact) whose code holds them.
     pub(crate) str_calls: BTreeMap<Id, Vec<katalogr_model::StrCall>>,
+    /// Names of the symbols relative to the artifact, by id; built on first use.
+    pub(crate) rel_names: std::cell::OnceCell<HashMap<Id, String>>,
     /// The package key when this file is generated wasm glue.
     pub(crate) glue: Option<String>,
 }
@@ -121,6 +123,7 @@ impl<'s> Builder<'s> {
             wasm_instances: HashMap::new(),
             bindings: Vec::new(),
             str_calls: BTreeMap::new(),
+            rel_names: std::cell::OnceCell::new(),
             glue: ctx.wasm.glue_of(path.as_str()).map(|p| p.key.clone()),
         }
     }

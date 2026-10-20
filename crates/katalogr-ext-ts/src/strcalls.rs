@@ -82,9 +82,36 @@ fn concat_text(e: &Expression<'_>, has: &mut bool) -> String {
     }
 }
 
+/// Whether an argument can render as a quoted value: a string, a template, a `+` concatenation,
+/// or an object with such a value of its own.
+fn may_be_quoted(e: &Expression<'_>) -> bool {
+    match e.get_inner_expression() {
+        Expression::StringLiteral(_) | Expression::TemplateLiteral(_) => true,
+        Expression::BinaryExpression(b) => b.operator == BinaryOperator::Addition,
+        Expression::ObjectExpression(o) => o.properties.iter().any(|p| match p {
+            ObjectPropertyKind::ObjectProperty(p) => matches!(
+                p.value.get_inner_expression(),
+                Expression::StringLiteral(_)
+                    | Expression::TemplateLiteral(_)
+                    | Expression::BinaryExpression(_)
+            ),
+            _ => false,
+        }),
+        _ => false,
+    }
+}
+
 impl Builder<'_> {
     /// The `str_calls` entry of a call, when one of its arguments is a quoted value.
     pub(crate) fn str_call_of(&self, it: &CallExpression<'_>) -> Option<StrCall> {
+        // Most calls pass no string: skip the rendering unless an argument can be one.
+        if !it
+            .arguments
+            .iter()
+            .any(|a| a.as_expression().is_some_and(may_be_quoted))
+        {
+            return None;
+        }
         let mut refs = Refs::new();
         let (text, quoted) = self.render_call(it, 0, 0, &mut refs)?;
         if !quoted {
@@ -242,13 +269,17 @@ impl Builder<'_> {
     /// An identifier that names a function of this file, or a named import.
     fn arg_ref_ident(&self, name: &str) -> Option<ArgRef> {
         if let Some(&to) = self.callable.get(name) {
-            let rel = self
-                .symbols
-                .iter()
-                .find(|s| s.name.id() == to)
-                .map(|s| s.name.canonical())?;
-            let (_, rel) = rel.split_once('#')?;
-            return Some(ArgRef::Local(rel.to_string()));
+            let rels = self.rel_names.get_or_init(|| {
+                self.symbols
+                    .iter()
+                    .filter_map(|s| {
+                        let canon = s.name.canonical();
+                        let (_, rel) = canon.split_once('#')?;
+                        Some((s.name.id(), rel.to_string()))
+                    })
+                    .collect()
+            });
+            return rels.get(&to).map(|rel| ArgRef::Local(rel.clone()));
         }
         if let Some(Binding::Named { modules, name }) = self.imports.get(name) {
             let cands = export_candidates(modules, name);

@@ -133,6 +133,19 @@ fn format_macro(m: &ast::MacroExpr) -> Option<String> {
     Some(format_holes(&s.value().ok()?))
 }
 
+/// Whether an argument can render as a quoted value: a string literal, a `format!` invocation
+/// or a converted string, through borrows and parentheses.
+fn may_be_quoted(e: &ast::Expr) -> bool {
+    match e {
+        ast::Expr::Literal(l) => matches!(l.kind(), ast::LiteralKind::String(_)),
+        ast::Expr::MacroExpr(_) => true,
+        ast::Expr::RefExpr(r) => r.expr().is_some_and(|x| may_be_quoted(&x)),
+        ast::Expr::ParenExpr(p) => p.expr().is_some_and(|x| may_be_quoted(&x)),
+        ast::Expr::MethodCallExpr(_) | ast::Expr::CallExpr(_) => converted_string(e).is_some(),
+        _ => false,
+    }
+}
+
 impl Builder<'_> {
     /// The `str_calls` entry of a path call, when one of its arguments is a quoted value.
     pub(crate) fn str_call_of_call(&self, call: &ast::CallExpr) -> Option<StrCall> {
@@ -156,6 +169,15 @@ impl Builder<'_> {
         start: usize,
         node: &ra_ap_syntax::SyntaxNode,
     ) -> Option<StrCall> {
+        // Most calls pass no string: skip the rendering unless an argument can be one.
+        let list = match e {
+            ast::Expr::CallExpr(c) => c.arg_list()?,
+            ast::Expr::MethodCallExpr(m) => m.arg_list()?,
+            _ => return None,
+        };
+        if !list.args().any(|a| may_be_quoted(&a)) {
+            return None;
+        }
         let mut refs = Refs::new();
         let (text, quoted) = self.render_call(e, 0, 0, &mut refs)?;
         if !quoted {
