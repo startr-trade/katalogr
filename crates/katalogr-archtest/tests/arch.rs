@@ -358,6 +358,253 @@ mod archtest {
         );
     }
 
+    /// The path of a `syn::Path` as `a::b::c`.
+    fn path_string(p: &syn::Path) -> String {
+        p.segments
+            .iter()
+            .map(|s| s.ident.to_string())
+            .collect::<Vec<_>>()
+            .join("::")
+    }
+
+    /// Every `use` tree flattened to full paths.
+    fn use_paths(tree: &syn::UseTree, prefix: &str, out: &mut Vec<String>) {
+        let join = |name: &str| {
+            if prefix.is_empty() {
+                name.to_string()
+            } else {
+                format!("{prefix}::{name}")
+            }
+        };
+        match tree {
+            syn::UseTree::Path(p) => use_paths(&p.tree, &join(&p.ident.to_string()), out),
+            syn::UseTree::Name(n) => out.push(join(&n.ident.to_string())),
+            syn::UseTree::Rename(r) => out.push(join(&r.ident.to_string())),
+            syn::UseTree::Glob(_) => out.push(join("*")),
+            syn::UseTree::Group(g) => {
+                for t in &g.items {
+                    use_paths(t, prefix, out);
+                }
+            }
+        }
+    }
+
+    /// Whether `path` is `prefix` or lies under it (whole segments).
+    fn under(path: &str, prefix: &str) -> bool {
+        path == prefix || path.starts_with(&format!("{prefix}::"))
+    }
+
+    /// Paths the MCP module must not name: the query, store, engine and model crates; the
+    /// facade's query, hook and Claude modules; and network, file, process and signal APIs.
+    const MCP_DENIED_PATHS: [&str; 14] = [
+        "katalogr_query",
+        "katalogr_store",
+        "katalogr_engine",
+        "katalogr_model",
+        "katalogr_dist::query",
+        "katalogr_dist::hooks",
+        "katalogr_dist::claude",
+        "std::net",
+        "std::fs",
+        "std::process",
+        "tokio::net",
+        "tokio::fs",
+        "tokio::process",
+        "tokio::signal",
+    ];
+
+    /// Facade or function names that edit source files, settings, hooks or the project.
+    const MCP_DENIED_NAMES: [&str; 6] = [
+        "replace",
+        "notify",
+        "add_root",
+        "claude_sync",
+        "skill_install",
+        "session_start",
+    ];
+
+    /// The facade calls `tools.rs` makes: each exactly once.
+    const MCP_FACADE_CALLS: [&str; 13] = [
+        "resolve", "find", "refs", "callers", "explain", "show", "path", "map", "search",
+        "dangling", "why", "index", "status",
+    ];
+
+    #[derive(Default)]
+    struct McpScan {
+        file: String,
+        is_tools: bool,
+        violations: Vec<String>,
+        facade_calls: Vec<String>,
+    }
+
+    impl McpScan {
+        fn violation(&mut self, line: usize, rule: &str) {
+            self.violations
+                .push(format!("{}:{line}: {rule}", self.file));
+        }
+
+        fn check_path(&mut self, line: usize, path: &str) {
+            for denied in MCP_DENIED_PATHS {
+                if under(path, denied) {
+                    self.violation(line, &format!("path `{path}` is under `{denied}`"));
+                }
+            }
+            let segs: Vec<&str> = path.split("::").collect();
+            let via_facade = segs
+                .iter()
+                .any(|s| *s == "Katalogr" || *s == "katalogr_dist");
+            if let Some(last) = segs.last()
+                && via_facade
+                && MCP_DENIED_NAMES.contains(last)
+            {
+                self.violation(
+                    line,
+                    &format!("path `{path}` names the editing call `{last}`"),
+                );
+            }
+            if segs.len() >= 2 && segs[0] == "Katalogr" && !self.is_tools {
+                self.violation(
+                    line,
+                    &format!("`{path}`: only tools.rs may call the facade"),
+                );
+            }
+        }
+    }
+
+    impl<'ast> Visit<'ast> for McpScan {
+        fn visit_item_use(&mut self, i: &'ast syn::ItemUse) {
+            let mut paths = Vec::new();
+            use_paths(&i.tree, "", &mut paths);
+            let line = i.use_token.span.start().line;
+            for p in paths {
+                self.check_path(line, &p);
+            }
+        }
+
+        fn visit_path(&mut self, p: &'ast syn::Path) {
+            let line = p
+                .segments
+                .first()
+                .map_or(0, |s| s.ident.span().start().line);
+            self.check_path(line, &path_string(p));
+            syn::visit::visit_path(self, p);
+        }
+
+        fn visit_expr_call(&mut self, c: &'ast syn::ExprCall) {
+            if let syn::Expr::Path(p) = &*c.func {
+                let segs: Vec<String> = p
+                    .path
+                    .segments
+                    .iter()
+                    .map(|s| s.ident.to_string())
+                    .collect();
+                if segs.len() == 2 && segs[0] == "Katalogr" {
+                    self.facade_calls.push(segs[1].clone());
+                }
+            }
+            syn::visit::visit_expr_call(self, c);
+        }
+
+        fn visit_expr_method_call(&mut self, m: &'ast syn::ExprMethodCall) {
+            // `tools.rs` is the only file with a facade value in hand.
+            if self.is_tools && MCP_DENIED_NAMES.contains(&m.method.to_string().as_str()) {
+                self.violation(
+                    m.method.span().start().line,
+                    &format!("method `{}` edits what the MCP wrapper must not", m.method),
+                );
+            }
+            syn::visit::visit_expr_method_call(self, m);
+        }
+    }
+
+    /// The violations of the wrapper rules in one file's source.
+    fn mcp_violations(file: &str, is_tools: bool, src: &str) -> Vec<String> {
+        let ast = match syn::parse_file(src) {
+            Ok(a) => a,
+            Err(e) => return vec![format!("{file}: parse error: {e}")],
+        };
+        let mut scan = McpScan {
+            file: file.to_string(),
+            is_tools,
+            ..McpScan::default()
+        };
+        scan.visit_file(&ast);
+        let mut out = scan.violations;
+        if is_tools {
+            let mut want: Vec<&str> = MCP_FACADE_CALLS.to_vec();
+            want.sort_unstable();
+            let mut got: Vec<&str> = scan.facade_calls.iter().map(String::as_str).collect();
+            got.sort_unstable();
+            if got != want {
+                out.push(format!(
+                    "{file}: facade calls are {got:?}, want exactly one of each of {want:?}"
+                ));
+            }
+        }
+        out
+    }
+
+    /// R-2, R-11 (ADR-0023). The MCP module is a wrapper: each tool is one facade call, and
+    /// nothing under `src/mcp` reaches the core crates, edits files or opens a socket.
+    #[test]
+    fn mcp_is_a_wrapper() {
+        let dir = workspace_root().join("crates/katalogr/src/mcp");
+        let mut files = Vec::new();
+        rs_files(&dir, &mut files);
+        files.sort();
+        assert!(!files.is_empty(), "no files under {}", dir.display());
+        assert!(
+            files.iter().any(|f| f.ends_with("tools.rs")),
+            "no tools.rs under src/mcp"
+        );
+        let mut failures = Vec::new();
+        for f in &files {
+            let src = std::fs::read_to_string(f).expect("read source");
+            let name = f.file_name().and_then(|n| n.to_str()).unwrap_or("");
+            failures.extend(mcp_violations(
+                &f.display().to_string(),
+                name == "tools.rs",
+                &src,
+            ));
+        }
+        assert!(
+            failures.is_empty(),
+            "the MCP module is not a thin wrapper:\n{}",
+            failures.join("\n")
+        );
+    }
+
+    /// The rules above catch what they claim to, so a pass of `mcp_is_a_wrapper` means something.
+    #[test]
+    fn mcp_rules_detect_violations() {
+        let bad = r#"
+            use std::{fs, net::TcpStream};
+            use katalogr_query::resolve;
+            fn f(k: &Katalogr) {
+                katalogr_dist::claude::sync();
+                Katalogr::replace(k);
+                tokio::process::Command::new("x");
+            }
+        "#;
+        let v = mcp_violations("other.rs", false, bad);
+        for needle in [
+            "std::fs",
+            "std::net",
+            "katalogr_query",
+            "katalogr_dist::claude",
+            "`Katalogr::replace`",
+            "tokio::process",
+        ] {
+            assert!(v.iter().any(|l| l.contains(needle)), "{needle}: {v:?}");
+        }
+        let tools = "fn a(k: &Katalogr) { Katalogr::find(k); Katalogr::find(k); k.notify(); }";
+        let v = mcp_violations("tools.rs", true, tools);
+        assert!(v.iter().any(|l| l.contains("facade calls are")), "{v:?}");
+        assert!(v.iter().any(|l| l.contains("method `notify`")), "{v:?}");
+        let fine = "use katalogr_dist::Katalogr;\nfn a() { let _ = 1; }";
+        assert!(mcp_violations("other.rs", false, fine).is_empty());
+    }
+
     #[test]
     fn extensions_depend_on_model_only() {
         // Vacuous today: no `katalogr-ext-*` packages exist yet, so the loop body
