@@ -127,6 +127,37 @@ mod cache {
     }
 
     #[test]
+    fn index_errors_all_sorted() {
+        use katalogr_store::ErrorRow;
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = project(&tmp);
+        let cache = Cache::open_or_rebuild(&dir, &Stitcher::new(), soon()).unwrap();
+        let row = |m: &str| ErrorRow {
+            span: None,
+            message: m.to_string(),
+        };
+        {
+            let mut tx = cache.write().unwrap();
+            tx.put_index_errors("r2", &RelPath::new("a.tx").unwrap(), &[row("x")])
+                .unwrap();
+            tx.put_index_errors("r1", &RelPath::new("z.tx").unwrap(), &[row("y"), row("z")])
+                .unwrap();
+            tx.put_index_errors("r1", &RelPath::new("b.tx").unwrap(), &[row("w")])
+                .unwrap();
+            tx.commit().unwrap();
+        }
+        let all = cache.read().unwrap().index_errors_all().unwrap();
+        let keys: Vec<_> = all
+            .iter()
+            .map(|((r, p), rows)| (r.as_str(), p.as_str(), rows.len()))
+            .collect();
+        assert_eq!(
+            keys,
+            [("r1", "b.tx", 1), ("r1", "z.tx", 2), ("r2", "a.tx", 1)]
+        );
+    }
+
+    #[test]
     fn busy_retries_until_deadline() {
         let tmp = tempfile::tempdir().unwrap();
         let dir = project(&tmp);

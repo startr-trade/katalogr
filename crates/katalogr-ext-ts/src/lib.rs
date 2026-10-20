@@ -36,6 +36,21 @@ impl Extractor for TsExtractor {
             || context::is_config_name(name)
     }
 
+    fn language(&self, p: &RelPath) -> &'static str {
+        let s = p.as_str();
+        let name = context::file_name(s);
+        if name == context::PACKAGE_JSON || context::is_config_name(name) {
+            "json"
+        } else if [".js", ".jsx", ".mjs", ".cjs"]
+            .iter()
+            .any(|e| s.ends_with(e))
+        {
+            "javascript"
+        } else {
+            "typescript"
+        }
+    }
+
     fn context_files(&self) -> &'static [&'static str] {
         &[
             context::TSCONFIG,

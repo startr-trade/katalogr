@@ -20,6 +20,13 @@ pub trait Extractor: Send + Sync {
     ) -> Result<(Fragment, Vec<ExtractError>), ExtractError> {
         self.extract(input).map(|f| (f, Vec::new()))
     }
+    /// The language of `path` for coverage reports, as a short lowercase label. Default: the
+    /// extension id. An extension that handles several languages (one parser, several dialects)
+    /// overrides it. Must be deterministic and must not read the file.
+    fn language(&self, path: &RelPath) -> &'static str {
+        let _ = path;
+        self.id()
+    }
     /// The link patterns this extension produces, for the fixture coverage check (FEAT-023).
     fn patterns(&self) -> &'static [&'static str] {
         &[]
@@ -119,4 +126,12 @@ pub enum ExtractError {
     Parse { span: Option<Span>, message: String },
     #[error("unsupported: {0}")]
     Unsupported(String),
+}
+
+impl ExtractError {
+    /// True when `msg` is the display text of `ExtractError::Unsupported` (it starts with
+    /// "unsupported: "), as stored in the index-errors table.
+    pub fn is_unsupported_message(msg: &str) -> bool {
+        msg.starts_with("unsupported: ")
+    }
 }

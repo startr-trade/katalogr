@@ -435,4 +435,16 @@ mod ts {
         );
         assert_eq!(package("app.ts").as_deref(), Some("fx-root"));
     }
+
+    #[test]
+    fn language_by_suffix() {
+        use katalogr_model::{Extractor, RelPath};
+        let lang = |p: &str| TsExtractor.language(&RelPath::new(p).unwrap());
+        assert_eq!(lang("a.ts"), "typescript");
+        assert_eq!(lang("a.tsx"), "typescript");
+        assert_eq!(lang("a.js"), "javascript");
+        assert_eq!(lang("a.mjs"), "javascript");
+        assert_eq!(lang("package.json"), "json");
+        assert_eq!(lang("sub/tsconfig.json"), "json");
+    }
 }
