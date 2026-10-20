@@ -565,10 +565,10 @@ mod cli {
                 return Err(format!("{at}: expected {names:?}, got {instance}"));
             }
         }
-        if let Some(values) = schema.get("enum").and_then(Value::as_array) {
-            if !values.contains(instance) {
-                return Err(format!("{at}: {instance} not in {values:?}"));
-            }
+        if let Some(values) = schema.get("enum").and_then(Value::as_array)
+            && !values.contains(instance)
+        {
+            return Err(format!("{at}: {instance} not in {values:?}"));
         }
         if let Some(obj) = instance.as_object() {
             for k in schema

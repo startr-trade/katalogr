@@ -309,13 +309,36 @@ mod archtest {
         })
     }
 
-    #[test]
-    fn no_c_build_dependencies() {
-        let md = metadata(true);
-        let mut failures = Vec::new();
-        // `cargo metadata` lists edges to optional dependencies that no enabled
-        // feature activates (and the lockfile lists even more packages), so walk
-        // the graph from the workspace members and follow only activated edges.
+    /// The release targets, read from the matrix of `.github/workflows/release.yml`.
+    fn release_targets() -> Vec<String> {
+        let text = std::fs::read_to_string(workspace_root().join(".github/workflows/release.yml"))
+            .expect("release.yml");
+        text.lines()
+            .filter_map(|l| l.trim().strip_prefix("- target:"))
+            .map(|t| t.trim().to_string())
+            .collect()
+    }
+
+    fn metadata_at(dir: &Path, target: &str, offline: bool) -> Metadata {
+        let mut cmd = MetadataCommand::new();
+        cmd.current_dir(dir);
+        let mut opts = vec!["--filter-platform".to_string(), target.to_string()];
+        if offline {
+            opts.push("--offline".to_string());
+        }
+        cmd.other_options(opts);
+        cmd.exec().expect("cargo metadata --filter-platform")
+    }
+
+    /// Metadata of the workspace resolved for one release target.
+    fn metadata_for(target: &str) -> Metadata {
+        metadata_at(&workspace_root(), target, false)
+    }
+
+    /// Packages built for the metadata's target: the walk from the workspace members along
+    /// activated edges (`cargo metadata` lists edges to optional dependencies that no enabled
+    /// feature activates, and the lockfile lists even more packages).
+    fn resolved_packages(md: &Metadata) -> BTreeSet<&PackageId> {
         let resolve = md.resolve.as_ref().expect("resolve");
         let nodes: BTreeMap<_, _> = resolve.nodes.iter().map(|n| (&n.id, n)).collect();
         let pkgs: BTreeMap<_, _> = md.packages.iter().map(|p| (&p.id, p)).collect();
@@ -342,20 +365,115 @@ mod archtest {
                 }
             }
         }
-        for p in md.packages.iter().filter(|p| resolved.contains(&p.id)) {
+        resolved
+    }
+
+    /// Every package built for the metadata's target that declares `links` or build-depends
+    /// on `cc` or `cmake`.
+    fn c_build_failures(md: &Metadata) -> Vec<String> {
+        let mut failures = Vec::new();
+        let resolved = resolved_packages(md);
+        let resolve = md.resolve.as_ref().expect("resolve");
+        let pkgs: BTreeMap<_, _> = md.packages.iter().map(|p| (&p.id, p)).collect();
+        for node in resolve.nodes.iter().filter(|n| resolved.contains(&n.id)) {
+            let p = pkgs[&node.id];
             if p.links.is_some() {
                 failures.push(format!("{} declares `links`", p.name));
             }
-            for d in &p.dependencies {
-                if d.kind == DependencyKind::Build && (d.name == "cc" || d.name == "cmake") {
-                    failures.push(format!("{} has build-dependency `{}`", p.name, d.name));
+            // `node.deps` is already filtered by `--filter-platform`; `p.dependencies` is not
+            // (it lists target-specific dependencies of every platform).
+            for dep in &node.deps {
+                let name = pkgs[&dep.pkg].name.as_str();
+                if (name == "cc" || name == "cmake")
+                    && dep
+                        .dep_kinds
+                        .iter()
+                        .any(|k| k.kind == DependencyKind::Build)
+                {
+                    failures.push(format!("{} has build-dependency `{name}`", p.name));
                 }
+            }
+        }
+        failures
+    }
+
+    #[test]
+    fn no_c_build_dependencies() {
+        let mut failures = BTreeSet::new();
+        for t in release_targets() {
+            let md = metadata_for(&t);
+            for f in c_build_failures(&md) {
+                failures.insert(format!("{t}: {f}"));
             }
         }
         assert!(
             failures.is_empty(),
             "C build dependencies found:\n{}",
-            failures.join("\n")
+            failures.into_iter().collect::<Vec<_>>().join("\n")
         );
+    }
+
+    #[test]
+    fn release_targets_match_workflow() {
+        assert_eq!(
+            release_targets(),
+            [
+                "x86_64-unknown-linux-musl",
+                "aarch64-unknown-linux-musl",
+                "x86_64-apple-darwin",
+                "aarch64-apple-darwin",
+                "x86_64-pc-windows-msvc",
+            ]
+        );
+    }
+
+    #[test]
+    fn target_filter_catches_target_cc() {
+        let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/target-cc");
+        let haiku = c_build_failures(&metadata_at(&fixture, "x86_64-unknown-haiku", true));
+        assert!(
+            haiku.contains(&"a has build-dependency `cc`".to_string()),
+            "haiku walk missed the target-specific cc: {haiku:?}"
+        );
+        let musl = c_build_failures(&metadata_at(&fixture, "x86_64-unknown-linux-musl", true));
+        assert!(musl.is_empty(), "musl walk reported {musl:?}");
+    }
+
+    #[test]
+    fn rust_version_covers_dependencies() {
+        let root: toml::Table = std::fs::read_to_string(workspace_root().join("Cargo.toml"))
+            .expect("root Cargo.toml")
+            .parse()
+            .expect("root Cargo.toml parses");
+        let declared = root["workspace"]["package"]["rust-version"]
+            .as_str()
+            .expect("workspace rust-version");
+        let declared = pad_version(declared);
+        let mut offenders = BTreeSet::new();
+        for t in release_targets() {
+            let md = metadata_for(&t);
+            let resolved = resolved_packages(&md);
+            for p in md.packages.iter().filter(|p| resolved.contains(&p.id)) {
+                if let Some(rv) = &p.rust_version
+                    && *rv > declared
+                {
+                    offenders.insert(format!("{} {} (rust-version {rv})", p.name, p.version));
+                }
+            }
+        }
+        assert!(
+            offenders.is_empty(),
+            "packages need a newer Rust than the workspace rust-version {declared}:\n{}",
+            offenders.into_iter().collect::<Vec<_>>().join("\n")
+        );
+    }
+
+    /// `1.88` -> `1.88.0`.
+    fn pad_version(v: &str) -> cargo_metadata::semver::Version {
+        let mut parts: Vec<&str> = v.split('.').collect();
+        while parts.len() < 3 {
+            parts.push("0");
+        }
+        parts.join(".").parse().expect("semver")
     }
 }

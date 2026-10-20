@@ -13,3 +13,4 @@ publish = false
 cargo_metadata = "0.23.1"
 syn = { version = "2", features = ["full", "visit"] }
 proc-macro2 = { version = "1", features = ["span-locations"] }
+toml.workspace = true

@@ -48,10 +48,10 @@ fn git_paths(names: &[&str]) -> Vec<std::path::PathBuf> {
 
 /// Seconds since the Unix epoch, from `SOURCE_DATE_EPOCH` or the clock.
 fn epoch_seconds() -> Option<i64> {
-    if let Ok(v) = std::env::var("SOURCE_DATE_EPOCH") {
-        if let Ok(secs) = v.trim().parse::<i64>() {
-            return Some(secs);
-        }
+    if let Ok(v) = std::env::var("SOURCE_DATE_EPOCH")
+        && let Ok(secs) = v.trim().parse::<i64>()
+    {
+        return Some(secs);
     }
     let now = SystemTime::now().duration_since(UNIX_EPOCH).ok()?;
     i64::try_from(now.as_secs()).ok()

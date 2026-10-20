@@ -77,11 +77,12 @@ fn latin1(bytes: &[u8]) -> (String, Encoding, Option<String>) {
 
 fn utf16(rest: &[u8], enc: Encoding) -> (String, Encoding, Option<String>) {
     let mut bad = rest.len() % 2 == 1;
-    let units = rest.chunks_exact(2).map(|p| {
+    let (pairs, _) = rest.as_chunks::<2>();
+    let units = pairs.iter().map(|&p| {
         if enc == Encoding::Utf16Le {
-            u16::from_le_bytes([p[0], p[1]])
+            u16::from_le_bytes(p)
         } else {
-            u16::from_be_bytes([p[0], p[1]])
+            u16::from_be_bytes(p)
         }
     });
     let text: String = char::decode_utf16(units)
