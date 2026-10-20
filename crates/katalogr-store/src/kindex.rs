@@ -1,5 +1,6 @@
 //! The kindex repository and its projects.
 
+use crate::cache::ShardKey;
 use crate::error::StoreError;
 use crate::shard;
 use camino::{Utf8Path, Utf8PathBuf};
@@ -177,6 +178,16 @@ impl Kindex {
         })
     }
 
+    /// Reads `projects/<name>/format.json` without the newer-format refusal that
+    /// [`Kindex::project`] applies, so a health check can report a format it cannot open.
+    pub fn format_file(&self, name: &ProjectName) -> Result<FormatFile, StoreError> {
+        let fpath = self.project_root(name).join("format.json");
+        serde_json::from_str(&read_to_string(&fpath)?).map_err(|e| StoreError::Parse {
+            path: fpath.to_string(),
+            message: e.to_string(),
+        })
+    }
+
     fn project_root(&self, name: &ProjectName) -> Utf8PathBuf {
         self.root.join("projects").join(name.as_str())
     }
@@ -270,6 +281,25 @@ impl Kindex {
     }
 }
 
+/// How a project's shard files compare with the kindex git repository's HEAD.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum GitState {
+    /// The kindex root is not a git repository.
+    NotARepo,
+    /// A repository with no commit.
+    NoCommits { shard_files: usize },
+    Repo {
+        /// HEAD commit id, lower-case hex.
+        head: String,
+        /// Shard files whose bytes differ from the blob in HEAD.
+        modified: Vec<ShardKey>,
+        /// Shard files with no entry in HEAD.
+        added: Vec<ShardKey>,
+        /// Entries in HEAD with no shard file.
+        deleted: Vec<ShardKey>,
+    },
+}
+
 #[derive(Clone, Debug)]
 pub struct ProjectDir {
     root: Utf8PathBuf,
@@ -284,6 +314,15 @@ impl ProjectDir {
 
     pub fn config(&self) -> &ProjectConfig {
         &self.config
+    }
+
+    /// Reads this project's `format.json` without the newer-format refusal.
+    pub fn format_file(&self) -> Result<FormatFile, StoreError> {
+        let fpath = self.root.join("format.json");
+        serde_json::from_str(&read_to_string(&fpath)?).map_err(|e| StoreError::Parse {
+            path: fpath.to_string(),
+            message: e.to_string(),
+        })
     }
 
     /// `shards/<repo>/<path>.kshard.json` under the project directory.
@@ -318,6 +357,57 @@ impl ProjectDir {
         shard::encode_with_root(f, Some(&self.kindex_root))
     }
 
+    /// Compares every file under `shards/` with the blob in HEAD's tree at the same path
+    /// (`git_blob_id` of the file bytes against the tree entry id). Lists are sorted. Writes
+    /// nothing.
+    pub fn git_state(&self) -> Result<GitState, StoreError> {
+        let git = |e: &dyn std::fmt::Display| StoreError::Git(e.to_string());
+        if !self.kindex_root.join(".git").exists() {
+            return Ok(GitState::NotARepo);
+        }
+        let repo = gix::open(self.kindex_root.as_std_path()).map_err(|e| git(&e))?;
+        let files = self.list_shards()?;
+        let Ok(commit) = repo.head_commit() else {
+            return Ok(GitState::NoCommits {
+                shard_files: files.len(),
+            });
+        };
+        let project = self.root.file_name().unwrap_or_default();
+        let tree = commit.tree().map_err(|e| git(&e))?;
+        let base = format!("projects/{project}/shards");
+        let mut in_head: BTreeMap<ShardKey, String> = BTreeMap::new();
+        if let Some(entry) = tree
+            .lookup_entry_by_path(&base)
+            .map_err(|e| git(&e))?
+            .filter(|e| e.mode().is_tree())
+        {
+            let sub = entry
+                .object()
+                .map_err(|e| git(&e))?
+                .try_into_tree()
+                .map_err(|e| git(&e))?;
+            collect_tree(&repo, &sub, "", &mut in_head)?;
+        }
+        let (mut modified, mut added) = (Vec::new(), Vec::new());
+        for key in files {
+            let file = self.shard_path(&key.0, &key.1);
+            let bytes = std::fs::read(&file).map_err(|e| StoreError::io(&file, e))?;
+            match in_head.remove(&key) {
+                Some(id) if id == crate::blob::git_blob_id(&bytes) => {}
+                Some(_) => modified.push(key),
+                None => added.push(key),
+            }
+        }
+        // What is left in the map has no file.
+        let deleted: Vec<ShardKey> = in_head.into_keys().collect();
+        Ok(GitState::Repo {
+            head: commit.id().to_string(),
+            modified,
+            added,
+            deleted,
+        })
+    }
+
     /// Sorted `(repo, path)` of every shard on disk.
     pub fn list_shards(&self) -> Result<Vec<(String, RelPath)>, StoreError> {
         let base = self.root.join("shards");
@@ -338,6 +428,32 @@ impl ProjectDir {
         out.sort();
         Ok(out)
     }
+}
+
+/// Collects `(repo, path) -> blob id` of the shard files below a tree (`<repo>/<path>.kshard.json`).
+fn collect_tree(
+    repo: &gix::Repository,
+    tree: &gix::Tree<'_>,
+    prefix: &str,
+    out: &mut BTreeMap<ShardKey, String>,
+) -> Result<(), StoreError> {
+    let git = |e: &dyn std::fmt::Display| StoreError::Git(e.to_string());
+    for entry in tree.iter() {
+        let entry = entry.map_err(|e| git(&e))?;
+        let name = entry.filename().to_string();
+        let rel = format!("{prefix}{name}");
+        if entry.mode().is_tree() {
+            let sub = repo.find_tree(entry.oid()).map_err(|e| git(&e))?;
+            collect_tree(repo, &sub, &format!("{rel}/"), out)?;
+        } else if entry.mode().is_blob()
+            && let Some(stem) = rel.strip_suffix(shard::SUFFIX)
+            && let Some((r, p)) = stem.split_once('/')
+            && let Ok(p) = RelPath::new(p)
+        {
+            out.insert((r.to_string(), p), entry.oid().to_string());
+        }
+    }
+    Ok(())
 }
 
 fn walk(

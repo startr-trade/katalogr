@@ -3,6 +3,7 @@
 //! All behaviour of the command-line wrapper lives here; the wrapper parses, calls and renders.
 
 mod claude;
+pub mod doctor;
 mod error;
 pub mod hooks;
 mod roots;
@@ -44,7 +45,7 @@ use std::collections::BTreeMap;
 use std::path::Path;
 use std::time::{Duration, Instant};
 
-/// Every `--json` schema: the query schemas merged with the analytics schemas.
+/// Every `--json` schema: the query schemas merged with the analytics schemas and `doctor`.
 ///
 /// Panics if a command name occurs in both (a programming error caught by `query::schemas_current`).
 pub fn schemas() -> BTreeMap<&'static str, serde_json::Value> {
@@ -55,6 +56,10 @@ pub fn schemas() -> BTreeMap<&'static str, serde_json::Value> {
             "schema name {name} is registered twice"
         );
     }
+    assert!(
+        all.insert("doctor", doctor::schema()).is_none(),
+        "schema name doctor is registered twice"
+    );
     all
 }
 

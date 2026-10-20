@@ -31,6 +31,11 @@ fn run(cli: &Cli) -> Result<ExitCode, DistError> {
             full,
             history,
         }) => cmd::index::run(cli, since.as_ref(), range.as_ref(), *full, *history),
+        Some(Command::Doctor {
+            fail_on,
+            skip_git,
+            verbose,
+        }) => cmd::doctor::run(cli, *fail_on, *skip_git, *verbose),
         Some(Command::Dangling { kind }) => cmd::dangling::run(cli, kind),
         Some(Command::Mirrors { kind }) => cmd::mirrors::run(cli, kind),
         Some(Command::Hubs {

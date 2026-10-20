@@ -40,6 +40,14 @@ pub enum ConfidenceArg {
     Low,
 }
 
+/// Lowest severity of `doctor` finding that makes it exit 1.
+#[derive(Debug, Clone, Copy, ValueEnum)]
+#[value(rename_all = "kebab-case")]
+pub enum FailOn {
+    Error,
+    Warning,
+}
+
 /// Traceability for polyglot systems.
 #[derive(Debug, Parser)]
 #[command(name = "katalogr", version = VERSION.as_str(), about, long_about = None)]
@@ -174,6 +182,18 @@ pub enum Command {
         /// File holding the new text for exactly the symbol's lines.
         #[arg(long, value_name = "PATH")]
         file: String,
+    },
+    /// Check the index and print a recommended fix for each problem; exits 1 on findings.
+    Doctor {
+        /// Lowest severity that makes the command exit 1.
+        #[arg(long, value_enum, default_value = "warning", value_name = "LEVEL")]
+        fail_on: FailOn,
+        /// Do not compare the shard files with the kindex git repository.
+        #[arg(long)]
+        skip_git: bool,
+        /// List up to a few repo-relative keys for each finding.
+        #[arg(long)]
+        verbose: bool,
     },
     /// Claude Code project wiring.
     Claude {

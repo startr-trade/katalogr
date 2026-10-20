@@ -1,0 +1,213 @@
+{
+  "$defs": {
+    "CheckRun": {
+      "properties": {
+        "area": {
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/$defs/CheckStatus"
+        }
+      },
+      "required": [
+        "area",
+        "status"
+      ],
+      "type": "object"
+    },
+    "CheckStatus": {
+      "description": "Whether a check found something.",
+      "enum": [
+        "ok",
+        "findings",
+        "skipped"
+      ],
+      "type": "string"
+    },
+    "Finding": {
+      "description": "One problem (or notice) with a stable code and a recommended fix.",
+      "properties": {
+        "area": {
+          "description": "`marker`, `format`, `cache`, `journal`, `shards`, `queue`, `lock`, `parse`, `profile`,\n`git` or `roots`.",
+          "type": "string"
+        },
+        "code": {
+          "description": "`KD-<AREA>-<NNN>`: stable, never reused.",
+          "type": "string"
+        },
+        "count": {
+          "description": "How many items the finding covers.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "fix": {
+          "description": "A `katalogr` or `git` command, or a one-line instruction such as `edit <file>`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "message": {
+          "description": "One line, no paths, no source text.",
+          "type": "string"
+        },
+        "sample": {
+          "description": "Repo-relative keys, only with `--verbose`, at most `Thresholds::sample`.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "severity": {
+          "$ref": "#/$defs/Severity"
+        }
+      },
+      "required": [
+        "code",
+        "severity",
+        "area",
+        "message",
+        "sample"
+      ],
+      "type": "object"
+    },
+    "Severity": {
+      "description": "How bad a finding is. Ordered so that `Error > Warning > Info`.",
+      "enum": [
+        "info",
+        "warning",
+        "error"
+      ],
+      "type": "string"
+    },
+    "Summary": {
+      "properties": {
+        "error": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "info": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "warning": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "error",
+        "warning",
+        "info"
+      ],
+      "type": "object"
+    },
+    "Versions": {
+      "description": "The format and schema numbers the report prints.",
+      "properties": {
+        "cache_schema": {
+          "description": "The cache schema this binary uses.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "katalogr": {
+          "type": "string"
+        },
+        "kindex_shard_format": {
+          "description": "The shard format named by the kindex's `format.json`, when it could be read.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "shard_format": {
+          "description": "The shard format this binary writes and reads.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "stored_cache_schema": {
+          "description": "The cache schema stored in the cache, when there is a readable cache.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "katalogr",
+        "shard_format",
+        "cache_schema"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "checks": {
+      "description": "One entry per check, in the fixed order.",
+      "items": {
+        "$ref": "#/$defs/CheckRun"
+      },
+      "type": "array"
+    },
+    "findings": {
+      "description": "Sorted by severity (worst first), code, message.",
+      "items": {
+        "$ref": "#/$defs/Finding"
+      },
+      "type": "array"
+    },
+    "healthy": {
+      "description": "No finding at or above the fail-on level.",
+      "type": "boolean"
+    },
+    "pending": {
+      "description": "Queued paths in the cache.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "schema": {
+      "description": "`RESULT_SCHEMA_VERSION`, 1.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "summary": {
+      "$ref": "#/$defs/Summary"
+    },
+    "versions": {
+      "$ref": "#/$defs/Versions"
+    },
+    "watermark": {
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "schema",
+    "healthy",
+    "summary",
+    "versions",
+    "watermark",
+    "pending",
+    "checks",
+    "findings"
+  ],
+  "title": "Report",
+  "type": "object"
+}

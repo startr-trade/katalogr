@@ -6,11 +6,13 @@ pub mod error;
 #[cfg(feature = "failpoints")]
 pub mod failpoint;
 pub mod guard;
+pub mod inspect;
 pub mod kindex;
 pub mod marker;
 pub mod rank;
 pub mod shard;
 
+pub use cache::ShardKey;
 pub use cache::{
     ArtifactRow, BindingRow, CACHE_SCHEMA, Cache, ContractRow, ErrorRow, JournalEntry,
     LEXICON_FIELDS, LexiconStats, LinkEntry, LinkKey, LinkOrigin, LinkRow, PendingKey, Posting,
@@ -19,7 +21,8 @@ pub use cache::{
 };
 pub use error::StoreError;
 pub use guard::{GuardError, scan_for_absolute};
+pub use inspect::{CacheInspection, InspectedTables, OpenCache};
 pub use kindex::{
-    FormatFile, Kindex, ProjectConfig, ProjectDir, ProjectName, RepoConfig, SHARD_FORMAT,
+    FormatFile, GitState, Kindex, ProjectConfig, ProjectDir, ProjectName, RepoConfig, SHARD_FORMAT,
 };
 pub use rank::{RANK_CONTEXT, link_weight, pagerank, row_weight};

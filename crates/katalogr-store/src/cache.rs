@@ -429,6 +429,8 @@ pub type RawRows = Vec<(Vec<u8>, Vec<u8>)>;
 pub type ExtContextRow = ([u8; 32], Vec<u8>);
 /// `(repo, path)` of a shard.
 pub type ShardKey = (String, RelPath);
+/// A stored shard hash with the `(size, mtime)` recorded beside it.
+pub type ShardHashRow = (ShardKey, [u8; 32], Option<ShardStat>);
 
 /// The cache tables (FEAT-001 section 5, FEAT-003 section 5).
 #[doc(hidden)]
@@ -639,6 +641,29 @@ pub trait Reader {
             Some(v) => Ok(split_hash_value(&v)?.1),
             None => Ok(None),
         }
+    }
+
+    /// Every stored shard hash with the `(size, mtime)` recorded beside it, sorted by
+    /// `(repo, path)` key bytes.
+    fn shard_hash_rows(&self) -> Result<Vec<ShardHashRow>, StoreError> {
+        let mut out = Vec::new();
+        for (k, v) in self.raw_scan(TableId::ShardHashes, &[])? {
+            let (hash, stat) = split_hash_value(&v)?;
+            out.push((decode_path_key(&k)?, hash, stat));
+        }
+        Ok(out)
+    }
+
+    /// Files with at least one index-error row and the number of rows, sorted by key bytes.
+    fn index_error_files(&self) -> Result<Vec<(ShardKey, usize)>, StoreError> {
+        let mut out = Vec::new();
+        for (k, v) in self.raw_scan(TableId::IndexErrors, &[])? {
+            let rows: Vec<ErrorRow> = de(&v)?;
+            if !rows.is_empty() {
+                out.push((decode_path_key(&k)?, rows.len()));
+            }
+        }
+        Ok(out)
     }
 
     /// Every stored shard hash, sorted by `(repo, path)` key bytes.
@@ -1109,7 +1134,18 @@ fn id_bytes(k: &[u8]) -> Result<[u8; 16], StoreError> {
 /// MVCC snapshot of the cache.
 pub struct ReadTx<'a> {
     txn: ReadTransaction,
-    _cache: PhantomData<&'a Cache>,
+    _cache: PhantomData<&'a ()>,
+}
+
+impl ReadTx<'_> {
+    /// A snapshot over a transaction from any database handle (the read-only inspection uses
+    /// one from a `ReadOnlyDatabase`).
+    pub(crate) fn from_txn(txn: ReadTransaction) -> Self {
+        ReadTx {
+            txn,
+            _cache: PhantomData,
+        }
+    }
 }
 
 /// The engine's name for a read view of the graph.
@@ -1505,7 +1541,7 @@ pub struct ShardStat {
 }
 
 impl ShardStat {
-    fn of(meta: &std::fs::Metadata) -> Option<ShardStat> {
+    pub fn of(meta: &std::fs::Metadata) -> Option<ShardStat> {
         let d = meta
             .modified()
             .ok()?

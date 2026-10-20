@@ -1,10 +1,11 @@
 //! The durable change queue: inbox spool, processor (FEAT-047, ADR-0008, ADR-0014).
 
 pub mod inbox;
+pub(crate) mod lock;
 pub mod processor;
 
 pub use inbox::Inbox;
-pub use processor::Processor;
+pub use processor::{Processor, find_orphan_temps};
 
 use katalogr_model::RelPath;
 use serde::{Deserialize, Serialize};
