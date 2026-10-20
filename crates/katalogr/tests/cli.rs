@@ -746,7 +746,7 @@ mod query {
     fn schemas_current() {
         let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../schema/v1");
         let fresh = katalogr_dist::schemas();
-        assert_eq!(fresh.len(), 16);
+        assert_eq!(fresh.len(), 17);
         for (name, schema) in fresh {
             let mut want = serde_json::to_string_pretty(&schema).unwrap();
             want.push('\n');

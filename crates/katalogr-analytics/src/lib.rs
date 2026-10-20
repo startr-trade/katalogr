@@ -1,6 +1,7 @@
 //! Structure insights over one graph snapshot: hubs, communities, cycles, dead code and rationale (FEAT-030).
 
 mod communities;
+mod coverage;
 mod cycles;
 mod dead;
 mod graph;
@@ -20,6 +21,7 @@ mod testkit;
 pub use communities::communities;
 #[doc(hidden)]
 pub use communities::communities_with_stats;
+pub use coverage::*;
 pub use cycles::cycles;
 pub use dead::dead_code;
 pub use hubs::hubs;
