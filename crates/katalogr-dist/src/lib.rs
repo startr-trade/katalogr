@@ -451,6 +451,17 @@ impl Katalogr {
     ) -> Result<Reply<T>, DistError> {
         let timeout = opts.timeout()?;
         let engine = self.engine(Instant::now() + timeout)?;
+        self.query_on(&engine, opts, f)
+    }
+
+    /// Like `query`, on an engine the caller already opened, so one engine serves many reads.
+    pub(crate) fn query_on<T>(
+        &self,
+        engine: &Engine,
+        opts: &Options,
+        f: impl FnOnce(&ReadTx) -> Result<Outcome<T>, StoreError>,
+    ) -> Result<Reply<T>, DistError> {
+        let timeout = opts.timeout()?;
         let consistency = opts.consistency.unwrap_or(Consistency::Wait);
         let a = engine.with_consistency(
             &QueryOptions {
