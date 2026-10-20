@@ -266,10 +266,95 @@ mod archtest {
             .iter()
             .map(|s| s.to_string())
             .collect();
-        let extra: Vec<_> = normal_deps(p).difference(&allowed).cloned().collect();
+        // The MCP wrapper's dependencies, which must stay optional (FEAT-067, ADR-0023).
+        let optional_allowed: BTreeSet<String> =
+            ["rmcp", "tokio"].iter().map(|s| s.to_string()).collect();
+        let extra: Vec<_> = normal_deps(p)
+            .into_iter()
+            .filter(|d| !allowed.contains(d) && !optional_allowed.contains(d))
+            .collect();
         assert!(
             extra.is_empty(),
             "katalogr has disallowed dependencies: {extra:?}"
+        );
+        let not_optional: Vec<_> = p
+            .dependencies
+            .iter()
+            .filter(|d| d.kind == DependencyKind::Normal)
+            .filter(|d| optional_allowed.contains(&d.name) && !d.optional)
+            .map(|d| d.name.clone())
+            .collect();
+        assert!(
+            not_optional.is_empty(),
+            "katalogr must declare these dependencies optional: {not_optional:?}"
+        );
+    }
+
+    /// R-14. The async runtime and the MCP SDK live in the `katalogr` wrapper crate, behind
+    /// its default-on `mcp` feature, and never gain a network, file, process, signal or
+    /// multi-thread driver on a release target.
+    #[test]
+    fn async_runtime_is_confined() {
+        let md = metadata(false);
+        let mut failures = Vec::new();
+        for p in md.workspace_packages() {
+            if p.name.as_str() == "katalogr" {
+                continue;
+            }
+            for d in p
+                .dependencies
+                .iter()
+                .filter(|d| matches!(d.kind, DependencyKind::Normal | DependencyKind::Build))
+            {
+                if d.name == "rmcp" || d.name == "tokio" {
+                    failures.push(format!("{} depends on `{}`", p.name, d.name));
+                }
+            }
+        }
+        let k = workspace_package(&md, "katalogr").expect("package katalogr");
+        for name in ["rmcp", "tokio"] {
+            let deps: Vec<_> = k
+                .dependencies
+                .iter()
+                .filter(|d| d.name == name && d.kind == DependencyKind::Normal)
+                .collect();
+            if deps.is_empty() || deps.iter().any(|d| !d.optional) {
+                failures.push(format!("katalogr must depend on `{name}` optionally"));
+            }
+        }
+        let mcp = k.features.get("mcp").cloned().unwrap_or_default();
+        if mcp != ["dep:rmcp", "dep:tokio"] {
+            failures.push(format!("katalogr feature `mcp` is {mcp:?}"));
+        }
+        if !k
+            .features
+            .get("default")
+            .is_some_and(|d| d.iter().any(|f| f == "mcp"))
+        {
+            failures.push("katalogr feature `default` must contain `mcp`".to_string());
+        }
+        const FORBIDDEN: [&str; 5] = ["net", "fs", "process", "signal", "rt-multi-thread"];
+        for t in release_targets() {
+            let md = metadata_for(&t);
+            let resolve = md.resolve.as_ref().expect("resolve");
+            for n in resolve.nodes.iter().filter(|n| {
+                md.packages
+                    .iter()
+                    .any(|p| p.id == n.id && p.name.as_str() == "tokio")
+            }) {
+                for f in n
+                    .features
+                    .iter()
+                    .filter(|f| FORBIDDEN.contains(&f.as_str()))
+                {
+                    failures.push(format!("{t}: tokio has feature `{f}` enabled"));
+                }
+            }
+        }
+        assert!(
+            failures.is_empty(),
+            "the async runtime is not confined:\n{}",
+            failures.join("\n")
         );
     }
 

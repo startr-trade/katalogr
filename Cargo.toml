@@ -56,3 +56,5 @@ schemars = "1.2"
 pulldown-cmark = { version = "0.13", default-features = false }
 regex = "1"
 sqlparser = { version = "=0.63.0", default-features = false, features = ["std", "visitor"] }
+rmcp = { version = "=3.5.0", default-features = false, features = ["server", "transport-io"] }
+tokio = { version = "1.53", default-features = false, features = ["rt", "time", "sync", "io-std", "io-util", "macros"] }

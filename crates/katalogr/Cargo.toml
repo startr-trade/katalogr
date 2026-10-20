@@ -12,17 +12,29 @@ build = "build.rs"
 name = "katalogr"
 path = "src/main.rs"
 
+[features]
+default = ["mcp"]
+# The optional MCP wrapper for non-Claude hosts (ADR-0023). Off -> no tokio, no rmcp.
+mcp = ["dep:rmcp", "dep:tokio"]
+
 [dependencies]
 katalogr-dist.workspace = true
 anyhow.workspace = true
 clap.workspace = true
 serde_json.workspace = true
+rmcp = { workspace = true, optional = true }
+tokio = { workspace = true, optional = true }
+
+[[test]]
+name = "mcp"
+required-features = ["mcp"]
 
 [dev-dependencies]
 # The `.tx` test extractor gives integration tests symbols to query.
 katalogr-dist = { workspace = true, features = ["test-extractor"] }
 tempfile.workspace = true
 fs4.workspace = true
+toml.workspace = true
 camino.workspace = true
 # Reads an index's canonical graph, with the artifact facts (URLs) the CLI does not print.
 katalogr-acceptance = { path = "../katalogr-acceptance" }
