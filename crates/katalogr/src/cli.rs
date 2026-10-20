@@ -248,6 +248,16 @@ pub enum Command {
         #[arg(long)]
         strict: bool,
     },
+    /// Report how complete the index is: resolved, inferred and unresolved references, dangling
+    /// contracts, parse errors, and files no extension claims.
+    Coverage {
+        /// Only this repository of the project.
+        #[arg(long, value_name = "NAME")]
+        repo: Option<String>,
+        /// How many file suffixes to list per repository for unclaimed files.
+        #[arg(long, default_value_t = 20, value_name = "N")]
+        suffixes: usize,
+    },
     /// Find communities: groups of nodes that use each other more than the rest.
     Communities {
         /// Group nodes as symbols, files or packages.

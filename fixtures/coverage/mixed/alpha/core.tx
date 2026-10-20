@@ -1,0 +1,8 @@
+sym fn caller
+sym fn target
+sym fn twin_a
+export code:target target
+export code:twin twin_a
+ref caller calls code:target
+ref caller calls code:twin
+ref caller calls code:missing

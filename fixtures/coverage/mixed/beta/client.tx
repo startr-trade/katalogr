@@ -1,0 +1,2 @@
+sym fn client
+bind client consumes channel:orders

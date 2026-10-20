@@ -1,4 +1,7 @@
 technologies:
+  coverage:
+    coverage-report:
+      - coverage/mixed
   data:
     key-tree:
       - data/key-tree

@@ -2,7 +2,8 @@
 //! `cargo test -p katalogr-analytics --release --test bench -- --ignored --nocapture --test-threads=1`.
 //!
 //! The graph has 100,000 `fn` symbols in 1,000 files of 20 packages and 300,000 links; the rank
-//! is stored as the processor stores it at publish.
+//! is stored as the processor stores it at publish. `coverage_100k` has its own cache: 300,000
+//! references in 1,000 artifacts.
 
 mod bench {
     use camino::Utf8PathBuf;
@@ -330,5 +331,239 @@ mod bench {
             );
             assert!(r.communities_total >= 1);
         }
+    }
+
+    /// The coverage cache: 100,000 symbols in 1,000 artifacts, 3 references per symbol (80% with
+    /// one target, 10% with two, 10% unresolved), 2,000 contracts of which 300 are one-sided,
+    /// and 50 index-error rows.
+    fn coverage_cache() -> &'static Bench {
+        static CACHE: OnceLock<Bench> = OnceLock::new();
+        CACHE.get_or_init(build_coverage)
+    }
+
+    fn build_coverage() -> Bench {
+        use katalogr_model::{ContractName, ContractRole, ExportKey, OutRef};
+        use katalogr_store::{BindingRow, ContractRow, ErrorRow, RefId};
+        let tmp = tempfile::tempdir().unwrap();
+        let root = Utf8PathBuf::from_path_buf(tmp.path().join("kx")).unwrap();
+        let dir = Kindex::init(&root)
+            .unwrap()
+            .create_project(
+                &ProjectName::new("bench").unwrap(),
+                ProjectConfig {
+                    repos: vec![RepoConfig::new("r")],
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        let cache =
+            Cache::open_or_rebuild(&dir, &NoShards, Instant::now() + Duration::from_secs(60))
+                .unwrap();
+        let span = Span {
+            start_line: 1,
+            start_col: 1,
+            end_line: 1,
+            end_col: 1,
+        };
+        let provenance = |path: &RelPath| Provenance {
+            repo: "r".into(),
+            path: path.clone(),
+            revision: "ce013625030ba8dba906f756967f9e9ca394464a".into(),
+        };
+        let ids: Vec<Id> = (0..SYMBOLS)
+            .map(|i| Id::of(&format!("r:cov#fn:s{i}")))
+            .collect();
+        let mut bindings: BTreeMap<usize, Vec<BindingRow>> = BTreeMap::new();
+        let mut tx = cache.write().unwrap();
+        let mut artifact_ids = Vec::with_capacity(FILES);
+        let mut rng = SEED;
+        for f in 0..FILES {
+            let path = RelPath::new(&format!("dir{}/f{f}.tx", f % 50)).unwrap();
+            let artifact = ArtifactName {
+                repo: "r".into(),
+                path: path.clone(),
+            };
+            let artifact_id = artifact.id();
+            let mut refs = Vec::with_capacity(PER_FILE * 3);
+            let mut symbols = Vec::with_capacity(PER_FILE);
+            for k in 0..PER_FILE {
+                let i = f * PER_FILE + k;
+                let from = ids[i];
+                symbols.push(from);
+                tx.put_symbol(
+                    from,
+                    &SymbolRow {
+                        name: SymbolName {
+                            artifact: artifact.clone(),
+                            segments: vec![Segment {
+                                kind: "fn".into(),
+                                name: format!("s{i}"),
+                            }],
+                            ordinal: 1,
+                        },
+                        artifact: artifact_id,
+                        kind: "fn".into(),
+                        span,
+                        facts: BTreeMap::new(),
+                    },
+                )
+                .unwrap();
+                for r in 0..3 {
+                    let index = refs.len() as u32;
+                    let out = OutRef {
+                        from,
+                        kind: LinkKind("calls".into()),
+                        span: Some(span),
+                        candidates: vec![ExportKey {
+                            namespace: "ns".into(),
+                            key: format!("k{i}_{r}"),
+                        }],
+                        confidence: Confidence::Extracted,
+                        origin: None,
+                    };
+                    refs.push(out.clone());
+                    let roll = next_rand(&mut rng) % 10;
+                    let targets = match roll {
+                        0 => 0,
+                        1 => 2,
+                        _ => 1,
+                    };
+                    if targets == 0 {
+                        tx.put_unresolved(
+                            RefId {
+                                artifact: artifact_id,
+                                index,
+                            },
+                            &out,
+                        )
+                        .unwrap();
+                    }
+                    for t in 0..targets {
+                        let to = ids[(i * 7 + r * 13 + t * 1009 + 1) % SYMBOLS];
+                        tx.put_link(
+                            &LinkKey {
+                                from,
+                                kind: LinkKind("calls".into()),
+                                to,
+                            },
+                            &LinkRow {
+                                entries: vec![LinkEntry {
+                                    origin: LinkOrigin::Ref(index),
+                                    confidence: if targets > 1 {
+                                        Confidence::Inferred
+                                    } else {
+                                        Confidence::Extracted
+                                    },
+                                    span: Some(span),
+                                    provenance: provenance(&path),
+                                    fanout: (targets > 1).then_some(targets as u32),
+                                    produced_by: None,
+                                }],
+                            },
+                        )
+                        .unwrap();
+                    }
+                }
+            }
+            symbols.sort();
+            tx.put_artifact(
+                artifact_id,
+                &ArtifactRow {
+                    name: artifact,
+                    extension: "test".into(),
+                    provenance: provenance(&path),
+                    facts: BTreeMap::new(),
+                    symbols,
+                    exports: Vec::new(),
+                    refs,
+                },
+            )
+            .unwrap();
+            tx.put_index_errors(
+                "r",
+                &path,
+                &if f < 50 {
+                    vec![ErrorRow {
+                        span: None,
+                        message: "parse error: x".into(),
+                    }]
+                } else {
+                    Vec::new()
+                },
+            )
+            .unwrap();
+            artifact_ids.push(artifact_id);
+        }
+        for c in 0..2_000usize {
+            let (providers, consumers) = match c {
+                0..150 => (1, 0),
+                150..300 => (0, 1),
+                _ => (1, 1),
+            };
+            let id = Id::of(&format!("contract:wasm:c{c}"));
+            tx.put_contract(
+                id,
+                &ContractRow {
+                    name: ContractName {
+                        kind: "wasm".into(),
+                        key: format!("c{c}"),
+                    },
+                    providers,
+                    consumers,
+                    declarers: 0,
+                },
+            )
+            .unwrap();
+            let owner = c % FILES;
+            let symbol = ids[owner * PER_FILE];
+            let role = if providers > 0 {
+                ContractRole::Provides
+            } else {
+                ContractRole::Consumes
+            };
+            bindings.entry(owner).or_default().push(BindingRow {
+                symbol,
+                contract: id,
+                role,
+            });
+        }
+        for (owner, rows) in &bindings {
+            tx.put_bindings(artifact_ids[*owner], rows).unwrap();
+        }
+        tx.commit().unwrap();
+        Bench { _tmp: tmp, cache }
+    }
+
+    #[test]
+    #[ignore]
+    fn coverage_100k() {
+        use katalogr_analytics::{CoverageInput, coverage};
+        let read = coverage_cache().cache.read().unwrap();
+        let language = |ext: &str, _: &RelPath| ext.to_string();
+        let claim = |_: &RelPath| None;
+        let input = CoverageInput {
+            language: &language,
+            claim: &claim,
+            unclaimed: BTreeMap::new(),
+            roots_missing: Vec::new(),
+            exclude_prefixes: vec!["@history/".into()],
+            repo: None,
+            suffix_top: 20,
+        };
+        let start = Instant::now();
+        let r = coverage(&read, &input).unwrap();
+        report("coverage_100k", start, 1500);
+        println!(
+            "coverage: {} refs ({:.1}% resolved, {:.1}% inferred, {:.1}% unresolved), {} dangling contracts",
+            r.totals.refs_total,
+            r.totals.resolution_rate.unwrap() * 100.0,
+            r.totals.inferred_rate.unwrap() * 100.0,
+            r.totals.unresolved_rate.unwrap() * 100.0,
+            r.totals.contracts_dangling
+        );
+        assert_eq!(r.totals.refs_total, 300_000);
+        assert_eq!(r.totals.files_indexed, FILES as u64);
+        assert_eq!(r.totals.contracts_dangling, 300);
+        assert_eq!(r.totals.files_parse_errors, 50);
     }
 }

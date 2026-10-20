@@ -317,6 +317,7 @@ mod cli {
             let (code, out, _) = run(&repo, &["callers", "target", "--depth", d]);
             assert_eq!(code, 0, "{out}");
             out.lines()
+                .filter(|l| !l.starts_with("partial: "))
                 .map(|l| {
                     let name = l.split_whitespace().nth(1).unwrap().to_string();
                     let depth = l.rsplit(' ').next().unwrap();
@@ -332,7 +333,13 @@ mod cli {
         assert_eq!(depths("9").len(), 3);
         // The default is depth 1.
         let (_, out, _) = run(&repo, &["callers", "target"]);
-        assert_eq!(out.lines().count(), 1, "{out}");
+        assert_eq!(out.lines().count(), 2, "{out}");
+        assert!(
+            out.lines()
+                .nth(1)
+                .unwrap()
+                .starts_with("partial: capped at 1 (depth)")
+        );
     }
 
     #[test]
@@ -491,11 +498,15 @@ mod cli {
         let (code, out, _) = run(&repo, &["map", "--budget", "25"]);
         assert_eq!(code, 0);
         let lines: Vec<&str> = out.lines().collect();
-        assert_eq!(lines.len(), 3, "{out}");
+        assert_eq!(lines.len(), 4, "{out}");
         assert_eq!(lines[..2], full.lines().take(2).collect::<Vec<_>>()[..]);
         assert_eq!(
             lines[2],
             "… 6 more omitted (use a larger --budget or narrow the query)"
+        );
+        assert_eq!(
+            lines[3],
+            "partial: capped at 25 tokens (budget; 8 found); absence is not proof"
         );
         // A budget that fits everything adds no notice.
         let (_, out, _) = run(&repo, &["map", "--budget", "1000"]);
@@ -735,7 +746,7 @@ mod query {
     fn schemas_current() {
         let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../schema/v1");
         let fresh = katalogr_dist::schemas();
-        assert_eq!(fresh.len(), 17);
+        assert_eq!(fresh.len(), 18);
         for (name, schema) in fresh {
             let mut want = serde_json::to_string_pretty(&schema).unwrap();
             want.push('\n');
@@ -877,7 +888,14 @@ mod retrieval {
             Some("app:rates.tx#fn:applyRateCode")
         );
         let (_, limited, _) = run(&repo, &["search", "rate", "--limit", "1"]);
-        assert_eq!(limited.lines().count(), 1, "{limited}");
+        assert_eq!(limited.lines().count(), 2, "{limited}");
+        assert!(
+            limited
+                .lines()
+                .nth(1)
+                .unwrap()
+                .starts_with("partial: capped at 1 (limit)")
+        );
         let (code, _, err) = run(&repo, &["search", "zzzz"]);
         assert_eq!(code, 4, "{err}");
         let (code, _, _) = run(&repo, &["search", "x"]);
@@ -1040,7 +1058,8 @@ mod retrieval {
             out.lines().collect::<Vec<_>>()[1..],
             [
                 "incoming (first 1 of 2):",
-                "  calls  app:user.tx#fn:caller_a  [Extracted]"
+                "  calls  app:user.tx#fn:caller_a  [Extracted]",
+                "partial: capped at 1 (per-side; 2 found); absence is not proof"
             ]
         );
         let (_, out, _) = run(&repo, &["explain", "caller_a"]);
@@ -1090,6 +1109,10 @@ mod retrieval {
             let (code, out, _) = run(&repo, &["map", "--budget", &b]);
             assert_eq!(code, 0);
             let mut lines: Vec<&str> = out.lines().collect();
+            assert!(
+                lines.pop().unwrap().starts_with("partial: capped at"),
+                "{out}"
+            );
             assert!(lines.last().unwrap().contains("more omitted"), "{out}");
             lines.pop();
             let body = lines.iter().map(|l| format!("{l}\n")).collect::<String>();
@@ -1247,7 +1270,11 @@ mod retrieval {
         // The hints come after the budget notice, and every hint is a runnable command.
         let (_, out, _) = run_raw(&repo, &["map", "--budget", "20"]);
         let lines: Vec<&str> = out.lines().collect();
-        assert!(lines[lines.len() - 2].contains("more omitted"), "{out}");
+        assert!(lines[lines.len() - 3].contains("more omitted"), "{out}");
+        assert!(
+            lines[lines.len() - 2].starts_with("partial: capped at"),
+            "{out}"
+        );
         assert!(lines[lines.len() - 1].starts_with("next: "));
         let first = next[0].strip_prefix("katalogr ").unwrap();
         let args: Vec<&str> = first.split(' ').collect();

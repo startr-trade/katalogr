@@ -3,6 +3,7 @@
 pub mod callers;
 pub mod claude;
 pub mod communities;
+pub mod coverage;
 pub mod cycles;
 pub mod dangling;
 pub mod dead_code;

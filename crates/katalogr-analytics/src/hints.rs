@@ -1,5 +1,6 @@
 //! Leading symbols of the insight reports, for the next-query hints.
 
+use crate::coverage::CoverageReport;
 use crate::result::{CommunityReport, CycleReport, DeadCodeReport, HubReport, RationaleReport};
 use katalogr_query::HintSource;
 
@@ -32,5 +33,12 @@ impl HintSource for DeadCodeReport {
 impl HintSource for RationaleReport {
     fn lead(&self) -> Option<String> {
         self.items.first().map(|e| e.node.name.clone())
+    }
+}
+
+/// Coverage is a summary; no symbol to follow up on.
+impl HintSource for CoverageReport {
+    fn lead(&self) -> Option<String> {
+        None
     }
 }

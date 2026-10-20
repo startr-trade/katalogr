@@ -253,6 +253,69 @@ pub struct Truncation {
     pub budget: u64,
 }
 
+/// Names of caps, used in [`Partial::cap`].
+pub mod cap {
+    /// `--limit`, or a report's limit.
+    pub const LIMIT: &str = "limit";
+    /// `callers --depth`.
+    pub const DEPTH: &str = "depth";
+    /// `explain --per-side`.
+    pub const PER_SIDE: &str = "per-side";
+    /// `--budget` (tokens).
+    pub const BUDGET: &str = "budget";
+    /// Members listed per community or cycle.
+    pub const MEMBERS: &str = "members";
+}
+
+/// Said with every partial answer.
+pub const PARTIAL_NOTE: &str = "absence is not proof";
+
+/// The answer was cut by a cap: more items exist (or may exist) than are shown.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
+pub struct Partial {
+    /// Which cap: one of [`cap`]'s names.
+    pub cap: String,
+    /// The cap's value: N in "capped at N" (items, hops, or tokens for `budget`).
+    pub at: u64,
+    /// Items shown.
+    pub shown: u64,
+    /// Items there were before the cap, when known.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub total: Option<u64>,
+    /// Always [`PARTIAL_NOTE`].
+    pub note: String,
+}
+
+impl Partial {
+    pub fn new(cap: &str, at: u64, shown: u64, total: Option<u64>) -> Partial {
+        Partial {
+            cap: cap.to_string(),
+            at,
+            shown,
+            total,
+            note: PARTIAL_NOTE.to_string(),
+        }
+    }
+
+    /// Text form: `partial: capped at 20 (limit; 57 found); absence is not proof`, or without
+    /// `; N found` when `total` is None. For `budget`: `capped at 400 tokens (budget; ...)`.
+    pub fn line(&self) -> String {
+        let unit = if self.cap == cap::BUDGET {
+            " tokens"
+        } else {
+            ""
+        };
+        let found = self
+            .total
+            .map(|t| format!("; {t} found"))
+            .unwrap_or_default();
+        format!(
+            "partial: capped at {}{unit} ({}{found}); {}",
+            self.at, self.cap, self.note
+        )
+    }
+}
+
 /// What `--json` prints.
 #[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]
 pub struct Envelope<T> {
@@ -261,6 +324,9 @@ pub struct Envelope<T> {
     pub pending: u64,
     pub stale: bool,
     pub truncated: Option<Truncation>,
+    /// Present when a cap or budget cut the answer; one entry per cap that cut it.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub partial: Vec<Partial>,
     pub result: T,
     /// Suggested follow-up commands, at most three.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -268,4 +334,24 @@ pub struct Envelope<T> {
     /// The trace of the query, present only with `--diagnostic` (FEAT-065).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub diagnostic: Option<Trace>,
+}
+
+#[cfg(test)]
+#[test]
+fn partial_line_format() {
+    let p = Partial::new(cap::LIMIT, 20, 20, Some(57));
+    assert_eq!(
+        p.line(),
+        "partial: capped at 20 (limit; 57 found); absence is not proof"
+    );
+    let p = Partial::new(cap::DEPTH, 2, 5, None);
+    assert_eq!(
+        p.line(),
+        "partial: capped at 2 (depth); absence is not proof"
+    );
+    let p = Partial::new(cap::BUDGET, 400, 7, Some(12));
+    assert_eq!(
+        p.line(),
+        "partial: capped at 400 tokens (budget; 12 found); absence is not proof"
+    );
 }

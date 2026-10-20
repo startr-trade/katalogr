@@ -44,6 +44,9 @@ fn run(cli: &Cli) -> Result<ExitCode, DistError> {
             limit,
             strict,
         }) => cmd::hubs::run(cli, *level, *min_degree, *limit, *strict),
+        Some(Command::Coverage { repo, suffixes }) => {
+            cmd::coverage::run(cli, repo.as_deref(), *suffixes)
+        }
         Some(Command::Communities {
             level,
             seed,

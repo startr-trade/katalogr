@@ -1003,6 +1003,17 @@ pub trait Reader {
             .unwrap_or_default())
     }
 
+    /// Every recorded index error, sorted by `(repo, path)` key bytes.
+    fn index_errors_all(&self) -> Result<Vec<(ShardKey, Vec<ErrorRow>)>, StoreError> {
+        self.raw_scan(TableId::IndexErrors, &[])?
+            .into_iter()
+            .map(|(k, v)| {
+                let (repo, path) = decode_path_key(&k)?;
+                Ok(((repo, path), de(&v)?))
+            })
+            .collect()
+    }
+
     /// Last sequence number assigned in `context` (0 when none).
     fn last_seq(&self, context: &str) -> Result<u64, StoreError> {
         self.raw_get(TableId::Seq, context.as_bytes())?

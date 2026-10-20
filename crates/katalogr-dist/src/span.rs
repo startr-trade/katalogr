@@ -106,6 +106,7 @@ impl Katalogr {
             outcome,
             report: reply.report,
             diagnostic: None,
+            partial: Vec::new(),
         })
     }
 
@@ -175,6 +176,7 @@ impl Katalogr {
             outcome,
             report: reply.report,
             diagnostic: None,
+            partial: Vec::new(),
         })
     }
 
