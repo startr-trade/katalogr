@@ -340,6 +340,11 @@ pub fn explain(reply: Reply<Explain>, budget_tokens: Option<u64>) -> JsonAnswer 
                     let out_kept = fit.kept.min(x.outgoing.len());
                     x.outgoing.truncate(out_kept);
                     x.incoming.truncate(fit.kept - out_kept);
+                    if let Some(c) = x.contract.as_mut() {
+                        let kept: std::collections::BTreeSet<String> =
+                            x.incoming.iter().map(|l| l.other.clone()).collect();
+                        c.retain_named(&kept);
+                    }
                 }
             }
             let e = envelope(&reply.report, truncated, partial, x, next, None);

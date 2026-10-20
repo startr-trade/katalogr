@@ -65,6 +65,16 @@ impl HintSource for WhyResult {
 }
 impl HintSource for Explain {
     fn lead(&self) -> Option<String> {
+        if let Some(c) = &self.contract {
+            let first = c
+                .providers
+                .first()
+                .or_else(|| c.consumers.first())
+                .or_else(|| c.declarers.first());
+            if let Some(e) = first {
+                return Some(e.name.clone());
+            }
+        }
         Some(self.symbol.name.clone())
     }
 }

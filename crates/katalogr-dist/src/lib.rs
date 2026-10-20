@@ -763,6 +763,14 @@ impl Katalogr {
     /// The symbol at `file:line` of the current repo (`file` relative to the repo root) and its
     /// rationale links.
     pub fn why(&self, spec: &str, opts: &Options) -> Result<Reply<WhyResult>, DistError> {
+        if matches!(
+            katalogr_model::parse_name(spec),
+            Ok(katalogr_model::AnyName::Contract(_))
+        ) {
+            return Err(DistError::usage(format!(
+                "{spec}: a contract node has no file or line; `why` takes FILE:LINE (use `katalogr explain` for a contract)"
+            )));
+        }
         let (file, line) = spec
             .rsplit_once(':')
             .and_then(|(f, l)| Some((f, l.parse::<u32>().ok().filter(|n| *n >= 1)?)))
@@ -1292,6 +1300,7 @@ mod eval_runner {
             incoming: vec![link("y"), link("z")],
             incoming_total: 2,
             items: vec!["x".to_string(), "item".to_string()],
+            contract: None,
         };
         let names: Vec<String> = explain_items(&e).into_iter().map(|i| i.name).collect();
         assert_eq!(names, ["x", "y", "z", "item"]);

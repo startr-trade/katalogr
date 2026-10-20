@@ -9,6 +9,102 @@
       ],
       "type": "string"
     },
+    "ContractEnd": {
+      "description": "One symbol (or artifact) bound to a contract.",
+      "properties": {
+        "confidence": {
+          "$ref": "#/$defs/Confidence"
+        },
+        "kind": {
+          "description": "Symbol kind, or `artifact`.",
+          "type": "string"
+        },
+        "name": {
+          "description": "Canonical name of the bound symbol (an artifact name when the binding is artifact-level).",
+          "type": "string"
+        },
+        "origin": {
+          "description": "The profile rule that produced the binding, when one did.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "path": {
+          "description": "Repository-relative path.",
+          "type": "string"
+        },
+        "span": {
+          "$ref": "#/$defs/Span",
+          "description": "The binding's span when it has one, else the end's own span."
+        }
+      },
+      "required": [
+        "name",
+        "kind",
+        "path",
+        "span",
+        "confidence"
+      ],
+      "type": "object"
+    },
+    "ContractInfo": {
+      "description": "What `explain` adds for a contract node.",
+      "properties": {
+        "consumers": {
+          "items": {
+            "$ref": "#/$defs/ContractEnd"
+          },
+          "type": "array"
+        },
+        "consumers_total": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "declarers": {
+          "items": {
+            "$ref": "#/$defs/ContractEnd"
+          },
+          "type": "array"
+        },
+        "declarers_total": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "key": {
+          "description": "The unescaped contract key.",
+          "type": "string"
+        },
+        "kind": {
+          "description": "The contract kind, for example `channel` (opaque to the core).",
+          "type": "string"
+        },
+        "providers": {
+          "items": {
+            "$ref": "#/$defs/ContractEnd"
+          },
+          "type": "array"
+        },
+        "providers_total": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "kind",
+        "key",
+        "providers",
+        "providers_total",
+        "consumers",
+        "consumers_total",
+        "declarers",
+        "declarers_total"
+      ],
+      "type": "object"
+    },
     "ExpandedTerm": {
       "properties": {
         "postings": {
@@ -28,6 +124,17 @@
     },
     "Explain": {
       "properties": {
+        "contract": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ContractInfo"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The contract summary, present only when the answer is for a contract node."
+        },
         "doc": {
           "type": [
             "string",

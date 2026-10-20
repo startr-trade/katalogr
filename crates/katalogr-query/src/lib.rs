@@ -44,10 +44,10 @@ pub use rank::{
 pub use refs::{refs, refs_traced};
 pub use resolve::{resolve, resolve_traced};
 pub use result::{
-    CallerHit, CommitHit, DanglingRef, Direction, Envelope, Explain, FieldDiff, FieldShape,
-    LinkBrief, MapEntry, Matched, MirrorDrift, Note, PARTIAL_NOTE, Partial, PathStep,
-    RationaleLink, RefHit, ReplaceResult, Resolution, SearchHit, ShowResult, SymbolHit, TestHit,
-    Truncation, WhyResult, cap,
+    CallerHit, CommitHit, ContractEnd, ContractInfo, DanglingRef, Direction, Envelope, Explain,
+    FieldDiff, FieldShape, LinkBrief, MapEntry, Matched, MirrorDrift, Note, PARTIAL_NOTE, Partial,
+    PathStep, RationaleLink, RefHit, ReplaceResult, Resolution, SearchHit, ShowResult, SymbolHit,
+    TestHit, Truncation, WhyResult, cap,
 };
 pub use schema::schemas;
 pub use search::{SearchParams, search, search_traced, search_with, search_with_traced};

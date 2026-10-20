@@ -1,6 +1,6 @@
 format: 1
 set: cross
-version: 1
+version: 2
 description: Synthetic two-repository corpus linked through a WASM export contract.
 repos:
   - {name: svc, path: repos/svc}
@@ -75,3 +75,10 @@ queries:
     tags: [neighbours]
     evidence:
       - {name: "svc:src/lib.rs#fn:price_quote", grade: 3}
+  - id: c11
+    op: explain
+    input: "contract:wasm_export:pricing_wasm%2Fprice_quote"
+    tags: [neighbours]
+    evidence:
+      - {name: "svc:src/lib.rs#fn:price_quote", grade: 3}
+      - {name: "ui:src/cart.ts#fn:cartTotal", grade: 2}
