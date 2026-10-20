@@ -112,8 +112,7 @@ mod coverage_calc {
         from: Id,
         to: &str,
         index: u32,
-        confidence: Confidence,
-        fanout: Option<u32>,
+        (confidence, fanout): (Confidence, Option<u32>),
     ) {
         tx.put_link(
             &LinkKey {
@@ -181,8 +180,7 @@ mod coverage_calc {
                 from,
                 "t1",
                 0,
-                Confidence::Extracted,
-                None,
+                (Confidence::Extracted, None),
             );
             put_ref_link(
                 &mut tx,
@@ -191,8 +189,7 @@ mod coverage_calc {
                 from,
                 "t2a",
                 1,
-                Confidence::Inferred,
-                Some(2),
+                (Confidence::Inferred, Some(2)),
             );
             put_ref_link(
                 &mut tx,
@@ -201,8 +198,7 @@ mod coverage_calc {
                 from,
                 "t2b",
                 1,
-                Confidence::Inferred,
-                Some(2),
+                (Confidence::Inferred, Some(2)),
             );
             put_ref_link(
                 &mut tx,
@@ -211,8 +207,7 @@ mod coverage_calc {
                 from,
                 "t3",
                 2,
-                Confidence::Inferred,
-                Some(1),
+                (Confidence::Inferred, Some(1)),
             );
             tx.put_unresolved(
                 RefId {
@@ -231,8 +226,7 @@ mod coverage_calc {
                 from_b,
                 "t9",
                 0,
-                Confidence::Extracted,
-                Some(1),
+                (Confidence::Extracted, Some(1)),
             );
             // A history commit is not a file.
             put_artifact(&mut tx, "a", "@history/abc", "hist", 2);
@@ -414,8 +408,7 @@ mod coverage_calc {
                 from,
                 "t1",
                 0,
-                Confidence::Extracted,
-                None,
+                (Confidence::Extracted, None),
             );
             tx.commit().unwrap();
         }

@@ -4,8 +4,8 @@
 //! `kind  name  path:line  [confidence]`. JSON is the versioned envelope.
 
 use katalogr_dist::analytics::{
-    Community, CommunityReport, Cycle, CycleReport, DeadCandidate, DeadCodeReport, HubEntry,
-    HubReport, Itemized, RationaleEntry, RationaleReport,
+    Community, CommunityReport, CoverageCounts, CoverageReport, CoverageRow, Cycle, CycleReport,
+    DeadCandidate, DeadCodeReport, HubEntry, HubReport, Itemized, RationaleEntry, RationaleReport,
 };
 use katalogr_dist::query::{
     CallerHit, DanglingRef, Direction, Envelope, Explain, FieldShape, HintSource, MapEntry,
@@ -698,6 +698,96 @@ pub const RATIONALE: Shape<RationaleReport> = Shape {
             .iter()
             .map(|h| format!("no rationale: {}", h.name))
             .collect()
+    },
+    fails: never,
+};
+
+/// `82.1%`, or `-` for a rate with nothing to divide.
+fn pct(rate: Option<f64>) -> String {
+    rate.map_or("-".to_string(), |r| format!("{:.1}%", r * 100.0))
+}
+
+fn coverage_numbers(c: &CoverageCounts) -> String {
+    format!(
+        "files {}  resolved {} inferred {} unresolved {}  parse errors {}",
+        c.files_indexed,
+        pct(c.resolution_rate),
+        pct(c.inferred_rate),
+        pct(c.unresolved_rate),
+        pct(c.parse_error_rate)
+    )
+}
+
+fn coverage_group_rows(label: &str, rows: &[CoverageRow], out: &mut Vec<String>) {
+    for r in rows {
+        let key = r
+            .repo
+            .as_deref()
+            .or(r.extension.as_deref())
+            .or(r.language.as_deref())
+            .unwrap_or("-");
+        out.push(format!(
+            "{label:<13} {key}  {}",
+            coverage_numbers(&r.counts)
+        ));
+    }
+}
+
+pub const COVERAGE: Shape<CoverageReport> = Shape {
+    header: |r| {
+        let t = &r.totals;
+        let mut v = vec![
+            format!(
+                "coverage  files {} indexed, {} parse errors ({}), {} unsupported, {} failed, {} unclaimed",
+                t.files_indexed,
+                t.files_parse_errors,
+                pct(t.parse_error_rate),
+                t.files_unsupported,
+                t.files_failed,
+                t.files_unclaimed
+            ),
+            format!(
+                "refs      {}: {} resolved, {} inferred, {} unresolved; {} dangling contracts",
+                t.refs_total,
+                pct(t.resolution_rate),
+                pct(t.inferred_rate),
+                pct(t.unresolved_rate),
+                t.contracts_dangling
+            ),
+        ];
+        coverage_group_rows("by repo", &r.by_repo, &mut v);
+        coverage_group_rows("by extension", &r.by_extension, &mut v);
+        coverage_group_rows("by language", &r.by_language, &mut v);
+        v
+    },
+    line: |g: &CoverageRow| {
+        format!(
+            "group         {}/{}/{}  {}",
+            g.repo.as_deref().unwrap_or("-"),
+            g.extension.as_deref().unwrap_or("-"),
+            g.language.as_deref().unwrap_or("-"),
+            coverage_numbers(&g.counts)
+        )
+    },
+    footer: |r| {
+        let mut v = Vec::new();
+        for u in &r.unclaimed {
+            let sfx: Vec<String> = u
+                .suffixes
+                .iter()
+                .map(|s| format!("{} {}", s.suffix, s.files))
+                .collect();
+            v.push(format!(
+                "unclaimed     {}  {} files: {}",
+                u.repo,
+                u.files,
+                sfx.join(", ")
+            ));
+        }
+        for m in &r.roots_missing {
+            v.push(format!("roots missing {m}"));
+        }
+        v
     },
     fails: never,
 };

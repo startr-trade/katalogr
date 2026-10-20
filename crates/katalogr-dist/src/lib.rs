@@ -28,8 +28,9 @@ pub use setup::{ProjectCreated, kindex_init, project_init};
 
 use camino::{Utf8Path, Utf8PathBuf};
 use katalogr_analytics::{
-    CommunityOptions, CommunityReport, CycleOptions, CycleReport, DEFAULT_SEED, DeadCodeOptions,
-    DeadCodeReport, HubOptions, HubReport, RationaleReport, RationaleScope, STRUCTURAL_KINDS,
+    CommunityOptions, CommunityReport, CoverageInput, CoverageReport, CycleOptions, CycleReport,
+    DEFAULT_SEED, DeadCodeOptions, DeadCodeReport, HubOptions, HubReport, RationaleReport,
+    RationaleScope, STRUCTURAL_KINDS,
 };
 use katalogr_engine::history::{HISTORY_PREFIX, HistoryOptions, blame_commit, history_shas};
 use katalogr_engine::scan::{PathChange, changed_paths};
@@ -82,6 +83,24 @@ impl Default for InsightSettings {
             resolution: 1.0,
             community_min_size: 3,
             exclude_kinds: STRUCTURAL_KINDS.iter().map(|k| k.to_string()).collect(),
+        }
+    }
+}
+
+/// Options of the coverage report.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CoverageOptions {
+    /// Only this repository of the project.
+    pub repo: Option<String>,
+    /// How many suffixes to list per repository for unclaimed files.
+    pub suffix_top: usize,
+}
+
+impl Default for CoverageOptions {
+    fn default() -> Self {
+        CoverageOptions {
+            repo: None,
+            suffix_top: 20,
         }
     }
 }
@@ -768,6 +787,70 @@ impl Katalogr {
             }
         }
         Ok(reply)
+    }
+
+    /// How complete the graph is: references resolved, inferred and unresolved, dangling
+    /// contracts, parse errors and unclaimed files, per repository, extension and language.
+    /// Walks each repository root once, then reads one snapshot at `o`'s consistency (default
+    /// wait). The walk is not transactional with the index: a file created in between can
+    /// show as unclaimed while its artifact also exists; the next run settles it.
+    pub fn coverage(
+        &self,
+        opts: &CoverageOptions,
+        o: &Options,
+    ) -> Result<Reply<CoverageReport>, DistError> {
+        let repos: Vec<&str> = self
+            .project
+            .config()
+            .repos
+            .iter()
+            .map(|r| r.name.as_str())
+            .collect();
+        if let Some(r) = &opts.repo
+            && !repos.contains(&r.as_str())
+        {
+            return Err(DistError::usage(format!(
+                "repo {r} is not part of this project (repos: {})",
+                repos.join(", ")
+            )));
+        }
+        let timeout = o.timeout()?;
+        let engine = self.engine(Instant::now() + timeout)?;
+        let mut unclaimed = BTreeMap::new();
+        let mut roots_missing = Vec::new();
+        for repo in repos {
+            if opts.repo.as_deref().is_some_and(|r| r != repo) {
+                continue;
+            }
+            match katalogr_engine::census::census(&engine, repo)? {
+                Some(c) => {
+                    unclaimed.insert(repo.to_string(), c.unclaimed);
+                }
+                None => roots_missing.push(repo.to_string()),
+            }
+        }
+        let registry = engine.registry();
+        let language = |ext: &str, path: &RelPath| match registry.by_id(ext) {
+            Some(e) => e.language(path).to_string(),
+            None => ext.to_string(),
+        };
+        let claim = |path: &RelPath| {
+            registry
+                .for_path(path)
+                .map(|e| (e.id().to_string(), e.language(path).to_string()))
+        };
+        let input = CoverageInput {
+            language: &language,
+            claim: &claim,
+            unclaimed,
+            roots_missing,
+            exclude_prefixes: vec![HISTORY_PREFIX.to_string()],
+            repo: opts.repo.clone(),
+            suffix_top: opts.suffix_top,
+        };
+        self.query_on(&engine, o, |tx| {
+            Ok(Outcome::Found(katalogr_analytics::coverage(tx, &input)?))
+        })
     }
 
     /// Dead-code candidates. Fills `opts.code_kinds` from the registered extensions first.

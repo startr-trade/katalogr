@@ -1,0 +1,482 @@
+{
+  "$defs": {
+    "Better": {
+      "description": "Which direction is better; `Info` samples are reported and never gated.",
+      "enum": [
+        "higher",
+        "lower",
+        "info"
+      ],
+      "type": "string"
+    },
+    "ContractKindCount": {
+      "properties": {
+        "dangling": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "kind": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "dangling"
+      ],
+      "type": "object"
+    },
+    "CoverageCounts": {
+      "properties": {
+        "contracts_dangling": {
+          "description": "Distinct dangling contracts bound by the group's files.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "files_failed": {
+          "description": "Claimed files whose extraction failed outright (no artifact).",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "files_indexed": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "files_parse_errors": {
+          "description": "Indexed files whose extraction recorded parse errors (the fragment was still published).",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "files_unclaimed": {
+          "description": "Files no extension claims (repo totals only).",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "files_unsupported": {
+          "description": "Claimed files an extension refused as unsupported (no artifact).",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "inferred_rate": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "parse_error_rate": {
+          "description": "files_parse_errors / files_indexed; None when files_indexed = 0.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "parse_errors": {
+          "description": "Number of parse-error entries over those files.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "refs_inferred": {
+          "description": "Inferred: several targets, or the reference was inferred.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "refs_resolved": {
+          "description": "One target, with the reference's own confidence not inferred.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "refs_total": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "refs_unlinked": {
+          "description": "Neither linked nor recorded unresolved (should be 0; non-zero means a stitcher gap).",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "refs_unresolved": {
+          "description": "No target (`refs_unresolved` table), plus `refs_unlinked`.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "resolution_rate": {
+          "description": "refs_resolved / refs_total; None when refs_total = 0. Likewise the next two.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "unresolved_rate": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "files_indexed",
+        "files_parse_errors",
+        "parse_errors",
+        "files_unsupported",
+        "files_failed",
+        "files_unclaimed",
+        "refs_total",
+        "refs_resolved",
+        "refs_inferred",
+        "refs_unresolved",
+        "refs_unlinked",
+        "contracts_dangling"
+      ],
+      "type": "object"
+    },
+    "CoverageReport": {
+      "properties": {
+        "by_extension": {
+          "items": {
+            "$ref": "#/$defs/CoverageRow"
+          },
+          "type": "array"
+        },
+        "by_language": {
+          "items": {
+            "$ref": "#/$defs/CoverageRow"
+          },
+          "type": "array"
+        },
+        "by_link_kind": {
+          "items": {
+            "$ref": "#/$defs/KindCounts"
+          },
+          "type": "array"
+        },
+        "by_repo": {
+          "items": {
+            "$ref": "#/$defs/CoverageRow"
+          },
+          "type": "array"
+        },
+        "dangling_contracts_by_kind": {
+          "items": {
+            "$ref": "#/$defs/ContractKindCount"
+          },
+          "type": "array"
+        },
+        "groups": {
+          "description": "Finest grain: (repo, extension, language).",
+          "items": {
+            "$ref": "#/$defs/CoverageRow"
+          },
+          "type": "array"
+        },
+        "metrics": {
+          "description": "The `coverage.*` samples, for quality metrics and gates.",
+          "items": {
+            "$ref": "#/$defs/MetricSample"
+          },
+          "type": "array"
+        },
+        "roots_missing": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "totals": {
+          "$ref": "#/$defs/CoverageCounts"
+        },
+        "unclaimed": {
+          "items": {
+            "$ref": "#/$defs/UnclaimedRow"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "totals",
+        "by_repo",
+        "by_extension",
+        "by_language",
+        "groups",
+        "by_link_kind",
+        "dangling_contracts_by_kind",
+        "unclaimed",
+        "roots_missing",
+        "metrics"
+      ],
+      "type": "object"
+    },
+    "CoverageRow": {
+      "properties": {
+        "counts": {
+          "$ref": "#/$defs/CoverageCounts"
+        },
+        "extension": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "language": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "repo": {
+          "description": "For `groups`: all three; for a rollup: only its own key, the others None.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "counts"
+      ],
+      "type": "object"
+    },
+    "KindCounts": {
+      "properties": {
+        "inferred": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "resolved": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "total": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "unresolved": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "kind",
+        "total",
+        "resolved",
+        "inferred",
+        "unresolved"
+      ],
+      "type": "object"
+    },
+    "MetricSample": {
+      "description": "One measured value. `name` is dotted (`retrieval.ndcg@10`, `coverage.parse_error_rate`);\n`labels` qualify it (`set`, `op`, `scope`, `repo`, `extension`, `language`); an absent label\nmeans \"all\". `value` is rounded to 6 decimals.",
+      "properties": {
+        "better": {
+          "$ref": "#/$defs/Better"
+        },
+        "labels": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        },
+        "name": {
+          "type": "string"
+        },
+        "value": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "name",
+        "value",
+        "better"
+      ],
+      "type": "object"
+    },
+    "Partial": {
+      "description": "The answer was cut by a cap: more items exist (or may exist) than are shown.",
+      "properties": {
+        "at": {
+          "description": "The cap's value: N in \"capped at N\" (items, hops, or tokens for `budget`).",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "cap": {
+          "description": "Which cap: one of [`cap`]'s names.",
+          "type": "string"
+        },
+        "note": {
+          "description": "Always [`PARTIAL_NOTE`].",
+          "type": "string"
+        },
+        "shown": {
+          "description": "Items shown.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "total": {
+          "description": "Items there were before the cap, when known.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "cap",
+        "at",
+        "shown",
+        "note"
+      ],
+      "type": "object"
+    },
+    "SuffixCount": {
+      "properties": {
+        "files": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "suffix": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "suffix",
+        "files"
+      ],
+      "type": "object"
+    },
+    "Truncation": {
+      "properties": {
+        "budget": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "omitted": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "shown": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "shown",
+        "omitted",
+        "budget"
+      ],
+      "type": "object"
+    },
+    "UnclaimedRow": {
+      "properties": {
+        "files": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "repo": {
+          "type": "string"
+        },
+        "suffixes": {
+          "items": {
+            "$ref": "#/$defs/SuffixCount"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "repo",
+        "files",
+        "suffixes"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "What `--json` prints.",
+  "properties": {
+    "next": {
+      "description": "Suggested follow-up commands, at most three.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "partial": {
+      "description": "Present when a cap or budget cut the answer; one entry per cap that cut it.",
+      "items": {
+        "$ref": "#/$defs/Partial"
+      },
+      "type": "array"
+    },
+    "pending": {
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "result": {
+      "$ref": "#/$defs/CoverageReport"
+    },
+    "schema": {
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "stale": {
+      "type": "boolean"
+    },
+    "truncated": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Truncation"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "watermark": {
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "schema",
+    "watermark",
+    "pending",
+    "stale",
+    "result"
+  ],
+  "title": "Envelope",
+  "type": "object"
+}
