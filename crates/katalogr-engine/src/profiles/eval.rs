@@ -218,17 +218,13 @@ fn element_of(e: &Fact) -> Option<(&str, Option<Span>)> {
             let Some(Fact::Str(text)) = m.get("text") else {
                 return None;
             };
-            let int = |k: &str| match m.get(k) {
-                Some(Fact::Int(n)) => u32::try_from(*n).ok(),
-                _ => None,
-            };
-            // Only the start is stored; the element's span is the point where it starts.
-            let span = match (int("line"), int("col")) {
-                (Some(a), Some(b)) => Some(Span {
-                    start_line: a,
-                    start_col: b,
-                    end_line: a,
-                    end_col: b,
+            // Only the start is stored, packed in `pos`; the span is the point where it starts.
+            let span = match m.get("pos") {
+                Some(Fact::Int(n)) => katalogr_model::calls::unpack_pos(*n).map(|(l, c)| Span {
+                    start_line: l,
+                    start_col: c,
+                    end_line: l,
+                    end_col: c,
                 }),
                 _ => None,
             };

@@ -104,9 +104,9 @@ impl Extractor for TsExtractor {
     /// extensions (FEAT-017); `3` adds the `root`, `package` and `rationale`
     /// facts (FEAT-030); `;tests-1` adds the `test` fact, test symbols and the `test-name`
     /// exports (FEAT-063); `;rest-1` adds the `str_calls` fact (FEAT-014); `;rest-2` compacts it (per-file
-    /// candidate table, start-only positions).
+    /// candidate table, start-only positions); `;rest-3` packs the position in `pos`.
     fn revision_salt(&self) -> &'static str {
-        "ts-extract-3;tests-1;rest-1;rest-2"
+        "ts-extract-3;tests-1;rest-1;rest-2;rest-3"
     }
 
     /// The [`TsContext`] as compact JSON with sorted keys and vectors.

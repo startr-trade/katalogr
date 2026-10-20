@@ -586,8 +586,8 @@ mod ts {
         // The position is where the method name starts (the end is not stored).
         let e = &g.nodes["fx:src/client.ts#class:Svc/method:list"]["facts"]["str_calls"]["List"][0]
             ["Map"];
-        let int = |k: &str| e[k]["Int"].as_u64().unwrap();
-        assert_eq!((int("line"), int("col")), (14, 22));
+        let pos = e["pos"]["Int"].as_u64().unwrap();
+        assert_eq!((pos >> 20, pos & 0xF_FFFF), (14, 22));
     }
 
     #[test]

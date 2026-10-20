@@ -121,6 +121,14 @@ mod graph {
             panic!()
         };
         assert!(!first.contains_key("end_line") && !first.contains_key("end_col"));
+        assert_eq!(
+            first.get("pos"),
+            Some(&Fact::Int(katalogr_model::calls::pack_pos(3, 1)))
+        );
+        assert_eq!(
+            katalogr_model::calls::unpack_pos(katalogr_model::calls::pack_pos(3, 1)),
+            Some((3, 1))
+        );
         let cands = table.into_fact();
         let (r, inf) = arg_ref_of(&items[0], cands.as_ref(), "show").unwrap();
         assert!(inf);

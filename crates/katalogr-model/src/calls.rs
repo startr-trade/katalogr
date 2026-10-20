@@ -117,8 +117,23 @@ pub fn cap_text(text: String) -> String {
     out
 }
 
-fn int(v: u32) -> Fact {
-    Fact::Int(i64::from(v))
+/// Bits of a packed position that hold the column.
+const POS_COL_BITS: u32 = 20;
+
+/// The start of an entry as one integer, `line << 20 | col` (1-based; a column above 2^20 - 1 is
+/// clamped). One `pos` entry replaces the separate `line` and `col` entries, and an entry stores
+/// no end position.
+pub fn pack_pos(line: u32, col: u32) -> i64 {
+    (i64::from(line) << POS_COL_BITS) | i64::from(col.min((1 << POS_COL_BITS) - 1))
+}
+
+/// The `(line, col)` of a packed position.
+pub fn unpack_pos(pos: i64) -> Option<(u32, u32)> {
+    if pos < 0 {
+        return None;
+    }
+    let line = u32::try_from(pos >> POS_COL_BITS).ok()?;
+    Some((line, (pos & ((1 << POS_COL_BITS) - 1)) as u32))
 }
 
 /// The export-candidate lists of one fragment's `str_calls` entries, interned: equal lists share
@@ -178,8 +193,10 @@ pub fn str_calls_fact(calls: &[StrCall], table: &mut CandTable) -> Option<Fact> 
         .map(|c| {
             let mut m = BTreeMap::new();
             m.insert("text".to_string(), Fact::Str(c.text.clone()));
-            m.insert("line".to_string(), int(c.span.start_line));
-            m.insert("col".to_string(), int(c.span.start_col));
+            m.insert(
+                "pos".to_string(),
+                Fact::Int(pack_pos(c.span.start_line, c.span.start_col)),
+            );
             let mut refs = BTreeMap::new();
             for (text, r, inferred) in &c.refs {
                 if refs.len() >= ARG_REFS_MAX {

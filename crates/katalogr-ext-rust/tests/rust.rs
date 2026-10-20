@@ -996,10 +996,10 @@ mod rust {
         list.iter()
             .map(|e| {
                 let m = &e["Map"];
-                let int = |k: &str| m[k]["Int"].as_u64().unwrap();
+                let pos = m["pos"]["Int"].as_u64().unwrap();
                 (
                     m["text"]["Str"].as_str().unwrap().to_string(),
-                    (int("line"), int("col")),
+                    (pos >> 20, pos & 0xF_FFFF),
                     m["refs"]["Map"].clone(),
                 )
             })
