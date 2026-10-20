@@ -1,0 +1,184 @@
+format: 1
+set: core
+version: 1
+description: Synthetic single-repository bookkeeping corpus (Rust, TypeScript, Markdown).
+repos:
+  - {name: app, path: repos/app}
+queries:
+  # search: identifier words
+  - id: s01
+    op: search
+    input: ledger balance
+    scope: {repos: [app], paths: ["src/**"]}
+    tags: [identifier]
+    evidence:
+      - {name: "app:src/ledger.rs#impl:Ledger/fn:balance", grade: 3}
+      - {name: "app:web/src/client.ts#class:LedgerClient/method:fetchBalance", grade: 2}
+      - {name: "app:src/audit.rs#fn:audit_trail", grade: 1}
+  - id: s02
+    op: search
+    input: rate limiter
+    scope: {repos: [app], paths: ["src/**"]}
+    tags: [identifier]
+    evidence:
+      - {name: "app:src/rate_limit.rs#struct:RateLimiter", grade: 3}
+      - {name: "app:src/rate_limit.rs#impl:RateLimiter/fn:try_acquire", grade: 2}
+      - {name: "app:src/rate_limit.rs#impl:RateLimiter", grade: 1}
+  - id: s03
+    op: search
+    input: post entry
+    tags: [identifier]
+    evidence:
+      - {name: "app:src/ledger.rs#impl:Ledger/fn:post_entry", grade: 3}
+      - {name: "app:web/src/client.ts#class:LedgerClient/method:postEntry", grade: 3}
+      - {name: "app:src/entry.rs#struct:Entry", grade: 1}
+  - id: s04
+    op: search
+    input: close period
+    scope: {repos: [app], paths: ["src/**"]}
+    tags: [identifier]
+    evidence:
+      - {name: "app:src/ledger.rs#impl:Ledger/fn:close_period", grade: 3}
+      - {name: "app:docs/ledger.md#section:ledger/section:closing-a-period", grade: 2}
+  - id: s05
+    op: search
+    input: format amount
+    tags: [identifier]
+    evidence:
+      - {name: "app:web/src/format.ts#fn:formatAmount", grade: 3}
+  - id: s06
+    op: search
+    input: audit trail
+    scope: {repos: [app], paths: ["src/**"]}
+    tags: [identifier]
+    evidence:
+      - {name: "app:src/audit.rs#fn:audit_trail", grade: 3}
+      - {name: "app:src/lib.rs#mod:audit", grade: 1}
+  # search: documentation phrases
+  - id: s07
+    op: search
+    input: posting entries
+    tags: [phrase]
+    evidence:
+      - {name: "app:docs/ledger.md#section:ledger/section:posting-entries", grade: 3}
+      - {name: "app:src/ledger.rs#impl:Ledger/fn:post_entry", grade: 1}
+  - id: s08
+    op: search
+    input: closing a period
+    tags: [phrase]
+    evidence:
+      - {name: "app:docs/ledger.md#section:ledger/section:closing-a-period", grade: 3}
+      - {name: "app:src/ledger.rs#impl:Ledger/fn:close_period", grade: 2}
+  - id: s09
+    op: search
+    input: running balance of all posted entries
+    tags: [phrase]
+    evidence:
+      - {name: "app:src/ledger.rs#impl:Ledger/fn:balance", grade: 3}
+  # search: prefixes
+  - id: s10
+    op: search
+    input: led
+    tags: [prefix]
+    evidence:
+      - {name: "app:src/ledger.rs#struct:Ledger", grade: 3}
+      - {name: "app:web/src/client.ts#class:LedgerClient", grade: 2}
+      - {name: "app:docs/ledger.md#section:ledger", grade: 2}
+  - id: s11
+    op: search
+    input: rat
+    tags: [prefix]
+    evidence:
+      - {name: "app:src/rate_limit.rs#struct:RateLimiter", grade: 3}
+      - {name: "app:src/rate_limit.rs#impl:RateLimiter/fn:try_acquire", grade: 1}
+  # search: nothing matches
+  - id: s12
+    op: search
+    input: zebra
+    route: no-match
+    tags: [no-match]
+  # map: the most-called symbols
+  - id: m01
+    op: map
+    tags: [rank]
+    evidence:
+      - {name: "app:web/src/format.ts#fn:formatAmount", grade: 3}
+      - {name: "app:src/ledger.rs#impl:Ledger/fn:balance", grade: 3}
+      - {name: "app:src/rate_limit.rs#impl:RateLimiter/fn:try_acquire", grade: 2}
+  - id: m02
+    op: map
+    tags: [rank]
+    evidence:
+      - {name: "app:src/ledger.rs#impl:Ledger/fn:balance", grade: 3}
+      - {name: "app:src/rate_limit.rs#impl:RateLimiter/fn:try_acquire", grade: 2}
+      - {name: "app:web/src/format.ts#fn:formatAmount", grade: 2}
+  - id: m03
+    op: map
+    tags: [rank]
+    evidence:
+      - {name: "app:web/src/format.ts#fn:formatAmount", grade: 3}
+      - {name: "app:src/rate_limit.rs#impl:RateLimiter/fn:try_acquire", grade: 1}
+  - id: m04
+    op: map
+    tags: [rank]
+    evidence:
+      - {name: "app:src/ledger.rs#impl:Ledger/fn:balance", grade: 2}
+      - {name: "app:src/ledger.rs#impl:Ledger/fn:close_period", grade: 1}
+      - {name: "app:src/ledger.rs#impl:Ledger/fn:post_entry", grade: 1}
+  # refs
+  - id: r01
+    op: refs
+    input: "app:src/ledger.rs#impl:Ledger/fn:balance"
+    tags: [callers]
+    evidence:
+      - {name: "app:src/audit.rs#fn:audit_trail", grade: 3}
+      - {name: "app:src/ledger.rs#impl:Ledger/fn:close_period", grade: 3}
+      - {name: "app:src/ledger.rs#impl:Ledger", grade: 1}
+  - id: r02
+    op: refs
+    input: "app:src/rate_limit.rs#impl:RateLimiter/fn:try_acquire"
+    tags: [callers]
+    evidence:
+      - {name: "app:src/ledger.rs#impl:Ledger/fn:post_entry", grade: 3}
+      - {name: "app:src/rate_limit.rs#impl:RateLimiter", grade: 1}
+  - id: r03
+    op: refs
+    input: "app:web/src/format.ts#fn:formatAmount"
+    tags: [callers]
+    evidence:
+      - {name: "app:web/src/client.ts#class:LedgerClient/method:fetchBalance", grade: 3}
+      - {name: "app:web/src/client.ts#class:LedgerClient/method:postEntry", grade: 3}
+  - id: r04
+    op: refs
+    input: ghost_fn
+    route: no-match
+    tags: [no-match]
+  # explain
+  - id: e01
+    op: explain
+    input: "app:src/ledger.rs#impl:Ledger/fn:balance"
+    tags: [neighbours]
+    evidence:
+      - {name: "app:src/audit.rs#fn:audit_trail", grade: 3}
+      - {name: "app:src/ledger.rs#impl:Ledger/fn:close_period", grade: 3}
+      - {name: "app:src/ledger.rs#impl:Ledger", grade: 1}
+  - id: e02
+    op: explain
+    input: "app:web/src/format.ts#fn:formatAmount"
+    tags: [neighbours]
+    evidence:
+      - {name: "app:web/src/client.ts#class:LedgerClient/method:fetchBalance", grade: 3}
+      - {name: "app:web/src/client.ts#class:LedgerClient/method:postEntry", grade: 3}
+      - {name: "app:web/src/client.ts", grade: 1}
+  - id: e03
+    op: explain
+    input: "app:src/entry.rs#enum:EntryKind"
+    tags: [neighbours]
+    evidence:
+      - {name: "app:src/entry.rs#enum:EntryKind/variant:Credit", grade: 3}
+      - {name: "app:src/entry.rs#enum:EntryKind/variant:Debit", grade: 3}
+  - id: e04
+    op: explain
+    input: balance
+    route: ambiguous
+    tags: [ambiguous]

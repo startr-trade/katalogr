@@ -4,6 +4,7 @@
 
 mod claude;
 mod error;
+pub mod eval;
 pub mod hooks;
 mod roots;
 mod setup;
@@ -21,7 +22,7 @@ pub use katalogr_analytics as analytics;
 pub use katalogr_query as query;
 use katalogr_query::{
     Blame, CallerHit, DanglingRef, Explain, MapEntry, MirrorDrift, PathStep, RefHit, Resolution,
-    SearchHit, SymbolHit, WhyResult,
+    SearchHit, SearchParams, SymbolHit, WhyResult,
 };
 pub use katalogr_query::{ReplaceResult, ShowResult};
 pub use setup::{ProjectCreated, kindex_init, project_init};
@@ -576,13 +577,24 @@ impl Katalogr {
         limit: usize,
         opts: &Options,
     ) -> Result<Reply<Vec<SearchHit>>, DistError> {
+        self.search_with(terms, limit, &SearchParams::default(), opts)
+    }
+
+    /// `search` with explicit BM25F parameters (same outcome rules as `search`).
+    pub fn search_with(
+        &self,
+        terms: &str,
+        limit: usize,
+        p: &SearchParams,
+        opts: &Options,
+    ) -> Result<Reply<Vec<SearchHit>>, DistError> {
         if katalogr_model::tokenize(terms).is_empty() {
             return Err(DistError::usage(format!(
                 "{terms:?}: no searchable word (words need two letters, or a digit)"
             )));
         }
         self.query(opts, |tx| {
-            let hits = katalogr_query::search(tx, terms, limit)?;
+            let hits = katalogr_query::search_with(tx, terms, limit, p)?;
             Ok(if hits.is_empty() {
                 Outcome::NoMatch(format!("nothing matches {terms:?}"))
             } else {
@@ -807,5 +819,47 @@ mod profile_tests {
             katalogr_engine::profiles::parse(&format!("builtin:{name}"), text)
                 .unwrap_or_else(|e| panic!("{e}"));
         }
+    }
+}
+
+#[cfg(test)]
+mod eval_runner {
+    use crate::eval::explain_items;
+    use katalogr_model::Confidence;
+    use katalogr_query::{Explain, LinkBrief, SymbolHit};
+
+    fn link(other: &str) -> LinkBrief {
+        LinkBrief {
+            kind: "calls".to_string(),
+            other: other.to_string(),
+            confidence: Confidence::Extracted,
+            origin: None,
+        }
+    }
+
+    #[test]
+    fn explain_items_dedup() {
+        let e = Explain {
+            symbol: SymbolHit {
+                name: "app:src/a.rs#fn:a".to_string(),
+                kind: "fn".to_string(),
+                path: "src/a.rs".to_string(),
+                span: katalogr_model::Span {
+                    start_line: 1,
+                    start_col: 1,
+                    end_line: 1,
+                    end_col: 1,
+                },
+            },
+            signature: None,
+            doc: None,
+            outgoing: vec![link("x"), link("y")],
+            outgoing_total: 2,
+            incoming: vec![link("y"), link("z")],
+            incoming_total: 2,
+            items: vec!["x".to_string(), "item".to_string()],
+        };
+        let names: Vec<String> = explain_items(&e).into_iter().map(|i| i.name).collect();
+        assert_eq!(names, ["x", "y", "z", "item"]);
     }
 }

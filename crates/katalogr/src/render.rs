@@ -7,6 +7,7 @@ use katalogr_dist::analytics::{
     Community, CommunityReport, Cycle, CycleReport, DeadCandidate, DeadCodeReport, HubEntry,
     HubReport, Itemized, RationaleEntry, RationaleReport,
 };
+use katalogr_dist::eval::{EvalReport, SweepReport};
 use katalogr_dist::query::{
     CallerHit, DanglingRef, Direction, Envelope, Explain, FieldShape, HintSource, MapEntry,
     MirrorDrift, PathStep, RESULT_SCHEMA_VERSION, RefHit, ReplaceResult, SearchHit, Serialize,
@@ -709,4 +710,158 @@ where
         other => other_outcomes(cli, &reply.report, other),
     }
     code
+}
+
+fn value3(x: Option<f64>) -> String {
+    x.map_or_else(|| "-".to_string(), |v| format!("{v:.3}"))
+}
+
+/// Keep whole items of `r` within the budget; returns the truncation record.
+fn trim_items<R: Itemized>(r: &mut R, budget: Option<u64>) -> Option<Truncation> {
+    let b = budget?;
+    let json: Vec<String> = r
+        .items_mut()
+        .iter()
+        .map(|i| serde_json::to_string(i).expect("serialise result"))
+        .collect();
+    let fit = budget::fit_budget(&json, b);
+    if fit.omitted == 0 {
+        return None;
+    }
+    r.items_mut().truncate(fit.kept);
+    Some(Truncation {
+        shown: fit.kept as u64,
+        omitted: fit.omitted as u64,
+        budget: b,
+    })
+}
+
+/// Print an evaluation report: one line per metric group, then the comparison.
+pub fn eval_report(cli: &Cli, mut report: EvalReport, meta: &Report) {
+    let truncated = trim_items(&mut report, cli.budget);
+    if cli.json {
+        let e = envelope(meta, truncated, report, Vec::new());
+        println!("{}", serde_json::to_string(&e).expect("serialise envelope"));
+        return;
+    }
+    for w in &meta.warnings {
+        eprintln!("katalogr: warning: {w}");
+    }
+    if meta.stale {
+        eprintln!("katalogr: warning: the index was stale for this evaluation");
+    }
+    // (set, op, scope) -> metric name -> value; absent labels sort first and print as `*`.
+    type Key = (String, String, String);
+    let mut groups: std::collections::BTreeMap<Key, std::collections::BTreeMap<String, f64>> =
+        std::collections::BTreeMap::new();
+    for s in &report.metrics {
+        let l = |k: &str| s.labels.get(k).cloned().unwrap_or_default();
+        groups
+            .entry((l("set"), l("op"), l("scope")))
+            .or_default()
+            .insert(s.name.clone(), s.value);
+    }
+    let kmax = report.ks.iter().copied().max().unwrap_or(10);
+    let mut head = vec!["set".to_string(), "op".to_string(), "scope".to_string()];
+    head.extend(report.ks.iter().map(|k| format!("hit@{k}")));
+    head.extend([
+        "mrr".to_string(),
+        format!("ndcg@{kmax}"),
+        "tok/rel".to_string(),
+        "n".to_string(),
+    ]);
+    println!("{}", head.join("  "));
+    for ((set, op, scope), m) in &groups {
+        let star = |s: &String| {
+            if s.is_empty() {
+                "*".to_string()
+            } else {
+                s.clone()
+            }
+        };
+        let get = |n: &str| m.get(n).copied();
+        let mut cols = vec![star(set), star(op), star(scope)];
+        cols.extend(
+            report
+                .ks
+                .iter()
+                .map(|k| value3(get(&format!("retrieval.hit@{k}")))),
+        );
+        cols.push(value3(get("retrieval.mrr")));
+        cols.push(value3(get(&format!("retrieval.ndcg@{kmax}"))));
+        cols.push(value3(get("retrieval.tokens_per_relevant_hit")));
+        cols.push(format!("{}", get("retrieval.queries").unwrap_or(0.0)));
+        println!("{}", cols.join("  "));
+    }
+    if let Some(t) = &truncated {
+        println!("{}", budget::omitted_notice(t.omitted as usize));
+    }
+    if let Some(c) = &report.comparison {
+        for r in &c.metrics.regressions {
+            println!("REGRESSION {} {} -> {}", r.key, r.baseline, r.current);
+        }
+        for r in &c.queries {
+            println!(
+                "REGRESSION {}/{} {} {} -> {}",
+                r.set, r.id, r.metric, r.baseline, r.current
+            );
+        }
+        for s in &c.version_mismatch {
+            println!("version changed: {s}");
+        }
+        for s in &c.missing_sets {
+            println!("missing set: {s}");
+        }
+        for s in &c.new_sets {
+            println!("new set: {s}");
+        }
+        for r in &c.metrics.improvements {
+            println!("improved {} {} -> {}", r.key, r.baseline, r.current);
+        }
+        println!(
+            "{}: {} regressions, {} improvements, {} unchanged",
+            if c.failed {
+                "gate failed"
+            } else {
+                "gate passed"
+            },
+            c.metrics.regressions.len() + c.queries.len(),
+            c.metrics.improvements.len(),
+            c.metrics.unchanged
+        );
+    }
+}
+
+/// Print a sweep report: one line per combination, objective first.
+pub fn sweep_report(cli: &Cli, mut report: SweepReport, meta: &Report) {
+    let truncated = trim_items(&mut report, cli.budget);
+    if cli.json {
+        let e = envelope(meta, truncated, report, Vec::new());
+        println!("{}", serde_json::to_string(&e).expect("serialise envelope"));
+        return;
+    }
+    let default: std::collections::BTreeMap<String, f64> =
+        katalogr_dist::eval::describe(&katalogr_dist::eval::EvalParams::default());
+    println!("{} ({:?} is better)", report.objective, report.better);
+    for row in &report.rows {
+        let changed: Vec<String> = row
+            .params
+            .iter()
+            .filter(|(k, v)| report.rows.len() == 1 || default.get(*k) != Some(*v))
+            .map(|(k, v)| format!("{k}={v}"))
+            .collect();
+        println!(
+            "{:.6}  {}{}",
+            row.objective,
+            if changed.is_empty() {
+                "(defaults)".to_string()
+            } else {
+                changed.join(" ")
+            },
+            if row.is_default { "  [default]" } else { "" }
+        );
+    }
+    if let Some(t) = &truncated {
+        println!("{}", budget::omitted_notice(t.omitted as usize));
+    }
 }

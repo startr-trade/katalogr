@@ -6,6 +6,7 @@ pub mod communities;
 pub mod cycles;
 pub mod dangling;
 pub mod dead_code;
+pub mod eval;
 pub mod explain;
 pub mod find;
 pub mod hook;

@@ -1,0 +1,176 @@
+{
+  "$defs": {
+    "Better": {
+      "description": "Which direction is better; `Info` samples are reported and never gated.",
+      "enum": [
+        "higher",
+        "lower",
+        "info"
+      ],
+      "type": "string"
+    },
+    "MetricSample": {
+      "description": "One measured value. `name` is dotted (`retrieval.ndcg@10`, `coverage.parse_error_rate`);\n`labels` qualify it (`set`, `op`, `scope`, `repo`, `extension`, `language`); an absent label\nmeans \"all\". `value` is rounded to 6 decimals.",
+      "properties": {
+        "better": {
+          "$ref": "#/$defs/Better"
+        },
+        "labels": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        },
+        "name": {
+          "type": "string"
+        },
+        "value": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "name",
+        "value",
+        "better"
+      ],
+      "type": "object"
+    },
+    "SweepReport": {
+      "properties": {
+        "better": {
+          "$ref": "#/$defs/Better"
+        },
+        "combinations": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "objective": {
+          "type": "string"
+        },
+        "rows": {
+          "items": {
+            "$ref": "#/$defs/SweepRow"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "objective",
+        "better",
+        "combinations",
+        "rows"
+      ],
+      "type": "object"
+    },
+    "SweepRow": {
+      "properties": {
+        "is_default": {
+          "type": "boolean"
+        },
+        "metrics": {
+          "description": "The overall group only.",
+          "items": {
+            "$ref": "#/$defs/MetricSample"
+          },
+          "type": "array"
+        },
+        "objective": {
+          "format": "double",
+          "type": "number"
+        },
+        "params": {
+          "additionalProperties": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "object"
+        }
+      },
+      "required": [
+        "params",
+        "is_default",
+        "objective",
+        "metrics"
+      ],
+      "type": "object"
+    },
+    "Truncation": {
+      "properties": {
+        "budget": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "omitted": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "shown": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "shown",
+        "omitted",
+        "budget"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "What `--json` prints.",
+  "properties": {
+    "next": {
+      "description": "Suggested follow-up commands, at most three.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "pending": {
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "result": {
+      "$ref": "#/$defs/SweepReport"
+    },
+    "schema": {
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "stale": {
+      "type": "boolean"
+    },
+    "truncated": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Truncation"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "watermark": {
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "schema",
+    "watermark",
+    "pending",
+    "stale",
+    "result"
+  ],
+  "title": "Envelope",
+  "type": "object"
+}

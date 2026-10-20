@@ -292,6 +292,11 @@ pub enum Command {
         #[arg(long, default_value_t = 100, value_name = "N")]
         limit: usize,
     },
+    /// Evaluate retrieval against graded golden query sets: metrics, baselines, sweeps.
+    Eval {
+        #[command(subcommand)]
+        action: EvalAction,
+    },
     /// List references that name something that does not exist; exits 1 when any dangle.
     Dangling {
         /// Only this link kind, or `contract` for one-sided contracts; repeatable (default:
@@ -305,6 +310,52 @@ pub enum Command {
         /// Only contracts of this kind (for example `schema_type`); repeatable.
         #[arg(long, value_name = "KIND")]
         kind: Vec<String>,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum EvalAction {
+    /// Run the golden sets and print hit@k, MRR, nDCG@k and context efficiency.
+    Run {
+        /// Golden file or directory (default: fixtures/eval); repeatable.
+        #[arg(long, value_name = "PATH", conflicts_with = "project_sets")]
+        sets: Vec<String>,
+        /// Run the golden sets stored in the project's kindex against its live index.
+        #[arg(long)]
+        project_sets: bool,
+        /// The cut-offs k, comma separated (1..=50).
+        #[arg(long, value_delimiter = ',', default_values_t = [1u32, 5, 10], value_name = "LIST")]
+        k: Vec<u32>,
+        /// Override one parameter for a what-if run, `KEY=V`; repeatable.
+        #[arg(long, value_name = "KEY=V")]
+        param: Vec<String>,
+        /// Compare with this baseline file.
+        #[arg(long, value_name = "FILE")]
+        baseline: Option<String>,
+        /// Exit 1 on any regression, missing set or changed set version (needs a baseline).
+        #[arg(long)]
+        gate: bool,
+        /// Write the report as the new baseline.
+        #[arg(long, value_name = "FILE")]
+        write_baseline: Option<String>,
+    },
+    /// Evaluate every combination of parameter ranges and rank them by an objective metric.
+    Sweep {
+        /// Golden file or directory (default: fixtures/eval); repeatable.
+        #[arg(long, value_name = "PATH", conflicts_with = "project_sets")]
+        sets: Vec<String>,
+        /// Use the project's kindex golden sets and live index.
+        #[arg(long)]
+        project_sets: bool,
+        /// The cut-offs k, comma separated (1..=50).
+        #[arg(long, value_delimiter = ',', default_values_t = [1u32, 5, 10], value_name = "LIST")]
+        k: Vec<u32>,
+        /// A range, `KEY=V1,V2,...`; repeatable.
+        #[arg(long, value_name = "KEY=V1,V2,...", required = true)]
+        param: Vec<String>,
+        /// The metric to order combinations by.
+        #[arg(long, default_value = "retrieval.ndcg@10", value_name = "METRIC")]
+        objective: String,
     },
 }
 
