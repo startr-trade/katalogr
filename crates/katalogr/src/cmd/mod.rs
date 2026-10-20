@@ -17,6 +17,8 @@ pub mod hubs;
 pub mod index;
 pub mod kindex;
 pub mod map;
+#[cfg(feature = "mcp")]
+pub mod mcp;
 pub mod mirrors;
 pub mod notify;
 pub mod path;
@@ -29,6 +31,7 @@ pub mod search;
 pub mod session;
 pub mod show;
 pub mod skill;
+pub mod status;
 pub mod tests;
 pub mod version;
 pub mod why;
@@ -99,19 +102,18 @@ pub fn options_with(cli: &Cli, diagnostic: bool) -> Options {
 
 /// Print a read report and map staleness to the exit status.
 pub fn render(cli: &Cli, r: &katalogr_dist::Report, line: &str) -> ExitCode {
+    if cli.json {
+        return crate::render::emit(&crate::render::json::report(r));
+    }
     for w in &r.warnings {
         eprintln!("katalogr: warning: {w}");
     }
-    if cli.json {
-        println!("{}", r.to_json());
-    } else {
-        println!(
-            "{line}; watermark {}, {} pending{}",
-            r.watermark,
-            r.pending,
-            if r.stale { " (stale)" } else { "" }
-        );
-    }
+    println!(
+        "{line}; watermark {}, {} pending{}",
+        r.watermark,
+        r.pending,
+        if r.stale { " (stale)" } else { "" }
+    );
     if r.timed_out {
         ExitCode::Stale
     } else {

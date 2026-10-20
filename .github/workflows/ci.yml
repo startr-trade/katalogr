@@ -29,6 +29,9 @@ jobs:
           components: rustfmt, clippy
       - name: cargo clippy
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      # Test ci::builds_without_mcp_feature (FEAT-067 R-14)
+      - name: cargo clippy (no mcp feature)
+        run: cargo clippy -p katalogr --no-default-features --all-targets --locked -- -D warnings
 
   test:
     strategy:

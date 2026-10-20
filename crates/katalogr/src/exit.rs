@@ -27,11 +27,6 @@ impl ExitCode {
 
     /// Print the error and pick its status.
     pub fn from_error(e: &DistError) -> ExitCode {
-        eprintln!("katalogr: {e}");
-        if e.is_usage() {
-            ExitCode::Usage
-        } else {
-            ExitCode::Error
-        }
+        crate::render::emit(&crate::render::json::error(e))
     }
 }

@@ -112,10 +112,10 @@ mod bench {
                 };
                 let id = name.id();
                 let mut facts = BTreeMap::new();
-                if i % 10 == 0 {
+                if i.is_multiple_of(10) {
                     facts.insert("root".to_string(), Fact::Str("main".into()));
                 }
-                if i % 100 == 0 {
+                if i.is_multiple_of(100) {
                     facts.insert(
                         "rationale".to_string(),
                         Fact::List(vec![Fact::Map(BTreeMap::from([
@@ -180,7 +180,7 @@ mod bench {
             }
             for j in targets {
                 count += 1;
-                let inferred = count % 50 == 0;
+                let inferred = count.is_multiple_of(50);
                 tx.put_link(
                     &LinkKey {
                         from: *from,
