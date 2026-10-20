@@ -20,8 +20,8 @@ pub use error::DistError;
 pub use katalogr_analytics as analytics;
 pub use katalogr_query as query;
 use katalogr_query::{
-    Blame, CallerHit, DanglingRef, Explain, MapEntry, MirrorDrift, PathStep, RefHit, Resolution,
-    SearchHit, SymbolHit, WhyResult,
+    Blame, CallerHit, DanglingRef, Explain, MapEntry, MirrorDrift, Partial, PathStep, RefHit,
+    Resolution, SearchHit, SymbolHit, WhyResult, cap,
 };
 pub use katalogr_query::{ReplaceResult, ShowResult};
 pub use setup::{ProjectCreated, kindex_init, project_init};
@@ -218,6 +218,8 @@ pub enum Outcome<T> {
 pub struct Reply<T> {
     pub outcome: Outcome<T>,
     pub report: Report,
+    /// Caps that cut this answer (empty when none did). The renderer adds budget cuts.
+    pub partial: Vec<Partial>,
 }
 
 fn found_or_none(items: Vec<SymbolHit>, text: &str) -> Outcome<Vec<SymbolHit>> {
@@ -460,6 +462,7 @@ impl Katalogr {
         )?;
         Ok(Reply {
             outcome: a.value?,
+            partial: Vec::new(),
             report: Report {
                 watermark: a.watermark.0,
                 pending: a.pending,
@@ -492,9 +495,27 @@ impl Katalogr {
         depth: u32,
         opts: &Options,
     ) -> Result<Reply<Vec<CallerHit>>, DistError> {
-        self.query(opts, |tx| {
-            on_target(tx, text, |t| katalogr_query::callers(tx, t, depth))
-        })
+        // One extra level tells whether the depth cut the answer.
+        let mut partial = Vec::new();
+        // `callers` treats a depth of 0 as 1.
+        let depth = depth.max(1);
+        let mut reply = self.query(opts, |tx| {
+            on_target(tx, text, |t| {
+                let mut hits = katalogr_query::callers(tx, t, depth.saturating_add(1))?;
+                if hits.iter().any(|h| h.depth > depth) {
+                    hits.retain(|h| h.depth <= depth);
+                    partial.push(Partial::new(
+                        cap::DEPTH,
+                        u64::from(depth),
+                        hits.len() as u64,
+                        None,
+                    ));
+                }
+                Ok(hits)
+            })
+        })?;
+        reply.partial = partial;
+        Ok(reply)
     }
 
     /// The symbol at `file:line` of the current repo (`file` relative to the repo root) and its
@@ -570,14 +591,22 @@ impl Katalogr {
                 "{terms:?}: no searchable word (words need two letters, or a digit)"
             )));
         }
-        self.query(opts, |tx| {
-            let hits = katalogr_query::search(tx, terms, limit)?;
+        // One extra hit tells whether the limit cut the answer.
+        let mut partial = Vec::new();
+        let mut reply = self.query(opts, |tx| {
+            let mut hits = katalogr_query::search(tx, terms, limit.saturating_add(1))?;
+            if hits.len() > limit {
+                hits.truncate(limit);
+                partial.push(Partial::new(cap::LIMIT, limit as u64, limit as u64, None));
+            }
             Ok(if hits.is_empty() {
                 Outcome::NoMatch(format!("nothing matches {terms:?}"))
             } else {
                 Outcome::Found(hits)
             })
-        })
+        })?;
+        reply.partial = partial;
+        Ok(reply)
     }
 
     /// The shortest chain of links between two symbols, in either direction.
@@ -600,8 +629,10 @@ impl Katalogr {
             Ok(match katalogr_query::path(tx, &first, &second, max_len)? {
                 Some(steps) => Outcome::Found(steps),
                 None => Outcome::NoMatch(format!(
-                    "no path from {} to {} within {max_len} steps",
-                    first.name, second.name
+                    "no path from {} to {} within {max_len} steps; {} (searched up to {max_len} links)",
+                    first.name,
+                    second.name,
+                    katalogr_query::PARTIAL_NOTE
                 )),
             })
         })
@@ -614,9 +645,23 @@ impl Katalogr {
         per_side: usize,
         opts: &Options,
     ) -> Result<Reply<Explain>, DistError> {
-        self.query(opts, |tx| {
-            on_target(tx, text, |t| katalogr_query::explain(tx, t, per_side))
-        })
+        let mut partial = Vec::new();
+        let mut reply = self.query(opts, |tx| {
+            on_target(tx, text, |t| {
+                let x = katalogr_query::explain(tx, t, per_side)?;
+                if x.outgoing_total as usize > per_side || x.incoming_total as usize > per_side {
+                    partial.push(Partial::new(
+                        cap::PER_SIDE,
+                        per_side as u64,
+                        (x.outgoing.len() + x.incoming.len()) as u64,
+                        Some(x.outgoing_total + x.incoming_total),
+                    ));
+                }
+                Ok(x)
+            })
+        })?;
+        reply.partial = partial;
+        Ok(reply)
     }
 
     /// The insight defaults from the project settings (`insights.*`); a missing or malformed
@@ -655,9 +700,13 @@ impl Katalogr {
 
     /// Hubs: the nodes with the highest weighted degree.
     pub fn hubs(&self, opts: &HubOptions, o: &Options) -> Result<Reply<HubReport>, DistError> {
-        self.query(o, |tx| {
+        let mut reply = self.query(o, |tx| {
             Ok(Outcome::Found(katalogr_analytics::hubs(tx, opts)?))
-        })
+        })?;
+        if let Outcome::Found(r) = &reply.outcome {
+            reply.partial = limit_partial(opts.limit, r.items.len(), None);
+        }
+        Ok(reply)
     }
 
     /// Communities of the usage graph.
@@ -666,9 +715,23 @@ impl Katalogr {
         opts: &CommunityOptions,
         o: &Options,
     ) -> Result<Reply<CommunityReport>, DistError> {
-        self.query(o, |tx| {
+        let mut reply = self.query(o, |tx| {
             Ok(Outcome::Found(katalogr_analytics::communities(tx, opts)?))
-        })
+        })?;
+        if let Outcome::Found(r) = &reply.outcome {
+            reply.partial = limit_partial(opts.limit, r.items.len(), Some(r.communities_total));
+            let shown: usize = r.items.iter().map(|c| c.top.len()).sum();
+            let total: u64 = r.items.iter().map(|c| c.size).sum();
+            if total > shown as u64 {
+                reply.partial.push(Partial::new(
+                    cap::MEMBERS,
+                    opts.members as u64,
+                    shown as u64,
+                    Some(total),
+                ));
+            }
+        }
+        Ok(reply)
     }
 
     /// Dependency cycles.
@@ -677,9 +740,23 @@ impl Katalogr {
         opts: &CycleOptions,
         o: &Options,
     ) -> Result<Reply<CycleReport>, DistError> {
-        self.query(o, |tx| {
+        let mut reply = self.query(o, |tx| {
             Ok(Outcome::Found(katalogr_analytics::cycles(tx, opts)?))
-        })
+        })?;
+        if let Outcome::Found(r) = &reply.outcome {
+            reply.partial = limit_partial(opts.limit, r.items.len(), Some(r.cycles_total));
+            let shown: usize = r.items.iter().map(|c| c.members.len()).sum();
+            let total: u64 = r.items.iter().map(|c| c.members_total).sum();
+            if total > shown as u64 {
+                reply.partial.push(Partial::new(
+                    cap::MEMBERS,
+                    opts.members as u64,
+                    shown as u64,
+                    Some(total),
+                ));
+            }
+        }
+        Ok(reply)
     }
 
     /// Dead-code candidates. Fills `opts.code_kinds` from the registered extensions first.
@@ -698,9 +775,13 @@ impl Katalogr {
             })
             .filter(|(_, kinds): &(String, std::collections::BTreeSet<String>)| !kinds.is_empty())
             .collect();
-        self.query(o, |tx| {
+        let mut reply = self.query(o, |tx| {
             Ok(Outcome::Found(katalogr_analytics::dead_code(tx, &opts)?))
-        })
+        })?;
+        if let Outcome::Found(r) = &reply.outcome {
+            reply.partial = limit_partial(opts.limit, r.items.len(), Some(r.candidates_total));
+        }
+        Ok(reply)
     }
 
     /// Rationale of one symbol, a path prefix, the top `hubs` hubs, or (none given) everything.
@@ -719,7 +800,7 @@ impl Katalogr {
                 "give one of SYMBOL, --path and --hubs".to_string(),
             ));
         }
-        self.query(o, |tx| {
+        let mut reply = self.query(o, |tx| {
             let scope = if let Some(text) = symbol {
                 match katalogr_query::resolve(tx, text)? {
                     Resolution::One(h) => match katalogr_model::parse_name(&h.name) {
@@ -738,7 +819,11 @@ impl Katalogr {
             Ok(Outcome::Found(katalogr_analytics::rationale(
                 tx, &scope, limit,
             )?))
-        })
+        })?;
+        if let Outcome::Found(r) = &reply.outcome {
+            reply.partial = limit_partial(limit, r.items.len(), Some(r.entries_total));
+        }
+        Ok(reply)
     }
 
     fn read(
@@ -766,6 +851,17 @@ impl Katalogr {
             queued,
             warnings,
         })
+    }
+}
+
+/// The `limit` marker of a report that shows `shown` items under `limit`: present when the
+/// limit was reached and the report's total (if it has one) is larger.
+fn limit_partial(limit: usize, shown: usize, total: Option<u64>) -> Vec<Partial> {
+    let cut = shown == limit && total.is_none_or(|t| t > limit as u64);
+    if cut {
+        vec![Partial::new(cap::LIMIT, limit as u64, shown as u64, total)]
+    } else {
+        Vec::new()
     }
 }
 

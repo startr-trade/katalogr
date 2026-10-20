@@ -228,34 +228,55 @@ impl Katalogr {
             if reply.report.stale { ", stale" } else { "" },
         );
         let footer = "Ask the graph before reading files: use the katalogr skill (find, search, explain, show, refs, why).";
-        let mut lines = vec![header];
-        let mut tail = vec![footer.to_string()];
+        let symbol_lines: Vec<String> = entries
+            .iter()
+            .map(|e| {
+                format!(
+                    "{}  {}  {}:{}",
+                    e.symbol.kind, e.symbol.name, e.symbol.path, e.symbol.span.start_line
+                )
+            })
+            .collect();
         // Header and footer first; symbols fill what remains. If even those do not fit, the
         // footer is dropped, then the header is cut to the budget.
-        let fixed = |lines: &[String], tail: &[String]| {
-            estimate_tokens(&format!("{}\n{}\n", lines.join("\n"), tail.join("\n")))
-        };
-        if fixed(&lines, &tail) > budget {
-            tail.clear();
-        }
-        for e in &entries {
-            let line = format!(
-                "{}  {}  {}:{}",
-                e.symbol.kind, e.symbol.name, e.symbol.path, e.symbol.span.start_line
-            );
-            let mut trial = lines.clone();
-            trial.push(line.clone());
-            if estimate_tokens(&format!(
-                "{}\n{}",
-                trial.join("\n"),
-                tail.iter().map(|t| format!("{t}\n")).collect::<String>()
-            )) > budget
-            {
-                break;
+        let fill = |mut tail: Vec<String>| -> (Vec<String>, usize) {
+            let fixed =
+                |tail: &[String]| estimate_tokens(&format!("{header}\n{}\n", tail.join("\n")));
+            if fixed(&tail) > budget {
+                // The partial marker (the first entry, when present) outlives the footer.
+                tail.truncate(tail.len().saturating_sub(1));
+                if fixed(&tail) > budget {
+                    tail.clear();
+                }
             }
-            lines.push(line);
+            let mut lines = vec![header.clone()];
+            for line in &symbol_lines {
+                let mut trial = lines.clone();
+                trial.push(line.clone());
+                if estimate_tokens(&format!(
+                    "{}\n{}",
+                    trial.join("\n"),
+                    tail.iter().map(|t| format!("{t}\n")).collect::<String>()
+                )) > budget
+                {
+                    break;
+                }
+                lines.push(line.clone());
+            }
+            let shown = lines.len() - 1;
+            lines.extend(tail);
+            (lines, shown)
+        };
+        let (mut lines, shown) = fill(vec![footer.to_string()]);
+        if shown < symbol_lines.len() {
+            // Symbols were left out: say so, inside the budget, before the footer.
+            let marker = format!(
+                "partial: capped at {budget} tokens (budget; {} symbols); {}",
+                symbol_lines.len(),
+                katalogr_query::PARTIAL_NOTE
+            );
+            lines = fill(vec![marker, footer.to_string()]).0;
         }
-        lines.extend(tail);
         let mut text = lines.join("\n");
         text.push('\n');
         // A budget below one line: cut the text to the budget.

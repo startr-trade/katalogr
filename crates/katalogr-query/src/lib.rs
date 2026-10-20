@@ -35,8 +35,9 @@ pub use refs::refs;
 pub use resolve::resolve;
 pub use result::{
     CallerHit, CommitHit, DanglingRef, Direction, Envelope, Explain, FieldDiff, FieldShape,
-    LinkBrief, MapEntry, Matched, MirrorDrift, Note, PathStep, RationaleLink, RefHit,
-    ReplaceResult, Resolution, SearchHit, ShowResult, SymbolHit, Truncation, WhyResult,
+    LinkBrief, MapEntry, Matched, MirrorDrift, Note, PARTIAL_NOTE, Partial, PathStep,
+    RationaleLink, RefHit, ReplaceResult, Resolution, SearchHit, ShowResult, SymbolHit, Truncation,
+    WhyResult, cap,
 };
 pub use schema::schemas;
 pub use search::search;

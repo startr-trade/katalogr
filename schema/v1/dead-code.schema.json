@@ -122,6 +122,47 @@
       ],
       "type": "string"
     },
+    "Partial": {
+      "description": "The answer was cut by a cap: more items exist (or may exist) than are shown.",
+      "properties": {
+        "at": {
+          "description": "The cap's value: N in \"capped at N\" (items, hops, or tokens for `budget`).",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "cap": {
+          "description": "Which cap: one of [`cap`]'s names.",
+          "type": "string"
+        },
+        "note": {
+          "description": "Always [`PARTIAL_NOTE`].",
+          "type": "string"
+        },
+        "shown": {
+          "description": "Items shown.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "total": {
+          "description": "Items there were before the cap, when known.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "cap",
+        "at",
+        "shown",
+        "note"
+      ],
+      "type": "object"
+    },
     "Span": {
       "description": "Schema-only mirror of [`katalogr_model::Span`].",
       "properties": {
@@ -212,6 +253,13 @@
       "description": "Suggested follow-up commands, at most three.",
       "items": {
         "type": "string"
+      },
+      "type": "array"
+    },
+    "partial": {
+      "description": "Present when a cap or budget cut the answer; one entry per cap that cut it.",
+      "items": {
+        "$ref": "#/$defs/Partial"
       },
       "type": "array"
     },
