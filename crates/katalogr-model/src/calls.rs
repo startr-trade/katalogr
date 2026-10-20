@@ -18,6 +18,10 @@ use std::collections::BTreeMap;
 /// Fact name: on a symbol (or on the artifact, for top-level code), the calls in its body that
 /// pass at least one token-like string argument. Value: `Fact::List` of `Fact::Map`.
 pub const STR_CALLS_FACT: &str = "str_calls";
+/// Fact name: on the artifact, the export-candidate lists that `str_calls` entries refer to by a
+/// short id (`cid`), so a list shared by many entries is stored once per file. Value:
+/// `Fact::Map` of id to `Fact::List` of `Fact::Str` (`"<namespace> <key>"`).
+pub const STR_CALL_CANDS_FACT: &str = "str_call_cands";
 /// Longest `text` kept, in bytes (the cut marker included).
 pub const STR_CALL_TEXT_MAX: usize = 256;
 /// Most entries kept per symbol; later calls are dropped.
@@ -117,9 +121,54 @@ fn int(v: u32) -> Fact {
     Fact::Int(i64::from(v))
 }
 
+/// The export-candidate lists of one fragment's `str_calls` entries, interned: equal lists share
+/// an id, assigned in first-seen order as base-36 text.
+#[derive(Default)]
+pub struct CandTable {
+    ids: BTreeMap<Vec<String>, String>,
+}
+
+impl CandTable {
+    fn intern(&mut self, cands: &[ExportKey]) -> String {
+        let key: Vec<String> = cands
+            .iter()
+            .map(|k| format!("{} {}", k.namespace, k.key))
+            .collect();
+        let mut n = self.ids.len();
+        self.ids
+            .entry(key)
+            .or_insert_with(|| {
+                let mut out = Vec::new();
+                loop {
+                    out.push(char::from_digit((n % 36) as u32, 36).unwrap_or('0'));
+                    n /= 36;
+                    if n == 0 {
+                        break;
+                    }
+                }
+                out.iter().rev().collect()
+            })
+            .clone()
+    }
+
+    /// The artifact fact holding the table, or `None` when no entry used a candidate list.
+    pub fn into_fact(self) -> Option<Fact> {
+        if self.ids.is_empty() {
+            return None;
+        }
+        Some(Fact::Map(
+            self.ids
+                .into_iter()
+                .map(|(list, id)| (id, Fact::List(list.into_iter().map(Fact::Str).collect())))
+                .collect(),
+        ))
+    }
+}
+
 /// The fact value for `calls` (first `STR_CALLS_MAX` kept, each with at most `ARG_REFS_MAX`
-/// refs), or `None` when `calls` is empty.
-pub fn str_calls_fact(calls: &[StrCall]) -> Option<Fact> {
+/// refs), or `None` when `calls` is empty. Only the start of each span is kept, and candidate
+/// lists go through `table`.
+pub fn str_calls_fact(calls: &[StrCall], table: &mut CandTable) -> Option<Fact> {
     if calls.is_empty() {
         return None;
     }
@@ -131,8 +180,6 @@ pub fn str_calls_fact(calls: &[StrCall]) -> Option<Fact> {
             m.insert("text".to_string(), Fact::Str(c.text.clone()));
             m.insert("line".to_string(), int(c.span.start_line));
             m.insert("col".to_string(), int(c.span.start_col));
-            m.insert("end_line".to_string(), int(c.span.end_line));
-            m.insert("end_col".to_string(), int(c.span.end_col));
             let mut refs = BTreeMap::new();
             for (text, r, inferred) in &c.refs {
                 if refs.len() >= ARG_REFS_MAX {
@@ -147,14 +194,7 @@ pub fn str_calls_fact(calls: &[StrCall]) -> Option<Fact> {
                         e.insert("sym".to_string(), Fact::Str(rel.clone()));
                     }
                     ArgRef::Candidates(c) => {
-                        e.insert(
-                            "cands".to_string(),
-                            Fact::List(
-                                c.iter()
-                                    .map(|k| Fact::Str(format!("{} {}", k.namespace, k.key)))
-                                    .collect(),
-                            ),
-                        );
+                        e.insert("cid".to_string(), Fact::Str(table.intern(c)));
                     }
                 }
                 if *inferred {
@@ -172,8 +212,9 @@ pub fn str_calls_fact(calls: &[StrCall]) -> Option<Fact> {
 }
 
 /// The `refs` entry of one fact element, decoded: `None` when `text` has no entry or the entry is
-/// malformed. Used by the profile engine.
-pub fn arg_ref_of(element: &Fact, text: &str) -> Option<(ArgRef, bool)> {
+/// malformed. `table` is the artifact's `str_call_cands` fact, through which a `cid` is read.
+/// Used by the profile engine.
+pub fn arg_ref_of(element: &Fact, table: Option<&Fact>, text: &str) -> Option<(ArgRef, bool)> {
     let Fact::Map(m) = element else { return None };
     let Some(Fact::Map(refs)) = m.get("refs") else {
         return None;
@@ -185,7 +226,11 @@ pub fn arg_ref_of(element: &Fact, text: &str) -> Option<(ArgRef, bool)> {
     if let Some(Fact::Str(rel)) = e.get("sym") {
         return Some((ArgRef::Local(rel.clone()), inferred));
     }
-    if let Some(Fact::List(items)) = e.get("cands") {
+    let items = match (e.get("cid"), table) {
+        (Some(Fact::Str(id)), Some(Fact::Map(t))) => t.get(id),
+        _ => None,
+    };
+    if let Some(Fact::List(items)) = items {
         let mut out = Vec::new();
         for it in items {
             let Fact::Str(s) = it else { return None };

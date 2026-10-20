@@ -499,8 +499,9 @@ impl TestExtractor {
         }
 
         let mut artifact_facts = BTreeMap::new();
+        let mut table = katalogr_model::calls::CandTable::default();
         for (target, calls) in &str_calls {
-            let Some(fact) = katalogr_model::calls::str_calls_fact(calls) else {
+            let Some(fact) = katalogr_model::calls::str_calls_fact(calls, &mut table) else {
                 continue;
             };
             let name = katalogr_model::calls::STR_CALLS_FACT.to_string();
@@ -521,6 +522,9 @@ impl TestExtractor {
                 })
                 .ok_or_else(|| bad(None, format!("undeclared symbol {target:?}")))?;
             sym.facts.insert(name, fact);
+        }
+        if let Some(t) = table.into_fact() {
+            artifact_facts.insert(katalogr_model::calls::STR_CALL_CANDS_FACT.to_string(), t);
         }
         let mut embedded = Vec::new();
         for (_, sym, call, text, span) in lits {

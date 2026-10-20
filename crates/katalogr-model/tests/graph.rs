@@ -113,22 +113,28 @@ mod graph {
                 ("show".into(), ArgRef::Local("dup".into()), false),
             ],
         }];
-        let fact = str_calls_fact(&calls).unwrap();
+        let mut table = CandTable::default();
+        let fact = str_calls_fact(&calls, &mut table).unwrap();
         let Fact::List(items) = &fact else { panic!() };
         assert_eq!(items.len(), 1);
-        let (r, inf) = arg_ref_of(&items[0], "show").unwrap();
+        let Fact::Map(first) = &items[0] else {
+            panic!()
+        };
+        assert!(!first.contains_key("end_line") && !first.contains_key("end_col"));
+        let cands = table.into_fact();
+        let (r, inf) = arg_ref_of(&items[0], cands.as_ref(), "show").unwrap();
         assert!(inf);
         assert_eq!(
             r,
             ArgRef::Candidates(vec![key("src/h.ts#show"), key("other")])
         );
         assert_eq!(
-            arg_ref_of(&items[0], "auth"),
+            arg_ref_of(&items[0], cands.as_ref(), "auth"),
             Some((ArgRef::Local("function:auth".into()), false))
         );
-        assert_eq!(arg_ref_of(&items[0], "nope"), None);
+        assert_eq!(arg_ref_of(&items[0], cands.as_ref(), "nope"), None);
 
-        assert_eq!(str_calls_fact(&[]), None);
+        assert_eq!(str_calls_fact(&[], &mut CandTable::default()), None);
         let many: Vec<StrCall> = (0..300)
             .map(|i| StrCall {
                 text: format!("f({i})"),
@@ -136,7 +142,7 @@ mod graph {
                 refs: vec![],
             })
             .collect();
-        let Some(Fact::List(l)) = str_calls_fact(&many) else {
+        let Some(Fact::List(l)) = str_calls_fact(&many, &mut CandTable::default()) else {
             panic!()
         };
         assert_eq!(l.len(), STR_CALLS_MAX);
@@ -152,11 +158,14 @@ mod graph {
                 )
             })
             .collect();
-        let Some(Fact::List(l)) = str_calls_fact(&[StrCall {
-            text: "f()".into(),
-            span: span(1),
-            refs,
-        }]) else {
+        let Some(Fact::List(l)) = str_calls_fact(
+            &[StrCall {
+                text: "f()".into(),
+                span: span(1),
+                refs,
+            }],
+            &mut CandTable::default(),
+        ) else {
             panic!()
         };
         let Fact::Map(m) = &l[0] else { panic!() };

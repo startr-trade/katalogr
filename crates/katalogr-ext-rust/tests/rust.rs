@@ -986,7 +986,7 @@ mod rust {
     }
 
     /// One `str_calls` entry: text, span and the `refs` map (or null).
-    type Call = (String, (u64, u64, u64, u64), Value);
+    type Call = (String, (u64, u64), Value);
 
     /// The `str_calls` entries of a symbol.
     fn str_calls(g: &Graph, sym: &str) -> Vec<Call> {
@@ -999,7 +999,7 @@ mod rust {
                 let int = |k: &str| m[k]["Int"].as_u64().unwrap();
                 (
                     m["text"]["Str"].as_str().unwrap().to_string(),
-                    (int("line"), int("col"), int("end_line"), int("end_col")),
+                    (int("line"), int("col")),
                     m["refs"]["Map"].clone(),
                 )
             })
@@ -1021,8 +1021,8 @@ mod rust {
                 ".route(\"/inline\", get(_))",
             ]
         );
-        // The span runs from the method name to the closing parenthesis.
-        assert_eq!(router[0].1, (13, 14, 13, 59));
+        // The position is where the method name starts (the end is not stored).
+        assert_eq!(router[0].1, (13, 14));
         let client = str_calls(&g, "src/routes.rs#fn:client");
         let texts: Vec<&str> = client.iter().map(|c| c.0.as_str()).collect();
         assert_eq!(
@@ -1071,8 +1071,11 @@ mod rust {
     fn handler_arguments_resolved() {
         let g = index_case("string-calls");
         let router = str_calls(&g, "src/routes.rs#impl:Api/fn:router");
+        let table =
+            &g.artifacts[&format!("{REPO}:src/routes.rs")]["facts"]["str_call_cands"]["Map"];
         let cands = |i: usize, arg: &str| -> Vec<String> {
-            router[i].2[arg]["Map"]["cands"]["List"]
+            let id = router[i].2[arg]["Map"]["cid"]["Str"].as_str().unwrap();
+            table[id]["List"]
                 .as_array()
                 .unwrap_or_else(|| panic!("no cands for {arg} in {:?}", router[i].2))
                 .iter()

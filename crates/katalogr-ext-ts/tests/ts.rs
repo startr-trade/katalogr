@@ -583,14 +583,11 @@ mod ts {
         );
         let list = str_calls(&g.nodes["fx:src/client.ts#class:Svc/method:list"]);
         assert_eq!(texts(&list), ["this.http.get(\"/v1/items\")"]);
-        // The span runs from the method name to the closing parenthesis.
+        // The position is where the method name starts (the end is not stored).
         let e = &g.nodes["fx:src/client.ts#class:Svc/method:list"]["facts"]["str_calls"]["List"][0]
             ["Map"];
         let int = |k: &str| e[k]["Int"].as_u64().unwrap();
-        assert_eq!(
-            (int("line"), int("col"), int("end_line"), int("end_col")),
-            (14, 22, 14, 37)
-        );
+        assert_eq!((int("line"), int("col")), (14, 22));
     }
 
     #[test]
@@ -636,8 +633,10 @@ mod ts {
         assert_eq!(entry(0, "health")["Map"]["sym"]["Str"], "fn:health");
         assert_eq!(entry(1, "auth")["Map"]["sym"]["Str"], "fn:auth");
         // A named import: the export candidates of the imported module.
+        let table = &g.artifacts["fx:src/app.ts"]["facts"]["str_call_cands"]["Map"];
         let cands = |e: &Value| -> Vec<String> {
-            e["Map"]["cands"]["List"]
+            let id = e["Map"]["cid"]["Str"].as_str().unwrap();
+            table[id]["List"]
                 .as_array()
                 .unwrap()
                 .iter()

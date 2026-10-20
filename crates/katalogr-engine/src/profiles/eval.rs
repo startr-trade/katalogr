@@ -177,6 +177,9 @@ pub struct Cx {
     /// Symbols by their name relative to the artifact (the canonical name after the first `#`),
     /// built only when a rule has a `holder`.
     locals: Option<HashMap<String, Id>>,
+    /// The artifact's `str_call_cands` fact, through which `str_calls` entries name their export
+    /// candidates; read only when a rule has a `holder`.
+    cands: Option<Fact>,
 }
 
 impl Cx {
@@ -191,7 +194,19 @@ impl Cx {
             }
             m
         });
-        Cx { scope, locals }
+        let cands = holders
+            .then(|| {
+                f.artifact
+                    .facts
+                    .get(katalogr_model::calls::STR_CALL_CANDS_FACT)
+            })
+            .flatten()
+            .cloned();
+        Cx {
+            scope,
+            locals,
+            cands,
+        }
     }
 }
 
@@ -207,12 +222,13 @@ fn element_of(e: &Fact) -> Option<(&str, Option<Span>)> {
                 Some(Fact::Int(n)) => u32::try_from(*n).ok(),
                 _ => None,
             };
-            let span = match (int("line"), int("col"), int("end_line"), int("end_col")) {
-                (Some(a), Some(b), Some(c), Some(d)) => Some(Span {
+            // Only the start is stored; the element's span is the point where it starts.
+            let span = match (int("line"), int("col")) {
+                (Some(a), Some(b)) => Some(Span {
                     start_line: a,
                     start_col: b,
-                    end_line: c,
-                    end_col: d,
+                    end_line: a,
+                    end_col: b,
                 }),
                 _ => None,
             };
@@ -416,6 +432,7 @@ pub fn apply_rule(
                     holder.as_deref(),
                     element,
                     cx.locals.as_ref(),
+                    cx.cands.as_ref(),
                     id,
                     confidence,
                 );
@@ -488,6 +505,7 @@ fn hold(
     holder: Option<&str>,
     element: Option<&Fact>,
     locals: Option<&HashMap<String, Id>>,
+    cands: Option<&Fact>,
     target: Id,
     confidence: Confidence,
 ) -> Held {
@@ -498,7 +516,7 @@ fn hold(
     if h.is_empty() {
         return fallback;
     }
-    let Some((r, inferred)) = element.and_then(|e| arg_ref_of(e, h)) else {
+    let Some((r, inferred)) = element.and_then(|e| arg_ref_of(e, cands, h)) else {
         return fallback;
     };
     let confidence = if inferred {

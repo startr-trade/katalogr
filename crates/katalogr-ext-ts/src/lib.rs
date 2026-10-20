@@ -103,9 +103,10 @@ impl Extractor for TsExtractor {
     /// bindings (FEAT-016); `2` offers string literals to guest
     /// extensions (FEAT-017); `3` adds the `root`, `package` and `rationale`
     /// facts (FEAT-030); `;tests-1` adds the `test` fact, test symbols and the `test-name`
-    /// exports (FEAT-063); `;rest-1` adds the `str_calls` fact (FEAT-014).
+    /// exports (FEAT-063); `;rest-1` adds the `str_calls` fact (FEAT-014); `;rest-2` compacts it (per-file
+    /// candidate table, start-only positions).
     fn revision_salt(&self) -> &'static str {
-        "ts-extract-3;tests-1;rest-1"
+        "ts-extract-3;tests-1;rest-1;rest-2"
     }
 
     /// The [`TsContext`] as compact JSON with sorted keys and vectors.

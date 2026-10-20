@@ -259,10 +259,11 @@ pub fn extract_full(input: &ExtractInput) -> Result<Extraction, ExtractError> {
             .enumerate()
             .map(|(i, s)| (s.name.id(), i))
             .collect();
+        let mut table = katalogr_model::calls::CandTable::default();
         for (id, calls) in &mut b.str_calls {
             // Source order: the walk meets an outer call before the calls it is chained on.
             calls.sort_by_key(|c| (c.span.start_line, c.span.start_col));
-            let Some(fact) = katalogr_model::calls::str_calls_fact(calls) else {
+            let Some(fact) = katalogr_model::calls::str_calls_fact(calls, &mut table) else {
                 continue;
             };
             let name = katalogr_model::calls::STR_CALLS_FACT.to_string();
@@ -275,6 +276,9 @@ pub fn extract_full(input: &ExtractInput) -> Result<Extraction, ExtractError> {
                 }
                 None => {}
             }
+        }
+        if let Some(t) = table.into_fact() {
+            facts.insert(katalogr_model::calls::STR_CALL_CANDS_FACT.to_string(), t);
         }
     }
     let mut fragment = Fragment {
