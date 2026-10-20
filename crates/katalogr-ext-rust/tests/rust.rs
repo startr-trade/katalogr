@@ -739,6 +739,114 @@ mod rust {
         );
         assert!(!g.errors.contains_key("Cargo.toml"));
     }
+
+    /// One `str_calls` entry: text, span and the `refs` map (or null).
+    type Call = (String, (u64, u64, u64, u64), Value);
+
+    /// The `str_calls` entries of a symbol.
+    fn str_calls(g: &Graph, sym: &str) -> Vec<Call> {
+        let Some(list) = g.sym(sym)["facts"]["str_calls"]["List"].as_array() else {
+            return Vec::new();
+        };
+        list.iter()
+            .map(|e| {
+                let m = &e["Map"];
+                let int = |k: &str| m[k]["Int"].as_u64().unwrap();
+                (
+                    m["text"]["Str"].as_str().unwrap().to_string(),
+                    (int("line"), int("col"), int("end_line"), int("end_col")),
+                    m["refs"]["Map"].clone(),
+                )
+            })
+            .collect()
+    }
+
+    #[test]
+    fn string_calls_recorded() {
+        let g = index_case("string-calls");
+        assert_expected("string-calls", &g);
+        let router = str_calls(&g, "src/routes.rs#impl:Api/fn:router");
+        let texts: Vec<&str> = router.iter().map(|c| c.0.as_str()).collect();
+        assert_eq!(
+            texts,
+            [
+                ".route(\"/users/{id}\", get(show).delete(remove))",
+                ".route(\"/local\", get(local_handler))",
+                ".route(\"/list\", post(Self::list))",
+                ".route(\"/inline\", get(_))",
+            ]
+        );
+        // The span runs from the method name to the closing parenthesis.
+        assert_eq!(router[0].1, (13, 14, 13, 59));
+        let client = str_calls(&g, "src/routes.rs#fn:client");
+        let texts: Vec<&str> = client.iter().map(|c| c.0.as_str()).collect();
+        assert_eq!(
+            texts,
+            [
+                "client.get(\"https://api.example.test/users\")",
+                "client.post(\"{}/users/{}\")",
+                "reqwest::get(\"https://api.example.test/ping\")",
+            ],
+            "the call that passes only prose is not recorded"
+        );
+        // No entry for a symbol without string calls.
+        assert!(g.sym("src/handlers.rs#fn:show")["facts"]["str_calls"].is_null());
+    }
+
+    #[test]
+    fn format_macro_rendered_as_template() {
+        let g = index_case("string-calls");
+        let client = str_calls(&g, "src/routes.rs#fn:client");
+        assert_eq!(client[1].0, "client.post(\"{}/users/{}\")");
+        // Escaped braces become single braces and other holes `{}`.
+        let src = "pub fn f(b: &str) { g(format!(\"{{{}}}/a/{b:?}/{0}\", b)); }\n";
+        let path = RelPath::new("src/lib.rs").unwrap();
+        let ex = RustExtractor
+            .extract(&ExtractInput {
+                repo: "fx",
+                path: &path,
+                revision: "ce013625030ba8dba906f756967f9e9ca394464a",
+                content: src.as_bytes(),
+                context: &[],
+            })
+            .unwrap();
+        let Some(katalogr_model::Fact::List(l)) = ex.symbols[0].facts.get("str_calls") else {
+            panic!("no str_calls: {:?}", ex.symbols[0].facts)
+        };
+        let katalogr_model::Fact::Map(m) = &l[0] else {
+            panic!()
+        };
+        assert_eq!(
+            m["text"],
+            katalogr_model::Fact::Str("g(\"{{}}/a/{}/{}\")".to_string())
+        );
+    }
+
+    #[test]
+    fn handler_arguments_resolved() {
+        let g = index_case("string-calls");
+        let router = str_calls(&g, "src/routes.rs#impl:Api/fn:router");
+        let cands = |i: usize, arg: &str| -> Vec<String> {
+            router[i].2[arg]["Map"]["cands"]["List"]
+                .as_array()
+                .unwrap_or_else(|| panic!("no cands for {arg} in {:?}", router[i].2))
+                .iter()
+                .map(|c| c["Str"].as_str().unwrap().to_string())
+                .collect()
+        };
+        // An imported name: the export key of the item in the `handlers` module.
+        assert_eq!(cands(0, "show")[0], "rs-item .::handlers::show");
+        assert_eq!(cands(0, "remove")[0], "rs-item .::handlers::remove");
+        // A same-file function has its own item key.
+        assert_eq!(
+            cands(1, "local_handler")[0],
+            "rs-item .::routes::local_handler"
+        );
+        // `Self::list` resolves through the impl.
+        assert_eq!(cands(2, "Self::list")[0], "rs-item .::routes::Api::list");
+        // A closure has no entry at all.
+        assert!(router[3].2.is_null(), "{:?}", router[3].2);
+    }
 }
 
 mod bench {

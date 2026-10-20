@@ -10,6 +10,7 @@ pub mod items;
 pub mod lines;
 pub mod literals;
 pub mod modules;
+pub mod strcalls;
 pub(crate) mod wasm;
 
 pub use context::{TsContext, TsProject};
@@ -68,14 +69,15 @@ impl Extractor for TsExtractor {
             "wasm-import",
             "wasm-glue",
             "embedded-literals",
+            "string-calls",
         ]
     }
 
     /// Bumped when extraction output changes for unchanged input: `1` adds the wasm package
     /// bindings (FEAT-016); `2` offers string literals to guest
-    /// extensions (FEAT-017).
+    /// extensions (FEAT-017); `2-rest1` adds the `str_calls` fact (FEAT-014).
     fn revision_salt(&self) -> &'static str {
-        "ts-extract-2"
+        "ts-extract-2-rest1"
     }
 
     /// The [`TsContext`] as compact JSON with sorted keys and vectors.

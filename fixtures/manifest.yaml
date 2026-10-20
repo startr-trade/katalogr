@@ -81,6 +81,8 @@ technologies:
       - rust/broken-syntax
     re-export:
       - rust/use-and-reexport
+    string-calls:
+      - rust/string-calls
     use-resolution:
       - rust/use-and-reexport
     wasm-export:
@@ -163,6 +165,8 @@ technologies:
       - ts/reexports
     require:
       - ts/require
+    string-calls:
+      - ts/string-calls
     wasm-glue:
       - wasm/glue-committed
     wasm-import:

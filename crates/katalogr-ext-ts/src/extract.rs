@@ -83,7 +83,7 @@ fn source_fragment(
     b.declare_glue();
     b.walk_calls(pending);
 
-    let facts = BTreeMap::new();
+    let mut facts = BTreeMap::new();
     let errors: Vec<ExtractError> = ret
         .diagnostics
         .errors()
@@ -102,6 +102,31 @@ fn source_fragment(
 
     let mut symbols = std::mem::take(&mut b.symbols);
     symbols.sort_by_key(|s| s.name.canonical());
+    // FEAT-014: the `str_calls` fact of each symbol (of the artifact for top-level code).
+    if !b.str_calls.is_empty() {
+        let at: std::collections::HashMap<_, _> = symbols
+            .iter()
+            .enumerate()
+            .map(|(i, s)| (s.name.id(), i))
+            .collect();
+        for (id, calls) in &mut b.str_calls {
+            // Source order: the walk meets an outer call before the calls it is chained on.
+            calls.sort_by_key(|c| (c.span.start_line, c.span.start_col));
+            let Some(fact) = katalogr_model::calls::str_calls_fact(calls) else {
+                continue;
+            };
+            let name = katalogr_model::calls::STR_CALLS_FACT.to_string();
+            match at.get(id) {
+                Some(&i) => {
+                    symbols[i].facts.insert(name, fact);
+                }
+                None if *id == b.artifact_id => {
+                    facts.insert(name, fact);
+                }
+                None => {}
+            }
+        }
+    }
     let embedded = crate::literals::collect(&ret.program, &b.lines, &symbols, b.artifact.id());
     let fragment = Fragment {
         provenance: b.provenance.clone(),

@@ -11,6 +11,7 @@ pub mod lines;
 pub mod literals;
 pub mod manifest;
 pub mod ownership;
+pub mod strcalls;
 
 pub use context::{CrateInfo, Dep, Target, TargetKind, WorkspaceContext};
 
@@ -48,14 +49,15 @@ impl Extractor for RustExtractor {
             "wasm-export",
             "wasm-extern",
             "embedded-literals",
+            "string-calls",
         ]
     }
 
     /// Bumped when extraction output changes for unchanged input: `1` adds extern-block items
     /// and the wasm-bindgen bindings (FEAT-016); `2` offers string literals to guest
-    /// extensions (FEAT-017).
+    /// extensions (FEAT-017); `2-rest1` adds the `str_calls` fact (FEAT-014).
     fn revision_salt(&self) -> &'static str {
-        "rust-extract-2"
+        "rust-extract-2-rest1"
     }
 
     /// The [`WorkspaceContext`] as compact JSON with sorted keys and vectors.
