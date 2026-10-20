@@ -47,6 +47,20 @@ fn line_range(text: &str, first: u32, last: u32) -> Option<(usize, usize)> {
     Some((start, end))
 }
 
+/// A contract node has no span of its own: `show` and `replace` refuse its name.
+fn reject_contract(text: &str, command: &str) -> Result<(), DistError> {
+    if matches!(
+        katalogr_model::parse_name(text),
+        Ok(katalogr_model::AnyName::Contract(_))
+    ) {
+        return Err(DistError::usage(format!(
+            "{text} is a contract node and has no span of its own, so `{command}` cannot apply; \
+             use `katalogr explain` for its ends or `katalogr refs` for who is bound to it"
+        )));
+    }
+    Ok(())
+}
+
 impl Katalogr {
     fn read_fresh(&self, t: &Target) -> Result<Read, DistError> {
         let root = self
@@ -90,6 +104,7 @@ impl Katalogr {
         signature_only: bool,
         opts: &Options,
     ) -> Result<Reply<ShowResult>, DistError> {
+        reject_contract(text, "show")?;
         let reply = self.query(opts, |tx| {
             crate::on_target(tx, text, |s| {
                 katalogr_query::show::target(tx, s)?
@@ -154,6 +169,7 @@ impl Katalogr {
         new_body: &std::path::Path,
         opts: &Options,
     ) -> Result<Reply<ReplaceResult>, DistError> {
+        reject_contract(text, "replace")?;
         let body = std::fs::read(new_body).map_err(|e| DistError::io(new_body.display(), e))?;
         let body = String::from_utf8(body)
             .map_err(|_| DistError::usage(format!("{}: not UTF-8", new_body.display())))?;

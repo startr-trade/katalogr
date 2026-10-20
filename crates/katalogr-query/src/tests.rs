@@ -312,3 +312,199 @@ pub fn tests_for(
     });
     Ok(ranked.into_iter().map(|r| r.3).collect())
 }
+
+#[cfg(test)]
+mod explain_contract_fixture {
+    use crate::result::SymbolHit;
+    use crate::{Explain, explain};
+    use camino::Utf8PathBuf;
+    use katalogr_model::{
+        ArtifactName, Confidence, ContractName, Fragment, Id, LinkKind, Name, Provenance, RelPath,
+        Segment, Span, SymbolName,
+    };
+    use katalogr_store::{
+        Cache, ContractRow, Kindex, LinkEntry, LinkKey, LinkOrigin, LinkRow, ProjectConfig,
+        ProjectName, RepoConfig, Restitch, StoreError, SymbolRow, WriteTx,
+    };
+    use std::time::{Duration, Instant};
+
+    struct NoShards;
+
+    impl Restitch for NoShards {
+        fn replace_fragment(&self, _: &mut WriteTx, _: Fragment) -> Result<(), StoreError> {
+            Ok(())
+        }
+        fn remove_artifact(&self, _: &mut WriteTx, _: &ArtifactName) -> Result<(), StoreError> {
+            Ok(())
+        }
+    }
+
+    const SPAN: Span = Span {
+        start_line: 3,
+        start_col: 1,
+        end_line: 3,
+        end_col: 9,
+    };
+
+    /// A cache holding `contract:channel:orders` with the given provider, consumer and declarer
+    /// counts; returns it with the contract's hit.
+    pub(super) fn build(
+        providers: u32,
+        consumers: u32,
+        declarers: u32,
+    ) -> (tempfile::TempDir, Cache, SymbolHit) {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = Utf8PathBuf::from_path_buf(tmp.path().join("kx")).unwrap();
+        let dir = Kindex::init(&root)
+            .unwrap()
+            .create_project(
+                &ProjectName::new("ec").unwrap(),
+                ProjectConfig {
+                    repos: vec![RepoConfig::new("r")],
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        let cache =
+            Cache::open_or_rebuild(&dir, &NoShards, Instant::now() + Duration::from_secs(60))
+                .unwrap();
+        let path = RelPath::new("f.tx").unwrap();
+        let artifact = ArtifactName {
+            repo: "r".into(),
+            path: path.clone(),
+        };
+        let provenance = Provenance {
+            repo: "r".into(),
+            path,
+            revision: "ce013625030ba8dba906f756967f9e9ca394464a".into(),
+        };
+        let cname = ContractName {
+            kind: "channel".into(),
+            key: "orders".into(),
+        };
+        let cid = Id::of(&cname.canonical());
+        let mut tx = cache.write().unwrap();
+        tx.put_contract(
+            cid,
+            &ContractRow {
+                name: cname.clone(),
+                providers,
+                consumers,
+                declarers,
+            },
+        )
+        .unwrap();
+        for (role, count) in [
+            ("provides", providers),
+            ("consumes", consumers),
+            ("declares", declarers),
+        ] {
+            for i in 0..count {
+                let n = SymbolName {
+                    artifact: artifact.clone(),
+                    segments: vec![Segment {
+                        kind: "fn".into(),
+                        name: format!("{role}_{i}"),
+                    }],
+                    ordinal: 1,
+                };
+                let id = n.id();
+                tx.put_symbol(
+                    id,
+                    &SymbolRow {
+                        name: n,
+                        artifact: artifact.id(),
+                        kind: "fn".into(),
+                        span: SPAN,
+                        facts: Default::default(),
+                    },
+                )
+                .unwrap();
+                tx.put_link(
+                    &LinkKey {
+                        from: id,
+                        kind: LinkKind(role.into()),
+                        to: cid,
+                    },
+                    &LinkRow {
+                        entries: vec![LinkEntry {
+                            origin: LinkOrigin::Intra,
+                            confidence: Confidence::Extracted,
+                            span: Some(SPAN),
+                            provenance: provenance.clone(),
+                            fanout: None,
+                            produced_by: None,
+                        }],
+                    },
+                )
+                .unwrap();
+            }
+        }
+        tx.commit().unwrap();
+        let hit = SymbolHit {
+            name: cname.canonical(),
+            kind: "contract".into(),
+            path: String::new(),
+            span: Span {
+                start_line: 1,
+                start_col: 1,
+                end_line: 1,
+                end_col: 1,
+            },
+        };
+        (tmp, cache, hit)
+    }
+
+    pub(super) fn run(cache: &Cache, hit: &SymbolHit, per_side: usize) -> Explain {
+        let r = cache.read().unwrap();
+        explain(&r, hit, per_side).unwrap()
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn explain_contract_groups_by_role() {
+    let (_tmp, cache, hit) = explain_contract_fixture::build(2, 1, 1);
+    let x = explain_contract_fixture::run(&cache, &hit, 10);
+    let c = x.contract.expect("contract block");
+    assert_eq!((c.kind.as_str(), c.key.as_str()), ("channel", "orders"));
+    assert_eq!(
+        (c.providers_total, c.consumers_total, c.declarers_total),
+        (2, 1, 1)
+    );
+    let names = |v: &[crate::ContractEnd]| v.iter().map(|e| e.name.clone()).collect::<Vec<_>>();
+    assert_eq!(
+        names(&c.providers),
+        ["r:f.tx#fn:provides_0", "r:f.tx#fn:provides_1"]
+    );
+    assert_eq!(names(&c.consumers), ["r:f.tx#fn:consumes_0"]);
+    assert_eq!(names(&c.declarers), ["r:f.tx#fn:declares_0"]);
+    assert_eq!(c.providers[0].path, "f.tx");
+    assert_eq!(c.providers[0].span.start_line, 3);
+    assert_eq!(x.outgoing_total, 0);
+    assert_eq!(x.incoming_total, 4);
+}
+
+#[cfg(test)]
+#[test]
+fn explain_contract_totals_exceed_cap() {
+    let (_tmp, cache, hit) = explain_contract_fixture::build(1, 3, 0);
+    let x = explain_contract_fixture::run(&cache, &hit, 1);
+    let c = x.contract.expect("contract block");
+    assert_eq!(c.consumers.len(), 1);
+    assert_eq!(c.consumers[0].name, "r:f.tx#fn:consumes_0");
+    assert_eq!(c.consumers_total, 3);
+    assert_eq!(c.providers_total, 1);
+    assert_eq!(x.incoming.len(), 1);
+    assert_eq!(x.incoming_total, 4);
+}
+
+#[cfg(test)]
+#[test]
+fn explain_symbol_json_has_no_contract_key() {
+    let (_tmp, cache, hit) = explain_contract_fixture::build(1, 0, 0);
+    let mut x = explain_contract_fixture::run(&cache, &hit, 10);
+    assert!(serde_json::to_value(&x).unwrap().get("contract").is_some());
+    x.contract = None;
+    assert!(serde_json::to_value(&x).unwrap().get("contract").is_none());
+}

@@ -69,7 +69,7 @@ mod eval {
     fn fixture_suite_runs() {
         let r = report(&["--sets", "fixtures/eval"]);
         assert_eq!(r["mode"], "fixture");
-        assert_eq!(r["queries"].as_array().unwrap().len(), 34);
+        assert_eq!(r["queries"].as_array().unwrap().len(), 35);
         let sets: Vec<&str> = r["sets"]
             .as_array()
             .unwrap()
@@ -296,6 +296,17 @@ mod eval {
     }
 
     #[test]
+    fn golden_explain_contract() {
+        let r = report(&["--sets", "fixtures/eval/cross"]);
+        let c11 = query(&r, "cross", "c11");
+        assert_eq!(c11["route_expected"], "found");
+        assert_eq!(c11["route_actual"], "found");
+        assert_eq!(c11["route_ok"], true);
+        assert_eq!(c11["relevant_in_k"], 2);
+        assert_eq!(c11["hit"]["10"], 1.0);
+    }
+
+    #[test]
     fn cross_repo_breakdown() {
         let r = report(&["--sets", "fixtures/eval/cross"]);
         assert_eq!(query(&r, "cross", "c01")["scope_class"], "cross");
@@ -303,7 +314,7 @@ mod eval {
         assert_eq!(query(&r, "cross", "c03")["scope_class"], "within");
         assert_eq!(
             metric(&r, "retrieval.queries", &[("scope", "cross")]),
-            Some(3.0)
+            Some(4.0)
         );
         assert_eq!(
             metric(&r, "retrieval.queries", &[("scope", "within")]),
@@ -377,7 +388,7 @@ mod eval {
         let v: Value = serde_json::from_str(&out).unwrap();
         let r = &v["result"];
         assert_eq!(r["mode"], "project");
-        assert_eq!(r["queries"].as_array().unwrap().len(), 10);
+        assert_eq!(r["queries"].as_array().unwrap().len(), 11);
         assert_eq!(metric(r, "retrieval.evidence_missing", &[]), Some(0.0));
         assert!(v["watermark"].as_u64().unwrap() > 0);
         // Bless a project baseline; the default baseline is then picked up and gated.

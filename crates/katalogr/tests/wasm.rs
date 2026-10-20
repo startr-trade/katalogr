@@ -126,4 +126,20 @@ mod wasm {
             "{callers}"
         );
     }
+
+    #[test]
+    fn explain_wasm_export_contract() {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = tmp.path().join("app");
+        copy_dir(&fixtures().join("exports-uncommitted"), &repo);
+        project(tmp.path(), &[("app", &repo)]);
+
+        let out = ok(&repo, &["explain", CONTRACT]);
+        assert!(out.contains("kind: wasm_export"), "{out}");
+        let at = |head: &str| out.lines().position(|l| l.starts_with(head)).expect(&out);
+        let provider = out.lines().nth(at("providers") + 1).expect(&out);
+        assert!(provider.contains("src/lib.rs#fn:greet"), "{out}");
+        let consumer = out.lines().nth(at("consumers") + 1).expect(&out);
+        assert!(consumer.contains("web/src/app.ts"), "{out}");
+    }
 }

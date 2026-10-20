@@ -551,11 +551,40 @@ pub fn explain(cli: &Cli, reply: Reply<Explain>) -> ExitCode {
             if let Some(d) = &x.doc {
                 lines.push(format!("doc: {d}"));
             }
+            if let Some(c) = &x.contract {
+                lines.push(format!("kind: {}", c.kind));
+                lines.push(format!("key: {}", c.key));
+                for (title, ends, total) in [
+                    ("providers", &c.providers, c.providers_total),
+                    ("consumers", &c.consumers, c.consumers_total),
+                    ("declarers", &c.declarers, c.declarers_total),
+                ] {
+                    if ends.is_empty() {
+                        continue;
+                    }
+                    if total as usize > ends.len() {
+                        lines.push(format!("{title} (first {} of {total}):", ends.len()));
+                    } else {
+                        lines.push(format!("{title} ({total}):"));
+                    }
+                    lines.extend(ends.iter().map(|e| {
+                        let origin = e
+                            .origin
+                            .as_ref()
+                            .map(|o| format!("  origin {o}"))
+                            .unwrap_or_default();
+                        format!(
+                            "  {}  {}:{}  [{:?}]{origin}",
+                            e.name, e.path, e.span.start_line, e.confidence
+                        )
+                    }));
+                }
+            }
             for (title, links, total) in [
                 ("outgoing", &x.outgoing, x.outgoing_total),
                 ("incoming", &x.incoming, x.incoming_total),
             ] {
-                if links.is_empty() {
+                if x.contract.is_some() || links.is_empty() {
                     continue;
                 }
                 if total as usize > links.len() {

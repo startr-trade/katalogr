@@ -247,6 +247,57 @@ pub struct Explain {
     pub incoming_total: u64,
     /// Rationale targets (board items, documents, commits), sorted.
     pub items: Vec<String>,
+    /// The contract summary, present only when the answer is for a contract node.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub contract: Option<ContractInfo>,
+}
+
+/// One symbol (or artifact) bound to a contract.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
+pub struct ContractEnd {
+    /// Canonical name of the bound symbol (an artifact name when the binding is artifact-level).
+    pub name: String,
+    /// Symbol kind, or `artifact`.
+    pub kind: String,
+    /// Repository-relative path.
+    pub path: String,
+    /// The binding's span when it has one, else the end's own span.
+    #[schemars(with = "SpanSchema")]
+    pub span: Span,
+    #[schemars(with = "ConfidenceSchema")]
+    pub confidence: Confidence,
+    /// The profile rule that produced the binding, when one did.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub origin: Option<String>,
+}
+
+/// What `explain` adds for a contract node.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
+pub struct ContractInfo {
+    /// The contract kind, for example `channel` (opaque to the core).
+    pub kind: String,
+    /// The unescaped contract key.
+    pub key: String,
+    pub providers: Vec<ContractEnd>,
+    pub providers_total: u64,
+    pub consumers: Vec<ContractEnd>,
+    pub consumers_total: u64,
+    pub declarers: Vec<ContractEnd>,
+    pub declarers_total: u64,
+}
+
+impl ContractInfo {
+    /// Keep only the ends whose name is in `keep` (used when a token budget trims the links);
+    /// the totals stay.
+    pub fn retain_named(&mut self, keep: &std::collections::BTreeSet<String>) {
+        for ends in [
+            &mut self.providers,
+            &mut self.consumers,
+            &mut self.declarers,
+        ] {
+            ends.retain(|e| keep.contains(&e.name));
+        }
+    }
 }
 
 /// What `show` prints: the symbol's lines (or, for `--signature`, its signature and doc).

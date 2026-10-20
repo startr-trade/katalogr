@@ -26,8 +26,8 @@
     },
     {
       "set": "cross",
-      "version": 1,
-      "queries": 10
+      "version": 2,
+      "queries": 11
     }
   ],
   "metrics": [
@@ -133,7 +133,7 @@
     },
     {
       "name": "retrieval.hit@1",
-      "value": 0.967742,
+      "value": 0.9375,
       "better": "higher"
     },
     {
@@ -247,7 +247,7 @@
     },
     {
       "name": "retrieval.hit@1",
-      "value": 1.0,
+      "value": 0.75,
       "better": "higher",
       "labels": {
         "op": "explain",
@@ -301,7 +301,7 @@
     },
     {
       "name": "retrieval.hit@1",
-      "value": 1.0,
+      "value": 0.75,
       "better": "higher",
       "labels": {
         "scope": "cross"
@@ -325,7 +325,7 @@
     },
     {
       "name": "retrieval.hit@1",
-      "value": 1.0,
+      "value": 0.909091,
       "better": "higher",
       "labels": {
         "set": "cross"
@@ -433,7 +433,7 @@
     },
     {
       "name": "retrieval.mrr",
-      "value": 0.983871,
+      "value": 0.96875,
       "better": "higher"
     },
     {
@@ -447,7 +447,7 @@
     },
     {
       "name": "retrieval.mrr",
-      "value": 1.0,
+      "value": 0.875,
       "better": "higher",
       "labels": {
         "op": "explain",
@@ -501,7 +501,7 @@
     },
     {
       "name": "retrieval.mrr",
-      "value": 1.0,
+      "value": 0.875,
       "better": "higher",
       "labels": {
         "scope": "cross"
@@ -525,7 +525,7 @@
     },
     {
       "name": "retrieval.mrr",
-      "value": 1.0,
+      "value": 0.954545,
       "better": "higher",
       "labels": {
         "set": "cross"
@@ -533,12 +533,12 @@
     },
     {
       "name": "retrieval.ndcg@1",
-      "value": 0.930876,
+      "value": 0.901786,
       "better": "higher"
     },
     {
       "name": "retrieval.ndcg@10",
-      "value": 0.962538,
+      "value": 0.951409,
       "better": "higher"
     },
     {
@@ -552,7 +552,7 @@
     },
     {
       "name": "retrieval.ndcg@10",
-      "value": 0.944664,
+      "value": 0.860104,
       "better": "higher",
       "labels": {
         "op": "explain",
@@ -606,7 +606,7 @@
     },
     {
       "name": "retrieval.ndcg@10",
-      "value": 1.0,
+      "value": 0.901606,
       "better": "higher",
       "labels": {
         "scope": "cross"
@@ -630,7 +630,7 @@
     },
     {
       "name": "retrieval.ndcg@10",
-      "value": 0.983399,
+      "value": 0.949129,
       "better": "higher",
       "labels": {
         "set": "cross"
@@ -647,7 +647,7 @@
     },
     {
       "name": "retrieval.ndcg@1",
-      "value": 0.809524,
+      "value": 0.607143,
       "better": "higher",
       "labels": {
         "op": "explain",
@@ -701,7 +701,7 @@
     },
     {
       "name": "retrieval.ndcg@1",
-      "value": 1.0,
+      "value": 0.75,
       "better": "higher",
       "labels": {
         "scope": "cross"
@@ -725,7 +725,7 @@
     },
     {
       "name": "retrieval.ndcg@1",
-      "value": 0.942857,
+      "value": 0.857143,
       "better": "higher",
       "labels": {
         "set": "cross"
@@ -733,7 +733,7 @@
     },
     {
       "name": "retrieval.ndcg@5",
-      "value": 0.961315,
+      "value": 0.950224,
       "better": "higher"
     },
     {
@@ -747,7 +747,7 @@
     },
     {
       "name": "retrieval.ndcg@5",
-      "value": 0.944664,
+      "value": 0.860104,
       "better": "higher",
       "labels": {
         "op": "explain",
@@ -801,7 +801,7 @@
     },
     {
       "name": "retrieval.ndcg@5",
-      "value": 1.0,
+      "value": 0.901606,
       "better": "higher",
       "labels": {
         "scope": "cross"
@@ -825,7 +825,7 @@
     },
     {
       "name": "retrieval.ndcg@5",
-      "value": 0.983399,
+      "value": 0.949129,
       "better": "higher",
       "labels": {
         "set": "cross"
@@ -833,7 +833,7 @@
     },
     {
       "name": "retrieval.queries",
-      "value": 34.0,
+      "value": 35.0,
       "better": "info"
     },
     {
@@ -847,7 +847,7 @@
     },
     {
       "name": "retrieval.queries",
-      "value": 3.0,
+      "value": 4.0,
       "better": "info",
       "labels": {
         "op": "explain",
@@ -901,7 +901,7 @@
     },
     {
       "name": "retrieval.queries",
-      "value": 3.0,
+      "value": 4.0,
       "better": "info",
       "labels": {
         "scope": "cross"
@@ -925,7 +925,7 @@
     },
     {
       "name": "retrieval.queries",
-      "value": 10.0,
+      "value": 11.0,
       "better": "info",
       "labels": {
         "set": "cross"
@@ -1080,7 +1080,7 @@
     },
     {
       "name": "retrieval.tokens_per_relevant_hit",
-      "value": 134.78125,
+      "value": 131.606061,
       "better": "lower"
     },
     {
@@ -1094,7 +1094,7 @@
     },
     {
       "name": "retrieval.tokens_per_relevant_hit",
-      "value": 22.8,
+      "value": 24.857143,
       "better": "lower",
       "labels": {
         "op": "explain",
@@ -1148,7 +1148,7 @@
     },
     {
       "name": "retrieval.tokens_per_relevant_hit",
-      "value": 77.125,
+      "value": 67.7,
       "better": "lower",
       "labels": {
         "scope": "cross"
@@ -1172,7 +1172,7 @@
     },
     {
       "name": "retrieval.tokens_per_relevant_hit",
-      "value": 63.705882,
+      "value": 60.157895,
       "better": "lower",
       "labels": {
         "set": "cross"
@@ -2110,6 +2110,34 @@
       },
       "rr": 1.0,
       "tokens": 21,
+      "scope_leaks": null,
+      "missing_evidence": []
+    },
+    {
+      "set": "cross",
+      "id": "c11",
+      "op": "explain",
+      "tags": [
+        "neighbours"
+      ],
+      "route_expected": "found",
+      "route_actual": "found",
+      "route_ok": true,
+      "scope_class": "cross",
+      "returned": 3,
+      "relevant_in_k": 2,
+      "hit": {
+        "1": 0.0,
+        "10": 1.0,
+        "5": 1.0
+      },
+      "ndcg": {
+        "1": 0.0,
+        "10": 0.606423,
+        "5": 0.606423
+      },
+      "rr": 0.5,
+      "tokens": 60,
       "scope_leaks": null,
       "missing_evidence": []
     }
