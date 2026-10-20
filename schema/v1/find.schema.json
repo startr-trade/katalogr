@@ -1,5 +1,327 @@
 {
   "$defs": {
+    "ExpandedTerm": {
+      "properties": {
+        "postings": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "term": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "term",
+        "postings"
+      ],
+      "type": "object"
+    },
+    "PackEntry": {
+      "properties": {
+        "index": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "kept": {
+          "type": "boolean"
+        },
+        "reason": {
+          "description": "Set by context packs (FEAT-038).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "tier": {
+          "description": "Set by context packs (FEAT-038).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "tokens": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "index",
+        "tokens",
+        "kept"
+      ],
+      "type": "object"
+    },
+    "PackTrace": {
+      "properties": {
+        "budget": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "considered": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "entries": {
+          "description": "The first `DIAG_PACK` kept entries, plus the first omitted one.",
+          "items": {
+            "$ref": "#/$defs/PackEntry"
+          },
+          "type": "array"
+        },
+        "estimator": {
+          "type": "string"
+        },
+        "first_omitted_tokens": {
+          "description": "What the first omitted entry would have cost.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "kept": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "omitted": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "used_tokens": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "budget",
+        "estimator",
+        "considered",
+        "kept",
+        "omitted",
+        "used_tokens",
+        "entries"
+      ],
+      "type": "object"
+    },
+    "PartTrace": {
+      "properties": {
+        "contribution": {
+          "description": "`factor * idf * t / (k1 + t)` (6 decimals).",
+          "format": "double",
+          "type": "number"
+        },
+        "factor": {
+          "description": "1.0 for an exact term, the prefix factor for a prefix term.",
+          "format": "double",
+          "type": "number"
+        },
+        "t": {
+          "description": "Field-weighted, length-normalised frequency (6 decimals).",
+          "format": "double",
+          "type": "number"
+        },
+        "term": {
+          "description": "The indexed term that gave the best value.",
+          "type": "string"
+        },
+        "token": {
+          "type": "string"
+        },
+        "via": {
+          "description": "`exact` or `prefix`.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "token",
+        "via",
+        "term",
+        "t",
+        "factor",
+        "contribution"
+      ],
+      "type": "object"
+    },
+    "PrefixTrace": {
+      "properties": {
+        "attempted": {
+          "description": "The token has enough characters to be expanded.",
+          "type": "boolean"
+        },
+        "cap_hit": {
+          "description": "The expansion cap was reached.",
+          "type": "boolean"
+        },
+        "expanded": {
+          "description": "Terms the expansion returned.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "factor": {
+          "format": "double",
+          "type": "number"
+        },
+        "terms": {
+          "description": "At most `DIAG_TERMS`, in selection order.",
+          "items": {
+            "$ref": "#/$defs/ExpandedTerm"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "attempted",
+        "expanded",
+        "cap_hit",
+        "factor",
+        "terms"
+      ],
+      "type": "object"
+    },
+    "RankSource": {
+      "properties": {
+        "damping": {
+          "format": "double",
+          "type": "number"
+        },
+        "iterations": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "rank_watermark": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "source": {
+          "description": "`cached` or `live`.",
+          "type": "string"
+        },
+        "watermark": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "source",
+        "watermark",
+        "damping",
+        "iterations"
+      ],
+      "type": "object"
+    },
+    "RankTrace": {
+      "properties": {
+        "parts": {
+          "description": "One per query token that contributed, in query order.",
+          "items": {
+            "$ref": "#/$defs/PartTrace"
+          },
+          "type": "array"
+        },
+        "position": {
+          "description": "1-based.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "score": {
+          "description": "As printed in the answer.",
+          "format": "double",
+          "type": "number"
+        },
+        "symbol": {
+          "description": "Canonical name.",
+          "type": "string"
+        },
+        "tied_with_next": {
+          "description": "Same score as the next hit, so the name order decided.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "position",
+        "symbol",
+        "score",
+        "parts",
+        "tied_with_next"
+      ],
+      "type": "object"
+    },
+    "RoutingTrace": {
+      "properties": {
+        "after_collapse": {
+          "description": "After re-export and impl collapsing.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "candidates": {
+          "description": "Symbols the winning tier matched before alias collapsing.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "command": {
+          "description": "`search`, `refs` or `map`.",
+          "type": "string"
+        },
+        "dropped": {
+          "description": "`search`: words of the input that produced no token.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "input": {
+          "description": "The user's text (not a path).",
+          "type": "string"
+        },
+        "kind": {
+          "description": "`tokens`, `name` or `none`.",
+          "type": "string"
+        },
+        "tier": {
+          "description": "`refs`: `contract`, `canonical`, `plain` or `plain_ci`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "tokens": {
+          "description": "`search`: the query tokens, deduplicated, in order.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "command",
+        "input",
+        "kind",
+        "tokens",
+        "dropped",
+        "candidates",
+        "after_collapse"
+      ],
+      "type": "object"
+    },
     "Span": {
       "description": "Schema-only mirror of [`katalogr_model::Span`].",
       "properties": {
@@ -57,6 +379,108 @@
       ],
       "type": "object"
     },
+    "TermTrace": {
+      "properties": {
+        "exact_postings": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "idf": {
+          "description": "Rounded to 6 decimals.",
+          "format": "double",
+          "type": "number"
+        },
+        "matching_docs": {
+          "description": "Documents matched by the token or any of its expansions.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "prefix": {
+          "$ref": "#/$defs/PrefixTrace"
+        },
+        "token": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "token",
+        "exact_postings",
+        "matching_docs",
+        "idf",
+        "prefix"
+      ],
+      "type": "object"
+    },
+    "Trace": {
+      "description": "What `--diagnostic` reports.",
+      "properties": {
+        "omitted": {
+          "additionalProperties": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "description": "List name to the number of entries cut by a cap.",
+          "type": "object"
+        },
+        "packing": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PackTrace"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Set by the wrapper that packs the output (`--budget`)."
+        },
+        "rank_source": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RankSource"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "`map`: where the rank came from."
+        },
+        "ranking": {
+          "description": "`search`: the top hits, best first.",
+          "items": {
+            "$ref": "#/$defs/RankTrace"
+          },
+          "type": "array"
+        },
+        "routing": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RoutingTrace"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "terms": {
+          "description": "`search`: one per query token, in query order.",
+          "items": {
+            "$ref": "#/$defs/TermTrace"
+          },
+          "type": "array"
+        },
+        "weights": {
+          "description": "`refs` and `map`: link weights.",
+          "items": {
+            "$ref": "#/$defs/WeightTrace"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
     "Truncation": {
       "properties": {
         "budget": {
@@ -81,11 +505,61 @@
         "budget"
       ],
       "type": "object"
+    },
+    "WeightTrace": {
+      "properties": {
+        "confidence": {
+          "description": "`Extracted`, `Inferred` or `Declared`.",
+          "type": "string"
+        },
+        "fanout": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "from": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "to": {
+          "description": "The symbol the link arrives at.",
+          "type": "string"
+        },
+        "weight": {
+          "description": "The link row's weight (6 decimals).",
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "to",
+        "from",
+        "kind",
+        "confidence",
+        "weight"
+      ],
+      "type": "object"
     }
   },
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "description": "What `--json` prints.",
   "properties": {
+    "diagnostic": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Trace"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The trace of the query, present only with `--diagnostic` (FEAT-065)."
+    },
     "next": {
       "description": "Suggested follow-up commands, at most three.",
       "items": {

@@ -124,6 +124,9 @@ pub enum Command {
     Refs {
         /// Canonical name or plain name.
         text: String,
+        /// Also explain the answer: a bounded trace in the JSON `diagnostic` field, or on stderr.
+        #[arg(long)]
+        diagnostic: bool,
     },
     /// List the callers of a symbol.
     Callers {
@@ -139,7 +142,11 @@ pub enum Command {
         location: String,
     },
     /// Outline the project: symbols by PageRank over the reference graph.
-    Map,
+    Map {
+        /// Also explain the answer: a bounded trace in the JSON `diagnostic` field, or on stderr.
+        #[arg(long)]
+        diagnostic: bool,
+    },
     /// Rank symbols by BM25 over names, docs, sections and contract keys.
     Search {
         /// Words to look for; identifiers are split into words.
@@ -148,6 +155,9 @@ pub enum Command {
         /// How many hits to return.
         #[arg(long, default_value_t = 20, value_name = "N")]
         limit: usize,
+        /// Also explain the answer: a bounded trace in the JSON `diagnostic` field, or on stderr.
+        #[arg(long)]
+        diagnostic: bool,
     },
     /// Print a symbol's lines (or, with --signature, its signature and doc).
     Show {

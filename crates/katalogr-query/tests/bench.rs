@@ -5,7 +5,7 @@ use katalogr_model::{
     ArtifactName, Confidence, Field, Fragment, Id, LinkKind, Name, Provenance, RelPath, Segment,
     Span, SymbolName, tokenize,
 };
-use katalogr_query::{rank, refs, resolve, result::Resolution, search};
+use katalogr_query::{Diagnostic, rank, refs, resolve, result::Resolution, search, search_traced};
 use katalogr_store::{
     Cache, Kindex, LEXICON_FIELDS, LinkEntry, LinkKey, LinkOrigin, LinkRow, ProjectConfig,
     ProjectName, Reader, RepoConfig, Restitch, StoreError, SymbolRow, WriteTx,
@@ -378,11 +378,9 @@ fn index_name(tx: &mut WriteTx, id: Id, name: &str) {
     tx.put_doc_postings(id, lens, &terms).unwrap();
 }
 
-#[test]
-#[ignore]
-fn search_100k() {
-    let tmp = tempfile::tempdir().unwrap();
-    let cache = open_bench_cache(&tmp);
+/// The 100k-symbol search project: functions named `fn_<word>_<word>_<i>`.
+fn search_project(tmp: &tempfile::TempDir) -> Cache {
+    let cache = open_bench_cache(tmp);
 
     let path = RelPath::new("bench.tx").unwrap();
     let artifact = ArtifactName {
@@ -426,13 +424,50 @@ fn search_100k() {
         .unwrap();
     }
     tx.commit().unwrap();
+    cache
+}
 
+/// The best of five runs of `f`, in milliseconds.
+fn best_ms<T>(mut f: impl FnMut() -> T) -> f64 {
+    (0..5)
+        .map(|_| {
+            let start = Instant::now();
+            std::hint::black_box(f());
+            start.elapsed().as_secs_f64() * 1000.0
+        })
+        .fold(f64::MAX, f64::min)
+}
+
+#[test]
+#[ignore]
+fn search_100k() {
+    let tmp = tempfile::tempdir().unwrap();
+    let cache = search_project(&tmp);
     let read = cache.read().unwrap();
-    let start = Instant::now();
-    let hits = search(&read, "ember cache", 20).unwrap();
-    let elapsed = start.elapsed();
-    assert_eq!(hits.len(), 20);
-    println!("bench::search_100k: {} ms", elapsed.as_secs_f64() * 1000.0);
+    assert_eq!(search(&read, "ember cache", 20).unwrap().len(), 20);
+    let ms = best_ms(|| search(&read, "ember cache", 20).unwrap());
+    println!("bench::search_100k: {ms} ms");
+    assert!(ms < 35.0, "search took {ms} ms");
+}
+
+/// FEAT-065 R-11: the same search with the trace on stays under 60 ms.
+#[test]
+#[ignore]
+fn search_diagnostic_100k() {
+    let tmp = tempfile::tempdir().unwrap();
+    let cache = search_project(&tmp);
+    let read = cache.read().unwrap();
+    let run = || {
+        let mut d = Diagnostic::on_new();
+        let hits = search_traced(&read, "ember cache", 20, &mut d).unwrap();
+        (hits, d.finish())
+    };
+    let (hits, trace) = run();
+    assert_eq!(hits, search(&read, "ember cache", 20).unwrap());
+    assert!(trace.is_some_and(|t| !t.ranking.is_empty()));
+    let ms = best_ms(run);
+    println!("bench::search_diagnostic_100k: {ms} ms");
+    assert!(ms < 60.0, "traced search took {ms} ms");
 }
 
 #[test]

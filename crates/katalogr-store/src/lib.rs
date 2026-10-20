@@ -25,4 +25,6 @@ pub use inspect::{CacheInspection, InspectedTables, OpenCache};
 pub use kindex::{
     FormatFile, GitState, Kindex, ProjectConfig, ProjectDir, ProjectName, RepoConfig, SHARD_FORMAT,
 };
-pub use rank::{RANK_CONTEXT, link_weight, pagerank, row_weight};
+pub use rank::{
+    PAGERANK_DAMPING, PAGERANK_ITERATIONS, RANK_CONTEXT, link_weight, pagerank, row_weight,
+};

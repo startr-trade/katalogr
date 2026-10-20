@@ -7,6 +7,7 @@
 pub mod budget;
 mod callers;
 mod dangling;
+pub mod diagnostic;
 mod explain;
 mod find;
 mod hints;
@@ -24,22 +25,29 @@ mod why;
 
 pub use callers::callers;
 pub use dangling::{CONTRACT_KIND as DANGLING_CONTRACT, DEFAULT_KINDS as DANGLING_KINDS, dangling};
+pub use diagnostic::{
+    DIAG_PACK, DIAG_REFS, DIAG_TERMS, DIAG_TOP, DIAG_WEIGHTS, Diagnostic, ExpandedTerm, PackEntry,
+    PackTrace, PartTrace, PrefixTrace, RankSource, RankTrace, RoutingTrace, TermTrace, Trace,
+    WeightTrace,
+};
 pub use explain::explain;
 pub use find::find;
 pub use hints::{HintSource, hints};
-pub use map::map;
+pub use map::{map, map_traced};
 pub use mirror::mirror_drift;
 pub use path::path;
-pub use rank::{link_weight, rank, rank_cached_or_live, rank_live};
-pub use refs::refs;
-pub use resolve::resolve;
+pub use rank::{
+    link_weight, rank, rank_cached_or_live, rank_cached_or_live_with_source, rank_live,
+};
+pub use refs::{refs, refs_traced};
+pub use resolve::{resolve, resolve_traced};
 pub use result::{
     CallerHit, CommitHit, DanglingRef, Direction, Envelope, Explain, FieldDiff, FieldShape,
     LinkBrief, MapEntry, Matched, MirrorDrift, Note, PathStep, RationaleLink, RefHit,
     ReplaceResult, Resolution, SearchHit, ShowResult, SymbolHit, Truncation, WhyResult,
 };
 pub use schema::schemas;
-pub use search::search;
+pub use search::{search, search_traced};
 pub use why::{Blame, RATIONALE_KINDS, why};
 
 /// Re-exported so wrappers can bound on it without a direct dependency.
