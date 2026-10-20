@@ -61,6 +61,7 @@ pub fn full_registry() -> ExtensionRegistry {
     reg.register(Box::new(katalogr_ext_schema::XsdExtractor));
     reg.register(Box::new(katalogr_ext_schema::JsonSchemaExtractor));
     reg.register(Box::new(katalogr_ext_data::DataExtractor));
+    reg.register(Box::new(katalogr_ext_openapi::OpenApiExtractor));
     // The board extension claims its own Markdown files before the general one.
     reg.register(Box::new(katalogr_ext_kanbanr::BoardExtractor));
     reg.register(Box::new(katalogr_ext_md::MarkdownExtractor));

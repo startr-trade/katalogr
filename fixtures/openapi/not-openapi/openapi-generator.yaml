@@ -1,0 +1,6 @@
+# Settings of a code generator; the file name is conventional, the content is not an API document.
+generatorName: typescript-client
+inputSpec: specs/openapi.yaml
+outputDir: generated
+additionalProperties:
+  supportsES6: true

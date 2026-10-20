@@ -1,0 +1,32 @@
+mode: exact
+symbols:
+- fx:swagger.yaml#operation:GET%20%2Fusers
+- fx:swagger.yaml#operation:GET%20%2Fusers%2F{id}
+- fx:swagger.yaml#type:User
+- fx:swagger.yaml#type:User/field:id
+- fx:swagger.yaml#type:User/field:name
+contracts:
+- contract:http_route:GET%20%2Fv1%2Fusers
+- contract:http_route:GET%20%2Fv1%2Fusers%2F{}
+- contract:schema_type:{}User
+links:
+- from: fx:swagger.yaml#operation:GET%20%2Fusers
+  kind: declares
+  to: contract:http_route:GET%20%2Fv1%2Fusers
+  confidence: Extracted
+- from: fx:swagger.yaml#operation:GET%20%2Fusers%2F{id}
+  kind: declares
+  to: contract:http_route:GET%20%2Fv1%2Fusers%2F{}
+  confidence: Extracted
+- from: fx:swagger.yaml#type:User
+  kind: contains
+  to: fx:swagger.yaml#type:User/field:id
+  confidence: Extracted
+- from: fx:swagger.yaml#type:User
+  kind: contains
+  to: fx:swagger.yaml#type:User/field:name
+  confidence: Extracted
+- from: fx:swagger.yaml#type:User
+  kind: declares
+  to: contract:schema_type:{}User
+  confidence: Inferred

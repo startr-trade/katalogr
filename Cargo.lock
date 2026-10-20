@@ -1596,6 +1596,7 @@ dependencies = [
  "katalogr-ext-data",
  "katalogr-ext-kanbanr",
  "katalogr-ext-md",
+ "katalogr-ext-openapi",
  "katalogr-ext-rust",
  "katalogr-ext-schema",
  "katalogr-ext-sql",
@@ -1629,6 +1630,7 @@ dependencies = [
  "katalogr-ext-data",
  "katalogr-ext-kanbanr",
  "katalogr-ext-md",
+ "katalogr-ext-openapi",
  "katalogr-ext-rust",
  "katalogr-ext-schema",
  "katalogr-ext-sql",
@@ -1694,6 +1696,19 @@ version = "0.1.0"
 dependencies = [
  "katalogr-model",
  "pulldown-cmark",
+]
+
+[[package]]
+name = "katalogr-ext-openapi"
+version = "0.1.0"
+dependencies = [
+ "camino",
+ "katalogr-acceptance",
+ "katalogr-engine",
+ "katalogr-ext-data",
+ "katalogr-ext-schema",
+ "katalogr-model",
+ "serde_json",
 ]
 
 [[package]]

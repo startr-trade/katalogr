@@ -146,6 +146,9 @@ fn build_registry() -> ExtensionRegistry {
     registry.register(Box::new(katalogr_ext_schema::JsonSchemaExtractor));
     // Claims no file by itself: a profile `select` routes data documents to it.
     registry.register(Box::new(katalogr_ext_data::DataExtractor));
+    // Claims only conventionally named OpenAPI files (`openapi*`, `swagger*`); a profile
+    // `select` routes any other.
+    registry.register(Box::new(katalogr_ext_openapi::OpenApiExtractor));
     // The board extension claims its own Markdown files before the general one.
     registry.register(Box::new(katalogr_ext_kanbanr::BoardExtractor));
     registry.register(Box::new(katalogr_ext_md::MarkdownExtractor));
@@ -627,5 +630,25 @@ mod profile_tests {
             katalogr_engine::profiles::parse(&format!("builtin:{name}"), text)
                 .unwrap_or_else(|e| panic!("{e}"));
         }
+    }
+}
+
+#[cfg(test)]
+mod dist {
+    /// Two extensions providing a normaliser of the same id would make the second unreachable
+    /// (the first registered wins); the build refuses that instead.
+    #[test]
+    fn normaliser_ids_unique() {
+        let registry = super::build_registry();
+        let mut ids: Vec<&str> = registry
+            .extractors()
+            .flat_map(|e| e.key_normalisers().iter().map(|n| n.id()))
+            .collect();
+        assert!(ids.contains(&"http_route"), "{ids:?}");
+        let n = ids.len();
+        ids.sort_unstable();
+        ids.dedup();
+        assert_eq!(ids.len(), n, "a normaliser id is provided twice");
+        assert_eq!(registry.normalisers().len(), n);
     }
 }

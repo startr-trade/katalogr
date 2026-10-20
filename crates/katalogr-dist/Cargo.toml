@@ -21,6 +21,7 @@ katalogr-ext-md.workspace = true
 katalogr-ext-kanbanr.workspace = true
 katalogr-ext-data.workspace = true
 katalogr-ext-schema.workspace = true
+katalogr-ext-openapi.workspace = true
 katalogr-model.workspace = true
 katalogr-store.workspace = true
 camino.workspace = true

@@ -45,6 +45,18 @@ technologies:
       - md/sections-links
     sections:
       - md/sections-links
+  openapi:
+    component-schemas:
+      - openapi/yaml-v3
+    operations:
+      - openapi/yaml-v3
+      - openapi/json-v3
+    parse-error:
+      - openapi/broken
+    plain-artifact:
+      - openapi/not-openapi
+    swagger2:
+      - openapi/swagger2
   rust:
     annotations:
       - rust/annotations
