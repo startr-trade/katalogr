@@ -1,0 +1,213 @@
+{
+  "$defs": {
+    "Confidence": {
+      "description": "Schema-only mirror of [`katalogr_model::Confidence`].",
+      "enum": [
+        "Extracted",
+        "Inferred",
+        "Declared"
+      ],
+      "type": "string"
+    },
+    "Span": {
+      "description": "Schema-only mirror of [`katalogr_model::Span`].",
+      "properties": {
+        "end_col": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "end_line": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "start_col": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "start_line": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "start_line",
+        "start_col",
+        "end_line",
+        "end_col"
+      ],
+      "type": "object"
+    },
+    "SymbolHit": {
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "name": {
+          "description": "Canonical name.",
+          "type": "string"
+        },
+        "path": {
+          "description": "Repository-relative path.",
+          "type": "string"
+        },
+        "span": {
+          "$ref": "#/$defs/Span"
+        }
+      },
+      "required": [
+        "name",
+        "kind",
+        "path",
+        "span"
+      ],
+      "type": "object"
+    },
+    "TestHit": {
+      "description": "A test that exercises or verifies a symbol (FEAT-063).",
+      "properties": {
+        "chain": {
+          "description": "Canonical names between the test and the seed, test side first; contracts excluded.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "confidence": {
+          "$ref": "#/$defs/Confidence",
+          "description": "The weakest confidence on the path (Extracted > Declared > Inferred)."
+        },
+        "depth": {
+          "description": "Hops from the seed; 0 when the seed itself is test code.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "requirements": {
+          "description": "Canonical names of the nodes with a `verified-by` link to the test, sorted.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "role": {
+          "description": "`case`, `suite`, `support`, or any other string an extension or profile set.",
+          "type": "string"
+        },
+        "score": {
+          "description": "Product of the row weights on the path, rounded to 4 decimals.",
+          "format": "double",
+          "type": "number"
+        },
+        "seed": {
+          "description": "Canonical name of the seed reached.",
+          "type": "string"
+        },
+        "test": {
+          "$ref": "#/$defs/SymbolHit",
+          "description": "The test node; an artifact is shown with kind `artifact` (as `dangling` shows referrers)."
+        },
+        "via": {
+          "description": "The first contract on the path from the test side, `contract:<kind>:<key>`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "test",
+        "role",
+        "depth",
+        "confidence",
+        "score",
+        "seed",
+        "chain",
+        "requirements"
+      ],
+      "type": "object"
+    },
+    "Truncation": {
+      "properties": {
+        "budget": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "omitted": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "shown": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "shown",
+        "omitted",
+        "budget"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "What `--json` prints.",
+  "properties": {
+    "next": {
+      "description": "Suggested follow-up commands, at most three.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "pending": {
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "result": {
+      "items": {
+        "$ref": "#/$defs/TestHit"
+      },
+      "type": "array"
+    },
+    "schema": {
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "stale": {
+      "type": "boolean"
+    },
+    "truncated": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Truncation"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "watermark": {
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "schema",
+    "watermark",
+    "pending",
+    "stale",
+    "result"
+  ],
+  "title": "Envelope",
+  "type": "object"
+}

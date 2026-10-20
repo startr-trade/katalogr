@@ -1,0 +1,33 @@
+mode: exact
+symbols:
+- fx:Cargo.toml#crate:test-marks
+- fx:src/lib.rs#fn:a
+- fx:src/lib.rs#fn:b
+- fx:src/lib.rs#mod:live
+- fx:src/lib.rs#mod:live/fn:run
+- fx:src/lib.rs#mod:tests
+- fx:src/lib.rs#mod:tests/fn:c
+- fx:src/lib.rs#mod:tests/fn:helper
+- fx:tests/it.rs#fn:shared
+- fx:tests/it.rs#fn:works
+links:
+- from: fx:src/lib.rs#mod:live
+  kind: contains
+  to: fx:src/lib.rs#mod:live/fn:run
+  confidence: extracted
+- from: fx:src/lib.rs#mod:tests
+  kind: contains
+  to: fx:src/lib.rs#mod:tests/fn:c
+  confidence: extracted
+- from: fx:src/lib.rs#mod:tests
+  kind: contains
+  to: fx:src/lib.rs#mod:tests/fn:helper
+  confidence: extracted
+- from: fx:src/lib.rs#mod:tests/fn:c
+  kind: calls
+  to: fx:src/lib.rs#mod:tests/fn:helper
+  confidence: extracted
+- from: fx:tests/it.rs#fn:works
+  kind: calls
+  to: fx:tests/it.rs#fn:shared
+  confidence: extracted

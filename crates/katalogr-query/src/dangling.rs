@@ -100,7 +100,11 @@ fn names_board_id(r: &OutRef, prefixes: &BTreeSet<String>, have_adrs: bool) -> b
     })
 }
 
-fn referrer(tx: &impl Reader, id: Id, span: Option<Span>) -> Result<Option<SymbolHit>, StoreError> {
+pub(crate) fn referrer(
+    tx: &impl Reader,
+    id: Id,
+    span: Option<Span>,
+) -> Result<Option<SymbolHit>, StoreError> {
     if let Some(s) = tx.symbol(id)? {
         return Ok(Some(crate::resolve::hit(&s)));
     }

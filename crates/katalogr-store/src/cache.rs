@@ -62,6 +62,25 @@ pub struct SymbolBrief {
     pub facts: BTreeMap<String, Fact>,
 }
 
+/// What path scoring needs of a link row, read without decoding its spans and provenance:
+/// the confidence of the first entry and the row weight (see [`crate::rank::row_weight`]).
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub struct LinkBrief {
+    pub confidence: Confidence,
+    pub weight: f64,
+}
+
+#[derive(Deserialize)]
+struct RawLinkEntry {
+    confidence: Confidence,
+    fanout: Option<u32>,
+}
+
+#[derive(Deserialize)]
+struct RawLinkRow {
+    entries: Vec<RawLinkEntry>,
+}
+
 #[derive(Deserialize)]
 struct RawBrief<'a> {
     #[serde(borrow)]
@@ -744,6 +763,38 @@ pub trait Reader {
             out.extend(p?);
         }
         Ok(out)
+    }
+
+    /// The [`LinkBrief`] of many links, in order (None for a link that does not exist); the
+    /// reads share one table lookup.
+    fn link_briefs_many(&self, keys: &[LinkKey]) -> Result<Vec<Option<LinkBrief>>, StoreError> {
+        let raw: Vec<Vec<u8>> = keys.iter().map(link_out_key).collect();
+        self.raw_get_many(TableId::LinksOut, &raw)?
+            .into_iter()
+            .map(|v| {
+                v.map(|v| {
+                    let row: RawLinkRow =
+                        serde_json::from_slice(&v).map_err(|e| StoreError::Row(e.to_string()))?;
+                    let first = row
+                        .entries
+                        .first()
+                        .ok_or_else(|| StoreError::Row("link without entries".into()))?;
+                    let weight = row
+                        .entries
+                        .iter()
+                        .map(|e| match (e.confidence, e.fanout) {
+                            (Confidence::Inferred, Some(n)) if n > 1 => 1.0 / f64::from(n),
+                            _ => 1.0,
+                        })
+                        .fold(0.0f64, f64::max);
+                    Ok(LinkBrief {
+                        confidence: first.confidence,
+                        weight,
+                    })
+                })
+                .transpose()
+            })
+            .collect()
     }
 
     /// [`Reader::link_keys_out`] for many sources, in order.

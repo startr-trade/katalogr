@@ -29,13 +29,12 @@ pub struct RootCtx<'a> {
 
 /// `*.test.*`, `*.spec.*`, or a file below a `__tests__`, `test` or `tests` directory.
 pub fn is_test_path(path: &str) -> bool {
-    let mut parts: Vec<&str> = path.split('/').collect();
-    let file = parts.pop().unwrap_or("");
-    file.contains(".test.")
-        || file.contains(".spec.")
-        || parts
-            .iter()
-            .any(|d| matches!(*d, "__tests__" | "test" | "tests"))
+    crate::tests::is_test_file(path)
+        || path
+            .split('/')
+            .rev()
+            .skip(1)
+            .any(|d| matches!(d, "test" | "tests"))
 }
 
 /// Why the symbol is an entry point, if it is.

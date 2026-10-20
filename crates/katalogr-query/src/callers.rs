@@ -3,14 +3,10 @@
 use crate::refs::link_confidence;
 use crate::resolve::hit;
 use crate::result::{CallerHit, SymbolHit};
-use katalogr_model::LinkKind;
-use katalogr_model::{Id, Name};
+use crate::step::incoming;
+use katalogr_model::Id;
 use katalogr_store::{Reader, StoreError};
 use std::collections::BTreeSet;
-
-const CALLS: &str = "calls";
-const PROVIDES: &str = "provides";
-const CONSUMES: &str = "consumes";
 
 /// Breadth-first over incoming `calls` links, up to `depth` (at least 1). A provider of a
 /// contract is also called by the contract's consumers (`via` names the contract), and so is
@@ -28,45 +24,20 @@ pub fn callers(
     for d in 1..=depth.max(1) {
         let mut next = Vec::new();
         for id in frontier {
-            for key in tx.links_in(id)? {
-                if key.kind.0 != CALLS || !seen.insert(key.from) {
+            for step in incoming(tx, id)? {
+                if !seen.insert(step.from) {
                     continue;
                 }
-                let Some(row) = tx.symbol(key.from)? else {
+                let Some(row) = tx.symbol(step.from)? else {
                     continue;
                 };
                 out.push(CallerHit {
-                    confidence: link_confidence(tx, &key)?,
+                    confidence: link_confidence(tx, &step.key)?,
                     caller: hit(&row),
                     depth: d,
-                    via: None,
+                    via: step.via.map(|(name, _)| name),
                 });
-                next.push(key.from);
-            }
-            // The contracts `id` provides (or `id` itself, when it is a contract), and their consumers.
-            let mut contracts = vec![id];
-            for (key, _) in tx.links_out(id, Some(&LinkKind(PROVIDES.to_string())))? {
-                contracts.push(key.to);
-            }
-            for cid in contracts {
-                let Some(contract) = tx.contract(cid)? else {
-                    continue;
-                };
-                for key in tx.links_in(cid)? {
-                    if key.kind.0 != CONSUMES || !seen.insert(key.from) {
-                        continue;
-                    }
-                    let Some(row) = tx.symbol(key.from)? else {
-                        continue;
-                    };
-                    out.push(CallerHit {
-                        confidence: link_confidence(tx, &key)?,
-                        caller: hit(&row),
-                        depth: d,
-                        via: Some(contract.name.canonical()),
-                    });
-                    next.push(key.from);
-                }
+                next.push(step.from);
             }
         }
         frontier = next;

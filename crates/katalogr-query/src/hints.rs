@@ -2,7 +2,7 @@
 
 use crate::result::{
     CallerHit, DanglingRef, Explain, MapEntry, MirrorDrift, PathStep, RefHit, SearchHit,
-    ShowResult, SymbolHit, WhyResult,
+    ShowResult, SymbolHit, TestHit, WhyResult,
 };
 
 /// The most useful symbol of a result, if there is one.
@@ -41,6 +41,11 @@ impl HintSource for Vec<RefHit> {
 impl HintSource for Vec<CallerHit> {
     fn lead(&self) -> Option<String> {
         self.first().map(|h| h.caller.name.clone())
+    }
+}
+impl HintSource for Vec<TestHit> {
+    fn lead(&self) -> Option<String> {
+        self.first().map(|h| h.test.name.clone())
     }
 }
 impl HintSource for Vec<MapEntry> {
@@ -89,7 +94,7 @@ pub fn hints(command: &str, result: &impl HintSource) -> Vec<String> {
         "find" | "search" | "map" | "why" | "hubs" | "communities" | "rationale" => {
             &["explain", "show", "refs"]
         }
-        "refs" | "callers" => &["explain", "show"],
+        "refs" | "callers" | "tests" => &["explain", "show"],
         "explain" => &["show", "refs", "callers"],
         "show" => &["explain", "refs", "callers"],
         "path" => &["explain", "show"],

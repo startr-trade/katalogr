@@ -43,9 +43,9 @@ fn attr_path(attr: &str) -> &str {
     &a[..end]
 }
 
-/// True for `#[cfg(test)]`.
+/// True for a `cfg` attribute that requires `test` (shared with the `test` fact, FEAT-063).
 pub fn is_cfg_test(attr: &str) -> bool {
-    attr.replace(' ', "") == "cfg(test)"
+    crate::test_marks::is_cfg_test(attr)
 }
 
 fn path_is(path: &str, word: &str) -> bool {
@@ -67,7 +67,7 @@ pub fn root_reason(c: &RootCtx) -> Option<&'static str> {
     // 1. Test, bench or test-only code.
     if paths
         .iter()
-        .any(|p| path_is(p, "test") || path_is(p, "bench"))
+        .any(|p| crate::test_marks::is_test_attr(p) || path_is(p, "bench"))
         || c.in_test_code
         || test_file
     {

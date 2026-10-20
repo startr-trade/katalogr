@@ -804,6 +804,110 @@ mod rust {
         assert_eq!(frag.symbols[0].facts["root"], Fact::Str("test".into()));
     }
 
+    fn test_role(g: &Graph, name: &str) -> Option<String> {
+        g.sym(name)["facts"]["test"]["Str"]
+            .as_str()
+            .map(str::to_string)
+    }
+
+    #[test]
+    fn test_attrs_mark_cases() {
+        let g = index_case("tests");
+        assert_expected("tests", &g);
+        assert_eq!(test_role(&g, "src/lib.rs#fn:a").as_deref(), Some("case"));
+        assert_eq!(test_role(&g, "src/lib.rs#fn:b").as_deref(), Some("case"));
+        assert_eq!(test_role(&g, "src/lib.rs#mod:live"), None);
+        assert_eq!(test_role(&g, "src/lib.rs#mod:live/fn:run"), None);
+    }
+
+    #[test]
+    fn cfg_test_module_marks_suite() {
+        let g = index_case("tests");
+        assert_eq!(
+            test_role(&g, "src/lib.rs#mod:tests").as_deref(),
+            Some("suite")
+        );
+        assert_eq!(
+            test_role(&g, "src/lib.rs#mod:tests/fn:helper").as_deref(),
+            Some("support")
+        );
+        assert_eq!(
+            test_role(&g, "src/lib.rs#mod:tests/fn:c").as_deref(),
+            Some("case")
+        );
+    }
+
+    #[test]
+    fn integration_test_file_marks_suite() {
+        let g = index_case("tests");
+        let art = &g.artifacts[&format!("{REPO}:tests/it.rs")];
+        assert_eq!(art["facts"]["test"]["Str"].as_str(), Some("suite"));
+        assert_eq!(
+            test_role(&g, "tests/it.rs#fn:shared").as_deref(),
+            Some("support")
+        );
+        assert_eq!(
+            test_role(&g, "tests/it.rs#fn:works").as_deref(),
+            Some("case")
+        );
+        let lib = &g.artifacts[&format!("{REPO}:src/lib.rs")];
+        assert!(lib["facts"].get("test").is_none());
+    }
+
+    #[test]
+    fn test_names_exported() {
+        let dir = fixtures_dir().join("tests");
+        let read = |p: &str| std::fs::read(dir.join(p)).unwrap();
+        let ctx = RustExtractor
+            .build_context(&[file(
+                "Cargo.toml",
+                &String::from_utf8(read("Cargo.toml")).unwrap(),
+            )])
+            .unwrap();
+        let frag = |p: &str| {
+            let path = RelPath::new(p).unwrap();
+            RustExtractor
+                .extract(&ExtractInput {
+                    repo: REPO,
+                    path: &path,
+                    revision: "r",
+                    content: &read(p),
+                    context: &ctx,
+                })
+                .unwrap()
+        };
+        let names = |p: &str| -> BTreeMap<String, String> {
+            frag(p)
+                .exports
+                .iter()
+                .filter(|e| e.key.namespace == "test-name")
+                .map(|e| {
+                    let sym = frag(p)
+                        .symbols
+                        .iter()
+                        .find(|s| s.name.id() == e.target)
+                        .map(|s| s.name.canonical())
+                        .unwrap();
+                    (e.key.key.clone(), sym)
+                })
+                .collect()
+        };
+        let lib = names("src/lib.rs");
+        assert!(
+            lib["tests::c"].ends_with("src/lib.rs#mod:tests/fn:c"),
+            "{lib:?}"
+        );
+        assert!(lib["a"].ends_with("src/lib.rs#fn:a"));
+        assert!(!lib.keys().any(|k| k.contains("helper")));
+        let it = names("tests/it.rs");
+        let hit = it
+            .iter()
+            .find(|(k, _)| k.ends_with("works") && k.contains("::"))
+            .unwrap_or_else(|| panic!("{it:?}"));
+        assert!(hit.1.ends_with("tests/it.rs#fn:works"));
+        assert!(it.contains_key("it::works") || it.keys().any(|k| k.starts_with("it::")));
+    }
+
     #[test]
     fn rationale_markers_recorded() {
         let g = index_case("rationale");

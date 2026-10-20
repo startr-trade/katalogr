@@ -25,6 +25,7 @@ pub mod search;
 pub mod session;
 pub mod show;
 pub mod skill;
+pub mod tests;
 pub mod version;
 pub mod why;
 

@@ -86,7 +86,20 @@ impl Extractor for BoardExtractor {
     }
 
     fn patterns(&self) -> &'static [&'static str] {
-        &["items", "requirements", "tasks", "goals", "specs", "adrs"]
+        &[
+            "items",
+            "requirements",
+            "tasks",
+            "goals",
+            "specs",
+            "adrs",
+            "test-names",
+        ]
+    }
+
+    /// `1` adds the `verified-by` references of requirement tests (FEAT-063).
+    fn revision_salt(&self) -> &'static str {
+        "kanbanr-extract-1"
     }
 
     fn extract(&self, input: &ExtractInput) -> Result<Fragment, ExtractError> {

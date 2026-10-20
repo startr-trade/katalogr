@@ -21,7 +21,7 @@ pub use katalogr_analytics as analytics;
 pub use katalogr_query as query;
 use katalogr_query::{
     Blame, CallerHit, DanglingRef, Explain, MapEntry, MirrorDrift, PathStep, RefHit, Resolution,
-    SearchHit, SymbolHit, WhyResult,
+    SearchHit, SymbolHit, TestHit, TestsOptions, WhyResult,
 };
 pub use katalogr_query::{ReplaceResult, ShowResult};
 pub use setup::{ProjectCreated, kindex_init, project_init};
@@ -494,6 +494,38 @@ impl Katalogr {
     ) -> Result<Reply<Vec<CallerHit>>, DistError> {
         self.query(opts, |tx| {
             on_target(tx, text, |t| katalogr_query::callers(tx, t, depth))
+        })
+    }
+
+    /// Tests of the symbol `text` names (FEAT-063): resolved as `callers` does.
+    pub fn tests(
+        &self,
+        text: &str,
+        topts: TestsOptions,
+        opts: &Options,
+    ) -> Result<Reply<Vec<TestHit>>, DistError> {
+        self.query(opts, |tx| {
+            on_target(tx, text, |t| katalogr_query::tests(tx, t, topts))
+        })
+    }
+
+    /// Tests reaching any of the symbols `seeds` name, each once with its nearest seed
+    /// (FEAT-063 R-10: the multi-seed query that impact analysis consumes).
+    pub fn tests_for(
+        &self,
+        seeds: &[String],
+        topts: TestsOptions,
+        opts: &Options,
+    ) -> Result<Reply<Vec<TestHit>>, DistError> {
+        self.query(opts, |tx| {
+            let mut ids = Vec::new();
+            for text in seeds {
+                match katalogr_query::resolve(tx, text)? {
+                    Resolution::One(t) => ids.push(katalogr_model::Id::of(&t.name)),
+                    other => return Ok(unresolved(other, text)),
+                }
+            }
+            Ok(Outcome::Found(katalogr_query::tests_for(tx, &ids, topts)?))
         })
     }
 

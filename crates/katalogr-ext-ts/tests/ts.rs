@@ -329,6 +329,106 @@ mod ts {
             .map(str::to_string)
     }
 
+    fn test_role(g: &Graph, name: &str) -> Option<String> {
+        g.nodes[&format!("fx:{name}")]["facts"]["test"]["Str"]
+            .as_str()
+            .map(str::to_string)
+    }
+
+    #[test]
+    fn test_callbacks_become_symbols() {
+        let g = check("tests");
+        let r = |n: &str| test_role(&g, &format!("src/math.test.ts#{n}"));
+        assert_eq!(r("suite:add").as_deref(), Some("suite"));
+        assert_eq!(r("suite:add/hook:beforeEach").as_deref(), Some("support"));
+        assert_eq!(r("suite:add/case:sums").as_deref(), Some("case"));
+        assert_eq!(r("suite:add/case:table%20%25i").as_deref(), Some("case"));
+        assert_eq!(r("case:top").as_deref(), Some("case"));
+        assert_eq!(r("fn:reset").as_deref(), Some("support"));
+        let art = &g.artifacts["fx:src/math.test.ts"];
+        assert_eq!(art["facts"]["test"]["Str"].as_str(), Some("suite"));
+        assert_eq!(
+            test_role(&g, "src/__tests__/util.ts#fn:helper").as_deref(),
+            Some("support")
+        );
+    }
+
+    #[test]
+    fn calls_attributed_to_test_callbacks() {
+        let g = check("tests");
+        let has = |from: &str, to: &str| {
+            g.links
+                .iter()
+                .any(|l| l.kind == "calls" && l.from == from && l.to == to)
+        };
+        let t = "fx:src/math.test.ts#";
+        let add = "fx:src/math.ts#fn:add";
+        assert!(has(&format!("{t}suite:add/case:sums"), add));
+        assert!(has(&format!("{t}suite:add/case:table%20%25i"), add));
+        assert!(has(&format!("{t}case:top"), add));
+        assert!(has(
+            &format!("{t}suite:add/hook:beforeEach"),
+            &format!("{t}fn:reset")
+        ));
+        assert!(
+            !g.links
+                .iter()
+                .any(|l| l.kind == "calls" && l.from == "fx:src/math.test.ts")
+        );
+    }
+
+    #[test]
+    fn non_test_file_unmarked() {
+        let g = check("tests");
+        assert!(
+            !g.symbols
+                .iter()
+                .any(|s| s.starts_with("fx:src/runner.ts#suite"))
+        );
+        assert_eq!(test_role(&g, "src/runner.ts#fn:run"), None);
+        assert!(
+            g.artifacts["fx:src/runner.ts"]["facts"]
+                .get("test")
+                .is_none()
+        );
+        assert!(g.artifacts["fx:src/math.ts"]["facts"].get("test").is_none());
+    }
+
+    #[test]
+    fn test_names_exported() {
+        use katalogr_model::{ExtractInput, Extractor, Name, RelPath};
+        let dir = case_dir("tests");
+        let read = |p: &str| std::fs::read(dir.join(p)).unwrap();
+        let path = RelPath::new("src/math.test.ts").unwrap();
+        let frag = TsExtractor
+            .extract(&ExtractInput {
+                repo: "fx",
+                path: &path,
+                revision: "r",
+                content: &read("src/math.test.ts"),
+                context: &TsExtractor.build_context(&[]).unwrap(),
+            })
+            .unwrap();
+        let names: BTreeMap<String, String> = frag
+            .exports
+            .iter()
+            .filter(|e| e.key.namespace == "test-name")
+            .map(|e| {
+                let sym = frag
+                    .symbols
+                    .iter()
+                    .find(|s| s.name.id() == e.target)
+                    .unwrap();
+                (e.key.key.clone(), sym.name.canonical())
+            })
+            .collect();
+        let sums = "fx:src/math.test.ts#suite:add/case:sums";
+        assert_eq!(names["math::add::sums"], sums);
+        assert_eq!(names["add::sums"], sums);
+        assert_eq!(names["math::top"], "fx:src/math.test.ts#case:top");
+        assert!(!names.contains_key("sums"));
+    }
+
     #[test]
     fn entry_roots_marked() {
         let g = check("insight-roots");

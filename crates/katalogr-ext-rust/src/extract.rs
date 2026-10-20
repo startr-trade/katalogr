@@ -261,6 +261,16 @@ pub fn extract_full(input: &ExtractInput) -> Result<Extraction, ExtractError> {
         exports: b.exports,
         bindings: Vec::new(),
     };
+    // FEAT-063: the neutral `test` fact and the `test-name` exports.
+    crate::test_marks::mark(
+        &mut fragment,
+        &owner.module,
+        owner
+            .target
+            .as_ref()
+            .filter(|t| t.kind == TargetKind::Test)
+            .map(|t| t.name.as_str()),
+    );
     // FEAT-016: wasm-bindgen exports and extern imports (the convention lives in the bridge crate).
     if katalogr_ext_wasm::rust::mentions_wasm_bindgen(&fragment) {
         katalogr_ext_wasm::rust::apply(

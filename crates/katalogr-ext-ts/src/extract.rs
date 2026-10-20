@@ -6,7 +6,9 @@ use crate::context::{self, PACKAGE_JSON, TsContext};
 use crate::items::Builder;
 use crate::modules::{NS_FILE, NS_PACKAGE, key};
 use crate::roots;
-use katalogr_model::insight::{FACT_PACKAGE, FACT_RATIONALE, FACT_ROOT, ROOT_API, ROOT_TEST};
+use katalogr_model::insight::{
+    FACT_PACKAGE, FACT_RATIONALE, FACT_ROOT, FACT_TEST, ROOT_API, ROOT_TEST, TEST_SUITE,
+};
 use katalogr_model::{
     ArtifactName, ArtifactNode, Export, ExtractError, ExtractInput, Extraction, Fact, Fragment,
     Name, Provenance, Segment, Span, SymbolName, SymbolNode, annotate,
@@ -71,6 +73,7 @@ fn source_fragment(
             b.require_bindings(v);
         }
     }
+    let test_file = crate::tests::is_test_file(input.path.as_str());
     let mut pending = Vec::new();
     for stmt in &ret.program.body {
         if matches!(
@@ -79,15 +82,25 @@ fn source_fragment(
         ) {
             continue;
         }
+        // FEAT-063: in a test file, test calls become symbols; anything else is declared as usual.
+        if test_file && b.declare_test(stmt, None, &mut pending) {
+            continue;
+        }
         b.declare_statement(stmt, &mut pending);
     }
     b.finish_exports();
     b.declare_glue();
+    if test_file {
+        b.mark_support();
+    }
     b.walk_calls(pending);
 
     let mut facts = BTreeMap::new();
     if let Some(p) = roots::package_of(ctx, input.path.as_str()) {
         facts.insert(FACT_PACKAGE.to_string(), Fact::Str(p.to_string()));
+    }
+    if test_file {
+        facts.insert(FACT_TEST.to_string(), Fact::Str(TEST_SUITE.to_string()));
     }
     if roots::is_test_path(input.path.as_str()) {
         facts.insert(FACT_ROOT.to_string(), Fact::Str(ROOT_TEST.to_string()));
