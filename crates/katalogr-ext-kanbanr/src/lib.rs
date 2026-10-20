@@ -263,6 +263,7 @@ impl<'a> Build<'a> {
             candidates: keys,
             confidence: Confidence::Extracted,
             origin: None,
+            binds: None,
         });
     }
 

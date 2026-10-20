@@ -148,6 +148,7 @@ impl Extractor for TestExtractor {
                     candidates: vec![key(target)?],
                     confidence: Confidence::Extracted,
                     origin: None,
+                    binds: None,
                 }),
                 ["iref", from, kind, target] => refs.push(OutRef {
                     from: find(from)?,
@@ -156,6 +157,7 @@ impl Extractor for TestExtractor {
                     candidates: vec![key(target)?],
                     confidence: Confidence::Inferred,
                     origin: None,
+                    binds: None,
                 }),
                 ["export", k, sym] => exports.push(Export {
                     key: key(k)?,

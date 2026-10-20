@@ -420,6 +420,7 @@ mod bench {
                         }],
                         confidence: Confidence::Extracted,
                         origin: None,
+                        binds: None,
                     };
                     refs.push(out.clone());
                     let roll = next_rand(&mut rng) % 10;

@@ -1,6 +1,7 @@
 //! Technology-neutral model: names, ids, nodes, links, fragments and the extractor SPI (FEAT-001, ADR-0012).
 
 pub mod annotate;
+pub mod calls;
 pub mod embed;
 pub mod extract;
 pub mod fragment;
@@ -11,12 +12,13 @@ pub mod name;
 pub mod relpath;
 pub mod structure;
 
+pub use calls::{ArgRef, StrCall};
 pub use embed::{
     CALL_CALLEE_MAX, CallContext, EMBED_MAX_LEN, EMBED_MAX_PER_FILE, EMBED_MIN_LEN, EmbeddedInput,
     EmbeddedText, innermost_owner, offer,
 };
-pub use extract::{ExtractError, ExtractInput, Extraction, Extractor};
-pub use fragment::{Binding, ContractRole, Export, ExportKey, Fragment, OutRef};
+pub use extract::{ExtractError, ExtractInput, Extraction, Extractor, KeyNormaliser};
+pub use fragment::{Binding, ContractRole, Export, ExportKey, Fragment, OutRef, RefBinding};
 pub use graph::{
     ArtifactNode, Confidence, Fact, Link, LinkKind, LinkTarget, Provenance, Span, SymbolNode,
 };

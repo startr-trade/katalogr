@@ -547,4 +547,125 @@ mod ts {
         assert_eq!(lang("package.json"), "json");
         assert_eq!(lang("sub/tsconfig.json"), "json");
     }
+
+    /// The `str_calls` entries of a node: text and the `refs` map (or null).
+    fn str_calls(node: &Value) -> Vec<(String, Value)> {
+        let Some(list) = node["facts"]["str_calls"]["List"].as_array() else {
+            return Vec::new();
+        };
+        list.iter()
+            .map(|e| {
+                (
+                    e["Map"]["text"]["Str"].as_str().unwrap().to_string(),
+                    e["Map"]["refs"]["Map"].clone(),
+                )
+            })
+            .collect()
+    }
+
+    fn texts(calls: &[(String, Value)]) -> Vec<&str> {
+        calls.iter().map(|c| c.0.as_str()).collect()
+    }
+
+    #[test]
+    fn string_calls_recorded() {
+        let g = check("string-calls");
+        let load = str_calls(&g.nodes["fx:src/client.ts#fn:load"]);
+        assert_eq!(
+            texts(&load),
+            [
+                "fetch(\"/v1/users/{}\", {headers: {a: \"b\"}, method: \"POST\"})",
+                "axios.get(\"/v1/ping\")",
+                "axios({method: \"post\", url: \"/x\"})",
+                "fetch(\"/a{}/b\")",
+            ],
+            "object keys are sorted; the call that passes only prose is not recorded"
+        );
+        let list = str_calls(&g.nodes["fx:src/client.ts#class:Svc/method:list"]);
+        assert_eq!(texts(&list), ["this.http.get(\"/v1/items\")"]);
+        // The span runs from the method name to the closing parenthesis.
+        let e = &g.nodes["fx:src/client.ts#class:Svc/method:list"]["facts"]["str_calls"]["List"][0]
+            ["Map"];
+        let int = |k: &str| e[k]["Int"].as_u64().unwrap();
+        assert_eq!(
+            (int("line"), int("col"), int("end_line"), int("end_col")),
+            (14, 22, 14, 37)
+        );
+    }
+
+    #[test]
+    fn template_and_concat_rendered_with_holes() {
+        let g = check("string-calls");
+        let load = str_calls(&g.nodes["fx:src/client.ts#fn:load"]);
+        assert!(
+            load[0].0.starts_with("fetch(\"/v1/users/{}\""),
+            "{}",
+            load[0].0
+        );
+        assert_eq!(load[3].0, "fetch(\"/a{}/b\")");
+    }
+
+    #[test]
+    fn top_level_string_calls_on_artifact() {
+        let g = check("string-calls");
+        let app = str_calls(&g.artifacts["fx:src/app.ts"]);
+        assert_eq!(
+            texts(&app),
+            [
+                "app.get(\"/health\", health)",
+                "app.get(\"/users/:id\", auth, show)",
+                "app.post(\"/users\", users.create)",
+                "app.get(\"/ctrl\", ctrl.list)",
+                "app.get(\"/inline\", _)",
+                "app.get(\"/function\", _)",
+                "app.get(\"setting\")",
+            ]
+        );
+        let boot = str_calls(&g.artifacts["fx:src/client.ts"]);
+        assert_eq!(texts(&boot), ["fetch(\"/boot\")"]);
+        // None of it lands on a symbol of app.ts.
+        assert!(g.nodes["fx:src/app.ts#fn:auth"]["facts"]["str_calls"].is_null());
+    }
+
+    #[test]
+    fn handler_arguments_resolved() {
+        let g = check("string-calls");
+        let app = str_calls(&g.artifacts["fx:src/app.ts"]);
+        let entry = |i: usize, arg: &str| app[i].1[arg].clone();
+        // A function of the file: a local symbol by its name relative to the artifact.
+        assert_eq!(entry(0, "health")["Map"]["sym"]["Str"], "fn:health");
+        assert_eq!(entry(1, "auth")["Map"]["sym"]["Str"], "fn:auth");
+        // A named import: the export candidates of the imported module.
+        let cands = |e: &Value| -> Vec<String> {
+            e["Map"]["cands"]["List"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|c| c["Str"].as_str().unwrap().to_string())
+                .collect()
+        };
+        assert_eq!(
+            cands(&entry(1, "show"))[0],
+            "ts-export src/handlers/users#show"
+        );
+        // A namespace import: the export of the module, not inferred.
+        let create = entry(2, "users.create");
+        assert_eq!(cands(&create)[0], "ts-export src/handlers/users#create");
+        assert!(create["Map"]["inferred"].is_null());
+        // Any other member: the member name, inferred.
+        let list = entry(3, "ctrl.list");
+        assert_eq!(cands(&list), ["ts-member list"]);
+        assert_eq!(list["Map"]["inferred"]["Bool"], true);
+    }
+
+    #[test]
+    fn inline_handlers_unresolved() {
+        let g = check("string-calls");
+        let app = str_calls(&g.artifacts["fx:src/app.ts"]);
+        // An arrow function and a function expression render `_` and record no reference.
+        assert_eq!(app[4].0, "app.get(\"/inline\", _)");
+        assert!(app[4].1.is_null(), "{:?}", app[4].1);
+        assert_eq!(app[5].0, "app.get(\"/function\", _)");
+        assert!(app[5].1.is_null(), "{:?}", app[5].1);
+    }
 }

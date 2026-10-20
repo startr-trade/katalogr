@@ -1,0 +1,10 @@
+mode: subset
+symbols:
+- fx:src/app.ts#fn:auth
+- fx:src/app.ts#fn:health
+- fx:src/client.ts#class:Svc
+- fx:src/client.ts#class:Svc/method:list
+- fx:src/client.ts#fn:load
+- fx:src/handlers/users.ts#fn:create
+- fx:src/handlers/users.ts#fn:show
+links: []

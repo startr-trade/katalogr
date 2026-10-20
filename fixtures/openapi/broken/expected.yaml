@@ -1,0 +1,16 @@
+mode: exact
+symbols:
+- fx:openapi.yaml#operation:GET%20%2Ffirst
+- fx:openapi.yaml#operation:GET%20%2Fsecond
+contracts:
+- contract:http_route:GET%20%2Ffirst
+- contract:http_route:GET%20%2Fsecond
+links:
+- from: fx:openapi.yaml#operation:GET%20%2Ffirst
+  kind: declares
+  to: contract:http_route:GET%20%2Ffirst
+  confidence: Extracted
+- from: fx:openapi.yaml#operation:GET%20%2Fsecond
+  kind: declares
+  to: contract:http_route:GET%20%2Fsecond
+  confidence: Extracted

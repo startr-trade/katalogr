@@ -7,7 +7,8 @@ use katalogr_engine::{Consistency, Engine, EventKind, NewEvent, QueryOptions, Sc
 use katalogr_model::{
     ArtifactName, Binding, CallContext, Confidence, ContractName, ContractRole, EmbeddedInput,
     EmbeddedText, Export, ExportKey, ExtractError, ExtractInput, Extraction, Extractor, Fragment,
-    Id, Link, LinkKind, Name, OutRef, Provenance, RelPath, Segment, Span, SymbolName, SymbolNode,
+    Id, KeyNormaliser, Link, LinkKind, Name, OutRef, Provenance, RelPath, Segment, Span,
+    SymbolName, SymbolNode,
 };
 use katalogr_store::{Kindex, ProjectConfig, ProjectName, RepoConfig};
 use std::collections::BTreeMap;
@@ -16,6 +17,38 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 pub struct TestExtractor;
+
+/// The test key normaliser `upper`: upper-cases, and yields nothing for empty input.
+pub struct Upper;
+pub static UPPER: Upper = Upper;
+static NORMALISERS: [&dyn KeyNormaliser; 1] = [&UPPER];
+/// Its version; tests change the hash through `Upper::VERSION`.
+impl KeyNormaliser for Upper {
+    fn id(&self) -> &'static str {
+        "upper"
+    }
+    fn version(&self) -> u32 {
+        1
+    }
+    fn normalise(&self, raw: &str) -> Option<String> {
+        (!raw.is_empty()).then(|| raw.to_uppercase())
+    }
+}
+
+/// A second version of `upper`, to see the profile hash change.
+pub struct UpperV2;
+pub static UPPER_V2: UpperV2 = UpperV2;
+impl KeyNormaliser for UpperV2 {
+    fn id(&self) -> &'static str {
+        "upper"
+    }
+    fn version(&self) -> u32 {
+        2
+    }
+    fn normalise(&self, raw: &str) -> Option<String> {
+        (!raw.is_empty()).then(|| raw.to_uppercase())
+    }
+}
 
 /// Index into [`SALTS`] returned by [`SaltedExtractor::revision_salt`].
 pub static SALT: AtomicUsize = AtomicUsize::new(0);
@@ -113,6 +146,10 @@ impl Extractor for TestExtractor {
 
     fn embeds(&self) -> bool {
         true
+    }
+
+    fn key_normalisers(&self) -> &'static [&'static dyn KeyNormaliser] {
+        &NORMALISERS
     }
 
     fn extract_full(&self, input: &ExtractInput) -> Result<Extraction, ExtractError> {
@@ -230,6 +267,7 @@ impl TestExtractor {
         let mut exports = Vec::new();
         let mut bindings = Vec::new();
         let mut lits: Vec<(usize, String, Option<CallContext>, String, Span)> = Vec::new();
+        let mut str_calls: BTreeMap<String, Vec<katalogr_model::StrCall>> = BTreeMap::new();
 
         for (idx, line) in text.lines().enumerate() {
             let trimmed = line.trim();
@@ -267,6 +305,36 @@ impl TestExtractor {
                     })
                     .ok_or_else(|| bad(Some(span), format!("bad key {s:?}")))
             };
+            // `strcall <sym|@> <text…>`: a recorded call of the symbol (`@`: the artifact).
+            if let ["strcall", target, ..] = words.as_slice() {
+                let text = trimmed["strcall".len()..].trim_start()[target.len()..].trim_start();
+                str_calls
+                    .entry(target.to_string())
+                    .or_default()
+                    .push(katalogr_model::StrCall {
+                        text: text.to_string(),
+                        span,
+                        refs: Vec::new(),
+                    });
+                continue;
+            }
+            // `argref <sym|@> <text> local:<name>|<ns>:<key>[!]`: attaches to the last strcall.
+            if let ["argref", target, text, r] = words.as_slice() {
+                let (r, inferred) = match r.strip_suffix('!') {
+                    Some(r) => (r, true),
+                    None => (*r, false),
+                };
+                let arg = match r.strip_prefix("local:") {
+                    Some(rel) => katalogr_model::ArgRef::Local(rel.to_string()),
+                    None => katalogr_model::ArgRef::Candidates(vec![key(r)?]),
+                };
+                let call = str_calls
+                    .get_mut(*target)
+                    .and_then(|v| v.last_mut())
+                    .ok_or_else(|| bad(Some(span), format!("no strcall for {target:?}")))?;
+                call.refs.push((text.to_string(), arg, inferred));
+                continue;
+            }
             if let ["lit", sym, ..] = words.as_slice() {
                 let rest = trimmed["lit".len()..].trim_start()[sym.len()..].trim_start();
                 let (call, text) = match rest.split_once(' ') {
@@ -368,7 +436,30 @@ impl TestExtractor {
                     candidates: vec![key(target)?],
                     confidence: Confidence::Extracted,
                     origin: None,
+                    binds: None,
                 }),
+                // A reference holding a contract binding (ADR-0022).
+                ["boundref", from, role, contract, cand] => {
+                    let role = parse_role(role).map_err(|m| bad(Some(span), m))?;
+                    let (ckind, ckey) = contract
+                        .split_once(':')
+                        .ok_or_else(|| bad(Some(span), format!("bad contract {contract:?}")))?;
+                    refs.push(OutRef {
+                        from: find(from)?,
+                        kind: LinkKind(role.as_str().to_string()),
+                        span: Some(span),
+                        candidates: vec![key(cand)?],
+                        confidence: Confidence::Extracted,
+                        origin: None,
+                        binds: Some(katalogr_model::RefBinding {
+                            contract: ContractName {
+                                kind: ckind.to_string(),
+                                key: ckey.to_string(),
+                            },
+                            role,
+                        }),
+                    });
+                }
                 ["export", k, sym] => exports.push(Export {
                     key: key(k)?,
                     target: find(sym)?,
@@ -407,6 +498,30 @@ impl TestExtractor {
             }
         }
 
+        let mut artifact_facts = BTreeMap::new();
+        for (target, calls) in &str_calls {
+            let Some(fact) = katalogr_model::calls::str_calls_fact(calls) else {
+                continue;
+            };
+            let name = katalogr_model::calls::STR_CALLS_FACT.to_string();
+            if target == "@" {
+                artifact_facts.insert(name, fact);
+                continue;
+            }
+            let sym = symbols
+                .iter_mut()
+                .find(|s| {
+                    s.name
+                        .segments
+                        .iter()
+                        .map(|g| g.name.as_str())
+                        .collect::<Vec<_>>()
+                        .join("/")
+                        == *target
+                })
+                .ok_or_else(|| bad(None, format!("undeclared symbol {target:?}")))?;
+            sym.facts.insert(name, fact);
+        }
         let mut embedded = Vec::new();
         for (_, sym, call, text, span) in lits {
             let owner = symbols
@@ -428,7 +543,7 @@ impl TestExtractor {
                 extension: self.id().to_string(),
                 artifact: katalogr_model::ArtifactNode {
                     name: artifact,
-                    facts: BTreeMap::new(),
+                    facts: artifact_facts,
                 },
                 symbols,
                 links,
@@ -438,6 +553,15 @@ impl TestExtractor {
             },
             embedded,
         ))
+    }
+}
+
+fn parse_role(role: &str) -> Result<ContractRole, String> {
+    match role {
+        "provides" => Ok(ContractRole::Provides),
+        "consumes" => Ok(ContractRole::Consumes),
+        "declares" => Ok(ContractRole::Declares),
+        other => Err(format!("bad role {other:?}")),
     }
 }
 

@@ -81,6 +81,7 @@ mod coverage_calc {
             }],
             confidence: Confidence::Extracted,
             origin: None,
+            binds: None,
         }
     }
 

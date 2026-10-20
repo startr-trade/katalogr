@@ -23,7 +23,7 @@ use std::ops::Bound;
 use std::time::{Duration, Instant};
 
 /// Stored in `meta`; a different number rebuilds the cache from the shards.
-pub const CACHE_SCHEMA: u32 = 7;
+pub const CACHE_SCHEMA: u32 = 8;
 
 /// `meta` key: the watermark the stored rank reflects.
 const RANK_WATERMARK_META: &str = "rank_watermark";
@@ -168,6 +168,12 @@ pub struct BindingRow {
 pub enum LinkOrigin {
     Intra,
     Ref(u32),
+    /// A link written by the `index`-th (bound) reference of `artifact` (ADR-0022): it may start
+    /// at a symbol of another artifact.
+    Bound {
+        artifact: Id,
+        index: u32,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

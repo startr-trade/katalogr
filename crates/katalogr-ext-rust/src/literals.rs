@@ -48,7 +48,7 @@ pub fn collect(
 }
 
 /// `render_path`: segments joined by `::`, generic arguments and whitespace removed.
-fn render_path(path: &ast::Path) -> String {
+pub(crate) fn render_path(path: &ast::Path) -> String {
     let mut segs = Vec::new();
     let mut p = Some(path.clone());
     while let Some(cur) = p {
@@ -73,7 +73,7 @@ fn render_path(path: &ast::Path) -> String {
 }
 
 /// A receiver is rendered only for a path, `self`, or a field chain of those.
-fn render_recv(e: &ast::Expr) -> Option<String> {
+pub(crate) fn render_recv(e: &ast::Expr) -> Option<String> {
     match e {
         ast::Expr::PathExpr(p) => Some(render_path(&p.path()?)),
         ast::Expr::FieldExpr(f) => {

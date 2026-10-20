@@ -1,0 +1,38 @@
+mode: exact
+symbols:
+- fx:openapi.yaml#operation:DELETE%20%2Fusers%2F{id}
+- fx:openapi.yaml#operation:GET%20%2Fusers
+- fx:openapi.yaml#operation:GET%20%2Fusers%2F{id}
+- fx:openapi.yaml#type:User
+- fx:openapi.yaml#type:User/field:id
+- fx:openapi.yaml#type:User/field:name
+contracts:
+- contract:http_route:DELETE%20%2Fv1%2Fusers%2F{}
+- contract:http_route:GET%20%2Fv1%2Fusers
+- contract:http_route:GET%20%2Fv1%2Fusers%2F{}
+- contract:schema_type:{}User
+links:
+- from: fx:openapi.yaml#operation:DELETE%20%2Fusers%2F{id}
+  kind: declares
+  to: contract:http_route:DELETE%20%2Fv1%2Fusers%2F{}
+  confidence: Extracted
+- from: fx:openapi.yaml#operation:GET%20%2Fusers
+  kind: declares
+  to: contract:http_route:GET%20%2Fv1%2Fusers
+  confidence: Extracted
+- from: fx:openapi.yaml#operation:GET%20%2Fusers%2F{id}
+  kind: declares
+  to: contract:http_route:GET%20%2Fv1%2Fusers%2F{}
+  confidence: Extracted
+- from: fx:openapi.yaml#type:User
+  kind: contains
+  to: fx:openapi.yaml#type:User/field:id
+  confidence: Extracted
+- from: fx:openapi.yaml#type:User
+  kind: contains
+  to: fx:openapi.yaml#type:User/field:name
+  confidence: Extracted
+- from: fx:openapi.yaml#type:User
+  kind: declares
+  to: contract:schema_type:{}User
+  confidence: Inferred

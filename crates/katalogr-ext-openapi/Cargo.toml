@@ -1,0 +1,19 @@
+[package]
+name = "katalogr-ext-openapi"
+description = "OpenAPI extension: operations as symbols, the http_route contract and its key normaliser, and request-line literals."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+katalogr-model.workspace = true
+katalogr-ext-data.workspace = true
+katalogr-ext-schema.workspace = true
+
+[dev-dependencies]
+katalogr-acceptance = { path = "../katalogr-acceptance" }
+katalogr-engine.workspace = true
+camino.workspace = true
+serde_json.workspace = true

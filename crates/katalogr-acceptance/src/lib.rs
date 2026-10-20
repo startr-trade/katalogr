@@ -58,6 +58,7 @@ pub fn full_registry() -> ExtensionRegistry {
     reg.register(Box::new(katalogr_ext_rust::RustExtractor));
     reg.register(Box::new(katalogr_ext_ts::TsExtractor));
     reg.register(Box::new(katalogr_ext_sql::SqlExtractor));
+    reg.register(Box::new(katalogr_ext_openapi::OpenApiExtractor));
     reg.register(Box::new(katalogr_ext_schema::XsdExtractor));
     reg.register(Box::new(katalogr_ext_schema::JsonSchemaExtractor));
     reg.register(Box::new(katalogr_ext_data::DataExtractor));

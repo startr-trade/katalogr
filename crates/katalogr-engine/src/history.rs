@@ -163,6 +163,7 @@ pub fn history_fragment(
             candidates: annotate::keys(r),
             confidence: Confidence::Extracted,
             origin: None,
+            binds: None,
         });
     }
     let changed = changed_files(&repo, &commit)?;
@@ -178,6 +179,7 @@ pub fn history_fragment(
             }],
             confidence: Confidence::Extracted,
             origin: None,
+            binds: None,
         });
         hunks.insert(
             file.clone(),

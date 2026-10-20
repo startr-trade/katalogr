@@ -13,6 +13,7 @@ pub mod manifest;
 pub mod ownership;
 pub mod rationale;
 pub mod roots;
+pub mod strcalls;
 mod test_marks;
 
 pub use context::{CrateInfo, Dep, Target, TargetKind, WorkspaceContext};
@@ -55,6 +56,7 @@ impl Extractor for RustExtractor {
             "rationale-comment",
             "package-fact",
             "test-marks",
+            "string-calls",
         ]
     }
 
@@ -66,9 +68,9 @@ impl Extractor for RustExtractor {
     /// and the wasm-bindgen bindings (FEAT-016); `2` offers string literals to guest
     /// extensions (FEAT-017); `3` adds the `root`, `package` and `rationale`
     /// facts (FEAT-030); `;tests-1` adds the `test` fact and the `test-name`
-    /// exports (FEAT-063).
+    /// exports (FEAT-063); `;rest-1` adds the `str_calls` fact (FEAT-014).
     fn revision_salt(&self) -> &'static str {
-        "rust-extract-3;tests-1"
+        "rust-extract-3;tests-1;rest-1"
     }
 
     /// The [`WorkspaceContext`] as compact JSON with sorted keys and vectors.

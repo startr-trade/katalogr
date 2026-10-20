@@ -12,6 +12,7 @@ pub mod literals;
 pub mod modules;
 pub mod rationale;
 pub mod roots;
+pub mod strcalls;
 pub(crate) mod tests;
 pub(crate) mod wasm;
 
@@ -90,6 +91,7 @@ impl Extractor for TsExtractor {
             "rationale-comment",
             "package-fact",
             "test-marks",
+            "string-calls",
         ]
     }
 
@@ -101,9 +103,9 @@ impl Extractor for TsExtractor {
     /// bindings (FEAT-016); `2` offers string literals to guest
     /// extensions (FEAT-017); `3` adds the `root`, `package` and `rationale`
     /// facts (FEAT-030); `;tests-1` adds the `test` fact, test symbols and the `test-name`
-    /// exports (FEAT-063).
+    /// exports (FEAT-063); `;rest-1` adds the `str_calls` fact (FEAT-014).
     fn revision_salt(&self) -> &'static str {
-        "ts-extract-3;tests-1"
+        "ts-extract-3;tests-1;rest-1"
     }
 
     /// The [`TsContext`] as compact JSON with sorted keys and vectors.

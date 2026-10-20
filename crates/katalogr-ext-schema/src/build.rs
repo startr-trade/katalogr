@@ -169,6 +169,7 @@ impl Builder {
             candidates,
             confidence,
             origin: None,
+            binds: None,
         });
     }
 

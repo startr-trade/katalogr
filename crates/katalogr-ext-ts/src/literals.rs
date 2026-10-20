@@ -50,7 +50,7 @@ struct Walk {
 }
 
 /// A receiver is rendered only for an identifier, `this`, or a static member chain of those.
-fn render_recv(e: &Expression<'_>) -> Option<String> {
+pub(crate) fn render_recv(e: &Expression<'_>) -> Option<String> {
     match e {
         Expression::Identifier(i) => Some(i.name.to_string()),
         Expression::ThisExpression(_) => Some("this".to_string()),

@@ -255,6 +255,7 @@ impl Builder<'_> {
 }
 
 #[cfg(test)]
+#[allow(clippy::module_inception)]
 mod tests {
     use super::*;
 

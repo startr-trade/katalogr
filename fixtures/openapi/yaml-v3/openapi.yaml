@@ -1,0 +1,37 @@
+openapi: 3.0.3
+info:
+  title: Example API
+  version: "1.0"
+servers:
+  - url: https://api.example.test/v1
+paths:
+  /users:
+    get:
+      operationId: listUsers
+      tags: [users]
+      summary: List users
+      responses:
+        "200": {description: ok}
+  /users/{id}:
+    parameters:
+      - {name: id, in: path, required: true, schema: {type: integer}}
+    get:
+      operationId: getUser
+      tags: [users]
+      description: |
+        Fetch one user.
+        Second line.
+      responses:
+        "200": {description: ok}
+    delete:
+      operationId: removeUser
+      deprecated: true
+      responses:
+        "204": {description: gone}
+components:
+  schemas:
+    User:
+      type: object
+      properties:
+        id: {type: integer}
+        name: {type: string}

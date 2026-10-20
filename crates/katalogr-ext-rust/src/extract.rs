@@ -10,7 +10,7 @@ use katalogr_model::insight::{FACT_PACKAGE, FACT_RATIONALE, FACT_ROOT};
 use katalogr_model::{
     ArtifactName, ArtifactNode, Confidence, Export, ExportKey, ExtractError, ExtractInput,
     Extraction, Fact, Fragment, Id, Link, LinkKind, Name, OutRef, Provenance, Segment, Span,
-    SymbolName, SymbolNode,
+    StrCall, SymbolName, SymbolNode,
 };
 use ra_ap_syntax::{
     AstNode, Edition, SourceFile, SyntaxElement, SyntaxKind, SyntaxNode, TextRange,
@@ -104,6 +104,8 @@ pub(crate) struct Builder<'a> {
     pub trait_impl: bool,
     /// Node range of each symbol, to attribute comments.
     pub ranges: HashMap<TextRange, Id>,
+    /// Calls that pass a token-like string, by the symbol whose body holds them (FEAT-014).
+    pub str_calls: BTreeMap<Id, Vec<StrCall>>,
 }
 
 pub fn extract(input: &ExtractInput) -> Result<Fragment, ExtractError> {
@@ -184,6 +186,7 @@ pub fn extract_full(input: &ExtractInput) -> Result<Extraction, ExtractError> {
         test_depth: 0,
         trait_impl: false,
         ranges: HashMap::new(),
+        str_calls: BTreeMap::new(),
     };
 
     let mut facts: BTreeMap<String, Fact> = BTreeMap::new();
@@ -248,6 +251,32 @@ pub fn extract_full(input: &ExtractInput) -> Result<Extraction, ExtractError> {
         .collect();
 
     let embedded = crate::literals::collect(&tree, &b.lines, &b.symbols, artifact.id());
+    // FEAT-014: the `str_calls` fact of each symbol (of the artifact for top-level code).
+    if !b.str_calls.is_empty() {
+        let at: std::collections::HashMap<Id, usize> = b
+            .symbols
+            .iter()
+            .enumerate()
+            .map(|(i, s)| (s.name.id(), i))
+            .collect();
+        for (id, calls) in &mut b.str_calls {
+            // Source order: the walk meets an outer call before the calls it is chained on.
+            calls.sort_by_key(|c| (c.span.start_line, c.span.start_col));
+            let Some(fact) = katalogr_model::calls::str_calls_fact(calls) else {
+                continue;
+            };
+            let name = katalogr_model::calls::STR_CALLS_FACT.to_string();
+            match at.get(id) {
+                Some(&i) => {
+                    b.symbols[i].facts.insert(name, fact);
+                }
+                None if *id == artifact.id() => {
+                    facts.insert(name, fact);
+                }
+                None => {}
+            }
+        }
+    }
     let mut fragment = Fragment {
         provenance,
         extension: "rust".to_string(),
@@ -318,6 +347,11 @@ impl Builder<'_> {
         self.lines.span(s, e)
     }
 
+    /// The span of a byte range of the source.
+    pub(crate) fn span_of_range(&self, start: usize, end: usize) -> Span {
+        self.lines.span(start, end)
+    }
+
     pub(crate) fn add_ref(
         &mut self,
         from: Id,
@@ -342,6 +376,7 @@ impl Builder<'_> {
             candidates: seen,
             confidence,
             origin: None,
+            binds: None,
         });
     }
 

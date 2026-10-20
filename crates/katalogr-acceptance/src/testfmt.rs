@@ -112,6 +112,7 @@ impl Extractor for TestExtractor {
                     candidates: vec![key(target)?],
                     confidence: Confidence::Extracted,
                     origin: None,
+                    binds: None,
                 }),
                 ["export", k, sym] => exports.push(Export {
                     key: key(k)?,

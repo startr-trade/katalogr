@@ -29,6 +29,9 @@ impl<'a> Visit<'a> for CallWalk<'_, '_> {
             let modules = self.b.modules_for(spec);
             self.b.import_ref(modules, span);
         } else {
+            if let Some(sc) = self.b.str_call_of(it) {
+                self.b.str_calls.entry(self.from).or_default().push(sc);
+            }
             self.b.call(self.from, &it.callee, span);
         }
         walk::walk_call_expression(self, it);

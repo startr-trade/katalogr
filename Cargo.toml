@@ -26,6 +26,7 @@ katalogr-ext-kanbanr = { path = "crates/katalogr-ext-kanbanr", version = "0.1.0"
 katalogr-ext-data = { path = "crates/katalogr-ext-data", version = "0.1.0" }
 katalogr-ext-text = { path = "crates/katalogr-ext-text", version = "0.1.0" }
 katalogr-ext-schema = { path = "crates/katalogr-ext-schema", version = "0.1.0" }
+katalogr-ext-openapi = { path = "crates/katalogr-ext-openapi", version = "0.1.0" }
 quick-xml = "=0.41.0"
 saphyr-parser = "=0.1.0"
 oxc_parser = "=0.154.0"

@@ -1,0 +1,37 @@
+# Built-in REST conventions for TypeScript and JavaScript (FEAT-014, ADR-0020). They read the
+# `str_calls` fact that the TypeScript extension records and bind routes to `http_route`
+# contracts, so that a handler, the OpenAPI operation that documents it and the clients that
+# call it meet on one key.
+#
+# Copy this file into the project's `profiles/` folder (`katalogr profiles show http-ts`) to
+# change it: a project file with the same `profile:` name replaces this one. A router mounted
+# under a prefix (`app.use("/api", router)`) is not followed; add `path:`-scoped rules whose key
+# carries it.
+profile: http-ts
+version: 2
+rules:
+  # Express: the handler is the last argument; earlier ones are middleware. The rule needs a
+  # second argument, so the settings getter `app.get("name")` never matches, and the text must
+  # end in `)`, so an entry cut by the length cap does not bind. An inline arrow function renders
+  # `_` and falls back to the registering code.
+  - id: express-route
+    when: { extension: ts, on: all, each: str_calls, matches: '^(?:app|router|server|[A-Za-z_$][\w$]*Router)\.(get|post|put|delete|patch|head|options|all)\("(/[^"]*)", (?:.*, )?(?:([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*)|[^,]*)\)$' }
+    emit: { bind: { contract: { kind: http_route, key: '$1 $2' }, role: provides, normalise: http_route, holder: '$3' } }
+  # Clients. An empty method means GET; a method held in a variable produces no binding. The
+  # `axios-config` rule relies on object keys being rendered in sorted order.
+  - id: fetch
+    when: { extension: ts, on: all, each: str_calls, matches: '^(?:window\.|globalThis\.)?fetch\("([^"]*)"(?:, \{.*?\bmethod: ("?[A-Za-z_$][\w$]*"?))?' }
+    emit: { bind: { contract: { kind: http_route, key: '$2 $1' }, role: consumes, normalise: http_route } }
+  - id: axios-method
+    when: { extension: ts, on: all, each: str_calls, matches: '^axios\.(get|post|put|delete|patch|head|options)\("([^"]*)"' }
+    emit: { bind: { contract: { kind: http_route, key: '$1 $2' }, role: consumes, normalise: http_route } }
+  - id: axios-call
+    when: { extension: ts, on: all, each: str_calls, matches: '^axios\("([^"]*)"(?:, \{.*?\bmethod: ("?[A-Za-z_$][\w$]*"?))?' }
+    emit: { bind: { contract: { kind: http_route, key: '$2 $1' }, role: consumes, normalise: http_route } }
+  - id: axios-config
+    when: { extension: ts, on: all, each: str_calls, matches: '^axios(?:\.request)?\(\{(?:.*?\bmethod: ("?[A-Za-z_$][\w$]*"?))?.*?\burl: "([^"]*)"' }
+    emit: { bind: { contract: { kind: http_route, key: '$1 $2' }, role: consumes, normalise: http_route } }
+  # A receiver is matched by name, so these are inferred.
+  - id: client-member
+    when: { extension: ts, on: all, each: str_calls, matches: '^(?:this\.)?[\w$]*(?:[Hh]ttp|[Aa]pi|[Cc]lient)\.(get|post|put|delete|patch|head|options)\("([^"]*)"' }
+    emit: { bind: { contract: { kind: http_route, key: '$1 $2' }, role: consumes, normalise: http_route, confidence: inferred } }

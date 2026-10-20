@@ -50,6 +50,18 @@ technologies:
       - md/sections-links
     sections:
       - md/sections-links
+  openapi:
+    component-schemas:
+      - openapi/yaml-v3
+    operations:
+      - openapi/yaml-v3
+      - openapi/json-v3
+    parse-error:
+      - openapi/broken
+    plain-artifact:
+      - openapi/not-openapi
+    swagger2:
+      - openapi/swagger2
   rust:
     annotations:
       - rust/annotations
@@ -82,6 +94,8 @@ technologies:
       - rust/tests
     re-export:
       - rust/use-and-reexport
+    string-calls:
+      - rust/string-calls
     use-resolution:
       - rust/use-and-reexport
     wasm-export:
@@ -185,6 +199,8 @@ technologies:
       - ts/require
     test-marks:
       - ts/tests
+    string-calls:
+      - ts/string-calls
     wasm-glue:
       - wasm/glue-committed
     wasm-import:

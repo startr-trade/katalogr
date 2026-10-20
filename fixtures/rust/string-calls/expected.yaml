@@ -1,0 +1,11 @@
+mode: subset
+symbols:
+  - "fx:Cargo.toml#crate:string-calls"
+  - "fx:src/handlers.rs#fn:remove"
+  - "fx:src/handlers.rs#fn:show"
+  - "fx:src/routes.rs#fn:client"
+  - "fx:src/routes.rs#fn:local_handler"
+  - "fx:src/routes.rs#impl:Api"
+  - "fx:src/routes.rs#impl:Api/fn:list"
+  - "fx:src/routes.rs#impl:Api/fn:router"
+  - "fx:src/routes.rs#struct:Api"

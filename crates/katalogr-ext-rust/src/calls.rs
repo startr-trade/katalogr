@@ -85,6 +85,9 @@ impl Builder<'_> {
         for ev in node.preorder() {
             let WalkEvent::Enter(n) = ev else { continue };
             if let Some(call) = ast::CallExpr::cast(n.clone()) {
+                if let Some(sc) = self.str_call_of_call(&call) {
+                    self.str_calls.entry(from).or_default().push(sc);
+                }
                 let Some(ast::Expr::PathExpr(pe)) = call.expr() else {
                     continue;
                 };
@@ -96,6 +99,9 @@ impl Builder<'_> {
                 let span = self.span_of(path.syntax());
                 self.add_ref(from, "calls", span, cands, Confidence::Extracted);
             } else if let Some(call) = ast::MethodCallExpr::cast(n.clone()) {
+                if let Some(sc) = self.str_call_of_method(&call) {
+                    self.str_calls.entry(from).or_default().push(sc);
+                }
                 let Some(name) = call.name_ref() else {
                     continue;
                 };

@@ -1,0 +1,11 @@
+openapi: 3.0.3
+info:
+  title: Broken API
+  version: "1.0"
+paths:
+  /first:
+    get:
+      operationId: first
+      responses: {"200": {description: ok}}
+  /second:
+    get: [unclosed

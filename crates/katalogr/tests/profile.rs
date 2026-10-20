@@ -142,4 +142,65 @@ rules:
             "{still}"
         );
     }
+
+    /// FEAT-014 R-12: a built-in profile is printed as it is embedded, and the listing marks
+    /// the project files that replace a built-in.
+    #[test]
+    fn builtin_shown_by_cli() {
+        let tmp = tempfile::tempdir().unwrap();
+        let shipped = Path::new(env!("CARGO_MANIFEST_DIR")).join("../katalogr-dist/profiles");
+        let want = std::fs::read_to_string(shipped.join("http-ts.yaml")).unwrap();
+        // `show` needs no project and prints the file byte for byte.
+        assert_eq!(ok(tmp.path(), &["profiles", "show", "http-ts"]), want);
+        assert_eq!(ok(tmp.path(), &["profiles", "show", "http-ts.yaml"]), want);
+        let json: serde_json::Value =
+            serde_json::from_str(&ok(tmp.path(), &["--json", "profiles", "show", "http-ts"]))
+                .unwrap();
+        assert_eq!(json["text"], want.as_str());
+        // An unknown name exits 4 with one line on stderr.
+        let (code, out, err) = run(tmp.path(), &["profiles", "show", "nope"]);
+        assert_eq!((code, out.as_str()), (4, ""), "{err}");
+        assert_eq!(err.lines().count(), 1, "{err}");
+
+        // Outside a project, `list` names the three built-ins.
+        let list = ok(tmp.path(), &["profiles", "list"]);
+        assert_eq!(
+            list.lines().collect::<Vec<_>>(),
+            [
+                "builtin:generic.yaml",
+                "builtin:http-rust.yaml",
+                "builtin:http-ts.yaml"
+            ]
+        );
+
+        // In a project, a copy of a built-in replaces it by name, and a refused file is listed.
+        let (kx, repo) = project(tmp.path(), &[("a.tx", "sym fn f\n")]);
+        let dir = kx.join("projects/demo/profiles");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("ts.yaml"), want.replace("express-route", "mine")).unwrap();
+        std::fs::write(
+            dir.join("bad.yaml"),
+            "profile: bad\nversion: 9\nrules: []\n",
+        )
+        .unwrap();
+        let list = ok(&repo, &["profiles", "list"]);
+        let lines: Vec<&str> = list.lines().collect();
+        assert_eq!(
+            lines[..3],
+            [
+                "builtin:generic.yaml",
+                "builtin:http-rust.yaml",
+                "builtin:http-ts.yaml"
+            ]
+        );
+        assert_eq!(lines[3], "profiles/ts.yaml (replaces builtin:http-ts.yaml)");
+        assert!(
+            lines[4].starts_with("refused: profiles/bad.yaml:") && lines[4].contains("version"),
+            "{list}"
+        );
+        let json: serde_json::Value =
+            serde_json::from_str(&ok(&repo, &["--json", "profiles", "list"])).unwrap();
+        assert_eq!(json["project"][0]["replaces"], "builtin:http-ts.yaml");
+        assert_eq!(json["refused"][0]["file"], "profiles/bad.yaml");
+    }
 }
