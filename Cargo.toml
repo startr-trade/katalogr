@@ -8,7 +8,9 @@ edition = "2024"
 license = "Apache-2.0 OR MIT"
 repository = "https://github.com/startr-trade/katalogr"
 homepage = "https://github.com/startr-trade/katalogr"
-rust-version = "1.85"
+# rmcp 3.5.0 (FEAT-067) declares rust-version 1.88; the highest of any package built for a
+# release target is ra_ap_syntax 0.0.358 at 1.98 (archtest::rust_version_covers_dependencies)
+rust-version = "1.98"
 
 [workspace.dependencies]
 katalogr-model = { path = "crates/katalogr-model", version = "0.1.0" }
@@ -55,3 +57,5 @@ schemars = "1.2"
 pulldown-cmark = { version = "0.13", default-features = false }
 regex = "1"
 sqlparser = { version = "=0.63.0", default-features = false, features = ["std", "visitor"] }
+rmcp = { version = "=3.5.0", default-features = false, features = ["server", "transport-io"] }
+tokio = { version = "1.53", default-features = false, features = ["rt", "time", "sync", "io-std", "io-util", "macros"] }

@@ -82,11 +82,11 @@ fn role_of(tx: &impl Reader, id: Id) -> Result<Option<(String, SymbolHit)>, Stor
     if let Some(row) = tx.symbol(id)? {
         return Ok(role(&row.facts).map(|r| (r, hit(&row))));
     }
-    if let Some(a) = tx.artifact(id)? {
-        if let Some(r) = role(&a.facts) {
-            let h = crate::dangling::referrer(tx, id, None)?;
-            return Ok(h.map(|h| (r, h)));
-        }
+    if let Some(a) = tx.artifact(id)?
+        && let Some(r) = role(&a.facts)
+    {
+        let h = crate::dangling::referrer(tx, id, None)?;
+        return Ok(h.map(|h| (r, h)));
     }
     Ok(None)
 }
@@ -256,10 +256,10 @@ pub fn tests_for(
             },
             None => role_of(tx, *id)?,
         };
-        if let Some((role, test)) = r {
-            if !opts.cases_only || role == TEST_CASE {
-                found.push((*id, role, test));
-            }
+        if let Some((role, test)) = r
+            && (!opts.cases_only || role == TEST_CASE)
+        {
+            found.push((*id, role, test));
         }
     }
     let found_ids: Vec<Id> = found.iter().map(|f| f.0).collect();

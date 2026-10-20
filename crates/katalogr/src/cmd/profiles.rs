@@ -1,11 +1,11 @@
 //! `katalogr profiles list` and `katalogr profiles show <name>`.
 
 use katalogr_dist::{DistError, Katalogr, ProfileListing};
-use serde_json::json;
 
 use crate::cli::{Cli, ProfilesAction};
 use crate::cmd::resolve;
 use crate::exit::ExitCode;
+use crate::render;
 
 pub fn run(cli: &Cli, action: &ProfilesAction) -> Result<ExitCode, DistError> {
     match action {
@@ -21,7 +21,7 @@ pub fn run(cli: &Cli, action: &ProfilesAction) -> Result<ExitCode, DistError> {
         ProfilesAction::Show { name } => match Katalogr::builtin_profile(name) {
             Some(text) => {
                 if cli.json {
-                    println!("{}", json!({ "name": name, "text": text }));
+                    println!("{}", render::json::profile_text(name, text));
                 } else {
                     print!("{text}");
                 }
@@ -40,23 +40,7 @@ pub fn run(cli: &Cli, action: &ProfilesAction) -> Result<ExitCode, DistError> {
 
 fn print_listing(cli: &Cli, l: &ProfileListing) {
     if cli.json {
-        let project: Vec<_> = l
-            .project
-            .iter()
-            .map(|p| match &p.replaces {
-                Some(r) => json!({ "file": p.file, "replaces": r }),
-                None => json!({ "file": p.file }),
-            })
-            .collect();
-        let refused: Vec<_> = l
-            .refused
-            .iter()
-            .map(|e| json!({ "file": e.file, "line": e.line, "message": e.message }))
-            .collect();
-        println!(
-            "{}",
-            json!({ "builtins": l.builtins, "project": project, "refused": refused })
-        );
+        println!("{}", render::json::profile_listing(l));
         return;
     }
     for b in &l.builtins {
