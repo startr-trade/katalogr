@@ -11,9 +11,17 @@ definition:
   - id: R-1
     kind: functional
     text: THE SYSTEM SHALL do the first example thing.
+    tests:
+    - name: unit::adds_one
+      kind: unit
+      state: planned
   - id: R-2
     kind: functional
     text: THE SYSTEM SHALL do the second example thing.
+    tests:
+    - name: unit::missing_case
+      kind: unit
+      state: planned
 todo_lists:
 - code: TL-001
   description: Example list

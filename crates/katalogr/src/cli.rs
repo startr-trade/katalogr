@@ -136,6 +136,17 @@ pub enum Command {
         #[arg(long, default_value_t = 1, value_name = "N")]
         depth: u32,
     },
+    /// List the tests that exercise or verify a symbol.
+    Tests {
+        /// Canonical name or plain name.
+        text: String,
+        /// How many call hops to follow.
+        #[arg(long, default_value_t = katalogr_dist::query::DEFAULT_TEST_DEPTH, value_name = "N")]
+        depth: u32,
+        /// Only list test cases.
+        #[arg(long)]
+        cases: bool,
+    },
     /// Show the symbol at a line and the rationale linked to it.
     Why {
         /// `FILE:LINE`, with FILE relative to the repository root.

@@ -21,6 +21,8 @@ pub mod result;
 mod schema;
 mod search;
 pub mod show;
+mod step;
+mod tests;
 mod why;
 
 pub use callers::callers;
@@ -44,11 +46,12 @@ pub use resolve::{resolve, resolve_traced};
 pub use result::{
     CallerHit, CommitHit, DanglingRef, Direction, Envelope, Explain, FieldDiff, FieldShape,
     LinkBrief, MapEntry, Matched, MirrorDrift, Note, PARTIAL_NOTE, Partial, PathStep,
-    RationaleLink, RefHit, ReplaceResult, Resolution, SearchHit, ShowResult, SymbolHit, Truncation,
-    WhyResult, cap,
+    RationaleLink, RefHit, ReplaceResult, Resolution, SearchHit, ShowResult, SymbolHit, TestHit,
+    Truncation, WhyResult, cap,
 };
 pub use schema::schemas;
 pub use search::{SearchParams, search, search_traced, search_with, search_with_traced};
+pub use tests::{DEFAULT_TEST_DEPTH, TestsOptions, tests, tests_for};
 pub use why::{Blame, RATIONALE_KINDS, why};
 
 /// Re-exported so wrappers can bound on it without a direct dependency.

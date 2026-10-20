@@ -23,7 +23,8 @@ pub use katalogr_analytics as analytics;
 pub use katalogr_query as query;
 use katalogr_query::{
     Blame, CallerHit, DanglingRef, Diagnostic, Explain, MapEntry, MirrorDrift, Partial, PathStep,
-    RefHit, Resolution, SearchHit, SearchParams, SymbolHit, Trace, WhyResult, cap,
+    RefHit, Resolution, SearchHit, SearchParams, SymbolHit, TestHit, TestsOptions, Trace,
+    WhyResult, cap,
 };
 pub use katalogr_query::{ReplaceResult, ShowResult};
 pub use setup::{ProjectCreated, kindex_init, project_init};
@@ -615,6 +616,50 @@ impl Katalogr {
         Ok(reply)
     }
 
+    /// Tests of the symbol `text` names (FEAT-063): resolved as `callers` does.
+    pub fn tests(
+        &self,
+        text: &str,
+        topts: TestsOptions,
+        opts: &Options,
+    ) -> Result<Reply<Vec<TestHit>>, DistError> {
+        let (deeper, depth) = one_deeper(topts);
+        let mut partial = Vec::new();
+        let mut reply = self.query(opts, |tx| {
+            on_target(tx, text, |t| {
+                let hits = katalogr_query::tests(tx, t, deeper)?;
+                Ok(cut_depth(hits, depth, &mut partial))
+            })
+        })?;
+        reply.partial = partial;
+        Ok(reply)
+    }
+
+    /// Tests reaching any of the symbols `seeds` name, each once with its nearest seed
+    /// (FEAT-063 R-10: the multi-seed query that impact analysis consumes).
+    pub fn tests_for(
+        &self,
+        seeds: &[String],
+        topts: TestsOptions,
+        opts: &Options,
+    ) -> Result<Reply<Vec<TestHit>>, DistError> {
+        let (deeper, depth) = one_deeper(topts);
+        let mut partial = Vec::new();
+        let mut reply = self.query(opts, |tx| {
+            let mut ids = Vec::new();
+            for text in seeds {
+                match katalogr_query::resolve(tx, text)? {
+                    Resolution::One(t) => ids.push(katalogr_model::Id::of(&t.name)),
+                    other => return Ok(unresolved(other, text)),
+                }
+            }
+            let hits = katalogr_query::tests_for(tx, &ids, deeper)?;
+            Ok(Outcome::Found(cut_depth(hits, depth, &mut partial)))
+        })?;
+        reply.partial = partial;
+        Ok(reply)
+    }
+
     /// The symbol at `file:line` of the current repo (`file` relative to the repo root) and its
     /// rationale links.
     pub fn why(&self, spec: &str, opts: &Options) -> Result<Reply<WhyResult>, DistError> {
@@ -1110,4 +1155,31 @@ mod eval_runner {
         let names: Vec<String> = explain_items(&e).into_iter().map(|i| i.name).collect();
         assert_eq!(names, ["x", "y", "z", "item"]);
     }
+}
+
+/// `topts` with one more level, and the depth the caller asked for: the extra level tells
+/// whether the depth cut the answer.
+fn one_deeper(topts: TestsOptions) -> (TestsOptions, u32) {
+    let depth = topts.depth.max(1);
+    (
+        TestsOptions {
+            depth: depth.saturating_add(1),
+            ..topts
+        },
+        depth,
+    )
+}
+
+/// Keep the hits within `depth`; a hit beyond it records the depth cap in `partial`.
+fn cut_depth(mut hits: Vec<TestHit>, depth: u32, partial: &mut Vec<Partial>) -> Vec<TestHit> {
+    if hits.iter().any(|h| h.depth > depth) {
+        hits.retain(|h| h.depth <= depth);
+        partial.push(Partial::new(
+            cap::DEPTH,
+            u64::from(depth),
+            hits.len() as u64,
+            None,
+        ));
+    }
+    hits
 }

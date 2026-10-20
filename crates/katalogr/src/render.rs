@@ -11,7 +11,8 @@ use katalogr_dist::eval::{EvalReport, SweepReport};
 use katalogr_dist::query::{
     CallerHit, DIAG_PACK, DanglingRef, Direction, Envelope, Explain, FieldShape, HintSource,
     MapEntry, MirrorDrift, Partial, PathStep, RESULT_SCHEMA_VERSION, RefHit, ReplaceResult,
-    SearchHit, Serialize, ShowResult, SymbolHit, Trace, Truncation, WhyResult, budget, cap, hints,
+    SearchHit, Serialize, ShowResult, SymbolHit, TestHit, Trace, Truncation, WhyResult, budget,
+    cap, hints,
 };
 use katalogr_dist::{Outcome, Reply, Report};
 
@@ -54,6 +55,27 @@ pub fn caller_line(c: &CallerHit) -> String {
         c.confidence,
         c.depth
     )
+}
+
+pub fn test_line(h: &TestHit) -> String {
+    let mut line = format!(
+        "{}  {}  depth {}  {}  {:.4}",
+        h.role,
+        h.test.name,
+        h.depth,
+        format!("{:?}", h.confidence).to_lowercase(),
+        h.score
+    );
+    if let Some(c) = &h.via {
+        line.push_str(&format!("  via {c}"));
+    }
+    if !h.chain.is_empty() {
+        line.push_str(&format!("  through {}", h.chain.join(" \u{2192} ")));
+    }
+    if !h.requirements.is_empty() {
+        line.push_str(&format!("  verifies {}", h.requirements.join(", ")));
+    }
+    line
 }
 
 pub fn map_line(m: &MapEntry) -> String {

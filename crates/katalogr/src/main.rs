@@ -95,6 +95,7 @@ fn run(cli: &Cli) -> Result<ExitCode, DistError> {
         Some(Command::Find { text }) => cmd::find::run(cli, text),
         Some(Command::Refs { text, diagnostic }) => cmd::refs::run(cli, text, *diagnostic),
         Some(Command::Callers { text, depth }) => cmd::callers::run(cli, text, *depth),
+        Some(Command::Tests { text, depth, cases }) => cmd::tests::run(cli, text, *depth, *cases),
         Some(Command::Why { location }) => cmd::why::run(cli, location),
         Some(Command::Map { diagnostic }) => cmd::map::run(cli, *diagnostic),
         Some(Command::Search {

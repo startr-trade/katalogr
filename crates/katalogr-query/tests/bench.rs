@@ -2,10 +2,12 @@
 
 use camino::Utf8PathBuf;
 use katalogr_model::{
-    ArtifactName, Confidence, Field, Fragment, Id, LinkKind, Name, Provenance, RelPath, Segment,
-    Span, SymbolName, tokenize,
+    ArtifactName, Confidence, Fact, Field, Fragment, Id, LinkKind, Name, Provenance, RelPath,
+    Segment, Span, SymbolName, tokenize,
 };
-use katalogr_query::{Diagnostic, rank, refs, resolve, result::Resolution, search, search_traced};
+use katalogr_query::{
+    Diagnostic, TestsOptions, rank, refs, resolve, result::Resolution, search, search_traced, tests,
+};
 use katalogr_store::{
     Cache, Kindex, LEXICON_FIELDS, LinkEntry, LinkKey, LinkOrigin, LinkRow, ProjectConfig,
     ProjectName, Reader, RepoConfig, Restitch, StoreError, SymbolRow, WriteTx,
@@ -811,4 +813,133 @@ mod bench {
             "mirror_drift took {elapsed:?}"
         );
     }
+}
+
+/// FEAT-063 R-13: `tests` on a hub of a 100k-symbol graph where every node is within reach:
+/// 1,000 middle functions call the hub, 99,000 leaves call a middle one, every 10th leaf is a
+/// test case (9,900 hits at the default depth).
+#[test]
+#[ignore]
+fn tests_100k() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = Utf8PathBuf::from_path_buf(tmp.path().join("kx")).unwrap();
+    let dir = Kindex::init(&root)
+        .unwrap()
+        .create_project(
+            &ProjectName::new("bench").unwrap(),
+            ProjectConfig {
+                repos: vec![RepoConfig::new("r")],
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    let cache =
+        Cache::open_or_rebuild(&dir, &NoShards, Instant::now() + Duration::from_secs(60)).unwrap();
+    let path = RelPath::new("bench.tx").unwrap();
+    let artifact = ArtifactName {
+        repo: "r".into(),
+        path: path.clone(),
+    };
+    let artifact_id = artifact.id();
+    let provenance = Provenance {
+        repo: "r".into(),
+        path: path.clone(),
+        revision: "ce013625030ba8dba906f756967f9e9ca394464a".into(),
+    };
+    let span = Span {
+        start_line: 1,
+        start_col: 1,
+        end_line: 1,
+        end_col: 1,
+    };
+    let symbol = |name: String| SymbolName {
+        artifact: artifact.clone(),
+        segments: vec![Segment {
+            kind: "fn".into(),
+            name,
+        }],
+        ordinal: 1,
+    };
+    let mut tx = cache.write().unwrap();
+    let put = |tx: &mut WriteTx, name: String, test: bool| -> Id {
+        let n = symbol(name);
+        let id = n.id();
+        let mut facts = BTreeMap::new();
+        if test {
+            facts.insert("test".to_string(), Fact::Str("case".into()));
+        }
+        tx.put_symbol(
+            id,
+            &SymbolRow {
+                name: n,
+                artifact: artifact_id,
+                kind: "fn".into(),
+                span,
+                facts,
+            },
+        )
+        .unwrap();
+        id
+    };
+    let call = |tx: &mut WriteTx, from: Id, to: Id| {
+        tx.put_link(
+            &LinkKey {
+                from,
+                kind: LinkKind("calls".into()),
+                to,
+            },
+            &LinkRow {
+                entries: vec![LinkEntry {
+                    origin: LinkOrigin::Intra,
+                    confidence: Confidence::Extracted,
+                    span: Some(span),
+                    provenance: provenance.clone(),
+                    fanout: None,
+                    produced_by: None,
+                }],
+            },
+        )
+        .unwrap();
+    };
+    let hub = put(&mut tx, "hub".into(), false);
+    let mids: Vec<Id> = (0..1000)
+        .map(|i| {
+            let m = put(&mut tx, format!("m{i}"), false);
+            call(&mut tx, m, hub);
+            m
+        })
+        .collect();
+    for j in 0..99_000usize {
+        let s = put(&mut tx, format!("s{j}"), j % 10 == 0);
+        call(&mut tx, s, mids[j % 1000]);
+    }
+    tx.commit().unwrap();
+
+    let read = cache.read().unwrap();
+    let Resolution::One(target) = resolve(&read, "hub").unwrap() else {
+        panic!("hub must resolve to one symbol");
+    };
+    for depth in 1..=6 {
+        let start = Instant::now();
+        let hits = tests(
+            &read,
+            &target,
+            TestsOptions {
+                depth,
+                cases_only: false,
+            },
+        )
+        .unwrap();
+        println!(
+            "bench::tests_100k depth {depth}: {} hits, {} ms",
+            hits.len(),
+            start.elapsed().as_secs_f64() * 1000.0
+        );
+    }
+    let start = Instant::now();
+    let hits = tests(&read, &target, TestsOptions::default()).unwrap();
+    let elapsed = start.elapsed();
+    assert_eq!(hits.len(), 9_900);
+    println!("bench::tests_100k: {} ms", elapsed.as_secs_f64() * 1000.0);
+    assert!(elapsed < Duration::from_millis(500), "{elapsed:?}");
 }

@@ -2,7 +2,7 @@
 
 use crate::result::{
     CallerHit, DanglingRef, Envelope, Explain, MapEntry, MirrorDrift, PathStep, RefHit, SearchHit,
-    ShowResult, SymbolHit, WhyResult,
+    ShowResult, SymbolHit, TestHit, WhyResult,
 };
 use schemars::schema_for;
 use serde_json::Value;
@@ -26,5 +26,6 @@ pub fn schemas() -> BTreeMap<&'static str, Value> {
         ("search", to_value(schema_for!(Envelope<Vec<SearchHit>>))),
         ("path", to_value(schema_for!(Envelope<Vec<PathStep>>))),
         ("explain", to_value(schema_for!(Envelope<Explain>))),
+        ("tests", to_value(schema_for!(Envelope<Vec<TestHit>>))),
     ])
 }

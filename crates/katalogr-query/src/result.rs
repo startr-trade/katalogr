@@ -67,6 +67,31 @@ pub struct CallerHit {
     pub via: Option<String>,
 }
 
+/// A test that exercises or verifies a symbol (FEAT-063).
+#[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]
+pub struct TestHit {
+    /// The test node; an artifact is shown with kind `artifact` (as `dangling` shows referrers).
+    pub test: SymbolHit,
+    /// `case`, `suite`, `support`, or any other string an extension or profile set.
+    pub role: String,
+    /// Hops from the seed; 0 when the seed itself is test code.
+    pub depth: u32,
+    /// The weakest confidence on the path (Extracted > Declared > Inferred).
+    #[schemars(with = "ConfidenceSchema")]
+    pub confidence: Confidence,
+    /// Product of the row weights on the path, rounded to 4 decimals.
+    pub score: f64,
+    /// Canonical name of the seed reached.
+    pub seed: String,
+    /// Canonical names between the test and the seed, test side first; contracts excluded.
+    pub chain: Vec<String>,
+    /// The first contract on the path from the test side, `contract:<kind>:<key>`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub via: Option<String>,
+    /// Canonical names of the nodes with a `verified-by` link to the test, sorted.
+    pub requirements: Vec<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
 pub struct RationaleLink {
     pub kind: String,

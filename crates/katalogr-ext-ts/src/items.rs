@@ -45,6 +45,8 @@ pub enum Pending<'p, 'a> {
     Statement(&'p Statement<'a>),
     Declarator(&'p VariableDeclarator<'a>),
     Expression(&'p Expression<'a>),
+    /// A statement inside a test suite callback; calls belong to the suite symbol (FEAT-063).
+    Within(Id, &'p Statement<'a>),
 }
 
 pub struct Builder<'s> {
@@ -246,14 +248,14 @@ impl<'s> Builder<'s> {
         }
     }
 
-    fn export(&mut self, namespace: &str, k: String, target: Id) {
+    pub(crate) fn export(&mut self, namespace: &str, k: String, target: Id) {
         self.exports.push(Export {
             key: key(namespace, k),
             target,
         });
     }
 
-    fn contains(&mut self, from: Id, to: Id, span: Span) {
+    pub(crate) fn contains(&mut self, from: Id, to: Id, span: Span) {
         self.links.push(Link {
             from,
             to,
@@ -264,7 +266,7 @@ impl<'s> Builder<'s> {
         });
     }
 
-    fn seg(kind: &str, name: &str) -> Segment {
+    pub(crate) fn seg(kind: &str, name: &str) -> Segment {
         Segment {
             kind: kind.to_string(),
             name: name.to_string(),

@@ -2,6 +2,7 @@
 
 use crate::{Build, find_line, str_fact};
 use katalogr_model::annotate::{GOAL_NS, ITEM_NS, PREFIX_NS, REQ_NS};
+use katalogr_model::insight::{TEST_NAME_NS, VERIFIED_BY};
 use katalogr_model::{ExportKey, ExtractError, Fact, Segment, Span};
 use serde_yaml_ng::Value;
 use std::collections::BTreeMap;
@@ -81,6 +82,29 @@ pub(crate) fn extract(b: &mut Build<'_>) -> Result<(), ExtractError> {
         }
         let (rid, _) = b.symbol(&item_segs, "req", id, span, f);
         b.export(REQ_NS, format!("{code}/{id}"), rid);
+        // FEAT-063: each named test is a `verified-by` reference to the `test-name` namespace.
+        let from_line = line.unwrap_or(def_line);
+        for t in r
+            .get("tests")
+            .and_then(Value::as_sequence)
+            .into_iter()
+            .flatten()
+        {
+            let Some(name) = t.get("name").and_then(Value::as_str) else {
+                continue;
+            };
+            let at = find_line(b.text, from_line, &format!("name: {name}"))
+                .map_or(span, |l| b.line_span(l));
+            b.add_ref(
+                rid,
+                VERIFIED_BY,
+                Some(at),
+                vec![ExportKey {
+                    namespace: TEST_NAME_NS.to_string(),
+                    key: name.to_string(),
+                }],
+            );
+        }
     }
 
     // Tasks of the todo-lists: `task:TL-001/T1`.

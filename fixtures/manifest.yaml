@@ -38,6 +38,8 @@ technologies:
       - kanbanr/board
     tasks:
       - kanbanr/board
+    test-names:
+      - kanbanr/board
   md:
     annotations:
       - md/annotations
@@ -76,6 +78,8 @@ technologies:
       - rust/broken-syntax
     rationale-comment:
       - rust/rationale
+    test-marks:
+      - rust/tests
     re-export:
       - rust/use-and-reexport
     use-resolution:
@@ -179,6 +183,8 @@ technologies:
       - ts/reexports
     require:
       - ts/require
+    test-marks:
+      - ts/tests
     wasm-glue:
       - wasm/glue-committed
     wasm-import:

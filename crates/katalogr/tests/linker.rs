@@ -354,6 +354,56 @@ mod kanbanr {
         );
     }
 
+    /// `bare_code_and_board` plus the `.tx` files `(path, text)` written to the code repo and
+    /// indexed.
+    fn code_tx_and_board(tmp: &Path, files: &[(&str, &str)]) -> PathBuf {
+        let code = bare_code_and_board(tmp);
+        for (p, text) in files {
+            std::fs::write(code.join(p), text).unwrap();
+        }
+        ok(&code, &["index", "--full"]);
+        code
+    }
+
+    const REQ_1: &str = "board:projects/demo/features/Planned/FEAT-001.yaml#item:FEAT-001/req:R-1";
+
+    #[test]
+    fn requirement_tests_linked() {
+        let tmp = tempfile::tempdir().unwrap();
+        let code = code_tx_and_board(
+            tmp.path(),
+            &[(
+                "src/t.tx",
+                "sym fn adds_one\nexport test-name:unit::adds_one adds_one\nfact adds_one test case\n",
+            )],
+        );
+        let out = ok(&code, &["explain", REQ_1]);
+        assert!(
+            out.contains("verified-by") && out.contains("code:src/t.tx#fn:adds_one"),
+            "{out}"
+        );
+        assert!(out.to_lowercase().contains("extracted"), "{out}");
+    }
+
+    #[test]
+    fn unmatched_test_name_dangling() {
+        let tmp = tempfile::tempdir().unwrap();
+        let code = code_tx_and_board(
+            tmp.path(),
+            &[(
+                "src/t.tx",
+                "sym fn adds_one\nexport test-name:unit::adds_one adds_one\nfact adds_one test case\n",
+            )],
+        );
+        let (status, out, _) = katalogr(&code, &["dangling", "--kind", "verified-by"]);
+        assert_eq!(status, 1, "{out}");
+        assert_eq!(out.lines().count(), 1, "{out}");
+        assert!(out.contains("req:R-2"), "{out}");
+        assert!(out.contains("wants test-name:unit::missing_case"), "{out}");
+        let (_, out, _) = katalogr(&code, &["dangling"]);
+        assert!(!out.contains("verified-by"), "{out}");
+    }
+
     #[test]
     fn trailer_links() {
         let tmp = tempfile::tempdir().unwrap();
@@ -572,5 +622,236 @@ mod kanbanr {
         let v: serde_json::Value = serde_json::from_str(&out).unwrap();
         assert_eq!(v["result"]["goals"].as_array().unwrap().len(), 2, "{out}");
         assert_eq!(v["result"]["commits"].as_array().unwrap().len(), 1, "{out}");
+    }
+}
+
+mod testlink {
+    use super::*;
+
+    /// One marked repository `app` holding the given `(path, text)` files; indexed.
+    fn repo_with(tmp: &Path, files: &[(&str, &str)]) -> PathBuf {
+        let repo = tmp.join("app");
+        std::fs::create_dir_all(&repo).unwrap();
+        for (p, text) in files {
+            std::fs::write(repo.join(p), text).unwrap();
+        }
+        project(tmp, &[("app", &repo)]);
+        ok(&repo, &["index"]);
+        repo
+    }
+
+    /// The `tests` lines as `(role, name suffix after '#', depth, rest)`.
+    fn lines(out: &str) -> Vec<String> {
+        out.lines().map(str::to_string).collect()
+    }
+
+    fn line_of<'a>(ls: &'a [String], sym: &str) -> &'a str {
+        ls.iter()
+            .find(|l| l.contains(&format!("#fn:{sym}  ")))
+            .unwrap_or_else(|| panic!("{sym} in {ls:?}"))
+    }
+
+    #[test]
+    fn direct_and_transitive_tests() {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = repo_with(
+            tmp.path(),
+            &[(
+                "t.tx",
+                "sym fn target\nsym fn helper\nsym fn t1\nsym fn t2\nsym fn t3\n\
+                 link t1 calls target\nlink t2 calls helper\nlink helper calls target\n\
+                 link t3 calls target\n\
+                 fact t1 test case\nfact t2 test case\nfact t3 test support\n",
+            )],
+        );
+        let out = ok(&repo, &["tests", "target"]);
+        let ls = lines(&out);
+        assert_eq!(
+            ls.iter().filter(|l| !l.starts_with("next:")).count(),
+            3,
+            "{out}"
+        );
+        let t1 = line_of(&ls, "t1");
+        assert!(t1.starts_with("case  ") && t1.contains("depth 1"), "{t1}");
+        assert!(t1.contains("extracted") && t1.contains("1.0000"), "{t1}");
+        let t3 = line_of(&ls, "t3");
+        assert!(
+            t3.starts_with("support  ") && t3.contains("depth 1"),
+            "{t3}"
+        );
+        let t2 = line_of(&ls, "t2");
+        assert!(
+            t2.contains("depth 2") && t2.contains("through app:t.tx#fn:helper"),
+            "{t2}"
+        );
+        // Sorted by depth, then confidence, score and name.
+        let pos = |s: &str| {
+            ls.iter()
+                .position(|l| l.contains(&format!("#fn:{s}  ")))
+                .unwrap()
+        };
+        assert!(pos("t1") < pos("t3") && pos("t3") < pos("t2"), "{out}");
+        // `--cases` drops the support code.
+        let out = ok(&repo, &["tests", "target", "--cases"]);
+        assert!(!out.contains("#fn:t3"), "{out}");
+        assert!(out.contains("#fn:t1") && out.contains("#fn:t2"), "{out}");
+    }
+
+    #[test]
+    fn contract_mediated_tests() {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = repo_with(
+            tmp.path(),
+            &[(
+                "t.tx",
+                "sym fn prov\nsym fn cons\nsym fn t\n\
+                 bind prov provides endpoint:orders\nbind cons consumes endpoint:orders\n\
+                 link t calls cons\nfact t test case\n",
+            )],
+        );
+        let out = ok(&repo, &["tests", "prov"]);
+        let ls = lines(&out);
+        let t = line_of(&ls, "t");
+        assert!(t.contains("depth 2"), "{t}");
+        assert!(t.contains("via contract:endpoint:orders"), "{t}");
+        assert!(t.contains("through app:t.tx#fn:cons"), "{t}");
+    }
+
+    #[test]
+    fn depth_limits_tests() {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = repo_with(
+            tmp.path(),
+            &[(
+                "t.tx",
+                "sym fn target\nsym fn h1\nsym fn h2\nsym fn h3\nsym fn t\n\
+                 link h1 calls target\nlink h2 calls h1\nlink h3 calls h2\nlink t calls h3\n\
+                 fact t test case\n",
+            )],
+        );
+        let out = ok(&repo, &["tests", "target", "--depth", "3"]);
+        assert!(!out.contains("#fn:t  "), "{out}");
+        let out = ok(&repo, &["tests", "target", "--depth", "4"]);
+        assert!(out.contains("#fn:t  ") && out.contains("depth 4"), "{out}");
+        // The default depth is 3.
+        let out = ok(&repo, &["tests", "target"]);
+        assert!(!out.contains("#fn:t  "), "{out}");
+    }
+
+    #[test]
+    fn inferred_path_confidence() {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = repo_with(
+            tmp.path(),
+            &[(
+                "t.tx",
+                "sym fn target\nsym fn other\nsym fn t\n\
+                 export ns:either target\nexport ns:either other\n\
+                 iref t calls ns:either\nfact t test case\n",
+            )],
+        );
+        let out = ok(&repo, &["--json", "tests", "target"]);
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        let hit = &v["result"][0];
+        assert_eq!(hit["role"], "case", "{out}");
+        assert_eq!(hit["confidence"], "Inferred", "{out}");
+        assert_eq!(hit["score"], 0.5, "{out}");
+    }
+
+    const T_CODE: &str = "sym fn adds_one\nexport test-name:unit::adds_one adds_one\n\
+                          fact adds_one test case\nsym fn lib_fn\nlink adds_one calls lib_fn\n";
+    const REQ_1: &str = "board:projects/demo/features/Planned/FEAT-001.yaml#item:FEAT-001/req:R-1";
+
+    fn code_and_board_tx(tmp: &Path) -> PathBuf {
+        let code = bare_code_and_board(tmp);
+        std::fs::write(code.join("src/t.tx"), T_CODE).unwrap();
+        ok(&code, &["index", "--full"]);
+        code
+    }
+
+    #[test]
+    fn requirements_on_hits() {
+        let tmp = tempfile::tempdir().unwrap();
+        let code = code_and_board_tx(tmp.path());
+        let out = ok(&code, &["tests", "lib_fn"]);
+        let line = out
+            .lines()
+            .find(|l| l.contains("#fn:adds_one"))
+            .expect(&out);
+        assert!(line.contains(&format!("verifies {REQ_1}")), "{line}");
+    }
+
+    #[test]
+    fn requirement_lists_its_tests() {
+        let tmp = tempfile::tempdir().unwrap();
+        let code = code_and_board_tx(tmp.path());
+        let out = ok(&code, &["tests", REQ_1]);
+        let line = out
+            .lines()
+            .find(|l| l.contains("#fn:adds_one"))
+            .expect(&out);
+        assert!(
+            line.starts_with("case  ") && line.contains("depth 1"),
+            "{line}"
+        );
+    }
+
+    #[test]
+    fn multi_seed_nearest() {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = repo_with(
+            tmp.path(),
+            &[(
+                "t.tx",
+                "sym fn a\nsym fn b\nsym fn t\nsym fn u\nsym fn h\n\
+                 link t calls a\nlink b calls a\nlink u calls b\nlink u calls h\n\
+                 link h calls a\nfact t test case\nfact u test case\n",
+            )],
+        );
+        // `t` reaches seed `a` at depth 1; `u` reaches `b` at depth 1 and `a` at depth 2, and
+        // is reported once with its nearest seed.
+        let k =
+            katalogr_dist::Katalogr::resolve(&repo, &katalogr_dist::Overrides::default()).unwrap();
+        let reply = k
+            .tests_for(
+                &["a".to_string(), "b".to_string()],
+                katalogr_dist::query::TestsOptions::default(),
+                &katalogr_dist::Options::default(),
+            )
+            .unwrap();
+        let katalogr_dist::Outcome::Found(hits) = reply.outcome else {
+            panic!("seeds resolve");
+        };
+        assert_eq!(hits.len(), 2, "{hits:?}");
+        let by = |n: &str| hits.iter().find(|h| h.test.name.ends_with(n)).unwrap();
+        assert_eq!(
+            (by("#fn:t").seed.as_str(), by("#fn:t").depth),
+            ("app:t.tx#fn:a", 1)
+        );
+        assert_eq!(
+            (by("#fn:u").seed.as_str(), by("#fn:u").depth),
+            ("app:t.tx#fn:b", 1)
+        );
+    }
+
+    #[test]
+    fn tests_json_envelope() {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = repo_with(
+            tmp.path(),
+            &[(
+                "t.tx",
+                "sym fn target\nsym fn t1\nsym fn t2\nsym fn t3\n\
+                 link t1 calls target\nlink t2 calls target\nlink t3 calls target\n\
+                 fact t1 test case\nfact t2 test case\nfact t3 test case\n",
+            )],
+        );
+        let out = ok(&repo, &["--json", "tests", "target"]);
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(v["schema"], 1, "{out}");
+        assert_eq!(v["result"][0]["role"], "case", "{out}");
+        assert_eq!(v["result"].as_array().unwrap().len(), 3, "{out}");
+        let out = ok(&repo, &["tests", "target", "--budget", "20"]);
+        assert!(out.contains("more omitted"), "{out}");
     }
 }

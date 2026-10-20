@@ -1,0 +1,52 @@
+mode: exact
+symbols:
+- fx:src/__tests__/util.ts#fn:helper
+- fx:src/math.test.ts#case:top
+- fx:src/math.test.ts#fn:reset
+- fx:src/math.test.ts#suite:add
+- fx:src/math.test.ts#suite:add/case:sums
+- fx:src/math.test.ts#suite:add/case:table%20%25i
+- fx:src/math.test.ts#suite:add/hook:beforeEach
+- fx:src/math.ts#fn:add
+- fx:src/runner.ts#fn:run
+links:
+- from: fx:src/math.test.ts
+  kind: imports
+  to: fx:src/math.ts
+  confidence: Extracted
+- from: fx:src/math.test.ts
+  kind: imports
+  to: fx:src/math.ts#fn:add
+  confidence: Extracted
+- from: fx:src/math.test.ts#case:top
+  kind: calls
+  to: fx:src/math.ts#fn:add
+  confidence: Extracted
+- from: fx:src/math.test.ts#suite:add
+  kind: contains
+  to: fx:src/math.test.ts#suite:add/case:sums
+  confidence: Extracted
+- from: fx:src/math.test.ts#suite:add
+  kind: contains
+  to: fx:src/math.test.ts#suite:add/case:table%20%25i
+  confidence: Extracted
+- from: fx:src/math.test.ts#suite:add
+  kind: contains
+  to: fx:src/math.test.ts#suite:add/hook:beforeEach
+  confidence: Extracted
+- from: fx:src/math.test.ts#suite:add/case:sums
+  kind: calls
+  to: fx:src/math.ts#fn:add
+  confidence: Extracted
+- from: fx:src/math.test.ts#suite:add/case:table%20%25i
+  kind: calls
+  to: fx:src/math.ts#fn:add
+  confidence: Extracted
+- from: fx:src/math.test.ts#suite:add/hook:beforeEach
+  kind: calls
+  to: fx:src/math.test.ts#fn:reset
+  confidence: Extracted
+- from: fx:src/runner.ts
+  kind: calls
+  to: fx:src/runner.ts#fn:run
+  confidence: Extracted

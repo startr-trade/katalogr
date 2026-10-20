@@ -158,6 +158,9 @@ impl Builder<'_> {
                     }
                     .visit_variable_declarator(d);
                 }
+                Pending::Within(id, s) => {
+                    CallWalk { b: self, from: id }.visit_statement(s);
+                }
                 Pending::Expression(e) => {
                     CallWalk {
                         b: self,
