@@ -1,0 +1,77 @@
+format: 1
+set: cross
+version: 1
+description: Synthetic two-repository corpus linked through a WASM export contract.
+repos:
+  - {name: svc, path: repos/svc}
+  - {name: ui, path: repos/ui}
+queries:
+  - id: c01
+    op: search
+    input: price quote
+    tags: [cross]
+    evidence:
+      - {name: "svc:src/lib.rs#fn:price_quote", grade: 3}
+      - {name: "ui:src/cart.ts#fn:renderQuote", grade: 2}
+      - {name: "ui:src/cart.ts#fn:cartTotal", grade: 1}
+  - id: c02
+    op: search
+    input: volume discount
+    tags: [cross, phrase]
+    evidence:
+      - {name: "ui:docs/pricing.md#section:pricing/section:volume-discount", grade: 3}
+      - {name: "svc:src/lib.rs#fn:discount", grade: 3}
+      - {name: "svc:src/lib.rs#fn:price_quote", grade: 1}
+  - id: c03
+    op: search
+    input: cart total
+    scope: {repos: [ui]}
+    tags: [within]
+    evidence:
+      - {name: "ui:src/cart.ts#fn:cartTotal", grade: 3}
+  - id: c04
+    op: search
+    input: render
+    scope: {repos: [ui], paths: ["src/**"]}
+    tags: [within, prefix]
+    evidence:
+      - {name: "ui:src/cart.ts#fn:renderQuote", grade: 3}
+  - id: c05
+    op: refs
+    input: "contract:wasm_export:pricing_wasm%2Fprice_quote"
+    tags: [cross, contract]
+    evidence:
+      - {name: "svc:src/lib.rs#fn:price_quote", grade: 3}
+      - {name: "ui:src/cart.ts#fn:cartTotal", grade: 3}
+  - id: c06
+    op: refs
+    input: "svc:src/lib.rs#fn:discount"
+    tags: [within, callers]
+    evidence:
+      - {name: "svc:src/lib.rs#fn:price_quote", grade: 3}
+  - id: c07
+    op: refs
+    input: "ui:src/cart.ts#fn:cartTotal"
+    tags: [within, callers]
+    evidence:
+      - {name: "ui:src/cart.ts#fn:renderQuote", grade: 3}
+  - id: c08
+    op: explain
+    input: "svc:src/lib.rs#fn:price_quote"
+    tags: [neighbours]
+    evidence:
+      - {name: "svc:src/lib.rs#fn:discount", grade: 3}
+      - {name: "contract:wasm_export:pricing_wasm%2Fprice_quote", grade: 2}
+  - id: c09
+    op: explain
+    input: "ui:src/cart.ts#fn:cartTotal"
+    tags: [neighbours]
+    evidence:
+      - {name: "ui:src/cart.ts#fn:renderQuote", grade: 3}
+      - {name: "contract:wasm_export:pricing_wasm%2Fprice_quote", grade: 2}
+  - id: c10
+    op: explain
+    input: "svc:src/lib.rs#fn:discount"
+    tags: [neighbours]
+    evidence:
+      - {name: "svc:src/lib.rs#fn:price_quote", grade: 3}

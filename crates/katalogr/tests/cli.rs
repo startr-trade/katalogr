@@ -746,7 +746,7 @@ mod query {
     fn schemas_current() {
         let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../schema/v1");
         let fresh = katalogr_dist::schemas();
-        assert_eq!(fresh.len(), 18);
+        assert_eq!(fresh.len(), 20);
         for (name, schema) in fresh {
             let mut want = serde_json::to_string_pretty(&schema).unwrap();
             want.push('\n');
@@ -782,6 +782,37 @@ mod retrieval {
         full.extend_from_slice(args);
         let (_, out, err) = run_raw(repo, &full);
         serde_json::from_str(&out).unwrap_or_else(|e| panic!("{args:?}: {e}: {out} {err}"))
+    }
+
+    #[test]
+    fn search_params_default_identical() {
+        use katalogr_dist::query::SearchParams;
+        use katalogr_dist::{Consistency, Katalogr, Options, Outcome, Overrides};
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = project_with_rust(tmp.path());
+        let k = Katalogr::resolve(&repo, &Overrides::default()).unwrap();
+        let o = Options {
+            consistency: Some(Consistency::WaitAll),
+            timeout: None,
+            diagnostic: false,
+        };
+        for q in ["apply rate code", "rate", "apply"] {
+            let plain = k.search(q, 10, &o).unwrap();
+            let with = k.search_with(q, 10, &SearchParams::default(), &o).unwrap();
+            assert_eq!(plain, with, "{q}");
+        }
+        // Prefix matching off: "appl" only matches by prefix.
+        let on = k.search("appl", 10, &o).unwrap();
+        assert!(matches!(on.outcome, Outcome::Found(_)));
+        let p = SearchParams {
+            prefix_factor: 0.0,
+            ..SearchParams::default()
+        };
+        let off = k.search_with("appl", 10, &p, &o).unwrap();
+        let Outcome::Found(hits) = off.outcome else {
+            return;
+        };
+        assert!(hits.iter().all(|h| h.score == 0.0), "{hits:?}");
     }
 
     #[test]

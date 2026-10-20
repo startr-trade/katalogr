@@ -1617,6 +1617,7 @@ name = "katalogr-analytics"
 version = "0.1.0"
 dependencies = [
  "camino",
+ "globset",
  "katalogr-model",
  "katalogr-query",
  "katalogr-store",
@@ -1624,7 +1625,9 @@ dependencies = [
  "schemars",
  "serde",
  "serde_json",
+ "serde_yaml_ng",
  "tempfile",
+ "thiserror",
 ]
 
 [[package]]

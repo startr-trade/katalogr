@@ -1,0 +1,7 @@
+{
+  "name": "pricing-ui",
+  "version": "0.1.0",
+  "dependencies": {
+    "pricing-wasm": "file:../svc/pkg"
+  }
+}

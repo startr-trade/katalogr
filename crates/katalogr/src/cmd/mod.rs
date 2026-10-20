@@ -8,6 +8,7 @@ pub mod cycles;
 pub mod dangling;
 pub mod dead_code;
 pub mod doctor;
+pub mod eval;
 pub mod explain;
 pub mod find;
 pub mod hook;

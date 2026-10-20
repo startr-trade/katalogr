@@ -48,7 +48,7 @@ pub use result::{
     WhyResult, cap,
 };
 pub use schema::schemas;
-pub use search::{search, search_traced};
+pub use search::{SearchParams, search, search_traced, search_with, search_with_traced};
 pub use why::{Blame, RATIONALE_KINDS, why};
 
 /// Re-exported so wrappers can bound on it without a direct dependency.

@@ -1,6 +1,7 @@
 //! JSON Schemas of the insight envelopes, one per command.
 
 use crate::coverage::CoverageReport;
+use crate::eval::{EvalReport, SweepReport};
 use crate::result::{CommunityReport, CycleReport, DeadCodeReport, HubReport, RationaleReport};
 use katalogr_query::result::Envelope;
 use schemars::schema_for;
@@ -8,7 +9,7 @@ use serde_json::Value;
 use std::collections::BTreeMap;
 
 /// Command name to the schema of its envelope: `hubs`, `communities`, `cycles`, `dead-code`,
-/// `rationale` and `coverage`. Written to `schema/v1/<command>.schema.json`.
+/// `rationale`, `coverage`, `eval` and `eval-sweep`. Written to `schema/v1/<command>.schema.json`.
 pub fn schemas() -> BTreeMap<&'static str, Value> {
     let to_value = |s: schemars::Schema| s.to_value();
     BTreeMap::from([
@@ -24,5 +25,7 @@ pub fn schemas() -> BTreeMap<&'static str, Value> {
             "rationale",
             to_value(schema_for!(Envelope<RationaleReport>)),
         ),
+        ("eval", to_value(schema_for!(Envelope<EvalReport>))),
+        ("eval-sweep", to_value(schema_for!(Envelope<SweepReport>))),
     ])
 }

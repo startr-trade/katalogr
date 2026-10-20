@@ -36,6 +36,7 @@ fn run(cli: &Cli) -> Result<ExitCode, DistError> {
             skip_git,
             verbose,
         }) => cmd::doctor::run(cli, *fail_on, *skip_git, *verbose),
+        Some(Command::Eval { action }) => cmd::eval::run(cli, action),
         Some(Command::Dangling { kind }) => cmd::dangling::run(cli, kind),
         Some(Command::Mirrors { kind }) => cmd::mirrors::run(cli, kind),
         Some(Command::Hubs {

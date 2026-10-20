@@ -38,6 +38,32 @@ struct Acc {
     matched: Vec<(usize, usize, bool)>,
 }
 
+/// BM25F parameters. `Default` returns exactly the constants `search` has always used.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SearchParams {
+    pub k1: f64,
+    pub b: f64,
+    /// A query token of at least this many characters also matches the terms it prefixes.
+    pub min_prefix: usize,
+    pub max_expansions: usize,
+    pub prefix_factor: f64,
+    /// Per field, indexed by `Field::index()`.
+    pub weights: [f64; LEXICON_FIELDS],
+}
+
+impl Default for SearchParams {
+    fn default() -> Self {
+        SearchParams {
+            k1: K1,
+            b: B,
+            min_prefix: MIN_PREFIX,
+            max_expansions: MAX_EXPANSIONS,
+            prefix_factor: PREFIX_FACTOR,
+            weights: Field::ALL.map(Field::weight),
+        }
+    }
+}
+
 /// The `limit` best symbols for the words in `terms`, best first. A symbol matches when any
 /// query term is one of its tokens. Per term, the field-weighted, length-normalised term
 /// frequency `t` contributes `idf * t / (k1 + t)`.
@@ -51,6 +77,28 @@ pub fn search_traced(
     tx: &impl Reader,
     terms: &str,
     limit: usize,
+    diag: &mut Diagnostic,
+) -> Result<Vec<SearchHit>, StoreError> {
+    search_with_traced(tx, terms, limit, &SearchParams::default(), diag)
+}
+
+/// `search` with explicit parameters. Same ordering and tie-break rules.
+pub fn search_with(
+    tx: &impl Reader,
+    terms: &str,
+    limit: usize,
+    p: &SearchParams,
+) -> Result<Vec<SearchHit>, StoreError> {
+    search_with_traced(tx, terms, limit, p, &mut Diagnostic::off())
+}
+
+/// What [`search_with`] does, recording its routing, retrieval and scoring into `diag`. The
+/// answer does not depend on `diag`.
+pub fn search_with_traced(
+    tx: &impl Reader,
+    terms: &str,
+    limit: usize,
+    p: &SearchParams,
     diag: &mut Diagnostic,
 ) -> Result<Vec<SearchHit>, StoreError> {
     let mut query: Vec<String> = Vec::new();
@@ -96,9 +144,9 @@ pub fn search_traced(
         // The exact term, then (3+ characters) the most frequent indexed terms it prefixes.
         let mut candidates: Vec<(bool, String, Vec<Posting>)> =
             vec![(false, term.clone(), tx.postings(term)?)];
-        let attempted = term.chars().count() >= MIN_PREFIX;
+        let attempted = term.chars().count() >= p.min_prefix;
         if attempted {
-            for (t, postings) in tx.postings_prefix(term, MAX_EXPANSIONS)? {
+            for (t, postings) in tx.postings_prefix(term, p.max_expansions)? {
                 candidates.push((true, t, postings));
             }
         }
@@ -107,22 +155,23 @@ pub fn search_traced(
         let mut matching: BTreeSet<Id> = BTreeSet::new();
         for (is_prefix, _, postings) in &candidates {
             let mut weighted: BTreeMap<Id, f64> = BTreeMap::new();
-            for p in postings {
-                let Some(field) = Field::from_index(p.field as usize) else {
+            for post in postings {
+                let Some(field) = Field::from_index(post.field as usize) else {
                     continue;
                 };
-                let dl = match lens.get(&p.symbol) {
+                let dl = match lens.get(&post.symbol) {
                     Some(l) => l[field.index()],
                     None => {
-                        let l = tx.doc_len(p.symbol)?.unwrap_or([0; LEXICON_FIELDS]);
-                        lens.insert(p.symbol, l);
+                        let l = tx.doc_len(post.symbol)?.unwrap_or([0; LEXICON_FIELDS]);
+                        lens.insert(post.symbol, l);
                         l[field.index()]
                     }
                 };
-                let norm = 1.0 - B + B * f64::from(dl) / avg[field.index()];
-                *weighted.entry(p.symbol).or_default() += field.weight() * f64::from(p.tf) / norm;
-                matching.insert(p.symbol);
-                acc.entry(p.symbol)
+                let norm = 1.0 - p.b + p.b * f64::from(dl) / avg[field.index()];
+                *weighted.entry(post.symbol).or_default() +=
+                    p.weights[field.index()] * f64::from(post.tf) / norm;
+                matching.insert(post.symbol);
+                acc.entry(post.symbol)
                     .or_default()
                     .matched
                     .push((qi, field.index(), *is_prefix));
@@ -137,9 +186,9 @@ pub fn search_traced(
         let tracing = diag.on().is_some();
         let mut source: Best = BTreeMap::new();
         for (ci, (is_prefix, weighted)) in per_term.into_iter().enumerate() {
-            let factor = if is_prefix { PREFIX_FACTOR } else { 1.0 };
+            let factor = if is_prefix { p.prefix_factor } else { 1.0 };
             for (id, t) in weighted {
-                let c = factor * idf * t / (K1 + t);
+                let c = factor * idf * t / (p.k1 + t);
                 let e = best.entry(id).or_insert(0.0);
                 if c > *e {
                     *e = c;

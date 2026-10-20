@@ -1,0 +1,2117 @@
+{
+  "format": 1,
+  "mode": "fixture",
+  "ks": [
+    1,
+    5,
+    10
+  ],
+  "params": {
+    "explain.per_side": 10.0,
+    "search.b": 0.75,
+    "search.k1": 1.2,
+    "search.max_expansions": 50.0,
+    "search.min_prefix": 3.0,
+    "search.prefix_factor": 0.5,
+    "search.weight.contract": 2.0,
+    "search.weight.doc": 1.0,
+    "search.weight.name": 3.0,
+    "search.weight.section": 1.5
+  },
+  "sets": [
+    {
+      "set": "core",
+      "version": 1,
+      "queries": 24
+    },
+    {
+      "set": "cross",
+      "version": 1,
+      "queries": 10
+    }
+  ],
+  "metrics": [
+    {
+      "name": "retrieval.evidence_missing",
+      "value": 0.0,
+      "better": "lower"
+    },
+    {
+      "name": "retrieval.evidence_missing",
+      "value": 0.0,
+      "better": "lower",
+      "labels": {
+        "op": "explain",
+        "set": "core"
+      }
+    },
+    {
+      "name": "retrieval.evidence_missing",
+      "value": 0.0,
+      "better": "lower",
+      "labels": {
+        "op": "explain",
+        "set": "cross"
+      }
+    },
+    {
+      "name": "retrieval.evidence_missing",
+      "value": 0.0,
+      "better": "lower",
+      "labels": {
+        "op": "map",
+        "set": "core"
+      }
+    },
+    {
+      "name": "retrieval.evidence_missing",
+      "value": 0.0,
+      "better": "lower",
+      "labels": {
+        "op": "refs",
+        "set": "core"
+      }
+    },
+    {
+      "name": "retrieval.evidence_missing",
+      "value": 0.0,
+      "better": "lower",
+      "labels": {
+        "op": "refs",
+        "set": "cross"
+      }
+    },
+    {
+      "name": "retrieval.evidence_missing",
+      "value": 0.0,
+      "better": "lower",
+      "labels": {
+        "op": "search",
+        "set": "core"
+      }
+    },
+    {
+      "name": "retrieval.evidence_missing",
+      "value": 0.0,
+      "better": "lower",
+      "labels": {
+        "op": "search",
+        "set": "cross"
+      }
+    },
+    {
+      "name": "retrieval.evidence_missing",
+      "value": 0.0,
+      "better": "lower",
+      "labels": {
+        "scope": "cross"
+      }
+    },
+    {
+      "name": "retrieval.evidence_missing",
+      "value": 0.0,
+      "better": "lower",
+      "labels": {
+        "scope": "within"
+      }
+    },
+    {
+      "name": "retrieval.evidence_missing",
+      "value": 0.0,
+      "better": "lower",
+      "labels": {
+        "set": "core"
+      }
+    },
+    {
+      "name": "retrieval.evidence_missing",
+      "value": 0.0,
+      "better": "lower",
+      "labels": {
+        "set": "cross"
+      }
+    },
+    {
+      "name": "retrieval.hit@1",
+      "value": 0.967742,
+      "better": "higher"
+    },
+    {
+      "name": "retrieval.hit@10",
+      "value": 1.0,
+      "better": "higher"
+    },
+    {
+      "name": "retrieval.hit@10",
+      "value": 1.0,
+      "better": "higher",
+      "labels": {
+        "op": "explain",
+        "set": "core"
+      }
+    },
+    {
+      "name": "retrieval.hit@10",
+      "value": 1.0,
+      "better": "higher",
+      "labels": {
+        "op": "explain",
+        "set": "cross"
+      }
+    },
+    {
+      "name": "retrieval.hit@10",
+      "value": 1.0,
+      "better": "higher",
+      "labels": {
+        "op": "map",
+        "set": "core"
+      }
+    },
+    {
+      "name": "retrieval.hit@10",
+      "value": 1.0,
+      "better": "higher",
+      "labels": {
+        "op": "refs",
+        "set": "core"
+      }
+    },
+    {
+      "name": "retrieval.hit@10",
+      "value": 1.0,
+      "better": "higher",
+      "labels": {
+        "op": "refs",
+        "set": "cross"
+      }
+    },
+    {
+      "name": "retrieval.hit@10",
+      "value": 1.0,
+      "better": "higher",
+      "labels": {
+        "op": "search",
+        "set": "core"
+      }
+    },
+    {
+      "name": "retrieval.hit@10",
+      "value": 1.0,
+      "better": "higher",
+      "labels": {
+        "op": "search",
+        "set": "cross"
+      }
+    },
+    {
+      "name": "retrieval.hit@10",
+      "value": 1.0,
+      "better": "higher",
+      "labels": {
+        "scope": "cross"
+      }
+    },
+    {
+      "name": "retrieval.hit@10",
+      "value": 1.0,
+      "better": "higher",
+      "labels": {
+        "scope": "within"
+      }
+    },
+    {
+      "name": "retrieval.hit@10",
+      "value": 1.0,
+      "better": "higher",
+      "labels": {
+        "set": "core"
+      }
+    },
+    {
+      "name": "retrieval.hit@10",
+      "value": 1.0,
+      "better": "higher",
+      "labels": {
+        "set": "cross"
+      }
+    },
+    {
+      "name": "retrieval.hit@1",
+      "value": 1.0,
+      "better": "higher",
+      "labels": {
+        "op": "explain",
+        "set": "core"
+      }
+    },
+    {
+      "name": "retrieval.hit@1",
+      "value": 1.0,
+      "better": "higher",
+      "labels": {
+        "op": "explain",
+        "set": "cross"
+      }
+    },
+    {
+      "name": "retrieval.hit@1",
+      "value": 0.75,
+      "better": "higher",
+      "labels": {
+        "op": "map",
+        "set": "core"
+      }
+    },
+    {
+      "name": "retrieval.hit@1",
+      "value": 1.0,
+      "better": "higher",
+      "labels": {
+        "op": "refs",
+        "set": "core"
+      }
+    },
+    {
+      "name": "retrieval.hit@1",
+      "value": 1.0,
+      "better": "higher",
+      "labels": {
+        "op": "refs",
+        "set": "cross"
+      }
+    },
+    {
+      "name": "retrieval.hit@1",
+      "value": 1.0,
+      "better": "higher",
+      "labels": {
+        "op": "search",
+        "set": "core"
+      }
+    },
+    {
+      "name": "retrieval.hit@1",
+      "value": 1.0,
+      "better": "higher",
+      "labels": {
+        "op": "search",
+        "set": "cross"
+      }
+    },
+    {
+      "name": "retrieval.hit@1",
+      "value": 1.0,
+      "better": "higher",
+      "labels": {
+        "scope": "cross"
+      }
+    },
+    {
+      "name": "retrieval.hit@1",
+      "value": 0.964286,
+      "better": "higher",
+      "labels": {
+        "scope": "within"
+      }
+    },
+    {
+      "name": "retrieval.hit@1",
+      "value": 0.952381,
+      "better": "higher",
+      "labels": {
+        "set": "core"
+      }
+    },
+    {
+      "name": "retrieval.hit@1",
+      "value": 1.0,
+      "better": "higher",
+      "labels": {
+        "set": "cross"
+      }
+    },
+    {
+      "name": "retrieval.hit@5",
+      "value": 1.0,
+      "better": "higher"
+    },
+    {
+      "name": "retrieval.hit@5",
+      "value": 1.0,
+      "better": "higher",
+      "labels": {
+        "op": "explain",
+        "set": "core"
+      }
+    },
+    {
+      "name": "retrieval.hit@5",
+      "value": 1.0,
+      "better": "higher",
+      "labels": {
+        "op": "explain",
+        "set": "cross"
+      }
+    },
+    {
+      "name": "retrieval.hit@5",
+      "value": 1.0,
+      "better": "higher",
+      "labels": {
+        "op": "map",
+        "set": "core"
+      }
+    },
+    {
+      "name": "retrieval.hit@5",
+      "value": 1.0,
+      "better": "higher",
+      "labels": {
+        "op": "refs",
+        "set": "core"
+      }
+    },
+    {
+      "name": "retrieval.hit@5",
+      "value": 1.0,
+      "better": "higher",
+      "labels": {
+        "op": "refs",
+        "set": "cross"
+      }
+    },
+    {
+      "name": "retrieval.hit@5",
+      "value": 1.0,
+      "better": "higher",
+      "labels": {
+        "op": "search",
+        "set": "core"
+      }
+    },
+    {
+      "name": "retrieval.hit@5",
+      "value": 1.0,
+      "better": "higher",
+      "labels": {
+        "op": "search",
+        "set": "cross"
+      }
+    },
+    {
+      "name": "retrieval.hit@5",
+      "value": 1.0,
+      "better": "higher",
+      "labels": {
+        "scope": "cross"
+      }
+    },
+    {
+      "name": "retrieval.hit@5",
+      "value": 1.0,
+      "better": "higher",
+      "labels": {
+        "scope": "within"
+      }
+    },
+    {
+      "name": "retrieval.hit@5",
+      "value": 1.0,
+      "better": "higher",
+      "labels": {
+        "set": "core"
+      }
+    },
+    {
+      "name": "retrieval.hit@5",
+      "value": 1.0,
+      "better": "higher",
+      "labels": {
+        "set": "cross"
+      }
+    },
+    {
+      "name": "retrieval.mrr",
+      "value": 0.983871,
+      "better": "higher"
+    },
+    {
+      "name": "retrieval.mrr",
+      "value": 1.0,
+      "better": "higher",
+      "labels": {
+        "op": "explain",
+        "set": "core"
+      }
+    },
+    {
+      "name": "retrieval.mrr",
+      "value": 1.0,
+      "better": "higher",
+      "labels": {
+        "op": "explain",
+        "set": "cross"
+      }
+    },
+    {
+      "name": "retrieval.mrr",
+      "value": 0.875,
+      "better": "higher",
+      "labels": {
+        "op": "map",
+        "set": "core"
+      }
+    },
+    {
+      "name": "retrieval.mrr",
+      "value": 1.0,
+      "better": "higher",
+      "labels": {
+        "op": "refs",
+        "set": "core"
+      }
+    },
+    {
+      "name": "retrieval.mrr",
+      "value": 1.0,
+      "better": "higher",
+      "labels": {
+        "op": "refs",
+        "set": "cross"
+      }
+    },
+    {
+      "name": "retrieval.mrr",
+      "value": 1.0,
+      "better": "higher",
+      "labels": {
+        "op": "search",
+        "set": "core"
+      }
+    },
+    {
+      "name": "retrieval.mrr",
+      "value": 1.0,
+      "better": "higher",
+      "labels": {
+        "op": "search",
+        "set": "cross"
+      }
+    },
+    {
+      "name": "retrieval.mrr",
+      "value": 1.0,
+      "better": "higher",
+      "labels": {
+        "scope": "cross"
+      }
+    },
+    {
+      "name": "retrieval.mrr",
+      "value": 0.982143,
+      "better": "higher",
+      "labels": {
+        "scope": "within"
+      }
+    },
+    {
+      "name": "retrieval.mrr",
+      "value": 0.97619,
+      "better": "higher",
+      "labels": {
+        "set": "core"
+      }
+    },
+    {
+      "name": "retrieval.mrr",
+      "value": 1.0,
+      "better": "higher",
+      "labels": {
+        "set": "cross"
+      }
+    },
+    {
+      "name": "retrieval.ndcg@1",
+      "value": 0.930876,
+      "better": "higher"
+    },
+    {
+      "name": "retrieval.ndcg@10",
+      "value": 0.962538,
+      "better": "higher"
+    },
+    {
+      "name": "retrieval.ndcg@10",
+      "value": 0.998061,
+      "better": "higher",
+      "labels": {
+        "op": "explain",
+        "set": "core"
+      }
+    },
+    {
+      "name": "retrieval.ndcg@10",
+      "value": 0.944664,
+      "better": "higher",
+      "labels": {
+        "op": "explain",
+        "set": "cross"
+      }
+    },
+    {
+      "name": "retrieval.ndcg@10",
+      "value": 0.824748,
+      "better": "higher",
+      "labels": {
+        "op": "map",
+        "set": "core"
+      }
+    },
+    {
+      "name": "retrieval.ndcg@10",
+      "value": 0.978025,
+      "better": "higher",
+      "labels": {
+        "op": "refs",
+        "set": "core"
+      }
+    },
+    {
+      "name": "retrieval.ndcg@10",
+      "value": 1.0,
+      "better": "higher",
+      "labels": {
+        "op": "refs",
+        "set": "cross"
+      }
+    },
+    {
+      "name": "retrieval.ndcg@10",
+      "value": 0.979767,
+      "better": "higher",
+      "labels": {
+        "op": "search",
+        "set": "core"
+      }
+    },
+    {
+      "name": "retrieval.ndcg@10",
+      "value": 1.0,
+      "better": "higher",
+      "labels": {
+        "op": "search",
+        "set": "cross"
+      }
+    },
+    {
+      "name": "retrieval.ndcg@10",
+      "value": 1.0,
+      "better": "higher",
+      "labels": {
+        "scope": "cross"
+      }
+    },
+    {
+      "name": "retrieval.ndcg@10",
+      "value": 0.958524,
+      "better": "higher",
+      "labels": {
+        "scope": "within"
+      }
+    },
+    {
+      "name": "retrieval.ndcg@10",
+      "value": 0.952604,
+      "better": "higher",
+      "labels": {
+        "set": "core"
+      }
+    },
+    {
+      "name": "retrieval.ndcg@10",
+      "value": 0.983399,
+      "better": "higher",
+      "labels": {
+        "set": "cross"
+      }
+    },
+    {
+      "name": "retrieval.ndcg@1",
+      "value": 1.0,
+      "better": "higher",
+      "labels": {
+        "op": "explain",
+        "set": "core"
+      }
+    },
+    {
+      "name": "retrieval.ndcg@1",
+      "value": 0.809524,
+      "better": "higher",
+      "labels": {
+        "op": "explain",
+        "set": "cross"
+      }
+    },
+    {
+      "name": "retrieval.ndcg@1",
+      "value": 0.607143,
+      "better": "higher",
+      "labels": {
+        "op": "map",
+        "set": "core"
+      }
+    },
+    {
+      "name": "retrieval.ndcg@1",
+      "value": 1.0,
+      "better": "higher",
+      "labels": {
+        "op": "refs",
+        "set": "core"
+      }
+    },
+    {
+      "name": "retrieval.ndcg@1",
+      "value": 1.0,
+      "better": "higher",
+      "labels": {
+        "op": "refs",
+        "set": "cross"
+      }
+    },
+    {
+      "name": "retrieval.ndcg@1",
+      "value": 1.0,
+      "better": "higher",
+      "labels": {
+        "op": "search",
+        "set": "core"
+      }
+    },
+    {
+      "name": "retrieval.ndcg@1",
+      "value": 1.0,
+      "better": "higher",
+      "labels": {
+        "op": "search",
+        "set": "cross"
+      }
+    },
+    {
+      "name": "retrieval.ndcg@1",
+      "value": 1.0,
+      "better": "higher",
+      "labels": {
+        "scope": "cross"
+      }
+    },
+    {
+      "name": "retrieval.ndcg@1",
+      "value": 0.923469,
+      "better": "higher",
+      "labels": {
+        "scope": "within"
+      }
+    },
+    {
+      "name": "retrieval.ndcg@1",
+      "value": 0.92517,
+      "better": "higher",
+      "labels": {
+        "set": "core"
+      }
+    },
+    {
+      "name": "retrieval.ndcg@1",
+      "value": 0.942857,
+      "better": "higher",
+      "labels": {
+        "set": "cross"
+      }
+    },
+    {
+      "name": "retrieval.ndcg@5",
+      "value": 0.961315,
+      "better": "higher"
+    },
+    {
+      "name": "retrieval.ndcg@5",
+      "value": 0.998061,
+      "better": "higher",
+      "labels": {
+        "op": "explain",
+        "set": "core"
+      }
+    },
+    {
+      "name": "retrieval.ndcg@5",
+      "value": 0.944664,
+      "better": "higher",
+      "labels": {
+        "op": "explain",
+        "set": "cross"
+      }
+    },
+    {
+      "name": "retrieval.ndcg@5",
+      "value": 0.824748,
+      "better": "higher",
+      "labels": {
+        "op": "map",
+        "set": "core"
+      }
+    },
+    {
+      "name": "retrieval.ndcg@5",
+      "value": 0.978025,
+      "better": "higher",
+      "labels": {
+        "op": "refs",
+        "set": "core"
+      }
+    },
+    {
+      "name": "retrieval.ndcg@5",
+      "value": 1.0,
+      "better": "higher",
+      "labels": {
+        "op": "refs",
+        "set": "cross"
+      }
+    },
+    {
+      "name": "retrieval.ndcg@5",
+      "value": 0.976319,
+      "better": "higher",
+      "labels": {
+        "op": "search",
+        "set": "core"
+      }
+    },
+    {
+      "name": "retrieval.ndcg@5",
+      "value": 1.0,
+      "better": "higher",
+      "labels": {
+        "op": "search",
+        "set": "cross"
+      }
+    },
+    {
+      "name": "retrieval.ndcg@5",
+      "value": 1.0,
+      "better": "higher",
+      "labels": {
+        "scope": "cross"
+      }
+    },
+    {
+      "name": "retrieval.ndcg@5",
+      "value": 0.95717,
+      "better": "higher",
+      "labels": {
+        "scope": "within"
+      }
+    },
+    {
+      "name": "retrieval.ndcg@5",
+      "value": 0.950798,
+      "better": "higher",
+      "labels": {
+        "set": "core"
+      }
+    },
+    {
+      "name": "retrieval.ndcg@5",
+      "value": 0.983399,
+      "better": "higher",
+      "labels": {
+        "set": "cross"
+      }
+    },
+    {
+      "name": "retrieval.queries",
+      "value": 34.0,
+      "better": "info"
+    },
+    {
+      "name": "retrieval.queries",
+      "value": 4.0,
+      "better": "info",
+      "labels": {
+        "op": "explain",
+        "set": "core"
+      }
+    },
+    {
+      "name": "retrieval.queries",
+      "value": 3.0,
+      "better": "info",
+      "labels": {
+        "op": "explain",
+        "set": "cross"
+      }
+    },
+    {
+      "name": "retrieval.queries",
+      "value": 4.0,
+      "better": "info",
+      "labels": {
+        "op": "map",
+        "set": "core"
+      }
+    },
+    {
+      "name": "retrieval.queries",
+      "value": 4.0,
+      "better": "info",
+      "labels": {
+        "op": "refs",
+        "set": "core"
+      }
+    },
+    {
+      "name": "retrieval.queries",
+      "value": 3.0,
+      "better": "info",
+      "labels": {
+        "op": "refs",
+        "set": "cross"
+      }
+    },
+    {
+      "name": "retrieval.queries",
+      "value": 12.0,
+      "better": "info",
+      "labels": {
+        "op": "search",
+        "set": "core"
+      }
+    },
+    {
+      "name": "retrieval.queries",
+      "value": 4.0,
+      "better": "info",
+      "labels": {
+        "op": "search",
+        "set": "cross"
+      }
+    },
+    {
+      "name": "retrieval.queries",
+      "value": 3.0,
+      "better": "info",
+      "labels": {
+        "scope": "cross"
+      }
+    },
+    {
+      "name": "retrieval.queries",
+      "value": 28.0,
+      "better": "info",
+      "labels": {
+        "scope": "within"
+      }
+    },
+    {
+      "name": "retrieval.queries",
+      "value": 24.0,
+      "better": "info",
+      "labels": {
+        "set": "core"
+      }
+    },
+    {
+      "name": "retrieval.queries",
+      "value": 10.0,
+      "better": "info",
+      "labels": {
+        "set": "cross"
+      }
+    },
+    {
+      "name": "retrieval.route_accuracy",
+      "value": 1.0,
+      "better": "higher"
+    },
+    {
+      "name": "retrieval.route_accuracy",
+      "value": 1.0,
+      "better": "higher",
+      "labels": {
+        "op": "explain",
+        "set": "core"
+      }
+    },
+    {
+      "name": "retrieval.route_accuracy",
+      "value": 1.0,
+      "better": "higher",
+      "labels": {
+        "op": "explain",
+        "set": "cross"
+      }
+    },
+    {
+      "name": "retrieval.route_accuracy",
+      "value": 1.0,
+      "better": "higher",
+      "labels": {
+        "op": "map",
+        "set": "core"
+      }
+    },
+    {
+      "name": "retrieval.route_accuracy",
+      "value": 1.0,
+      "better": "higher",
+      "labels": {
+        "op": "refs",
+        "set": "core"
+      }
+    },
+    {
+      "name": "retrieval.route_accuracy",
+      "value": 1.0,
+      "better": "higher",
+      "labels": {
+        "op": "refs",
+        "set": "cross"
+      }
+    },
+    {
+      "name": "retrieval.route_accuracy",
+      "value": 1.0,
+      "better": "higher",
+      "labels": {
+        "op": "search",
+        "set": "core"
+      }
+    },
+    {
+      "name": "retrieval.route_accuracy",
+      "value": 1.0,
+      "better": "higher",
+      "labels": {
+        "op": "search",
+        "set": "cross"
+      }
+    },
+    {
+      "name": "retrieval.route_accuracy",
+      "value": 1.0,
+      "better": "higher",
+      "labels": {
+        "scope": "cross"
+      }
+    },
+    {
+      "name": "retrieval.route_accuracy",
+      "value": 1.0,
+      "better": "higher",
+      "labels": {
+        "scope": "within"
+      }
+    },
+    {
+      "name": "retrieval.route_accuracy",
+      "value": 1.0,
+      "better": "higher",
+      "labels": {
+        "set": "core"
+      }
+    },
+    {
+      "name": "retrieval.route_accuracy",
+      "value": 1.0,
+      "better": "higher",
+      "labels": {
+        "set": "cross"
+      }
+    },
+    {
+      "name": "retrieval.scope_leak_rate",
+      "value": 0.227273,
+      "better": "lower"
+    },
+    {
+      "name": "retrieval.scope_leak_rate",
+      "value": 0.263158,
+      "better": "lower",
+      "labels": {
+        "op": "search",
+        "set": "core"
+      }
+    },
+    {
+      "name": "retrieval.scope_leak_rate",
+      "value": 0.0,
+      "better": "lower",
+      "labels": {
+        "op": "search",
+        "set": "cross"
+      }
+    },
+    {
+      "name": "retrieval.scope_leak_rate",
+      "value": 0.227273,
+      "better": "lower",
+      "labels": {
+        "scope": "within"
+      }
+    },
+    {
+      "name": "retrieval.scope_leak_rate",
+      "value": 0.263158,
+      "better": "lower",
+      "labels": {
+        "set": "core"
+      }
+    },
+    {
+      "name": "retrieval.scope_leak_rate",
+      "value": 0.0,
+      "better": "lower",
+      "labels": {
+        "set": "cross"
+      }
+    },
+    {
+      "name": "retrieval.tokens_per_relevant_hit",
+      "value": 134.78125,
+      "better": "lower"
+    },
+    {
+      "name": "retrieval.tokens_per_relevant_hit",
+      "value": 26.625,
+      "better": "lower",
+      "labels": {
+        "op": "explain",
+        "set": "core"
+      }
+    },
+    {
+      "name": "retrieval.tokens_per_relevant_hit",
+      "value": 22.8,
+      "better": "lower",
+      "labels": {
+        "op": "explain",
+        "set": "cross"
+      }
+    },
+    {
+      "name": "retrieval.tokens_per_relevant_hit",
+      "value": 232.0,
+      "better": "lower",
+      "labels": {
+        "op": "map",
+        "set": "core"
+      }
+    },
+    {
+      "name": "retrieval.tokens_per_relevant_hit",
+      "value": 61.428571,
+      "better": "lower",
+      "labels": {
+        "op": "refs",
+        "set": "core"
+      }
+    },
+    {
+      "name": "retrieval.tokens_per_relevant_hit",
+      "value": 49.0,
+      "better": "lower",
+      "labels": {
+        "op": "refs",
+        "set": "cross"
+      }
+    },
+    {
+      "name": "retrieval.tokens_per_relevant_hit",
+      "value": 209.217391,
+      "better": "lower",
+      "labels": {
+        "op": "search",
+        "set": "core"
+      }
+    },
+    {
+      "name": "retrieval.tokens_per_relevant_hit",
+      "value": 96.625,
+      "better": "lower",
+      "labels": {
+        "op": "search",
+        "set": "cross"
+      }
+    },
+    {
+      "name": "retrieval.tokens_per_relevant_hit",
+      "value": 77.125,
+      "better": "lower",
+      "labels": {
+        "scope": "cross"
+      }
+    },
+    {
+      "name": "retrieval.tokens_per_relevant_hit",
+      "value": 143.017857,
+      "better": "lower",
+      "labels": {
+        "scope": "within"
+      }
+    },
+    {
+      "name": "retrieval.tokens_per_relevant_hit",
+      "value": 160.489362,
+      "better": "lower",
+      "labels": {
+        "set": "core"
+      }
+    },
+    {
+      "name": "retrieval.tokens_per_relevant_hit",
+      "value": 63.705882,
+      "better": "lower",
+      "labels": {
+        "set": "cross"
+      }
+    }
+  ],
+  "queries": [
+    {
+      "set": "core",
+      "id": "e01",
+      "op": "explain",
+      "tags": [
+        "neighbours"
+      ],
+      "route_expected": "found",
+      "route_actual": "found",
+      "route_ok": true,
+      "scope_class": "within",
+      "returned": 3,
+      "relevant_in_k": 3,
+      "hit": {
+        "1": 1.0,
+        "10": 1.0,
+        "5": 1.0
+      },
+      "ndcg": {
+        "1": 1.0,
+        "10": 1.0,
+        "5": 1.0
+      },
+      "rr": 1.0,
+      "tokens": 66,
+      "scope_leaks": null,
+      "missing_evidence": []
+    },
+    {
+      "set": "core",
+      "id": "e02",
+      "op": "explain",
+      "tags": [
+        "neighbours"
+      ],
+      "route_expected": "found",
+      "route_actual": "found",
+      "route_ok": true,
+      "scope_class": "within",
+      "returned": 4,
+      "relevant_in_k": 3,
+      "hit": {
+        "1": 1.0,
+        "10": 1.0,
+        "5": 1.0
+      },
+      "ndcg": {
+        "1": 1.0,
+        "10": 0.994183,
+        "5": 0.994183
+      },
+      "rr": 1.0,
+      "tokens": 96,
+      "scope_leaks": null,
+      "missing_evidence": []
+    },
+    {
+      "set": "core",
+      "id": "e03",
+      "op": "explain",
+      "tags": [
+        "neighbours"
+      ],
+      "route_expected": "found",
+      "route_actual": "found",
+      "route_ok": true,
+      "scope_class": "within",
+      "returned": 2,
+      "relevant_in_k": 2,
+      "hit": {
+        "1": 1.0,
+        "10": 1.0,
+        "5": 1.0
+      },
+      "ndcg": {
+        "1": 1.0,
+        "10": 1.0,
+        "5": 1.0
+      },
+      "rr": 1.0,
+      "tokens": 51,
+      "scope_leaks": null,
+      "missing_evidence": []
+    },
+    {
+      "set": "core",
+      "id": "e04",
+      "op": "explain",
+      "tags": [
+        "ambiguous"
+      ],
+      "route_expected": "ambiguous",
+      "route_actual": "ambiguous",
+      "route_ok": true,
+      "scope_class": "none",
+      "returned": 0,
+      "relevant_in_k": 0,
+      "hit": {},
+      "ndcg": {},
+      "rr": null,
+      "tokens": 0,
+      "scope_leaks": null,
+      "missing_evidence": []
+    },
+    {
+      "set": "core",
+      "id": "m01",
+      "op": "map",
+      "tags": [
+        "rank"
+      ],
+      "route_expected": "found",
+      "route_actual": "found",
+      "route_ok": true,
+      "scope_class": "within",
+      "returned": 10,
+      "relevant_in_k": 3,
+      "hit": {
+        "1": 1.0,
+        "10": 1.0,
+        "5": 1.0
+      },
+      "ndcg": {
+        "1": 1.0,
+        "10": 1.0,
+        "5": 1.0
+      },
+      "rr": 1.0,
+      "tokens": 522,
+      "scope_leaks": null,
+      "missing_evidence": []
+    },
+    {
+      "set": "core",
+      "id": "m02",
+      "op": "map",
+      "tags": [
+        "rank"
+      ],
+      "route_expected": "found",
+      "route_actual": "found",
+      "route_ok": true,
+      "scope_class": "within",
+      "returned": 10,
+      "relevant_in_k": 3,
+      "hit": {
+        "1": 1.0,
+        "10": 1.0,
+        "5": 1.0
+      },
+      "ndcg": {
+        "1": 0.428571,
+        "10": 0.857951,
+        "5": 0.857951
+      },
+      "rr": 1.0,
+      "tokens": 522,
+      "scope_leaks": null,
+      "missing_evidence": []
+    },
+    {
+      "set": "core",
+      "id": "m03",
+      "op": "map",
+      "tags": [
+        "rank"
+      ],
+      "route_expected": "found",
+      "route_actual": "found",
+      "route_ok": true,
+      "scope_class": "within",
+      "returned": 10,
+      "relevant_in_k": 2,
+      "hit": {
+        "1": 1.0,
+        "10": 1.0,
+        "5": 1.0
+      },
+      "ndcg": {
+        "1": 1.0,
+        "10": 0.982842,
+        "5": 0.982842
+      },
+      "rr": 1.0,
+      "tokens": 522,
+      "scope_leaks": null,
+      "missing_evidence": []
+    },
+    {
+      "set": "core",
+      "id": "m04",
+      "op": "map",
+      "tags": [
+        "rank"
+      ],
+      "route_expected": "found",
+      "route_actual": "found",
+      "route_ok": true,
+      "scope_class": "within",
+      "returned": 10,
+      "relevant_in_k": 1,
+      "hit": {
+        "1": 0.0,
+        "10": 1.0,
+        "5": 1.0
+      },
+      "ndcg": {
+        "1": 0.0,
+        "10": 0.458199,
+        "5": 0.458199
+      },
+      "rr": 0.5,
+      "tokens": 522,
+      "scope_leaks": null,
+      "missing_evidence": []
+    },
+    {
+      "set": "core",
+      "id": "r01",
+      "op": "refs",
+      "tags": [
+        "callers"
+      ],
+      "route_expected": "found",
+      "route_actual": "found",
+      "route_ok": true,
+      "scope_class": "within",
+      "returned": 3,
+      "relevant_in_k": 3,
+      "hit": {
+        "1": 1.0,
+        "10": 1.0,
+        "5": 1.0
+      },
+      "ndcg": {
+        "1": 1.0,
+        "10": 0.934076,
+        "5": 0.934076
+      },
+      "rr": 1.0,
+      "tokens": 154,
+      "scope_leaks": null,
+      "missing_evidence": []
+    },
+    {
+      "set": "core",
+      "id": "r02",
+      "op": "refs",
+      "tags": [
+        "callers"
+      ],
+      "route_expected": "found",
+      "route_actual": "found",
+      "route_ok": true,
+      "scope_class": "within",
+      "returned": 2,
+      "relevant_in_k": 2,
+      "hit": {
+        "1": 1.0,
+        "10": 1.0,
+        "5": 1.0
+      },
+      "ndcg": {
+        "1": 1.0,
+        "10": 1.0,
+        "5": 1.0
+      },
+      "rr": 1.0,
+      "tokens": 107,
+      "scope_leaks": null,
+      "missing_evidence": []
+    },
+    {
+      "set": "core",
+      "id": "r03",
+      "op": "refs",
+      "tags": [
+        "callers"
+      ],
+      "route_expected": "found",
+      "route_actual": "found",
+      "route_ok": true,
+      "scope_class": "within",
+      "returned": 3,
+      "relevant_in_k": 2,
+      "hit": {
+        "1": 1.0,
+        "10": 1.0,
+        "5": 1.0
+      },
+      "ndcg": {
+        "1": 1.0,
+        "10": 1.0,
+        "5": 1.0
+      },
+      "rr": 1.0,
+      "tokens": 169,
+      "scope_leaks": null,
+      "missing_evidence": []
+    },
+    {
+      "set": "core",
+      "id": "r04",
+      "op": "refs",
+      "tags": [
+        "no-match"
+      ],
+      "route_expected": "no-match",
+      "route_actual": "no-match",
+      "route_ok": true,
+      "scope_class": "none",
+      "returned": 0,
+      "relevant_in_k": 0,
+      "hit": {},
+      "ndcg": {},
+      "rr": null,
+      "tokens": 0,
+      "scope_leaks": null,
+      "missing_evidence": []
+    },
+    {
+      "set": "core",
+      "id": "s01",
+      "op": "search",
+      "tags": [
+        "identifier"
+      ],
+      "route_expected": "found",
+      "route_actual": "found",
+      "route_ok": true,
+      "scope_class": "within",
+      "returned": 10,
+      "relevant_in_k": 3,
+      "hit": {
+        "1": 1.0,
+        "10": 1.0,
+        "5": 1.0
+      },
+      "ndcg": {
+        "1": 1.0,
+        "10": 0.984691,
+        "5": 0.946768
+      },
+      "rr": 1.0,
+      "tokens": 811,
+      "scope_leaks": 4,
+      "missing_evidence": []
+    },
+    {
+      "set": "core",
+      "id": "s02",
+      "op": "search",
+      "tags": [
+        "identifier"
+      ],
+      "route_expected": "found",
+      "route_actual": "found",
+      "route_ok": true,
+      "scope_class": "within",
+      "returned": 5,
+      "relevant_in_k": 3,
+      "hit": {
+        "1": 1.0,
+        "10": 1.0,
+        "5": 1.0
+      },
+      "ndcg": {
+        "1": 1.0,
+        "10": 0.972121,
+        "5": 0.972121
+      },
+      "rr": 1.0,
+      "tokens": 402,
+      "scope_leaks": 0,
+      "missing_evidence": []
+    },
+    {
+      "set": "core",
+      "id": "s03",
+      "op": "search",
+      "tags": [
+        "identifier"
+      ],
+      "route_expected": "found",
+      "route_actual": "found",
+      "route_ok": true,
+      "scope_class": "within",
+      "returned": 10,
+      "relevant_in_k": 3,
+      "hit": {
+        "1": 1.0,
+        "10": 1.0,
+        "5": 1.0
+      },
+      "ndcg": {
+        "1": 1.0,
+        "10": 1.0,
+        "5": 1.0
+      },
+      "rr": 1.0,
+      "tokens": 796,
+      "scope_leaks": null,
+      "missing_evidence": []
+    },
+    {
+      "set": "core",
+      "id": "s04",
+      "op": "search",
+      "tags": [
+        "identifier"
+      ],
+      "route_expected": "found",
+      "route_actual": "found",
+      "route_ok": true,
+      "scope_class": "within",
+      "returned": 2,
+      "relevant_in_k": 2,
+      "hit": {
+        "1": 1.0,
+        "10": 1.0,
+        "5": 1.0
+      },
+      "ndcg": {
+        "1": 1.0,
+        "10": 1.0,
+        "5": 1.0
+      },
+      "rr": 1.0,
+      "tokens": 201,
+      "scope_leaks": 1,
+      "missing_evidence": []
+    },
+    {
+      "set": "core",
+      "id": "s05",
+      "op": "search",
+      "tags": [
+        "identifier"
+      ],
+      "route_expected": "found",
+      "route_actual": "found",
+      "route_ok": true,
+      "scope_class": "within",
+      "returned": 2,
+      "relevant_in_k": 1,
+      "hit": {
+        "1": 1.0,
+        "10": 1.0,
+        "5": 1.0
+      },
+      "ndcg": {
+        "1": 1.0,
+        "10": 1.0,
+        "5": 1.0
+      },
+      "rr": 1.0,
+      "tokens": 192,
+      "scope_leaks": null,
+      "missing_evidence": []
+    },
+    {
+      "set": "core",
+      "id": "s06",
+      "op": "search",
+      "tags": [
+        "identifier"
+      ],
+      "route_expected": "found",
+      "route_actual": "found",
+      "route_ok": true,
+      "scope_class": "within",
+      "returned": 2,
+      "relevant_in_k": 2,
+      "hit": {
+        "1": 1.0,
+        "10": 1.0,
+        "5": 1.0
+      },
+      "ndcg": {
+        "1": 1.0,
+        "10": 1.0,
+        "5": 1.0
+      },
+      "rr": 1.0,
+      "tokens": 185,
+      "scope_leaks": 0,
+      "missing_evidence": []
+    },
+    {
+      "set": "core",
+      "id": "s07",
+      "op": "search",
+      "tags": [
+        "phrase"
+      ],
+      "route_expected": "found",
+      "route_actual": "found",
+      "route_ok": true,
+      "scope_class": "within",
+      "returned": 3,
+      "relevant_in_k": 1,
+      "hit": {
+        "1": 1.0,
+        "10": 1.0,
+        "5": 1.0
+      },
+      "ndcg": {
+        "1": 1.0,
+        "10": 0.917319,
+        "5": 0.917319
+      },
+      "rr": 1.0,
+      "tokens": 223,
+      "scope_leaks": null,
+      "missing_evidence": []
+    },
+    {
+      "set": "core",
+      "id": "s08",
+      "op": "search",
+      "tags": [
+        "phrase"
+      ],
+      "route_expected": "found",
+      "route_actual": "found",
+      "route_ok": true,
+      "scope_class": "within",
+      "returned": 2,
+      "relevant_in_k": 2,
+      "hit": {
+        "1": 1.0,
+        "10": 1.0,
+        "5": 1.0
+      },
+      "ndcg": {
+        "1": 1.0,
+        "10": 1.0,
+        "5": 1.0
+      },
+      "rr": 1.0,
+      "tokens": 191,
+      "scope_leaks": null,
+      "missing_evidence": []
+    },
+    {
+      "set": "core",
+      "id": "s09",
+      "op": "search",
+      "tags": [
+        "phrase"
+      ],
+      "route_expected": "found",
+      "route_actual": "found",
+      "route_ok": true,
+      "scope_class": "within",
+      "returned": 10,
+      "relevant_in_k": 1,
+      "hit": {
+        "1": 1.0,
+        "10": 1.0,
+        "5": 1.0
+      },
+      "ndcg": {
+        "1": 1.0,
+        "10": 1.0,
+        "5": 1.0
+      },
+      "rr": 1.0,
+      "tokens": 803,
+      "scope_leaks": null,
+      "missing_evidence": []
+    },
+    {
+      "set": "core",
+      "id": "s10",
+      "op": "search",
+      "tags": [
+        "prefix"
+      ],
+      "route_expected": "found",
+      "route_actual": "found",
+      "route_ok": true,
+      "scope_class": "within",
+      "returned": 10,
+      "relevant_in_k": 3,
+      "hit": {
+        "1": 1.0,
+        "10": 1.0,
+        "5": 1.0
+      },
+      "ndcg": {
+        "1": 1.0,
+        "10": 0.929544,
+        "5": 0.929544
+      },
+      "rr": 1.0,
+      "tokens": 683,
+      "scope_leaks": null,
+      "missing_evidence": []
+    },
+    {
+      "set": "core",
+      "id": "s11",
+      "op": "search",
+      "tags": [
+        "prefix"
+      ],
+      "route_expected": "found",
+      "route_actual": "found",
+      "route_ok": true,
+      "scope_class": "within",
+      "returned": 5,
+      "relevant_in_k": 2,
+      "hit": {
+        "1": 1.0,
+        "10": 1.0,
+        "5": 1.0
+      },
+      "ndcg": {
+        "1": 1.0,
+        "10": 0.973758,
+        "5": 0.973758
+      },
+      "rr": 1.0,
+      "tokens": 325,
+      "scope_leaks": null,
+      "missing_evidence": []
+    },
+    {
+      "set": "core",
+      "id": "s12",
+      "op": "search",
+      "tags": [
+        "no-match"
+      ],
+      "route_expected": "no-match",
+      "route_actual": "no-match",
+      "route_ok": true,
+      "scope_class": "none",
+      "returned": 0,
+      "relevant_in_k": 0,
+      "hit": {},
+      "ndcg": {},
+      "rr": null,
+      "tokens": 0,
+      "scope_leaks": null,
+      "missing_evidence": []
+    },
+    {
+      "set": "cross",
+      "id": "c01",
+      "op": "search",
+      "tags": [
+        "cross"
+      ],
+      "route_expected": "found",
+      "route_actual": "found",
+      "route_ok": true,
+      "scope_class": "cross",
+      "returned": 3,
+      "relevant_in_k": 3,
+      "hit": {
+        "1": 1.0,
+        "10": 1.0,
+        "5": 1.0
+      },
+      "ndcg": {
+        "1": 1.0,
+        "10": 1.0,
+        "5": 1.0
+      },
+      "rr": 1.0,
+      "tokens": 252,
+      "scope_leaks": null,
+      "missing_evidence": []
+    },
+    {
+      "set": "cross",
+      "id": "c02",
+      "op": "search",
+      "tags": [
+        "cross",
+        "phrase"
+      ],
+      "route_expected": "found",
+      "route_actual": "found",
+      "route_ok": true,
+      "scope_class": "cross",
+      "returned": 3,
+      "relevant_in_k": 3,
+      "hit": {
+        "1": 1.0,
+        "10": 1.0,
+        "5": 1.0
+      },
+      "ndcg": {
+        "1": 1.0,
+        "10": 1.0,
+        "5": 1.0
+      },
+      "rr": 1.0,
+      "tokens": 267,
+      "scope_leaks": null,
+      "missing_evidence": []
+    },
+    {
+      "set": "cross",
+      "id": "c03",
+      "op": "search",
+      "tags": [
+        "within"
+      ],
+      "route_expected": "found",
+      "route_actual": "found",
+      "route_ok": true,
+      "scope_class": "within",
+      "returned": 2,
+      "relevant_in_k": 1,
+      "hit": {
+        "1": 1.0,
+        "10": 1.0,
+        "5": 1.0
+      },
+      "ndcg": {
+        "1": 1.0,
+        "10": 1.0,
+        "5": 1.0
+      },
+      "rr": 1.0,
+      "tokens": 172,
+      "scope_leaks": 0,
+      "missing_evidence": []
+    },
+    {
+      "set": "cross",
+      "id": "c04",
+      "op": "search",
+      "tags": [
+        "within",
+        "prefix"
+      ],
+      "route_expected": "found",
+      "route_actual": "found",
+      "route_ok": true,
+      "scope_class": "within",
+      "returned": 1,
+      "relevant_in_k": 1,
+      "hit": {
+        "1": 1.0,
+        "10": 1.0,
+        "5": 1.0
+      },
+      "ndcg": {
+        "1": 1.0,
+        "10": 1.0,
+        "5": 1.0
+      },
+      "rr": 1.0,
+      "tokens": 82,
+      "scope_leaks": 0,
+      "missing_evidence": []
+    },
+    {
+      "set": "cross",
+      "id": "c05",
+      "op": "refs",
+      "tags": [
+        "cross",
+        "contract"
+      ],
+      "route_expected": "found",
+      "route_actual": "found",
+      "route_ok": true,
+      "scope_class": "cross",
+      "returned": 2,
+      "relevant_in_k": 2,
+      "hit": {
+        "1": 1.0,
+        "10": 1.0,
+        "5": 1.0
+      },
+      "ndcg": {
+        "1": 1.0,
+        "10": 1.0,
+        "5": 1.0
+      },
+      "rr": 1.0,
+      "tokens": 98,
+      "scope_leaks": null,
+      "missing_evidence": []
+    },
+    {
+      "set": "cross",
+      "id": "c06",
+      "op": "refs",
+      "tags": [
+        "within",
+        "callers"
+      ],
+      "route_expected": "found",
+      "route_actual": "found",
+      "route_ok": true,
+      "scope_class": "within",
+      "returned": 1,
+      "relevant_in_k": 1,
+      "hit": {
+        "1": 1.0,
+        "10": 1.0,
+        "5": 1.0
+      },
+      "ndcg": {
+        "1": 1.0,
+        "10": 1.0,
+        "5": 1.0
+      },
+      "rr": 1.0,
+      "tokens": 49,
+      "scope_leaks": null,
+      "missing_evidence": []
+    },
+    {
+      "set": "cross",
+      "id": "c07",
+      "op": "refs",
+      "tags": [
+        "within",
+        "callers"
+      ],
+      "route_expected": "found",
+      "route_actual": "found",
+      "route_ok": true,
+      "scope_class": "within",
+      "returned": 1,
+      "relevant_in_k": 1,
+      "hit": {
+        "1": 1.0,
+        "10": 1.0,
+        "5": 1.0
+      },
+      "ndcg": {
+        "1": 1.0,
+        "10": 1.0,
+        "5": 1.0
+      },
+      "rr": 1.0,
+      "tokens": 49,
+      "scope_leaks": null,
+      "missing_evidence": []
+    },
+    {
+      "set": "cross",
+      "id": "c08",
+      "op": "explain",
+      "tags": [
+        "neighbours"
+      ],
+      "route_expected": "found",
+      "route_actual": "found",
+      "route_ok": true,
+      "scope_class": "within",
+      "returned": 2,
+      "relevant_in_k": 2,
+      "hit": {
+        "1": 1.0,
+        "10": 1.0,
+        "5": 1.0
+      },
+      "ndcg": {
+        "1": 1.0,
+        "10": 1.0,
+        "5": 1.0
+      },
+      "rr": 1.0,
+      "tokens": 46,
+      "scope_leaks": null,
+      "missing_evidence": []
+    },
+    {
+      "set": "cross",
+      "id": "c09",
+      "op": "explain",
+      "tags": [
+        "neighbours"
+      ],
+      "route_expected": "found",
+      "route_actual": "found",
+      "route_ok": true,
+      "scope_class": "within",
+      "returned": 2,
+      "relevant_in_k": 2,
+      "hit": {
+        "1": 1.0,
+        "10": 1.0,
+        "5": 1.0
+      },
+      "ndcg": {
+        "1": 0.428571,
+        "10": 0.833991,
+        "5": 0.833991
+      },
+      "rr": 1.0,
+      "tokens": 47,
+      "scope_leaks": null,
+      "missing_evidence": []
+    },
+    {
+      "set": "cross",
+      "id": "c10",
+      "op": "explain",
+      "tags": [
+        "neighbours"
+      ],
+      "route_expected": "found",
+      "route_actual": "found",
+      "route_ok": true,
+      "scope_class": "within",
+      "returned": 1,
+      "relevant_in_k": 1,
+      "hit": {
+        "1": 1.0,
+        "10": 1.0,
+        "5": 1.0
+      },
+      "ndcg": {
+        "1": 1.0,
+        "10": 1.0,
+        "5": 1.0
+      },
+      "rr": 1.0,
+      "tokens": 21,
+      "scope_leaks": null,
+      "missing_evidence": []
+    }
+  ]
+}
