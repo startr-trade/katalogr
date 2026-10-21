@@ -2,6 +2,7 @@
 //! (FEAT-047 sections 3 and 4; ADR-0008, ADR-0014).
 
 use crate::error::EngineError;
+use crate::parallel::Parallelism;
 use crate::queue::{Context, Inbox, Processor, Seq};
 use crate::registry::ExtensionRegistry;
 use crate::stitch::Stitcher;
@@ -9,6 +10,7 @@ use camino::Utf8PathBuf;
 use katalogr_model::RelPath;
 use katalogr_store::{Cache, ProjectDir, ReadTx, Reader, RepoConfig};
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 /// Paths published per processing round (provisional; FEAT-047 section 9).
@@ -62,6 +64,19 @@ pub struct Answer<T> {
     pub stale: bool,
 }
 
+/// Per-stage times summed over an engine's processing rounds; for benches only.
+#[doc(hidden)]
+#[derive(Clone, Copy, Debug, Default)]
+pub struct IndexStats {
+    pub rounds: u64,
+    pub files: u64,
+    /// Plan, encode, hash and temp-file write (the parallel stages).
+    pub prepare: Duration,
+    /// The stitch loop inside the publish transaction.
+    pub stitch: Duration,
+    pub commit: Duration,
+}
+
 /// A project's index with its queue: cache, extractors and stitcher.
 pub struct Engine {
     dir: ProjectDir,
@@ -73,6 +88,11 @@ pub struct Engine {
     filters: BTreeMap<String, (Vec<String>, Vec<String>)>,
     /// Embedded profiles: `(file name, text)`, applied before the project's own.
     builtin_profiles: Vec<(String, String)>,
+    parallelism: Parallelism,
+    /// Built on first use with `parallelism.threads` workers; `None` when sequential or when
+    /// the pool cannot be built.
+    pool: OnceLock<Option<rayon::ThreadPool>>,
+    stats: Mutex<IndexStats>,
 }
 
 impl Engine {
@@ -94,7 +114,55 @@ impl Engine {
             roots,
             filters: BTreeMap::new(),
             builtin_profiles: Vec::new(),
+            parallelism: Parallelism::from_cores(),
+            pool: OnceLock::new(),
+            stats: Mutex::new(IndexStats::default()),
         })
+    }
+
+    /// Set before the first `process`; later calls replace the setting and drop a built pool.
+    pub fn set_parallelism(&mut self, p: Parallelism) {
+        self.parallelism = p;
+        self.pool = OnceLock::new();
+    }
+
+    pub fn parallelism(&self) -> Parallelism {
+        self.parallelism
+    }
+
+    /// The pool, built on first use with `threads` workers named `katalogr-index-<i>`; `None`
+    /// when `threads == 1` or when the pool cannot be built (then the run is sequential).
+    #[allow(dead_code)] // used by the round planner (T7)
+    pub(crate) fn pool(&self) -> Option<&rayon::ThreadPool> {
+        self.pool
+            .get_or_init(|| {
+                let n = self.parallelism.threads.get();
+                if n <= 1 {
+                    return None;
+                }
+                rayon::ThreadPoolBuilder::new()
+                    .num_threads(n)
+                    .thread_name(|i| format!("katalogr-index-{i}"))
+                    .build()
+                    .ok()
+            })
+            .as_ref()
+    }
+
+    /// Per-stage times summed over this engine's rounds; for benches only.
+    #[doc(hidden)]
+    pub fn index_stats(&self) -> IndexStats {
+        *self.stats.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    #[allow(dead_code)] // used by the processor (T7)
+    pub(crate) fn add_stats(&self, s: IndexStats) {
+        let mut g = self.stats.lock().unwrap_or_else(|e| e.into_inner());
+        g.rounds += s.rounds;
+        g.files += s.files;
+        g.prepare += s.prepare;
+        g.stitch += s.stitch;
+        g.commit += s.commit;
     }
 
     /// Set the built-in profiles, as `(file name, text)` pairs.

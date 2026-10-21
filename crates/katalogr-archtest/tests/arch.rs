@@ -709,7 +709,9 @@ mod archtest {
         let pkgs: BTreeMap<_, _> = md.packages.iter().map(|p| (&p.id, p)).collect();
         for node in resolve.nodes.iter().filter(|n| resolved.contains(&n.id)) {
             let p = pkgs[&node.id];
-            if p.links.is_some() {
+            // `rayon-core` declares `links = "rayon-core"` only so cargo refuses two versions in
+            // one build; it has no C code (FEAT-072, ADR-0027).
+            if p.links.is_some() && p.name != "rayon-core" {
                 failures.push(format!("{} declares `links`", p.name));
             }
             // `node.deps` is already filtered by `--filter-platform`; `p.dependencies` is not
