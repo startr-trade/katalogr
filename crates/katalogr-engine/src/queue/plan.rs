@@ -8,14 +8,19 @@ use crate::consistency::Engine;
 use crate::context;
 use crate::embed::{self, GuestContexts};
 use crate::error::EngineError;
+use crate::parallel::{Parallelism, wave_size};
 use crate::profiles::ProfileSet;
 use crate::registry::ExtensionRegistry;
+use crate::stitch::{PreparedFragment, Stitcher};
 use camino::Utf8Path;
 use katalogr_model::{ExtractError, ExtractInput, Extractor, Fragment, RelPath};
 use katalogr_store::blob::git_blob_id;
 use katalogr_store::{ErrorRow, PendingKey, ReadTx, Reader};
+use rayon::prelude::*;
+use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use std::fs::File;
+use std::time::Instant;
 
 /// The extractor for `path`: the profile route when it names a registered extension, else the
 /// first registered extractor that handles the path.
@@ -266,4 +271,153 @@ pub(super) fn write_synced(path: &Utf8Path, bytes: &[u8]) -> Result<(), EngineEr
     let mut f = File::create(path).map_err(io)?;
     f.write_all(bytes).map_err(io)?;
     f.sync_all().map_err(io)
+}
+
+/// A planned path with everything computed off the writer: the shard is encoded, hashed and
+/// written to its temp file, and the stitch inputs are prepared.
+pub(super) struct Prepared {
+    pub(super) key: PendingKey,
+    pub(super) seq: u64,
+    pub(super) ready: Ready,
+}
+
+pub(super) enum Ready {
+    Skip,
+    Replace {
+        prepared: Box<PreparedFragment>,
+        errors: Vec<ErrorRow>,
+        hash: [u8; 32],
+        encoded_len: u64,
+        tmp: String,
+        fin: String,
+    },
+    Delete {
+        fin: Option<String>,
+    },
+    Failed(String),
+}
+
+/// Encode, hash and write the temp shard of a `Replace`, then prepare its stitch inputs. Other
+/// actions pass through.
+pub(super) fn prepare_one(engine: &Engine, p: Planned) -> Result<Prepared, EngineError> {
+    let Planned { key, seq, action } = p;
+    let ready = match action {
+        Action::Skip => Ready::Skip,
+        Action::Delete { fin } => Ready::Delete { fin },
+        Action::Failed(m) => Ready::Failed(m),
+        Action::Replace {
+            fragment,
+            errors,
+            tmp,
+            fin,
+        } => {
+            let dir = engine.dir();
+            let bytes = dir.encode_shard(&fragment)?;
+            let hash = <[u8; 32]>::from(Sha256::digest(&bytes));
+            write_synced(&dir.root().join(&tmp), &bytes)?;
+            let prepared = Box::new(Stitcher::prepare(*fragment)?);
+            Ready::Replace {
+                prepared,
+                errors,
+                hash,
+                encoded_len: bytes.len() as u64,
+                tmp,
+                fin,
+            }
+        }
+    };
+    Ok(Prepared { key, seq, ready })
+}
+
+/// Whether to start another wave: always for the first, then only while the deadline has not
+/// passed and the encoded bytes held are below the cap (R-4, R-5).
+pub(super) fn next_wave(
+    done: usize,
+    bytes: u64,
+    now: Instant,
+    deadline: Instant,
+    cap: u64,
+) -> bool {
+    done == 0 || (now < deadline && bytes < cap)
+}
+
+/// Plan and prepare the paths of a round in waves of `wave_size(threads)`, on `pool` when there
+/// is one. The result is a prefix of `items` in batch order; the first error in batch order
+/// wins (R-7).
+pub(super) fn run_batch(
+    env: &PlanEnv,
+    items: &[(PendingKey, u64)],
+    deadline: Instant,
+    par: Parallelism,
+    pool: Option<&rayon::ThreadPool>,
+) -> Result<Vec<Prepared>, EngineError> {
+    let engine = env.engine;
+    let one = |(key, seq): &(PendingKey, u64)| -> Result<Prepared, EngineError> {
+        let action = plan_one(env, key, *seq)?;
+        prepare_one(
+            engine,
+            Planned {
+                key: key.clone(),
+                seq: *seq,
+                action,
+            },
+        )
+    };
+    let mut out: Vec<Prepared> = Vec::new();
+    let mut bytes = 0u64;
+    for wave in items.chunks(wave_size(par.threads)) {
+        if !next_wave(out.len(), bytes, Instant::now(), deadline, par.batch_bytes) {
+            break;
+        }
+        let results: Vec<Result<Prepared, EngineError>> = match pool {
+            Some(pool) => pool.install(|| wave.par_iter().map(one).collect()),
+            None => {
+                // Sequential: stop at the first error without planning the rest.
+                let mut v = Vec::with_capacity(wave.len());
+                for it in wave {
+                    let r = one(it);
+                    let failed = r.is_err();
+                    v.push(r);
+                    if failed {
+                        break;
+                    }
+                }
+                v
+            }
+        };
+        for r in results {
+            let p = r?;
+            if let Ready::Replace { encoded_len, .. } = &p.ready {
+                bytes += encoded_len;
+            }
+            out.push(p);
+        }
+    }
+    Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    #[test]
+    fn stops_after_byte_cap() {
+        let now = Instant::now();
+        let far = now + Duration::from_secs(60);
+        assert!(next_wave(0, 0, now, far, 100), "the first wave always runs");
+        assert!(next_wave(4, 99, now, far, 100));
+        assert!(!next_wave(4, 100, now, far, 100));
+        assert!(!next_wave(4, 101, now, far, 100));
+        assert!(next_wave(0, 1000, now, far, 100), "a round is never empty");
+    }
+
+    #[test]
+    fn deadline_checked_between_waves() {
+        let now = Instant::now();
+        let past = now - Duration::from_millis(1);
+        assert!(next_wave(0, 0, now, past, u64::MAX), "at least one wave");
+        assert!(!next_wave(8, 0, now, past, u64::MAX));
+        assert!(next_wave(8, 0, now, now + Duration::from_secs(1), u64::MAX));
+    }
 }

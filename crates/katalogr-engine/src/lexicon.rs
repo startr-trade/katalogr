@@ -63,18 +63,42 @@ fn contracts_by_symbol(artifact: &ArtifactRow) -> BTreeMap<Id, Vec<&str>> {
     out
 }
 
-/// Index every symbol of `artifact`. The symbol rows must already be in the transaction.
-pub fn index_artifact(tx: &mut WriteTx, artifact: &ArtifactRow) -> Result<(), StoreError> {
+/// Pure: the lexicon document of each symbol of `artifact`, in `artifact.symbols` order, from
+/// the given rows. A symbol without a row is skipped.
+pub fn docs_of_artifact(artifact: &ArtifactRow, rows: &[(Id, SymbolRow)]) -> Vec<(Id, Doc)> {
     let contracts = contracts_by_symbol(artifact);
+    let by_id: BTreeMap<Id, &SymbolRow> = rows.iter().map(|(id, r)| (*id, r)).collect();
+    let mut out = Vec::with_capacity(artifact.symbols.len());
     for id in &artifact.symbols {
-        let Some(row) = tx.symbol(*id)? else { continue };
+        let Some(row) = by_id.get(id) else { continue };
         let keys = contracts.get(id).map(Vec::as_slice).unwrap_or(&[]);
-        let doc = doc_of(&row, keys);
-        let terms: Vec<(String, u8, u32)> =
-            doc.terms.into_iter().map(|((t, f), n)| (t, f, n)).collect();
+        out.push((*id, doc_of(row, keys)));
+    }
+    out
+}
+
+/// Write the postings of precomputed documents.
+pub fn index_docs(tx: &mut WriteTx, docs: &[(Id, Doc)]) -> Result<(), StoreError> {
+    for (id, doc) in docs {
+        let terms: Vec<(String, u8, u32)> = doc
+            .terms
+            .iter()
+            .map(|((t, f), n)| (t.clone(), *f, *n))
+            .collect();
         tx.put_doc_postings(*id, doc.lens, &terms)?;
     }
     Ok(())
+}
+
+/// Index every symbol of `artifact`. The symbol rows must already be in the transaction.
+pub fn index_artifact(tx: &mut WriteTx, artifact: &ArtifactRow) -> Result<(), StoreError> {
+    let mut rows = Vec::with_capacity(artifact.symbols.len());
+    for id in &artifact.symbols {
+        if let Some(row) = tx.symbol(*id)? {
+            rows.push((*id, row));
+        }
+    }
+    index_docs(tx, &docs_of_artifact(artifact, &rows))
 }
 
 /// Remove the postings of every symbol of `artifact`. The symbol rows must still be present.

@@ -2,9 +2,9 @@
 //! entries, extracts the current content of queued paths and publishes results together with
 //! the watermark (FEAT-047 sections 3, 4 and 6; ADR-0014).
 
-use super::plan::{Action, PlanEnv, Planned, extractor_for, plan_one, write_synced};
+use super::plan::{PlanEnv, Prepared, Ready, extractor_for, run_batch};
 use super::{ChangeEvent, Context, EventKind, Inbox, Seq};
-use crate::consistency::{Engine, Scope};
+use crate::consistency::{Engine, IndexStats, Scope};
 use crate::context;
 use crate::embed;
 use crate::error::EngineError;
@@ -14,7 +14,6 @@ use crate::scan;
 use camino::{Utf8Path, Utf8PathBuf};
 use katalogr_model::{ArtifactName, RelPath};
 use katalogr_store::{ErrorRow, JournalEntry, PendingKey, RANK_CONTEXT, Reader, WriteTx, pagerank};
-use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::File;
 use std::time::Instant;
@@ -184,7 +183,6 @@ impl<'a> Processor<'a> {
         deadline: Instant,
     ) -> Result<Seq, EngineError> {
         let engine = self.engine;
-        let dir = engine.dir();
         self.refresh_embed_signature()?;
         let profiles = self.refresh_profiles()?;
         self.refresh_contexts()?;
@@ -197,57 +195,44 @@ impl<'a> Processor<'a> {
         first.truncate(budget);
 
         let env = PlanEnv::load(engine, &snap, &profiles, &first)?;
-        let mut planned = Vec::new();
-        for (key, seq) in first {
-            if Instant::now() >= deadline && !planned.is_empty() {
-                break;
-            }
-            let action = plan_one(&env, &key, seq)?;
-            planned.push(Planned { key, seq, action });
-        }
-        if planned.is_empty() {
+        let par = engine.parallelism();
+        let started = Instant::now();
+        let out = run_batch(&env, &first, deadline, par, engine.pool())?;
+        let prepare = started.elapsed();
+        if out.is_empty() {
             return Ok(Seq(engine.cache().read()?.watermark(Context::WORKTREE)?));
         }
 
-        // Shard bytes go to temp files first; they become visible only through the journal.
+        // Shard bytes are already in temp files; they become visible only through the journal.
         let mut journal: Vec<JournalEntry> = Vec::new();
-        let mut written: Vec<(Utf8PathBuf, Vec<u8>)> = Vec::new();
-        for p in &planned {
-            if let Action::Replace {
-                fragment, tmp, fin, ..
-            } = &p.action
-            {
-                let bytes = dir.encode_shard(fragment)?;
-                written.push((dir.root().join(tmp), bytes));
-                journal.push((tmp.clone(), fin.clone()));
+        for p in &out {
+            match &p.ready {
+                Ready::Replace { tmp, fin, .. } => journal.push((tmp.clone(), fin.clone())),
+                Ready::Delete { fin: Some(fin) } => journal.push((String::new(), fin.clone())),
+                _ => {}
             }
-            if let Action::Delete { fin: Some(fin) } = &p.action {
-                journal.push((String::new(), fin.clone()));
-            }
-        }
-        let mut hashes = Vec::new();
-        for (path, bytes) in &written {
-            write_synced(path, bytes)?;
-            hashes.push(<[u8; 32]>::from(Sha256::digest(bytes)));
         }
 
         let mut tx = engine.cache().write()?;
         let rank_was_current = tx.rank_is_current(RANK_CONTEXT)?;
         let mut touched: BTreeSet<String> = BTreeSet::new();
-        let mut hash_iter = hashes.into_iter();
-        for p in planned {
-            let Planned { key, seq, action } = p;
-            match action {
-                Action::Skip => {}
-                Action::Replace {
-                    fragment, errors, ..
+        let stitch_started = Instant::now();
+        let files = out.len() as u64;
+        for p in out {
+            let Prepared { key, seq, ready } = p;
+            match ready {
+                Ready::Skip => {}
+                Ready::Replace {
+                    prepared,
+                    errors,
+                    hash,
+                    ..
                 } => {
-                    let hash = hash_iter.next().expect("one hash per written shard");
-                    engine.stitcher().replace_fragment(&mut tx, *fragment)?;
+                    engine.stitcher().apply(&mut tx, *prepared)?;
                     tx.put_shard_hash(&key.repo, &key.path, &hash)?;
                     tx.put_index_errors(&key.repo, &key.path, &errors)?;
                 }
-                Action::Delete { .. } => {
+                Ready::Delete { .. } => {
                     engine.stitcher().remove_artifact(
                         &mut tx,
                         &ArtifactName {
@@ -258,7 +243,7 @@ impl<'a> Processor<'a> {
                     tx.remove_shard_hash(&key.repo, &key.path)?;
                     tx.put_index_errors(&key.repo, &key.path, &[])?;
                 }
-                Action::Failed(message) => {
+                Ready::Failed(message) => {
                     tx.put_index_errors(
                         &key.repo,
                         &key.path,
@@ -290,6 +275,7 @@ impl<'a> Processor<'a> {
             tx.set_watermark(ctx, wm)?;
             tx.prune_events(ctx, wm)?;
         }
+        let stitch = stitch_started.elapsed();
         tx.set_publish_journal(&journal)?;
         let wm = tx.watermark(Context::WORKTREE)?;
         // A publish that changed nothing the rank depends on keeps the stored rank, which then
@@ -297,7 +283,15 @@ impl<'a> Processor<'a> {
         if !tx.rank_inputs_changed()? && rank_was_current {
             tx.set_rank_watermark(wm)?;
         }
+        let commit_started = Instant::now();
         tx.commit()?;
+        engine.add_stats(IndexStats {
+            rounds: 1,
+            files,
+            prepare,
+            stitch,
+            commit: commit_started.elapsed(),
+        });
         fail!("after_publish_commit");
         Ok(Seq(wm))
     }

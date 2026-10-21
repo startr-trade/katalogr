@@ -132,7 +132,6 @@ impl Engine {
 
     /// The pool, built on first use with `threads` workers named `katalogr-index-<i>`; `None`
     /// when `threads == 1` or when the pool cannot be built (then the run is sequential).
-    #[allow(dead_code)] // used by the round planner (T7)
     pub(crate) fn pool(&self) -> Option<&rayon::ThreadPool> {
         self.pool
             .get_or_init(|| {
@@ -155,7 +154,6 @@ impl Engine {
         *self.stats.lock().unwrap_or_else(|e| e.into_inner())
     }
 
-    #[allow(dead_code)] // used by the processor (T7)
     pub(crate) fn add_stats(&self, s: IndexStats) {
         let mut g = self.stats.lock().unwrap_or_else(|e| e.into_inner());
         g.rounds += s.rounds;
