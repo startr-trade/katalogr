@@ -21,8 +21,10 @@ serde_yaml_ng.workspace = true
 sha1.workspace = true
 sha2.workspace = true
 redb.workspace = true
+postcard.workspace = true
 thiserror.workspace = true
 tempfile.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
+proptest.workspace = true
