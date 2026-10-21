@@ -8,19 +8,29 @@ use katalogr_model::{
     Link, LinkKind, Name, OutRef, Provenance, RefBinding,
 };
 use katalogr_store::{
-    ArtifactRow, BindingRow, ContractRow, LinkEntry, LinkKey, LinkOrigin, LinkRow, Reader, RefId,
-    Restitch, StoreError, SymbolRow, WriteTx,
+    ArtifactRow, BindingRow, ContractRow, FanKey, LinkEntry, LinkKey, LinkOrigin, LinkRow, Reader,
+    RefId, Restitch, StoreError, SymbolRow, WriteTx,
 };
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicU32, Ordering};
+
+/// A reference resolving to at least this many targets (and at least 2) is stored as one fan
+/// row (FEAT-077, ADR-0028). Chosen by measurement.
+pub const FAN_ROWS_FROM: u32 = 2;
 
 /// What one stitch call changed. Links that were removed and re-added unchanged cancel out.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct StitchDelta {
+    /// Stored link rows created by the call (fan rows are in `fans_added`).
     pub links_added: Vec<LinkKey>,
+    /// Stored link rows deleted by the call.
     pub links_removed: Vec<LinkKey>,
     /// Every reference that was resolved (or re-resolved) by the call, sorted.
     pub refs_resolved: Vec<RefId>,
+    /// Fan rows created or deleted by the call (rewritten rows are in neither), sorted.
+    pub fans_added: Vec<FanKey>,
+    pub fans_removed: Vec<FanKey>,
 }
 
 impl StitchDelta {
@@ -28,6 +38,8 @@ impl StitchDelta {
         self.links_added.extend(other.links_added);
         self.links_removed.extend(other.links_removed);
         self.refs_resolved.extend(other.refs_resolved);
+        self.fans_added.extend(other.fans_added);
+        self.fans_removed.extend(other.fans_removed);
     }
 }
 
@@ -58,11 +70,33 @@ pub struct PreparedFragment {
 #[derive(Default)]
 pub struct Stitcher {
     recorded: Mutex<StitchDelta>,
+    /// Storage threshold of fan rows; 0 (unset) and values below 2 mean `FAN_ROWS_FROM`.
+    fan_from: AtomicU32,
 }
 
 impl Stitcher {
     pub fn new() -> Stitcher {
         Stitcher::default()
+    }
+
+    /// The current fan-row threshold (default `FAN_ROWS_FROM`).
+    pub fn fan_rows_from(&self) -> u32 {
+        self.fan_from.load(Ordering::Relaxed).max(FAN_ROWS_FROM)
+    }
+
+    /// Tests and benches only. Values below 2 mean 2; `u32::MAX` stores one link row per
+    /// target (the layout before FEAT-077). Applies to later resolutions; rows already stored
+    /// keep their form until re-resolved, and readers cannot tell the two forms apart.
+    #[doc(hidden)]
+    pub fn set_fan_rows_from(&self, n: u32) {
+        self.fan_from.store(n, Ordering::Relaxed);
+    }
+
+    fn cx(&self) -> Cx {
+        Cx {
+            fan_from: self.fan_rows_from(),
+            ..Cx::default()
+        }
     }
 
     /// The delta accumulated by `Restitch` calls since the last take.
@@ -173,7 +207,7 @@ impl Stitcher {
     /// The writer half: the exact sequence of cache reads and writes `replace_fragment`
     /// performed before the split, fed from `p`. Same errors, same order, same delta.
     pub fn apply(&self, tx: &mut WriteTx, p: PreparedFragment) -> Result<StitchDelta, EngineError> {
-        let mut cx = Cx::default();
+        let mut cx = self.cx();
         let PreparedFragment {
             aid,
             name,
@@ -283,7 +317,7 @@ impl Stitcher {
         tx: &mut WriteTx,
         a: &ArtifactName,
     ) -> Result<StitchDelta, EngineError> {
-        let mut cx = Cx::default();
+        let mut cx = self.cx();
         let aid = a.id();
         let Some(old) = tx.artifact(aid)? else {
             return Ok(StitchDelta::default());
@@ -328,6 +362,10 @@ fn into_store(e: EngineError) -> StoreError {
 struct Cx {
     added: BTreeSet<LinkKey>,
     removed: BTreeSet<LinkKey>,
+    fans_added: BTreeSet<FanKey>,
+    fans_removed: BTreeSet<FanKey>,
+    /// The fan-row threshold of this call (0: unset, same as 2).
+    fan_from: u32,
     resolved: BTreeSet<RefId>,
     rows: BTreeMap<Id, ArtifactRow>,
     /// References of the artifact `apply` just purged and re-registered that `resolve` has not
@@ -349,6 +387,16 @@ impl Cx {
             links_added: self.added.difference(&self.removed).cloned().collect(),
             links_removed: self.removed.difference(&self.added).cloned().collect(),
             refs_resolved: self.resolved.into_iter().collect(),
+            fans_added: self
+                .fans_added
+                .difference(&self.fans_removed)
+                .cloned()
+                .collect(),
+            fans_removed: self
+                .fans_removed
+                .difference(&self.fans_added)
+                .cloned()
+                .collect(),
         }
     }
 }
@@ -395,7 +443,7 @@ fn purge(tx: &mut WriteTx, cx: &mut Cx, aid: Id, old: &ArtifactRow) -> Result<()
     // Then everything else the artifact's nodes start, except another artifact's bound links
     // held by this artifact's symbols: re-resolution moves those when the symbol goes.
     for from in std::iter::once(aid).chain(old.symbols.iter().copied()) {
-        for (key, mut row) in tx.links_out(from, None)? {
+        for (key, mut row) in tx.stored_links_out(from, None)? {
             row.entries.retain(
                 |e| matches!(e.origin, LinkOrigin::Bound { artifact, .. } if artifact != aid),
             );
@@ -405,6 +453,11 @@ fn purge(tx: &mut WriteTx, cx: &mut Cx, aid: Id, old: &ArtifactRow) -> Result<()
             } else {
                 tx.put_link(&key, &row)?;
             }
+        }
+        // Fan rows are written only for the artifact's own references (never bound ones).
+        for (fk, _) in tx.fans_out(from, None)? {
+            tx.remove_fan(&fk)?;
+            cx.fans_removed.insert(fk);
         }
     }
     for (r, _) in tx.unresolved_refs(Some(aid))? {
@@ -551,7 +604,7 @@ fn add_entry(
     key: LinkKey,
     entry: LinkEntry,
 ) -> Result<(), EngineError> {
-    let mut row = match tx.link(&key)? {
+    let mut row = match tx.stored_link(&key)? {
         Some(r) => r,
         None => {
             cx.added.insert(key.clone());
@@ -567,16 +620,18 @@ fn add_entry(
     Ok(())
 }
 
-/// Drop the entries of `origin` from the `(from, kind)` links; a row left empty is removed.
-fn drop_origin(
+/// Drop the entries of `origin` from the `(from, kind)` stored links and fan rows, except from
+/// the fan row `keep`; a row left empty is removed.
+fn drop_origin_except(
     tx: &mut WriteTx,
     cx: &mut Cx,
     from: Id,
     kind: &LinkKind,
     origin: LinkOrigin,
+    keep: Option<&FanKey>,
 ) -> Result<usize, EngineError> {
     let mut changed = 0;
-    for (key, mut row) in tx.links_out(from, Some(kind))? {
+    for (key, mut row) in tx.stored_links_out(from, Some(kind))? {
         let before = row.entries.len();
         row.entries.retain(|e| e.origin != origin);
         if row.entries.len() == before {
@@ -590,7 +645,53 @@ fn drop_origin(
             tx.put_link(&key, &row)?;
         }
     }
+    for (fk, mut row) in tx.fans_out(from, Some(kind))? {
+        if keep == Some(&fk) {
+            continue;
+        }
+        let before = row.entries.len();
+        row.entries.retain(|e| e.origin != origin);
+        if row.entries.len() == before {
+            continue;
+        }
+        changed += 1;
+        if row.entries.is_empty() {
+            tx.remove_fan(&fk)?;
+            cx.fans_removed.insert(fk);
+        } else {
+            tx.put_fan(&fk, &row)?;
+        }
+    }
     Ok(changed)
+}
+
+/// Add `entry` to the fan row `key`, replacing the entry of the same origin. A row that would
+/// be unchanged is not written.
+fn add_fan_entry(
+    tx: &mut WriteTx,
+    cx: &mut Cx,
+    key: FanKey,
+    entry: LinkEntry,
+) -> Result<(), EngineError> {
+    let existing = tx.fan(&key)?;
+    let mut row = existing.clone().unwrap_or(LinkRow {
+        entries: Vec::new(),
+    });
+    row.entries.retain(|e| e.origin != entry.origin);
+    row.entries.push(entry);
+    row.entries.sort_by_key(|e| e.origin);
+    if existing.as_ref() == Some(&row) {
+        return Ok(());
+    }
+    if existing.is_none() {
+        cx.fans_added.insert(key.clone());
+    }
+    tx.put_fan(&key, &row)?;
+    debug_assert!(
+        tx.exports(&key.key)?.len() >= 2,
+        "fan row {key:?} names a key with fewer than two targets"
+    );
+    Ok(())
 }
 
 /// Resolution of one reference (FEAT-001 section 6): the first candidate with exports wins; one
@@ -615,53 +716,82 @@ fn resolve(tx: &mut WriteTx, cx: &mut Cx, rid: RefId) -> Result<(), EngineError>
     if let Some(b) = &r.binds {
         return resolve_bound(tx, cx, rid, &r, b, provenance, fresh);
     }
+    // The winning key: the first candidate with exports.
+    let mut targets = Vec::new();
+    let mut winner = None;
+    for cand in &r.candidates {
+        targets = tx.exports(cand)?;
+        if !targets.is_empty() {
+            winner = Some(cand.clone());
+            break;
+        }
+    }
+    let n = targets.len();
+    let fan_from = cx.fan_from.max(FAN_ROWS_FROM);
+    let fan_key = match &winner {
+        Some(k) if n >= 2 && n as u64 >= u64::from(fan_from) => Some(FanKey {
+            from: r.from,
+            kind: r.kind.clone(),
+            key: k.clone(),
+        }),
+        _ => None,
+    };
+    let origin = LinkOrigin::Ref(rid.index);
     if fresh {
         #[cfg(test)]
         FRESH_SKIPS.with(|c| c.set(c.get() + 1));
         #[cfg(debug_assertions)]
         {
-            let n = drop_origin(tx, cx, r.from, &r.kind, LinkOrigin::Ref(rid.index))?;
+            let n = drop_origin_except(tx, cx, r.from, &r.kind, origin, fan_key.as_ref())?;
             debug_assert_eq!(n, 0, "fresh reference {rid:?} had origin entries to drop");
         }
     } else {
-        drop_origin(tx, cx, r.from, &r.kind, LinkOrigin::Ref(rid.index))?;
+        drop_origin_except(tx, cx, r.from, &r.kind, origin, fan_key.as_ref())?;
     }
     tx.remove_unresolved(rid)?;
 
-    let mut targets = Vec::new();
-    for cand in &r.candidates {
-        targets = tx.exports(cand)?;
-        if !targets.is_empty() {
-            break;
-        }
-    }
-    let confidence = if targets.len() == 1 {
-        r.confidence
-    } else {
-        Confidence::Inferred
-    };
-    let fanout = u32::try_from(targets.len()).unwrap_or(u32::MAX);
-    if targets.is_empty() {
+    if n == 0 {
         tx.put_unresolved(rid, &r)?;
-    }
-    for to in targets {
-        add_entry(
+    } else if let Some(fk) = fan_key {
+        add_fan_entry(
             tx,
             cx,
-            LinkKey {
-                from: r.from,
-                kind: r.kind.clone(),
-                to,
-            },
+            fk,
             LinkEntry {
-                origin: LinkOrigin::Ref(rid.index),
-                confidence,
+                origin,
+                confidence: Confidence::Inferred,
                 span: r.span,
                 provenance: provenance.clone(),
-                fanout: (confidence == Confidence::Inferred).then_some(fanout),
+                fanout: None,
                 produced_by: r.origin.clone(),
             },
         )?;
+    } else {
+        let confidence = if n == 1 {
+            r.confidence
+        } else {
+            Confidence::Inferred
+        };
+        let fanout = u32::try_from(n).unwrap_or(u32::MAX);
+        for to in targets {
+            add_entry(
+                tx,
+                cx,
+                LinkKey {
+                    from: r.from,
+                    kind: r.kind.clone(),
+                    to,
+                },
+                LinkEntry {
+                    origin,
+                    confidence,
+                    span: r.span,
+                    provenance: provenance.clone(),
+                    fanout: (confidence == Confidence::Inferred).then_some(fanout),
+                    produced_by: r.origin.clone(),
+                },
+            )?;
+        }
     }
     cx.resolved.insert(rid);
     Ok(())
@@ -677,11 +807,11 @@ fn drop_bound(
 ) -> Result<usize, EngineError> {
     let mut changed = 0;
     let kind = LinkKind(role.as_str().to_string());
-    for key in tx.links_in(contract)? {
+    for key in tx.stored_links_in(contract)? {
         if key.kind != kind {
             continue;
         }
-        let Some(mut row) = tx.link(&key)? else {
+        let Some(mut row) = tx.stored_link(&key)? else {
             continue;
         };
         let before = row.entries.len();

@@ -170,6 +170,38 @@ mod graph {
 mod stitch {
     use super::*;
 
+    #[test]
+    fn delta_reports_fan_rows() {
+        let e = env();
+        e.put("x.tx", "sym fn X\nexport ns:k X\n");
+        e.put("y.tx", "sym fn Y\nexport ns:k Y\n");
+        e.put("w.tx", "sym fn W\nexport ns:k W\n");
+        let z = sym("z.tx", "Z");
+        let fan = katalogr_store::FanKey {
+            from: z,
+            kind: LinkKind("calls".into()),
+            key: ExportKey {
+                namespace: "ns".into(),
+                key: "k".into(),
+            },
+        };
+        let d = e.put("z.tx", "sym fn Z\nref Z calls ns:k\n");
+        assert_eq!(d.fans_added, vec![fan.clone()]);
+        assert!(d.fans_removed.is_empty());
+        assert!(d.links_added.is_empty(), "no per-target link rows");
+        // One exporter fewer: two targets remain, the row stays and nothing is reported.
+        let d = e.remove("x.tx");
+        assert!(d.fans_added.is_empty() && d.fans_removed.is_empty());
+        assert!(d.links_added.is_empty() && d.links_removed.is_empty());
+        // Two fewer: one target, the fan row gives way to a stored link.
+        let d = e.remove("y.tx");
+        assert_eq!(d.fans_removed, vec![fan]);
+        assert_eq!(d.links_added, vec![lk(z, "calls", sym("w.tx", "W"))]);
+        // Rewriting the same file reports neither.
+        let d = e.put("z.tx", "sym fn Z\nref Z calls ns:k\n");
+        assert!(d.fans_added.is_empty() && d.fans_removed.is_empty());
+    }
+
     /// The skip is checked by `debug_assert!` in debug builds (the skipped scan still runs and
     /// must change nothing); here the graph must equal a fresh build from the final texts.
     #[test]

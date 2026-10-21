@@ -152,6 +152,34 @@ mod cache {
     }
 
     #[test]
+    fn schema_9_cache_rebuilds() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = project(&tmp);
+        for (p, t) in [
+            ("a.tx", "sym fn A\nexport ns:k A\n"),
+            ("a2.tx", "sym fn A2\nexport ns:k A2\n"),
+            ("b.tx", "sym fn B\nref B calls ns:k\n"),
+        ] {
+            dir.write_shard(&extract(p, t)).unwrap();
+        }
+        let cache = Cache::open_or_rebuild(&dir, &Stitcher::new(), soon()).unwrap();
+        let before = cache.read().unwrap().dump_graph().unwrap();
+        {
+            let mut tx = cache.write().unwrap();
+            tx.set_meta("cache_schema", &9u32.to_le_bytes()).unwrap();
+            tx.commit().unwrap();
+        }
+        drop(cache);
+
+        let cache = Cache::open_or_rebuild(&dir, &Stitcher::new(), soon()).unwrap();
+        assert_eq!(cache.report().replaced, 3, "rebuilt from the shards");
+        let after = cache.read().unwrap().dump_graph().unwrap();
+        assert_eq!(after, before);
+        let fan_rows = after.iter().find(|(n, _)| *n == "fan_out").unwrap().1.len();
+        assert_eq!(fan_rows, 1, "the rebuilt cache has the fan row");
+    }
+
+    #[test]
     fn index_errors_all_sorted() {
         use katalogr_store::ErrorRow;
         let tmp = tempfile::tempdir().unwrap();

@@ -20,4 +20,4 @@ pub use consistency::{Answer, Consistency, Engine, IndexStats, QueryOptions, Sco
 pub use error::EngineError;
 pub use export::canonical_graph;
 pub use queue::{ChangeEvent, Context, EventKind, NewEvent, Seq};
-pub use stitch::{StitchDelta, Stitcher};
+pub use stitch::{FAN_ROWS_FROM, StitchDelta, Stitcher};
