@@ -956,7 +956,7 @@ pub trait Reader {
             {
                 continue;
             }
-            let n = self.exports(&fk.key)?.len();
+            let n = self.export_count(&fk.key)?;
             out.push((fk.key, u32::try_from(n).unwrap_or(u32::MAX)));
         }
         Ok(out)
@@ -972,7 +972,7 @@ pub trait Reader {
         }
         let mut entries = stored.map(|r| r.entries).unwrap_or_default();
         for (fk, row) in &fans {
-            let n = self.exports(&fk.key)?.len();
+            let n = self.export_count(&fk.key)?;
             entries.extend(fan::expanded_entries(row, n));
         }
         entries.sort_by_key(|e| e.origin);
@@ -1244,7 +1244,7 @@ pub trait Reader {
                 );
             }
             if !counts.contains_key(&fk.key) {
-                counts.insert(fk.key.clone(), self.exports(&fk.key)?.len());
+                counts.insert(fk.key.clone(), self.export_count(&fk.key)?);
             }
             let n = u32::try_from(counts[&fk.key]).unwrap_or(u32::MAX);
             extra
@@ -1421,6 +1421,16 @@ pub trait Reader {
             .map(|v| de(&v))
             .transpose()?
             .unwrap_or_default())
+    }
+
+    /// The number of targets exported under `key`, without decoding the ids.
+    fn export_count(&self, key: &ExportKey) -> Result<usize, StoreError> {
+        match self.raw_get(TableId::Exports, &export_key(key))? {
+            Some(v) => serde_json::from_slice::<Vec<serde::de::IgnoredAny>>(&v)
+                .map(|l| l.len())
+                .map_err(|e| StoreError::Row(e.to_string())),
+            None => Ok(0),
+        }
     }
 
     /// Every `(key, targets)` in a namespace.
