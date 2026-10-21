@@ -2,6 +2,7 @@
 
 pub mod inbox;
 pub(crate) mod lock;
+mod plan;
 pub mod processor;
 
 pub use inbox::Inbox;

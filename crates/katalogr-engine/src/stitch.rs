@@ -293,9 +293,13 @@ fn purge(tx: &mut WriteTx, cx: &mut Cx, aid: Id, old: &ArtifactRow) -> Result<()
     }
     for index in 0..old.refs.len() {
         for key in distinct_candidates(old, index) {
-            let mut set = tx.refs_by_key(key)?;
-            set.retain(|r| !(r.artifact == aid && r.index == index as u32));
-            tx.put_refs_by_key(key, &set)?;
+            tx.remove_ref_by_key(
+                key,
+                RefId {
+                    artifact: aid,
+                    index: index as u32,
+                },
+            )?;
         }
     }
     for e in &old.exports {
@@ -438,11 +442,7 @@ fn register_refs(tx: &mut WriteTx, aid: Id, row: &ArtifactRow) -> Result<(), Eng
             index: index as u32,
         };
         for key in distinct_candidates(row, index) {
-            let mut set = tx.refs_by_key(key)?;
-            if let Err(pos) = set.binary_search(&me) {
-                set.insert(pos, me);
-                tx.put_refs_by_key(key, &set)?;
-            }
+            tx.add_ref_by_key(key, me)?;
         }
     }
     Ok(())
