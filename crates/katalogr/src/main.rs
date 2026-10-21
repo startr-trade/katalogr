@@ -110,8 +110,16 @@ fn run(cli: &Cli) -> Result<ExitCode, DistError> {
             limit,
         }) => cmd::rationale::run(cli, symbol.as_deref(), path.as_deref(), *hubs, *limit),
         Some(Command::Find { text }) => cmd::find::run(cli, text),
-        Some(Command::Refs { text, diagnostic }) => cmd::refs::run(cli, text, *diagnostic),
-        Some(Command::Callers { text, depth }) => cmd::callers::run(cli, text, *depth),
+        Some(Command::Refs {
+            text,
+            diagnostic,
+            expand,
+        }) => cmd::refs::run(cli, text, *diagnostic, *expand),
+        Some(Command::Callers {
+            text,
+            depth,
+            expand,
+        }) => cmd::callers::run(cli, text, *depth, *expand),
         Some(Command::Tests { text, depth, cases }) => cmd::tests::run(cli, text, *depth, *cases),
         Some(Command::Why { location }) => cmd::why::run(cli, location),
         Some(Command::Map { diagnostic }) => cmd::map::run(cli, *diagnostic),

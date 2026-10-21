@@ -17,6 +17,103 @@
       ],
       "type": "object"
     },
+    "Fold": {
+      "description": "Hits of `refs` or `callers` folded into one summary because they reach their node only\nthrough an export key with `FOLD_FROM` or more targets (FEAT-077). `--expand` lists them.",
+      "properties": {
+        "at": {
+          "description": "The number of `result` entries that come before this fold in today's order.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "depth": {
+          "description": "`callers`: the depth of the folded callers.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "first": {
+          "description": "The first folded hits (referrer or caller), in today's order.",
+          "items": {
+            "$ref": "#/$defs/SymbolHit"
+          },
+          "type": "array"
+        },
+        "hits": {
+          "description": "Hits folded.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "key": {
+          "description": "The export key, `namespace:key`.",
+          "type": "string"
+        },
+        "kind": {
+          "description": "Link kind of the folded hits (`calls` for callers).",
+          "type": "string"
+        },
+        "targets": {
+          "description": "The key's current target count.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "via": {
+          "description": "`refs`: the re-export chain of the folded hits, nearest the target first.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "key",
+        "kind",
+        "targets",
+        "hits",
+        "first",
+        "at"
+      ],
+      "type": "object"
+    },
+    "FoldTrace": {
+      "description": "One fold of a `refs` answer (FEAT-077).",
+      "properties": {
+        "at": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "hits": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "key": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "targets": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "key",
+        "kind",
+        "targets",
+        "hits",
+        "at"
+      ],
+      "type": "object"
+    },
     "PackEntry": {
       "properties": {
         "index": {
@@ -457,6 +554,13 @@
     "Trace": {
       "description": "What `--diagnostic` reports.",
       "properties": {
+        "folds": {
+          "description": "`refs`: the folds of the answer, in answer order, at most `DIAG_REFS` (the rest are\ncounted in `omitted[\"folds\"]`).",
+          "items": {
+            "$ref": "#/$defs/FoldTrace"
+          },
+          "type": "array"
+        },
         "omitted": {
           "additionalProperties": {
             "format": "uint64",
@@ -600,6 +704,13 @@
         }
       ],
       "description": "The trace of the query, present only with `--diagnostic` (FEAT-065)."
+    },
+    "folded": {
+      "description": "`refs` and `callers` only: hits folded into summaries (absent with `--expand` and\nwhenever nothing was folded).",
+      "items": {
+        "$ref": "#/$defs/Fold"
+      },
+      "type": "array"
     },
     "next": {
       "description": "Suggested follow-up commands, at most three.",

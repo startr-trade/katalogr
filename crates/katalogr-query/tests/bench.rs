@@ -943,3 +943,121 @@ fn tests_100k() {
     println!("bench::tests_100k: {} ms", elapsed.as_secs_f64() * 1000.0);
     assert!(elapsed < Duration::from_millis(500), "{elapsed:?}");
 }
+
+/// FEAT-077 R-23: 5,000 callers reach one symbol only through an export key with 230 targets
+/// among 20,000 symbols. `refs` and `callers` (depth 1) on it, folded and expanded, each within
+/// 500 ms.
+#[test]
+#[ignore]
+fn refs_callers_fanout_folded() {
+    use katalogr_model::ExportKey;
+    use katalogr_query::{FOLD_FROM, callers_folded, refs_folded_traced};
+    use katalogr_store::FanKey;
+
+    const N: usize = 20_000;
+    let tmp = tempfile::tempdir().unwrap();
+    let cache = open_bench_cache(&tmp);
+    let path = RelPath::new("bench.tx").unwrap();
+    let artifact = ArtifactName {
+        repo: "r".into(),
+        path: path.clone(),
+    };
+    let provenance = Provenance {
+        repo: "r".into(),
+        path,
+        revision: "ce013625030ba8dba906f756967f9e9ca394464a".into(),
+    };
+    let span = Span {
+        start_line: 1,
+        start_col: 1,
+        end_line: 1,
+        end_col: 1,
+    };
+    let mut tx = cache.write().unwrap();
+    let mut ids: Vec<Id> = Vec::with_capacity(N);
+    for i in 0..N {
+        let name = SymbolName {
+            artifact: artifact.clone(),
+            segments: vec![Segment {
+                kind: "fn".into(),
+                name: format!("s{i}"),
+            }],
+            ordinal: 1,
+        };
+        let id = name.id();
+        tx.put_symbol(
+            id,
+            &SymbolRow {
+                name,
+                artifact: artifact.id(),
+                kind: "fn".into(),
+                span,
+                facts: Default::default(),
+            },
+        )
+        .unwrap();
+        ids.push(id);
+    }
+    let key = ExportKey {
+        namespace: "m".into(),
+        key: "area".into(),
+    };
+    let mut targets: Vec<Id> = ids[..230].to_vec();
+    targets.sort();
+    tx.put_exports(&key, &targets).unwrap();
+    for from in &ids[1000..6000] {
+        tx.put_fan(
+            &FanKey {
+                from: *from,
+                kind: LinkKind("calls".into()),
+                key: key.clone(),
+            },
+            &LinkRow {
+                entries: vec![LinkEntry {
+                    origin: LinkOrigin::Ref(0),
+                    confidence: Confidence::Inferred,
+                    span: Some(span),
+                    provenance: provenance.clone(),
+                    fanout: None,
+                    produced_by: None,
+                }],
+            },
+        )
+        .unwrap();
+    }
+    tx.commit().unwrap();
+
+    let read = cache.read().unwrap();
+    let Resolution::One(target) = resolve(&read, "s7").unwrap() else {
+        panic!("s7 must resolve to one symbol");
+    };
+    let time = |label: &str, f: &dyn Fn() -> usize, want: usize| {
+        let ms = best_ms(f);
+        println!("bench::refs_callers_fanout_folded {label}: {ms} ms");
+        assert_eq!(f(), want, "{label}");
+        assert!(ms < 500.0, "{label}: {ms} ms");
+    };
+    for (label, from, hits, folds) in [
+        ("folded", Some(FOLD_FROM), 0, 1),
+        ("expanded", None, 5000, 0),
+    ] {
+        time(
+            &format!("refs {label}"),
+            &|| {
+                let f = refs_folded_traced(&read, &target, from, &mut Diagnostic::off()).unwrap();
+                assert_eq!(f.folds.len(), folds);
+                f.hits.len()
+            },
+            hits,
+        );
+        time(
+            &format!("callers {label}"),
+            &|| {
+                let a = callers_folded(&read, &target, 1, from).unwrap();
+                assert_eq!(a.folded.folds.len(), folds);
+                a.folded.hits.len()
+            },
+            hits,
+        );
+    }
+}

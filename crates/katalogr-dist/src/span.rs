@@ -122,6 +122,7 @@ impl Katalogr {
             report: reply.report,
             diagnostic: None,
             partial: Vec::new(),
+            folded: Vec::new(),
         })
     }
 
@@ -193,6 +194,7 @@ impl Katalogr {
             report: reply.report,
             diagnostic: None,
             partial: Vec::new(),
+            folded: Vec::new(),
         })
     }
 

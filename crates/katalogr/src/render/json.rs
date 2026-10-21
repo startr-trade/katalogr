@@ -8,7 +8,7 @@
 use katalogr_dist::analytics::Itemized;
 use katalogr_dist::eval::{EvalReport, SweepReport};
 use katalogr_dist::query::{
-    DanglingRef, Envelope, Explain, HintSource, MirrorDrift, Partial, RESULT_SCHEMA_VERSION,
+    DanglingRef, Envelope, Explain, Fold, HintSource, MirrorDrift, Partial, RESULT_SCHEMA_VERSION,
     ReplaceResult, Serialize, ShowResult, SymbolHit, Trace, Truncation, WhyResult, budget, cap,
     hints,
 };
@@ -65,6 +65,7 @@ pub(super) fn envelope<T>(
         result,
         next,
         diagnostic,
+        folded: Vec::new(),
     }
 }
 
@@ -136,6 +137,7 @@ fn list_envelope<T: Serialize>(
     budget_tokens: Option<u64>,
     command: &str,
     mut trace: Option<Trace>,
+    folded: Vec<Fold>,
 ) -> String
 where
     Vec<T>: HintSource,
@@ -161,7 +163,9 @@ where
         }
         None => (items, None),
     };
-    line(&envelope(report, truncated, partial, items, next, trace))
+    let mut e = envelope(report, truncated, partial, items, next, trace);
+    e.folded = folded;
+    line(&e)
 }
 
 /// Ambiguous candidates answer as a list (the trace rides in the envelope); no match and a
@@ -183,6 +187,7 @@ fn other_outcome<T>(
                 budget_tokens,
                 "",
                 trace,
+                Vec::new(),
             );
             JsonAnswer {
                 message: Some(message),
@@ -221,6 +226,35 @@ where
                 budget_tokens,
                 command,
                 reply.diagnostic,
+                Vec::new(),
+            );
+            found(exit, &reply.report, stdout)
+        }
+        other => other_outcome(exit, &reply.report, other, budget_tokens, reply.diagnostic),
+    }
+}
+
+/// [`list`] for `refs` and `callers`: the envelope also carries the folds of the reply
+/// (FEAT-077). Used by the CLI and the MCP tools.
+pub fn list_folded<T: Serialize>(
+    reply: Reply<Vec<T>>,
+    budget_tokens: Option<u64>,
+    command: &str,
+) -> JsonAnswer
+where
+    Vec<T>: HintSource,
+{
+    let exit = exit_for(&reply);
+    match reply.outcome {
+        Outcome::Found(items) => {
+            let stdout = list_envelope(
+                &reply.report,
+                items,
+                reply.partial,
+                budget_tokens,
+                command,
+                reply.diagnostic,
+                reply.folded,
             );
             found(exit, &reply.report, stdout)
         }

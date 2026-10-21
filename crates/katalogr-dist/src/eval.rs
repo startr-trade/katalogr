@@ -9,9 +9,9 @@ pub use katalogr_analytics::eval::*;
 use katalogr_analytics::metrics::{Better, MetricSample, metric_key};
 use katalogr_engine::Engine;
 use katalogr_model::{AnyName, Name, parse_name};
-use katalogr_query::Explain;
 use katalogr_query::Serialize;
 use katalogr_query::budget::estimate_tokens;
+use katalogr_query::{Explain, Fold, Folded, RefHit};
 use katalogr_store::{Reader, StoreError};
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -104,6 +104,7 @@ fn index_set(
             consistency: Some(Consistency::WaitAll),
             timeout: Some(timeout),
             diagnostic: false,
+            expand: false,
         },
     )?;
     if report.timed_out {
@@ -117,6 +118,39 @@ fn index_set(
 
 fn json_tokens<T: Serialize>(x: &T) -> u64 {
     estimate_tokens(&serde_json::to_string(x).unwrap_or_default())
+}
+
+/// The ranked items of a folded `refs` answer, as the default `refs` presents it: `hits` in
+/// order, each fold's `first` inserted at its `at`; the fold's first item carries the fold's
+/// JSON tokens, the others 0.
+pub(crate) fn refs_items(f: &Folded<RefHit>) -> Vec<RankedItem> {
+    let mut out = Vec::new();
+    let mut folds = f.folds.iter().peekable();
+    for (i, h) in f.hits.iter().enumerate() {
+        while let Some(fold) = folds.next_if(|fold| fold.at as usize <= i) {
+            push_fold(&mut out, fold);
+        }
+        out.push(RankedItem {
+            name: h.from.name.clone(),
+            path: Some(h.from.path.clone()),
+            tokens: json_tokens(h),
+        });
+    }
+    for fold in folds {
+        push_fold(&mut out, fold);
+    }
+    out
+}
+
+fn push_fold(out: &mut Vec<RankedItem>, fold: &Fold) {
+    let tokens = json_tokens(fold);
+    for (n, h) in fold.first.iter().enumerate() {
+        out.push(RankedItem {
+            name: h.name.clone(),
+            path: Some(h.path.clone()),
+            tokens: if n == 0 { tokens } else { 0 },
+        });
+    }
 }
 
 /// The ranked items of an `explain` answer: outgoing links, then incoming, then rationale
@@ -227,17 +261,17 @@ pub fn run_query(
         }
         Op::Refs => {
             let r = k.query_on(engine, o, |tx| {
-                on_target(tx, input, |t| katalogr_query::refs(tx, t))
+                on_target(tx, input, |t| {
+                    katalogr_query::refs_folded_traced(
+                        tx,
+                        t,
+                        Some(katalogr_query::FOLD_FROM),
+                        &mut katalogr_query::Diagnostic::off(),
+                    )
+                })
             })?;
             let items = match &r.outcome {
-                Outcome::Found(hits) => hits
-                    .iter()
-                    .map(|h| RankedItem {
-                        name: h.from.name.clone(),
-                        path: Some(h.from.path.clone()),
-                        tokens: json_tokens(h),
-                    })
-                    .collect(),
+                Outcome::Found(f) => refs_items(f),
                 _ => Vec::new(),
             };
             (route_of(&r.outcome), items)
@@ -367,6 +401,7 @@ fn fixture_options(req: &EvalRequest) -> Options {
         consistency: Some(Consistency::WaitAll),
         timeout: Some(req.index_timeout),
         diagnostic: false,
+        expand: false,
     }
 }
 
@@ -520,6 +555,7 @@ impl Katalogr {
             consistency: Some(o.consistency.unwrap_or(Consistency::WaitAll)),
             timeout: o.timeout,
             diagnostic: false,
+            expand: false,
         }
     }
 
@@ -559,5 +595,70 @@ impl Katalogr {
             objective,
             &Self::project_options(o),
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use katalogr_model::{Confidence, Span};
+    use katalogr_query::SymbolHit;
+
+    fn sym(n: &str) -> SymbolHit {
+        SymbolHit {
+            name: n.into(),
+            kind: "fn".into(),
+            path: format!("{n}.rs"),
+            span: Span {
+                start_line: 1,
+                start_col: 1,
+                end_line: 1,
+                end_col: 1,
+            },
+        }
+    }
+
+    fn hit(n: &str) -> RefHit {
+        RefHit {
+            from: sym(n),
+            kind: "calls".into(),
+            confidence: Confidence::Extracted,
+            via: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn refs_items_from_folded_answer() {
+        let fold = Fold {
+            key: "m:area".into(),
+            kind: "calls".into(),
+            targets: 60,
+            hits: 7,
+            first: vec![sym("f1"), sym("f2")],
+            at: 1,
+            via: Vec::new(),
+            depth: None,
+        };
+        let f = Folded {
+            hits: vec![hit("a"), hit("b")],
+            folds: vec![fold.clone()],
+        };
+        let items = refs_items(&f);
+        let names: Vec<&str> = items.iter().map(|i| i.name.as_str()).collect();
+        assert_eq!(names, ["a", "f1", "f2", "b"]);
+        assert_eq!(items[1].tokens, json_tokens(&fold));
+        assert_eq!(items[2].tokens, 0);
+        assert_eq!(items[1].path.as_deref(), Some("f1.rs"));
+        // A fold after the last hit goes last; no folds is the plain list.
+        let tail = Folded {
+            hits: vec![hit("a")],
+            folds: vec![Fold { at: 1, ..fold }],
+        };
+        assert_eq!(refs_items(&tail).len(), 3);
+        let plain = Folded {
+            hits: vec![hit("a")],
+            folds: Vec::new(),
+        };
+        assert_eq!(refs_items(&plain).len(), 1);
     }
 }

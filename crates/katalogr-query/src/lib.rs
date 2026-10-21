@@ -10,6 +10,7 @@ mod dangling;
 pub mod diagnostic;
 mod explain;
 mod find;
+pub mod fold;
 mod hints;
 mod map;
 mod mirror;
@@ -25,15 +26,16 @@ mod step;
 mod tests;
 mod why;
 
-pub use callers::callers;
+pub use callers::{CallersAnswer, callers, callers_folded};
 pub use dangling::{CONTRACT_KIND as DANGLING_CONTRACT, DEFAULT_KINDS as DANGLING_KINDS, dangling};
 pub use diagnostic::{
-    DIAG_PACK, DIAG_REFS, DIAG_TERMS, DIAG_TOP, DIAG_WEIGHTS, Diagnostic, ExpandedTerm, PackEntry,
-    PackTrace, PartTrace, PrefixTrace, RankSource, RankTrace, RoutingTrace, TermTrace, Trace,
-    WeightTrace,
+    DIAG_PACK, DIAG_REFS, DIAG_TERMS, DIAG_TOP, DIAG_WEIGHTS, Diagnostic, ExpandedTerm, FoldTrace,
+    PackEntry, PackTrace, PartTrace, PrefixTrace, RankSource, RankTrace, RoutingTrace, TermTrace,
+    Trace, WeightTrace,
 };
 pub use explain::explain;
 pub use find::find;
+pub use fold::{FOLD_FROM, FOLD_SHOWN, Folded};
 pub use hints::{HintSource, hints};
 pub use map::{map, map_traced};
 pub use mirror::mirror_drift;
@@ -41,13 +43,13 @@ pub use path::path;
 pub use rank::{
     link_weight, rank, rank_cached_or_live, rank_cached_or_live_with_source, rank_live,
 };
-pub use refs::{refs, refs_traced};
+pub use refs::{refs, refs_folded_traced, refs_traced};
 pub use resolve::{resolve, resolve_traced};
 pub use result::{
     CallerHit, CommitHit, ContractEnd, ContractInfo, DanglingRef, Direction, Envelope, Explain,
-    FieldDiff, FieldShape, LinkBrief, MapEntry, Matched, MirrorDrift, Note, PARTIAL_NOTE, Partial,
-    PathStep, RationaleLink, RefHit, ReplaceResult, Resolution, SearchHit, ShowResult, SymbolHit,
-    TestHit, Truncation, WhyResult, cap,
+    FieldDiff, FieldShape, Fold, LinkBrief, MapEntry, Matched, MirrorDrift, Note, PARTIAL_NOTE,
+    Partial, PathStep, RationaleLink, RefHit, ReplaceResult, Resolution, SearchHit, ShowResult,
+    SymbolHit, TestHit, Truncation, WhyResult, cap,
 };
 pub use schema::schemas;
 pub use search::{SearchParams, search, search_traced, search_with, search_with_traced};

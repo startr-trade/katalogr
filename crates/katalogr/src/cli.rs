@@ -127,6 +127,9 @@ pub enum Command {
         /// Also explain the answer: a bounded trace in the JSON `diagnostic` field, or on stderr.
         #[arg(long)]
         diagnostic: bool,
+        /// List every hit; by default a key with 50 or more targets is folded into one line.
+        #[arg(long)]
+        expand: bool,
     },
     /// List the callers of a symbol.
     Callers {
@@ -135,6 +138,9 @@ pub enum Command {
         /// How many call hops to follow.
         #[arg(long, default_value_t = 1, value_name = "N")]
         depth: u32,
+        /// List every caller; by default a key with 50 or more targets is folded into one line.
+        #[arg(long)]
+        expand: bool,
     },
     /// List the tests that exercise or verify a symbol.
     Tests {

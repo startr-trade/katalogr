@@ -70,6 +70,10 @@ pub struct Trace {
     /// `refs` and `map`: link weights.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub weights: Vec<WeightTrace>,
+    /// `refs`: the folds of the answer, in answer order, at most `DIAG_REFS` (the rest are
+    /// counted in `omitted["folds"]`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub folds: Vec<FoldTrace>,
     /// Set by the wrapper that packs the output (`--budget`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub packing: Option<PackTrace>,
@@ -94,6 +98,16 @@ impl Trace {
             *self.omitted.entry(name.to_string()).or_default() += n;
         }
     }
+}
+
+/// One fold of a `refs` answer (FEAT-077).
+#[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]
+pub struct FoldTrace {
+    pub key: String,
+    pub kind: String,
+    pub targets: u64,
+    pub hits: u64,
+    pub at: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]

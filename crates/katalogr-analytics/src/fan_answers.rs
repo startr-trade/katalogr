@@ -7,7 +7,7 @@ use crate::options::{
 use crate::result::{DeadConfidence, Level};
 use crate::testkit::{Built, Fx};
 use crate::{CoverageInput, communities, coverage, cycles, dead_code, hubs};
-use katalogr_model::{Id, RelPath};
+use katalogr_model::{Id, Name, RelPath};
 use katalogr_query::{
     SymbolHit, TestsOptions, callers, explain, map, path, rank_live, refs, tests,
 };

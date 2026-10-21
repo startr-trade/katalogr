@@ -638,8 +638,37 @@ mod mcp {
     fn output_matches_cli_json() {
         let tmp = tempfile::tempdir().unwrap();
         let (_kx, repo) = query_project(tmp.path());
+        // FEAT-077: a name with 60 targets, so refs and callers fold by default.
+        let mut impls = String::new();
+        for i in 0..60 {
+            impls.push_str(&format!("sym fn impl_{i}\nexport m:area impl_{i}\n"));
+        }
+        std::fs::write(repo.join("impls.tx"), impls).unwrap();
+        let mut users = String::new();
+        for j in 0..7 {
+            users.push_str(&format!("sym fn user_{j}\nref user_{j} calls m:area\n"));
+        }
+        users.push_str("sym fn direct\nlink direct calls impl_0\n");
+        std::fs::write(repo.join("users.tx"), users).unwrap();
+        ok(&repo, &["index"]);
         let mut tools: Vec<(&str, Value, Vec<String>)> = Vec::new();
         let base: Vec<(&str, Value, Vec<&str>)> = vec![
+            ("refs", json!({"symbol": "impl_0"}), vec!["refs", "impl_0"]),
+            (
+                "refs",
+                json!({"symbol": "impl_0", "expand": true}),
+                vec!["refs", "impl_0", "--expand"],
+            ),
+            (
+                "callers",
+                json!({"symbol": "impl_0"}),
+                vec!["callers", "impl_0"],
+            ),
+            (
+                "callers",
+                json!({"symbol": "impl_0", "expand": true}),
+                vec!["callers", "impl_0", "--expand"],
+            ),
             ("find", json!({"text": "call"}), vec!["find", "call"]),
             ("refs", json!({"symbol": "target"}), vec!["refs", "target"]),
             (

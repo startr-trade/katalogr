@@ -97,6 +97,7 @@ pub fn options_with(cli: &Cli, diagnostic: bool) -> Options {
         }),
         timeout: cli.timeout,
         diagnostic,
+        expand: false,
     }
 }
 

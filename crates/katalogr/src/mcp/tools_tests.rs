@@ -135,4 +135,18 @@ fn arguments_are_checked() {
         "callers: x: unknown argument"
     );
     assert!(Parsed::parse(spec, &json!({"symbol": "a", "budget": 5})).is_ok());
+    assert_eq!(
+        bad(json!({"symbol": "a", "expand": "yes"})),
+        "callers: expand: expected boolean"
+    );
+    assert!(Parsed::parse(spec, &json!({"symbol": "a", "expand": true})).is_ok());
+    let refs = &TOOLS[1];
+    assert_eq!(refs.name, "refs");
+    assert!(Parsed::parse(refs, &json!({"symbol": "a", "expand": false})).is_ok());
+    assert_eq!(
+        Parsed::parse(refs, &json!({"symbol": "a", "expand": 1}))
+            .err()
+            .unwrap(),
+        "refs: expand: expected boolean"
+    );
 }

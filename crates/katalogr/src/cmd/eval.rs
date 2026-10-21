@@ -49,6 +49,7 @@ fn project_report(k: &katalogr_dist::Katalogr) -> Result<Report, DistError> {
         consistency: Some(Consistency::StaleOk),
         timeout: None,
         diagnostic: false,
+        expand: false,
     })
 }
 

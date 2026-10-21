@@ -23,8 +23,8 @@ pub use error::DistError;
 pub use katalogr_analytics as analytics;
 pub use katalogr_query as query;
 use katalogr_query::{
-    Blame, CallerHit, DanglingRef, Diagnostic, Explain, MapEntry, MirrorDrift, Partial, PathStep,
-    RefHit, Resolution, SearchHit, SearchParams, SymbolHit, TestHit, TestsOptions, Trace,
+    Blame, CallerHit, DanglingRef, Diagnostic, Explain, Fold, MapEntry, MirrorDrift, Partial,
+    PathStep, RefHit, Resolution, SearchHit, SearchParams, SymbolHit, TestHit, TestsOptions, Trace,
     WhyResult, cap,
 };
 pub use katalogr_query::{ReplaceResult, ShowResult};
@@ -150,6 +150,8 @@ pub struct Options {
     pub timeout: Option<f64>,
     /// Record a diagnostic trace of the query (FEAT-065).
     pub diagnostic: bool,
+    /// `refs` and `callers`: list every hit instead of folding (`--expand`, FEAT-077).
+    pub expand: bool,
 }
 
 impl Options {
@@ -309,6 +311,8 @@ pub struct Reply<T> {
     pub diagnostic: Option<Trace>,
     /// Caps that cut this answer (empty when none did). The renderer adds budget cuts.
     pub partial: Vec<Partial>,
+    /// Folds of a `refs` or `callers` answer; empty for every other command and with `expand`.
+    pub folded: Vec<Fold>,
 }
 
 fn found_or_none(items: Vec<SymbolHit>, text: &str) -> Outcome<Vec<SymbolHit>> {
@@ -675,6 +679,7 @@ impl Katalogr {
         Ok(Reply {
             outcome: a.value?,
             partial: Vec::new(),
+            folded: Vec::new(),
             report: Report {
                 watermark: a.watermark.0,
                 pending: a.pending,
@@ -696,11 +701,17 @@ impl Katalogr {
 
     /// References to the symbol `text` names, through re-exports.
     pub fn refs(&self, text: &str, opts: &Options) -> Result<Reply<Vec<RefHit>>, DistError> {
-        self.query_traced(opts, |tx, diag| {
+        let fold_from = (!opts.expand).then_some(katalogr_query::FOLD_FROM);
+        let mut folds = Vec::new();
+        let mut reply = self.query_traced(opts, |tx, diag| {
             on_target_traced(tx, text, diag, |t, diag| {
-                katalogr_query::refs_traced(tx, t, diag)
+                let f = katalogr_query::refs_folded_traced(tx, t, fold_from, diag)?;
+                folds = f.folds;
+                Ok(f.hits)
             })
-        })
+        })?;
+        reply.folded = folds;
+        Ok(reply)
     }
 
     /// Callers of the symbol `text` names, up to `depth` hops.
@@ -714,22 +725,25 @@ impl Katalogr {
         let mut partial = Vec::new();
         // `callers` treats a depth of 0 as 1.
         let depth = depth.max(1);
+        let fold_from = (!opts.expand).then_some(katalogr_query::FOLD_FROM);
+        let mut folds = Vec::new();
         let mut reply = self.query(opts, |tx| {
             on_target(tx, text, |t| {
-                let mut hits = katalogr_query::callers(tx, t, depth.saturating_add(1))?;
-                if hits.iter().any(|h| h.depth > depth) {
-                    hits.retain(|h| h.depth <= depth);
+                let a = katalogr_query::callers_folded(tx, t, depth, fold_from)?;
+                if a.deeper {
                     partial.push(Partial::new(
                         cap::DEPTH,
                         u64::from(depth),
-                        hits.len() as u64,
+                        a.unfolded_len as u64,
                         None,
                     ));
                 }
-                Ok(hits)
+                folds = a.folded.folds;
+                Ok(a.folded.hits)
             })
         })?;
         reply.partial = partial;
+        reply.folded = folds;
         Ok(reply)
     }
 

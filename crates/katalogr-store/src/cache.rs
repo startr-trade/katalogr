@@ -1073,7 +1073,7 @@ pub trait Reader {
                 });
             }
         }
-        keys.sort_by(|a, b| a.to.cmp(&b.to));
+        keys.sort_by_key(|k| k.to);
         keys.dedup();
         Ok(keys)
     }

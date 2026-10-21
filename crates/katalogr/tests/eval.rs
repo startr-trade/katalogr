@@ -212,6 +212,29 @@ mod eval {
         assert_eq!(code, 2);
     }
 
+    /// FEAT-077 R-22. Scoring `refs` on the folded answer leaves the fixture baseline as it is:
+    /// no fixture export key has 50 targets.
+    #[test]
+    fn baseline_unchanged_by_folding() {
+        let tmp = tempfile::tempdir().unwrap();
+        let file = tmp.path().join("baseline.json");
+        let (code, _, err) = run(&[
+            "eval",
+            "run",
+            "--sets",
+            "fixtures/eval",
+            "--write-baseline",
+            file.to_str().unwrap(),
+        ]);
+        assert_eq!(code, 0, "{err}");
+        let made = std::fs::read_to_string(&file).unwrap();
+        let kept = std::fs::read_to_string(fixtures().join("baseline.json")).unwrap();
+        assert!(
+            made == kept,
+            "the re-blessed baseline differs from the checked-in one"
+        );
+    }
+
     #[test]
     fn fixture_suite_meets_baseline() {
         let (code, out, err) = run(&[
