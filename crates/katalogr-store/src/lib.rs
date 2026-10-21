@@ -2,6 +2,9 @@
 
 pub mod blob;
 pub mod cache;
+// Not wired into the cache yet: FEAT-075 T5 switches the tables to it.
+#[allow(dead_code)]
+mod codec;
 pub mod error;
 #[cfg(feature = "failpoints")]
 pub mod failpoint;
