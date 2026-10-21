@@ -251,6 +251,17 @@ fn builtin_profiles() -> Vec<(String, String)> {
         .collect()
 }
 
+/// The extension and language that claim `path`, routing as the indexer does: a profile
+/// `select` first, then the registry.
+fn claim_for(
+    registry: &ExtensionRegistry,
+    profiles: &katalogr_engine::profiles::ProfileSet,
+    path: &RelPath,
+) -> Option<(String, String)> {
+    katalogr_engine::census::extractor_for(registry, profiles, path)
+        .map(|e| (e.id().to_string(), e.language(path).to_string()))
+}
+
 /// Extension registration point. Register extractors here as they are written.
 fn build_registry() -> ExtensionRegistry {
     let mut registry = ExtensionRegistry::new();
@@ -1025,7 +1036,8 @@ impl Katalogr {
 
     /// How complete the graph is: references resolved, inferred and unresolved, dangling
     /// contracts, parse errors and unclaimed files, per repository, extension and language.
-    /// Walks each repository root once, then reads one snapshot at `o`'s consistency (default
+    /// Files are routed as the indexer routes them: the profiles are loaded once and a profile
+    /// `select` claims a file before the registry does (census and `claim` alike). Walks each repository root once, then reads one snapshot at `o`'s consistency (default
     /// wait). The walk is not transactional with the index: a file created in between can
     /// show as unclaimed while its artifact also exists; the next run settles it.
     pub fn coverage(
@@ -1050,13 +1062,14 @@ impl Katalogr {
         }
         let timeout = o.timeout()?;
         let engine = self.engine(Instant::now() + timeout)?;
+        let profiles = engine.routing_profiles()?;
         let mut unclaimed = BTreeMap::new();
         let mut roots_missing = Vec::new();
         for repo in repos {
             if opts.repo.as_deref().is_some_and(|r| r != repo) {
                 continue;
             }
-            match katalogr_engine::census::census(&engine, repo)? {
+            match katalogr_engine::census::census_with(&engine, repo, &profiles)? {
                 Some(c) => {
                     unclaimed.insert(repo.to_string(), c.unclaimed);
                 }
@@ -1068,11 +1081,7 @@ impl Katalogr {
             Some(e) => e.language(path).to_string(),
             None => ext.to_string(),
         };
-        let claim = |path: &RelPath| {
-            registry
-                .for_path(path)
-                .map(|e| (e.id().to_string(), e.language(path).to_string()))
-        };
+        let claim = |path: &RelPath| claim_for(registry, &profiles, path);
         let input = CoverageInput {
             language: &language,
             claim: &claim,
@@ -1246,6 +1255,32 @@ mod profile_tests {
 
 #[cfg(test)]
 mod dist {
+    /// A file a profile `select` routes to the text extension is claimed by it (and its
+    /// language), not left to the registry.
+    #[test]
+    fn claim_follows_routes() {
+        use katalogr_engine::profiles::ProfileSet;
+        let registry = super::build_registry();
+        let select = "profile: go-text\nversion: 2\nselect:\n  - extension: text\n    path: 'svc/*.go'\nrules: []\n";
+        let dir = std::env::temp_dir();
+        let dir = camino::Utf8Path::from_path(&dir).unwrap();
+        let none = dir.join("katalogr-no-such-project");
+        let with = ProfileSet::load_full(
+            &none,
+            &[("go-text.yaml", select)],
+            &Default::default(),
+            &registry.normalisers(),
+        );
+        assert!(with.errors.is_empty(), "{:?}", with.errors);
+        let path = katalogr_model::RelPath::new("svc/run.go").unwrap();
+        assert_eq!(
+            super::claim_for(&registry, &with.set, &path),
+            Some(("text".to_string(), "text".to_string()))
+        );
+        let without = ProfileSet::load_full(&none, &[], &Default::default(), &[]);
+        assert_eq!(super::claim_for(&registry, &without.set, &path), None);
+    }
+
     /// Two extensions providing a normaliser of the same id would make the second unreachable
     /// (the first registered wins); the build refuses that instead.
     #[test]
