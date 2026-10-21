@@ -78,15 +78,25 @@ impl std::fmt::Display for Id {
 }
 
 impl Serialize for Id {
+    /// Hex in human-readable formats (JSON, YAML); the 16 raw bytes, with no length prefix, in
+    /// binary ones.
     fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
-        s.serialize_str(&self.to_hex())
+        if s.is_human_readable() {
+            s.serialize_str(&self.to_hex())
+        } else {
+            self.0.serialize(s)
+        }
     }
 }
 
 impl<'de> Deserialize<'de> for Id {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        let s = String::deserialize(d)?;
-        Id::from_hex(&s).map_err(serde::de::Error::custom)
+        if d.is_human_readable() {
+            let s = String::deserialize(d)?;
+            Id::from_hex(&s).map_err(serde::de::Error::custom)
+        } else {
+            Ok(Id(<[u8; 16]>::deserialize(d)?))
+        }
     }
 }
 
@@ -413,6 +423,16 @@ impl PartialOrd for AnyName {
 mod tests {
     use super::*;
     use proptest::prelude::*;
+
+    #[test]
+    fn id_json_unchanged() {
+        let id = Id::of("core:src/graph.rs");
+        let json = serde_json::to_string(&id).unwrap();
+        assert_eq!(json, format!("\"{}\"", id.to_hex()));
+        assert_eq!(json.len(), 34);
+        assert_eq!(serde_json::from_str::<Id>(&json).unwrap(), id);
+        assert!(serde_json::from_str::<Id>("\"nothex\"").is_err());
+    }
 
     fn art(repo: &str, path: &str) -> ArtifactName {
         ArtifactName::new(repo, path).unwrap()
