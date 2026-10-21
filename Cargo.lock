@@ -1796,6 +1796,7 @@ dependencies = [
  "clap",
  "fs4",
  "katalogr-acceptance",
+ "katalogr-bench",
  "katalogr-dist",
  "rmcp",
  "serde_json",
@@ -1856,6 +1857,24 @@ dependencies = [
  "proc-macro2",
  "syn 2.0.119",
  "toml",
+]
+
+[[package]]
+name = "katalogr-bench"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "camino",
+ "clap",
+ "fs4",
+ "katalogr-dist",
+ "libc",
+ "serde",
+ "serde_json",
+ "serde_yaml_ng",
+ "sha2",
+ "tempfile",
+ "thiserror",
 ]
 
 [[package]]

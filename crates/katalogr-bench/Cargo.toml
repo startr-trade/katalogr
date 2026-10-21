@@ -1,0 +1,37 @@
+[package]
+name = "katalogr-bench"
+description = "Load-test harness: drives the release katalogr binary over pinned corpora (not shipped)."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+publish = false
+
+[lib]
+name = "katalogr_bench"
+path = "src/lib.rs"
+
+[[bin]]
+name = "katalogr-bench"
+path = "src/main.rs"
+
+[dependencies]
+# Only the dist crate may depend on katalogr-analytics (archtest::analytics_layering), so the
+# `metrics` samples come through its re-export.
+katalogr-dist.workspace = true
+anyhow.workspace = true
+camino.workspace = true
+clap.workspace = true
+fs4.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+serde_yaml_ng.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+libc = "=0.2.190"
+
+[dev-dependencies]
+tempfile.workspace = true
