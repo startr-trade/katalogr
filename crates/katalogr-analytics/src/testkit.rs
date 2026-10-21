@@ -3,11 +3,11 @@
 
 use camino::Utf8PathBuf;
 use katalogr_model::{
-    ArtifactName, Confidence, ContractName, ExportKey, Fact, Fragment, Id, LinkKind, Name,
+    ArtifactName, Confidence, ContractName, ExportKey, Fact, Fragment, Id, LinkKind, Name, OutRef,
     Provenance, RelPath, Segment, Span, SymbolName,
 };
 use katalogr_store::{
-    ArtifactRow, Cache, ContractRow, Kindex, LinkEntry, LinkKey, LinkOrigin, LinkRow,
+    ArtifactRow, Cache, ContractRow, FanKey, Kindex, LinkEntry, LinkKey, LinkOrigin, LinkRow,
     ProjectConfig, ProjectName, ReadTx, RepoConfig, Restitch, StoreError, SymbolRow, WriteTx,
 };
 use std::collections::BTreeMap;
@@ -38,6 +38,7 @@ pub struct Fx {
     links: BTreeMap<LinkKey, LinkRow>,
     contracts: BTreeMap<Id, ContractRow>,
     exports: BTreeMap<ExportKey, Vec<Id>>,
+    fans: BTreeMap<FanKey, LinkRow>,
 }
 
 pub struct Built {
@@ -206,6 +207,115 @@ impl Fx {
             .push(entry);
     }
 
+    /// Record the reference `index` of the artifact holding `from`, so counts that read the
+    /// artifact's references see it.
+    fn note_ref(&mut self, from: Id, kind: &str, index: u32, candidates: Vec<ExportKey>) {
+        let aid = self.symbols[&from].artifact;
+        let refs = &mut self.artifacts.get_mut(&aid).unwrap().refs;
+        let blank = OutRef {
+            from,
+            kind: LinkKind(kind.into()),
+            span: Some(SPAN),
+            candidates: Vec::new(),
+            confidence: Confidence::Extracted,
+            origin: None,
+            binds: None,
+        };
+        while refs.len() <= index as usize {
+            refs.push(blank.clone());
+        }
+        refs[index as usize] = OutRef {
+            candidates,
+            ..blank
+        };
+    }
+
+    fn ref_entry(&self, index: u32, fanout: Option<u32>) -> LinkEntry {
+        let rel = RelPath::new("x.tx").unwrap();
+        LinkEntry {
+            origin: LinkOrigin::Ref(index),
+            confidence: if fanout.is_some_and(|n| n >= 2) {
+                Confidence::Inferred
+            } else {
+                Confidence::Extracted
+            },
+            span: Some(SPAN),
+            provenance: provenance(&rel),
+            fanout,
+            produced_by: None,
+        }
+    }
+
+    /// A link with origin `Ref(index)`, confidence Inferred when `fanout` is Some(n >= 2).
+    pub fn link_ref(&mut self, from: Id, kind: &str, to: Id, index: u32, fanout: Option<u32>) {
+        let entry = self.ref_entry(index, fanout);
+        self.links
+            .entry(LinkKey {
+                from,
+                kind: LinkKind(kind.into()),
+                to,
+            })
+            .or_insert(LinkRow {
+                entries: Vec::new(),
+            })
+            .entries
+            .push(entry);
+    }
+
+    /// The fan row `(from, kind, ns:key)` with one entry of origin `Ref(index)`, and the export
+    /// `ns:key` to each of `targets` (two or more).
+    pub fn fan(&mut self, from: Id, kind: &str, key: (&str, &str), index: u32, targets: &[Id]) {
+        let k = ExportKey {
+            namespace: key.0.into(),
+            key: key.1.into(),
+        };
+        let mut entry = self.ref_entry(index, Some(targets.len() as u32));
+        entry.fanout = None;
+        self.note_ref(from, kind, index, vec![k.clone()]);
+        self.fans.insert(
+            FanKey {
+                from,
+                kind: LinkKind(kind.into()),
+                key: k.clone(),
+            },
+            LinkRow {
+                entries: vec![entry],
+            },
+        );
+        let ex = self.exports.entry(k).or_default();
+        for t in targets {
+            if !ex.contains(t) {
+                ex.push(*t);
+            }
+        }
+    }
+
+    /// What [`Fx::fan`] stands for in the layout before fan rows: one `Ref(index)` link per
+    /// target with `fanout` equal to the target count, the same export and reference.
+    pub fn fan_flat(
+        &mut self,
+        from: Id,
+        kind: &str,
+        key: (&str, &str),
+        index: u32,
+        targets: &[Id],
+    ) {
+        let k = ExportKey {
+            namespace: key.0.into(),
+            key: key.1.into(),
+        };
+        self.note_ref(from, kind, index, vec![k.clone()]);
+        for t in targets {
+            self.link_ref(from, kind, *t, index, Some(targets.len() as u32));
+        }
+        let ex = self.exports.entry(k).or_default();
+        for t in targets {
+            if !ex.contains(t) {
+                ex.push(*t);
+            }
+        }
+    }
+
     /// An extracted link.
     pub fn link(&mut self, from: Id, kind: &str, to: Id) {
         self.link_with(from, kind, to, Confidence::Extracted, None);
@@ -257,13 +367,20 @@ impl Fx {
             tx.put_symbol(*id, row).unwrap();
         }
         for (key, row) in &self.links {
-            tx.put_link(key, row).unwrap();
+            let mut row = row.clone();
+            row.entries.sort_by_key(|e| e.origin);
+            tx.put_link(key, &row).unwrap();
+        }
+        for (key, row) in &self.fans {
+            tx.put_fan(key, row).unwrap();
         }
         for (id, row) in &self.contracts {
             tx.put_contract(*id, row).unwrap();
         }
         for (key, targets) in &self.exports {
-            tx.put_exports(key, targets).unwrap();
+            let mut targets = targets.clone();
+            targets.sort();
+            tx.put_exports(key, &targets).unwrap();
         }
         tx.commit().unwrap();
         Built { _tmp: tmp, cache }

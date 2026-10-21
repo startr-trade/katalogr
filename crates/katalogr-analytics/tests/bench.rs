@@ -567,4 +567,245 @@ mod bench {
         assert_eq!(r.totals.contracts_dangling, 300);
         assert_eq!(r.totals.files_parse_errors, 50);
     }
+
+    /// A graph of 20,000 symbols in 100 files: one export key with 230 targets, 5,000 fan rows
+    /// from distinct callers naming it (1.15 M expanded entries) and 30,000 extracted calls.
+    fn build_fan() -> Bench {
+        use katalogr_model::ExportKey;
+        use katalogr_store::FanKey;
+        const N: usize = 20_000;
+        const FILES_F: usize = 100;
+        const PER: usize = N / FILES_F;
+        let tmp = tempfile::tempdir().unwrap();
+        let root = Utf8PathBuf::from_path_buf(tmp.path().join("kx")).unwrap();
+        let dir = Kindex::init(&root)
+            .unwrap()
+            .create_project(
+                &ProjectName::new("bench").unwrap(),
+                ProjectConfig {
+                    repos: vec![RepoConfig::new("r")],
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        let cache =
+            Cache::open_or_rebuild(&dir, &NoShards, Instant::now() + Duration::from_secs(60))
+                .unwrap();
+        let span = Span {
+            start_line: 1,
+            start_col: 1,
+            end_line: 1,
+            end_col: 1,
+        };
+        let provenance = |path: &RelPath| Provenance {
+            repo: "r".into(),
+            path: path.clone(),
+            revision: "ce013625030ba8dba906f756967f9e9ca394464a".into(),
+        };
+        let mut tx = cache.write().unwrap();
+        let mut ids: Vec<Id> = Vec::with_capacity(N);
+        let mut paths: Vec<RelPath> = Vec::new();
+        for f in 0..FILES_F {
+            let path = RelPath::new(&format!("dir{}/f{f}.tx", f % 10)).unwrap();
+            let artifact = ArtifactName {
+                repo: "r".into(),
+                path: path.clone(),
+            };
+            let aid = artifact.id();
+            let mut symbols = Vec::new();
+            for k in 0..PER {
+                let i = f * PER + k;
+                let name = SymbolName {
+                    artifact: artifact.clone(),
+                    segments: vec![Segment {
+                        kind: "fn".into(),
+                        name: format!("s{i}"),
+                    }],
+                    ordinal: 1,
+                };
+                let id = name.id();
+                let mut facts = BTreeMap::new();
+                if i.is_multiple_of(10) {
+                    facts.insert("root".to_string(), Fact::Str("main".into()));
+                }
+                tx.put_symbol(
+                    id,
+                    &SymbolRow {
+                        name,
+                        artifact: aid,
+                        kind: "fn".into(),
+                        span,
+                        facts,
+                    },
+                )
+                .unwrap();
+                ids.push(id);
+                symbols.push(id);
+            }
+            symbols.sort();
+            tx.put_artifact(
+                aid,
+                &ArtifactRow {
+                    name: artifact,
+                    extension: "test".into(),
+                    provenance: provenance(&path),
+                    facts: BTreeMap::from([(
+                        "package".to_string(),
+                        Fact::Str(format!("p{}", f % 10)),
+                    )]),
+                    symbols,
+                    exports: Vec::new(),
+                    refs: Vec::new(),
+                },
+            )
+            .unwrap();
+            paths.push(path);
+        }
+        let entry =
+            |origin: LinkOrigin, c: Confidence, fanout: Option<u32>, path: &RelPath| LinkEntry {
+                origin,
+                confidence: c,
+                span: Some(span),
+                provenance: provenance(path),
+                fanout,
+                produced_by: None,
+            };
+        for i in 0..N {
+            let mut to = vec![(i + 1) % N];
+            if i < 10_000 {
+                to.push((i + 13) % N);
+            }
+            for j in to {
+                tx.put_link(
+                    &LinkKey {
+                        from: ids[i],
+                        kind: LinkKind("calls".into()),
+                        to: ids[j],
+                    },
+                    &LinkRow {
+                        entries: vec![entry(
+                            LinkOrigin::Intra,
+                            Confidence::Extracted,
+                            None,
+                            &paths[i / PER],
+                        )],
+                    },
+                )
+                .unwrap();
+            }
+        }
+        let key = ExportKey {
+            namespace: "m".into(),
+            key: "area".into(),
+        };
+        let mut targets: Vec<Id> = ids[..230].to_vec();
+        targets.sort();
+        tx.put_exports(&key, &targets).unwrap();
+        for i in 1000..6000 {
+            tx.put_fan(
+                &FanKey {
+                    from: ids[i],
+                    kind: LinkKind("calls".into()),
+                    key: key.clone(),
+                },
+                &LinkRow {
+                    entries: vec![entry(
+                        LinkOrigin::Ref(0),
+                        Confidence::Inferred,
+                        None,
+                        &paths[i / PER],
+                    )],
+                },
+            )
+            .unwrap();
+        }
+        tx.commit().unwrap();
+        let mut tx = cache.write().unwrap();
+        let symbols = tx.symbols().unwrap();
+        let scores = katalogr_store::pagerank(&tx, &symbols).unwrap();
+        let stored: Vec<(Id, f64)> = symbols.iter().map(|(i, _)| *i).zip(scores).collect();
+        let wm = tx.watermark(katalogr_store::RANK_CONTEXT).unwrap();
+        tx.store_rank(&stored, wm).unwrap();
+        tx.commit().unwrap();
+        Bench { _tmp: tmp, cache }
+    }
+
+    /// FEAT-077 R-12: each insight on a graph with one 230-target key named by 5,000 fan rows
+    /// (1.15 M expanded entries) within 2 s.
+    #[test]
+    #[ignore]
+    fn fanout_heavy_insights() {
+        use katalogr_analytics::{CoverageInput, coverage};
+        let b = build_fan();
+        let read = b.cache.read().unwrap();
+        let links = read.links_all().unwrap();
+        let entries: usize = links.iter().map(|(_, r)| r.entries.len()).sum();
+        println!("expanded entries: {entries}");
+        assert!(entries >= 1_150_000);
+        let start = Instant::now();
+        let m = katalogr_query::map(&read).unwrap();
+        report("fanout_heavy_insights (map)", start, 2000);
+        assert!(!m.is_empty());
+        let start = Instant::now();
+        let r = hubs(
+            &read,
+            &HubOptions {
+                graph: graph(Level::Symbol, true),
+                min_degree: 10.0,
+                limit: 20,
+            },
+        )
+        .unwrap();
+        report("fanout_heavy_insights (hubs)", start, 2000);
+        assert!(!r.items.is_empty());
+        let start = Instant::now();
+        cycles(
+            &read,
+            &CycleOptions {
+                graph: graph(Level::Symbol, true),
+                members: 10,
+                limit: 20,
+            },
+        )
+        .unwrap();
+        report("fanout_heavy_insights (cycles)", start, 2000);
+        let start = Instant::now();
+        dead_code(
+            &read,
+            &DeadCodeOptions {
+                code_kinds: BTreeMap::from([(
+                    "test".to_string(),
+                    BTreeSet::from(["fn".to_string()]),
+                )]),
+                exclude_kinds: STRUCTURAL_KINDS.iter().map(|k| k.to_string()).collect(),
+                internal: false,
+                min_confidence: DeadConfidence::Low,
+                path_prefix: None,
+                limit: 50,
+            },
+        )
+        .unwrap();
+        report("fanout_heavy_insights (dead-code)", start, 2000);
+        let language = |ext: &str, _: &RelPath| ext.to_string();
+        let claim = |_: &RelPath| None;
+        let start = Instant::now();
+        coverage(
+            &read,
+            &CoverageInput {
+                language: &language,
+                claim: &claim,
+                unclaimed: BTreeMap::new(),
+                roots_missing: Vec::new(),
+                exclude_prefixes: Vec::new(),
+                repo: None,
+                suffix_top: 20,
+            },
+        )
+        .unwrap();
+        report("fanout_heavy_insights (coverage)", start, 2000);
+        let symbols = read.symbols().unwrap();
+        let start = Instant::now();
+        katalogr_store::pagerank(&read, &symbols).unwrap();
+        report("fanout_heavy_insights (pagerank)", start, 2000);
+    }
 }
