@@ -20,7 +20,7 @@ pub use cache::{
     SyncReport, WriteTx,
 };
 pub use error::StoreError;
-pub use guard::{GuardError, scan_for_absolute};
+pub use guard::{GuardError, needles_from, scan_for_absolute, scan_for_absolute_with};
 pub use inspect::{CacheInspection, InspectedTables, OpenCache};
 pub use kindex::{
     FormatFile, GitState, Kindex, ProjectConfig, ProjectDir, ProjectName, RepoConfig, SHARD_FORMAT,

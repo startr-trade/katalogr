@@ -482,4 +482,142 @@ mod kindex {
             Err(StoreError::Parse { .. })
         ));
     }
+
+    use katalogr_store::{needles_from, scan_for_absolute_with};
+    use std::time::Instant;
+
+    fn gfrag(sym_name: &str, facts: BTreeMap<String, Fact>) -> Fragment {
+        let art = ArtifactName::new("r", "src/a.ts").unwrap();
+        Fragment {
+            provenance: Provenance {
+                repo: "r".into(),
+                path: RelPath::new("src/a.ts").unwrap(),
+                revision: "ce013625030ba8dba906f756967f9e9ca394464a".into(),
+            },
+            extension: "test".into(),
+            artifact: ArtifactNode {
+                name: art.clone(),
+                facts: BTreeMap::new(),
+            },
+            symbols: vec![SymbolNode {
+                name: SymbolName {
+                    artifact: art,
+                    segments: vec![Segment {
+                        kind: "fn".into(),
+                        name: sym_name.into(),
+                    }],
+                    ordinal: 1,
+                },
+                kind: "fn".into(),
+                span: Span {
+                    start_line: 1,
+                    start_col: 1,
+                    end_line: 1,
+                    end_col: 2,
+                },
+                facts,
+            }],
+            links: vec![],
+            refs: vec![],
+            exports: vec![],
+            bindings: vec![],
+        }
+    }
+
+    fn with_fact(text: &str) -> Fragment {
+        let mut m = BTreeMap::new();
+        m.insert("source".to_string(), Fact::Str(text.to_string()));
+        gfrag("f", m)
+    }
+
+    #[test]
+    fn relative_needle_ignored() {
+        assert!(needles_from(["tmp", ".", "/", "", "C:\\"]).is_empty());
+        let needles = needles_from(["tmp"]);
+        let mut m = BTreeMap::new();
+        m.insert(
+            "str_calls".to_string(),
+            Fact::Str("path.join(portableDataPath, \"tmp\")".into()),
+        );
+        assert_eq!(
+            scan_for_absolute_with(&gfrag("tmpDir", m), &needles),
+            Ok(())
+        );
+    }
+
+    #[test]
+    fn needle_matches_whole_path_only() {
+        let n = needles_from(["/home/dev", "/tmp"]);
+        assert_eq!(n, vec!["/home/dev".to_string(), "/tmp".to_string()]);
+        for fine in [
+            "tmpDir",
+            "/api/tmpl",
+            "see /home/developer/x",
+            "x/home/dev",
+            "/tmp-x",
+        ] {
+            assert!(
+                scan_for_absolute_with(&with_fact(fine), &n).is_ok(),
+                "{fine} must pass"
+            );
+        }
+        for bad in [
+            "cat /home/dev/x",
+            "file:///home/dev",
+            "run /home/dev",
+            "a /tmp",
+        ] {
+            assert!(
+                scan_for_absolute_with(&with_fact(bad), &n).is_err(),
+                "{bad} must be refused"
+            );
+        }
+    }
+
+    #[test]
+    fn machine_paths_still_refused() {
+        let n = needles_from(["/home/synthuser", "/opt/scratch", "/srv/kx"]);
+        for bad in [
+            "open /home/synthuser/data.txt",
+            "in /opt/scratch/x",
+            "root /srv/kx",
+            "C:\\x",
+            "d:/x",
+            "\\\\srv\\share",
+            "file:///home/synthuser/x",
+            "~/x",
+            "/home/other",
+        ] {
+            let e = scan_for_absolute_with(&with_fact(bad), &n).unwrap_err();
+            let msg = e.to_string();
+            assert!(msg.contains("symbols[0].facts.source"), "{msg}");
+            assert!(!msg.contains(bad), "value echoed: {msg}");
+            assert!(!msg.contains("synthuser"), "value echoed: {msg}");
+        }
+    }
+
+    #[test]
+    #[ignore = "release build only"]
+    fn guard_scan_budget() {
+        let mut f = gfrag("f", BTreeMap::new());
+        let proto = f.symbols[0].clone();
+        f.symbols.clear();
+        for i in 0..5000 {
+            let mut s = proto.clone();
+            s.name.segments[0].name = format!("sym{i}");
+            for k in 0..8 {
+                s.facts.insert(
+                    format!("fact{k}"),
+                    Fact::Str(format!("path.join(base, \"segment{i}\", \"item{k}\")")),
+                );
+            }
+            f.symbols.push(s);
+        }
+        let n = needles_from(["/home/synthuser", "/opt/scratch", "/srv/kx"]);
+        let t = Instant::now();
+        scan_for_absolute_with(&f, &n).unwrap();
+        let ms = t.elapsed().as_millis();
+        println!("guard_scan_budget: {ms} ms");
+        assert!(ms < 25, "{ms} ms");
+    }
 }
