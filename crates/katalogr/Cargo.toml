@@ -38,3 +38,6 @@ toml.workspace = true
 camino.workspace = true
 # Reads an index's canonical graph, with the artifact facts (URLs) the CLI does not print.
 katalogr-acceptance = { path = "../katalogr-acceptance" }
+# The load-test harness is exercised end to end against a synthetic corpus (FEAT-068). It is
+# never a normal dependency: archtest::bench_not_shipped.
+katalogr-bench = { workspace = true }

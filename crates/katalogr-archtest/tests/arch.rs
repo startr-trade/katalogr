@@ -729,6 +729,46 @@ mod archtest {
         failures
     }
 
+    /// FEAT-068 R-16, ADR-0026. The load-test harness is a tool: it is not published, only the
+    /// `katalogr` crate's tests may depend on it (as a dev-dependency), and the release
+    /// workflow never names it.
+    #[test]
+    fn bench_not_shipped() {
+        let md = metadata(false);
+        let mut failures = Vec::new();
+        match workspace_package(&md, "katalogr-bench") {
+            None => failures.push("package katalogr-bench not found".to_string()),
+            Some(b) => {
+                if b.publish != Some(Vec::new()) {
+                    failures.push("katalogr-bench must declare `publish = false`".to_string());
+                }
+            }
+        }
+        for p in md.workspace_packages() {
+            for d in p.dependencies.iter().filter(|d| d.name == "katalogr-bench") {
+                let allowed =
+                    p.name.as_str() == "katalogr" && d.kind == DependencyKind::Development;
+                if !allowed {
+                    failures.push(format!(
+                        "{} depends on katalogr-bench ({:?}); only katalogr's tests may, as a dev-dependency",
+                        p.name, d.kind
+                    ));
+                }
+            }
+        }
+        let release =
+            std::fs::read_to_string(workspace_root().join(".github/workflows/release.yml"))
+                .expect("release workflow");
+        if release.contains("katalogr-bench") {
+            failures.push(".github/workflows/release.yml names katalogr-bench".to_string());
+        }
+        assert!(
+            failures.is_empty(),
+            "the harness would be shipped:\n{}",
+            failures.join("\n")
+        );
+    }
+
     #[test]
     fn no_c_build_dependencies() {
         let mut failures = BTreeSet::new();
