@@ -3,22 +3,22 @@
 //! the watermark (FEAT-047 sections 3, 4 and 6; ADR-0014).
 
 use super::{ChangeEvent, Context, EventKind, Inbox, Seq};
+use crate::census::extractor_for;
 use crate::consistency::{Engine, Scope};
 use crate::context;
 use crate::embed::{self, GuestContexts};
 use crate::error::EngineError;
 use crate::failpoint::fail;
 use crate::profiles::{self, ProfileSet};
-use crate::registry::ExtensionRegistry;
 use crate::scan;
 use camino::{Utf8Path, Utf8PathBuf};
-use katalogr_model::{ArtifactName, ExtractError, ExtractInput, Extractor, Fragment, RelPath};
+use katalogr_model::{ArtifactName, ExtractError, ExtractInput, Fragment, RelPath};
 use katalogr_store::blob::git_blob_id;
 use katalogr_store::{
     ErrorRow, JournalEntry, PendingKey, RANK_CONTEXT, ReadTx, Reader, StoreError, WriteTx, pagerank,
 };
 use sha2::{Digest, Sha256};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use std::fs::File;
 use std::time::Instant;
 
@@ -29,19 +29,6 @@ pub struct Processor<'a> {
     /// The profiles in force after the last `refresh_profiles`; they route files to
     /// extensions when a rescan lists paths.
     profiles: Option<ProfileSet>,
-}
-
-/// The extractor for `path`: the profile route when it names a registered extension, else the
-/// first registered extractor that handles the path.
-fn extractor_for<'r>(
-    registry: &'r ExtensionRegistry,
-    profiles: &ProfileSet,
-    path: &RelPath,
-) -> Option<&'r dyn Extractor> {
-    profiles
-        .route(path)
-        .and_then(|id| registry.by_id(id))
-        .or_else(|| registry.for_path(path))
 }
 
 /// What one pending path needs.
@@ -480,17 +467,7 @@ impl<'a> Processor<'a> {
     pub fn refresh_profiles(&mut self) -> Result<ProfileSet, EngineError> {
         let engine = self.engine;
         let snap = engine.cache().read()?;
-        let previous: BTreeMap<String, String> = snap
-            .meta(profiles::META_GOOD)?
-            .and_then(|b| serde_json::from_slice(&b).ok())
-            .unwrap_or_default();
-        let builtins: Vec<(&str, &str)> = engine
-            .builtin_profiles()
-            .iter()
-            .map(|(n, t)| (n.as_str(), t.as_str()))
-            .collect();
-        let normalisers = engine.registry().normalisers();
-        let report = ProfileSet::load_full(engine.dir().root(), &builtins, &previous, &normalisers);
+        let report = engine.load_profiles(&snap)?;
         self.profiles = Some(report.set.clone());
         let good =
             serde_json::to_vec(&report.good).map_err(|e| EngineError::Queue(e.to_string()))?;

@@ -229,6 +229,62 @@ mod coverage {
         assert!(text.contains("roots missing beta"), "{text}");
     }
 
+    /// A file a profile `select` routes to the text extension counts once, as indexed.
+    #[test]
+    fn routed_file_counted_once() {
+        let tmp = tempfile::tempdir().unwrap();
+        let t = tmp.path();
+        let app = t.join("app");
+        std::fs::create_dir_all(app.join("svc")).unwrap();
+        std::fs::create_dir_all(app.join("src")).unwrap();
+        std::fs::write(app.join("svc/run.go"), "package svc\nfunc Run() {}\n").unwrap();
+        std::fs::write(app.join("svc/other.go"), "package svc\nfunc Other() {}\n").unwrap();
+        std::fs::write(app.join("src/main.rs"), "fn main() {}\n").unwrap();
+        std::fs::write(app.join("logo.svg"), "<svg/>\n").unwrap();
+        let kx = t.join("kx");
+        ok(t, &["kindex", "init", kx.to_str().unwrap()]);
+        ok(
+            t,
+            &[
+                "--kindex",
+                kx.to_str().unwrap(),
+                "project",
+                "init",
+                "demo",
+                "--repo",
+                &format!("app={}", app.display()),
+                "--mark",
+            ],
+        );
+        let pdir = kx.join("projects/demo/profiles");
+        std::fs::create_dir_all(&pdir).unwrap();
+        std::fs::write(
+            pdir.join("go-text.yaml"),
+            "profile: go-text\nversion: 2\nselect:\n  - extension: text\n    path: 'svc/*.go'\nrules: []\n",
+        )
+        .unwrap();
+        ok(&app, &["index", "--full"]);
+
+        let (_, r) = report(&app, &[]);
+        let row = r.unclaimed.iter().find(|u| u.repo == "app").unwrap();
+        let sfx: Vec<(&str, u64)> = row
+            .suffixes
+            .iter()
+            .map(|s| (s.suffix.as_str(), s.files))
+            .collect();
+        assert_eq!(sfx, [(".katalogr", 1), (".svg", 1)]);
+        assert_eq!(r.totals.files_unclaimed, 2);
+        let text_row = r
+            .by_extension
+            .iter()
+            .find(|g| g.extension.as_deref() == Some("text"))
+            .unwrap();
+        assert_eq!(text_row.counts.files_indexed, 2);
+        let text = ok(&app, &["coverage"]);
+        let line = text.lines().find(|l| l.starts_with("unclaimed")).unwrap();
+        assert!(!line.contains(".go"), "{text}");
+    }
+
     /// The names a schema object lists under `properties`.
     fn properties(schema: &Value, def: Option<&str>) -> Vec<String> {
         let node = match def {

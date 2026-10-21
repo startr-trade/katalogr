@@ -2,6 +2,7 @@
 //! (FEAT-047 sections 3 and 4; ADR-0008, ADR-0014).
 
 use crate::error::EngineError;
+use crate::profiles::{self, LoadReport, ProfileSet};
 use crate::queue::{Context, Inbox, Processor, Seq};
 use crate::registry::ExtensionRegistry;
 use crate::stitch::Stitcher;
@@ -119,6 +120,34 @@ impl Engine {
             let d = RepoConfig::new(repo);
             (d.include, d.exclude)
         })
+    }
+
+    /// The profiles the processor would apply now: the built-ins, then the project's
+    /// `profiles/*.yaml`, a refused file replaced by its last good text (meta `profiles_good`),
+    /// with the registry's normalisers. Reads the cache and the disk; writes nothing.
+    pub fn routing_profiles(&self) -> Result<ProfileSet, EngineError> {
+        let snap = self.cache.read()?;
+        Ok(self.load_profiles(&snap)?.set)
+    }
+
+    /// Load the profiles against the last good texts stored in `snap`.
+    pub(crate) fn load_profiles(&self, snap: &ReadTx) -> Result<LoadReport, EngineError> {
+        let previous: BTreeMap<String, String> = snap
+            .meta(profiles::META_GOOD)?
+            .and_then(|b| serde_json::from_slice(&b).ok())
+            .unwrap_or_default();
+        let builtins: Vec<(&str, &str)> = self
+            .builtin_profiles()
+            .iter()
+            .map(|(n, t)| (n.as_str(), t.as_str()))
+            .collect();
+        let normalisers = self.registry().normalisers();
+        Ok(ProfileSet::load_full(
+            self.dir().root(),
+            &builtins,
+            &previous,
+            &normalisers,
+        ))
     }
 
     pub fn dir(&self) -> &ProjectDir {
