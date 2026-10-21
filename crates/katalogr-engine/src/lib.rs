@@ -9,13 +9,14 @@ pub mod export;
 pub(crate) mod failpoint;
 pub mod history;
 pub mod lexicon;
+pub mod parallel;
 pub mod profiles;
 pub mod queue;
 pub mod registry;
 pub mod scan;
 pub mod stitch;
 
-pub use consistency::{Answer, Consistency, Engine, QueryOptions, Scope};
+pub use consistency::{Answer, Consistency, Engine, IndexStats, QueryOptions, Scope};
 pub use error::EngineError;
 pub use export::canonical_graph;
 pub use queue::{ChangeEvent, Context, EventKind, NewEvent, Seq};

@@ -2,22 +2,19 @@
 //! entries, extracts the current content of queued paths and publishes results together with
 //! the watermark (FEAT-047 sections 3, 4 and 6; ADR-0014).
 
+use super::plan::{PlanEnv, Prepared, Ready, run_batch};
 use super::{ChangeEvent, Context, EventKind, Inbox, Seq};
 use crate::census::extractor_for;
-use crate::consistency::{Engine, Scope};
+use crate::consistency::{Engine, IndexStats, Scope};
 use crate::context;
-use crate::embed::{self, GuestContexts};
+use crate::embed;
 use crate::error::EngineError;
 use crate::failpoint::fail;
 use crate::profiles::{self, ProfileSet};
 use crate::scan;
 use camino::{Utf8Path, Utf8PathBuf};
-use katalogr_model::{ArtifactName, ExtractError, ExtractInput, Fragment, RelPath};
-use katalogr_store::blob::git_blob_id;
-use katalogr_store::{
-    ErrorRow, JournalEntry, PendingKey, RANK_CONTEXT, ReadTx, Reader, StoreError, WriteTx, pagerank,
-};
-use sha2::{Digest, Sha256};
+use katalogr_model::{ArtifactName, RelPath};
+use katalogr_store::{ErrorRow, JournalEntry, PendingKey, RANK_CONTEXT, Reader, WriteTx, pagerank};
 use std::collections::BTreeSet;
 use std::fs::File;
 use std::time::Instant;
@@ -29,28 +26,6 @@ pub struct Processor<'a> {
     /// The profiles in force after the last `refresh_profiles`; they route files to
     /// extensions when a rescan lists paths.
     profiles: Option<ProfileSet>,
-}
-
-/// What one pending path needs.
-enum Action {
-    /// Nothing to publish; the entry is dropped.
-    Skip,
-    Replace {
-        fragment: Box<Fragment>,
-        errors: Vec<ErrorRow>,
-        tmp: String,
-        fin: String,
-    },
-    Delete {
-        fin: Option<String>,
-    },
-    Failed(String),
-}
-
-struct Planned {
-    key: PendingKey,
-    seq: u64,
-    action: Action,
 }
 
 impl<'a> Processor<'a> {
@@ -209,7 +184,6 @@ impl<'a> Processor<'a> {
         deadline: Instant,
     ) -> Result<Seq, EngineError> {
         let engine = self.engine;
-        let dir = engine.dir();
         self.refresh_embed_signature()?;
         let profiles = self.refresh_profiles()?;
         self.refresh_contexts()?;
@@ -221,69 +195,45 @@ impl<'a> Processor<'a> {
         first.extend(rest);
         first.truncate(budget);
 
-        let mut planned = Vec::new();
-        for (key, seq) in first {
-            if Instant::now() >= deadline && !planned.is_empty() {
-                break;
-            }
-            let action = self.plan(&snap, &key, seq, &profiles)?;
-            planned.push(Planned { key, seq, action });
-        }
-        if planned.is_empty() {
+        let env = PlanEnv::load(engine, &snap, &profiles, &first)?;
+        let par = engine.parallelism();
+        let started = Instant::now();
+        let out = run_batch(&env, &first, deadline, par, engine.pool())?;
+        let prepare = started.elapsed();
+        if out.is_empty() {
             return Ok(Seq(engine.cache().read()?.watermark(Context::WORKTREE)?));
         }
 
-        // Shard bytes go to temp files first; they become visible only through the journal.
+        // Shard bytes are already in temp files; they become visible only through the journal.
         let mut journal: Vec<JournalEntry> = Vec::new();
-        let mut written: Vec<(Utf8PathBuf, Vec<u8>)> = Vec::new();
-        for p in &mut planned {
-            let refused = if let Action::Replace {
-                fragment, tmp, fin, ..
-            } = &p.action
-            {
-                match dir.encode_shard(fragment) {
-                    Ok(bytes) => {
-                        written.push((dir.root().join(tmp), bytes));
-                        journal.push((tmp.clone(), fin.clone()));
-                        None
-                    }
-                    // A guard refusal fails only this file; its earlier shard stays.
-                    Err(StoreError::Guard(g)) => Some(format!("shard refused: {g}")),
-                    Err(other) => return Err(other.into()),
-                }
-            } else {
-                None
-            };
-            if let Some(message) = refused {
-                p.action = Action::Failed(message);
+        for p in &out {
+            match &p.ready {
+                Ready::Replace { tmp, fin, .. } => journal.push((tmp.clone(), fin.clone())),
+                Ready::Delete { fin: Some(fin) } => journal.push((String::new(), fin.clone())),
+                _ => {}
             }
-            if let Action::Delete { fin: Some(fin) } = &p.action {
-                journal.push((String::new(), fin.clone()));
-            }
-        }
-        let mut hashes = Vec::new();
-        for (path, bytes) in &written {
-            write_synced(path, bytes)?;
-            hashes.push(<[u8; 32]>::from(Sha256::digest(bytes)));
         }
 
         let mut tx = engine.cache().write()?;
         let rank_was_current = tx.rank_is_current(RANK_CONTEXT)?;
         let mut touched: BTreeSet<String> = BTreeSet::new();
-        let mut hash_iter = hashes.into_iter();
-        for p in planned {
-            let Planned { key, seq, action } = p;
-            match action {
-                Action::Skip => {}
-                Action::Replace {
-                    fragment, errors, ..
+        let stitch_started = Instant::now();
+        let files = out.len() as u64;
+        for p in out {
+            let Prepared { key, seq, ready } = p;
+            match ready {
+                Ready::Skip => {}
+                Ready::Replace {
+                    prepared,
+                    errors,
+                    hash,
+                    ..
                 } => {
-                    let hash = hash_iter.next().expect("one hash per written shard");
-                    engine.stitcher().replace_fragment(&mut tx, *fragment)?;
+                    engine.stitcher().apply(&mut tx, *prepared)?;
                     tx.put_shard_hash(&key.repo, &key.path, &hash)?;
                     tx.put_index_errors(&key.repo, &key.path, &errors)?;
                 }
-                Action::Delete { .. } => {
+                Ready::Delete { .. } => {
                     engine.stitcher().remove_artifact(
                         &mut tx,
                         &ArtifactName {
@@ -294,7 +244,7 @@ impl<'a> Processor<'a> {
                     tx.remove_shard_hash(&key.repo, &key.path)?;
                     tx.put_index_errors(&key.repo, &key.path, &[])?;
                 }
-                Action::Failed(message) => {
+                Ready::Failed(message) => {
                     tx.put_index_errors(
                         &key.repo,
                         &key.path,
@@ -326,6 +276,7 @@ impl<'a> Processor<'a> {
             tx.set_watermark(ctx, wm)?;
             tx.prune_events(ctx, wm)?;
         }
+        let stitch = stitch_started.elapsed();
         tx.set_publish_journal(&journal)?;
         let wm = tx.watermark(Context::WORKTREE)?;
         // A publish that changed nothing the rank depends on keeps the stored rank, which then
@@ -333,7 +284,15 @@ impl<'a> Processor<'a> {
         if !tx.rank_inputs_changed()? && rank_was_current {
             tx.set_rank_watermark(wm)?;
         }
+        let commit_started = Instant::now();
         tx.commit()?;
+        engine.add_stats(IndexStats {
+            rounds: 1,
+            files,
+            prepare,
+            stitch,
+            commit: commit_started.elapsed(),
+        });
         fail!("after_publish_commit");
         Ok(Seq(wm))
     }
@@ -510,179 +469,6 @@ impl<'a> Processor<'a> {
         tx.commit()?;
         Ok(report.set)
     }
-
-    /// Decide what one queued path needs, from the file's current content.
-    fn plan(
-        &self,
-        snap: &ReadTx,
-        key: &PendingKey,
-        seq: u64,
-        profiles: &ProfileSet,
-    ) -> Result<Action, EngineError> {
-        let engine = self.engine;
-        let dir = engine.dir();
-        let Some(root) = engine.roots().get(&key.repo) else {
-            return Ok(Action::Skip);
-        };
-        let file = root.join(key.path.as_str());
-        let fin = relative_shard(dir.root(), &dir.shard_path(&key.repo, &key.path));
-        if let Some(sha) = key
-            .path
-            .as_str()
-            .strip_prefix(crate::history::HISTORY_PREFIX)
-        {
-            return self.plan_history(key, seq, root, sha, fin);
-        }
-        let content = match std::fs::read(&file) {
-            Ok(c) => Some(c),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
-            Err(e) => return Err(EngineError::io(&file, e)),
-        };
-        let existing = dir.read_shard(&key.repo, &key.path).unwrap_or_default();
-        let Some(content) = content else {
-            let has_shard = dir.shard_path(&key.repo, &key.path).exists();
-            return Ok(Action::Delete {
-                fin: has_shard.then_some(fin),
-            });
-        };
-        let Some(extractor) = extractor_for(engine.registry(), profiles, &key.path) else {
-            // No extractor applies any more (a `select` was removed, or the extension is gone):
-            // a shard left from before is stale.
-            let has_shard = dir.shard_path(&key.repo, &key.path).exists();
-            return Ok(if has_shard {
-                Action::Delete { fin: Some(fin) }
-            } else {
-                Action::Skip
-            });
-        };
-        let ctx = snap
-            .ext_context(&key.repo, extractor.id())?
-            .map(|(_, bytes)| bytes)
-            .unwrap_or_default();
-        // The profiles that can apply to this extension are part of what the shard depends on.
-        let mut keyed = ctx.clone();
-        if let Some(h) = profiles.hash_for(extractor.id()) {
-            keyed.extend_from_slice(&h);
-        }
-        // Revision key, in a fixed order: blob id, context, profile hash, revision salt, embed
-        // signature, guest key bytes. Every input takes part.
-        // An extension that changes what it extracts from unchanged input bumps its salt.
-        let salt = extractor.revision_salt();
-        if !salt.is_empty() {
-            keyed.extend_from_slice(b"salt:");
-            keyed.extend_from_slice(salt.as_bytes());
-        }
-        // A host's output also depends on the guest set and on each guest's projected context.
-        let guests = if extractor.embeds() {
-            let g = GuestContexts::load(engine.registry(), snap, &key.repo, extractor.id())?;
-            if let Some(sig) = embed::signature(engine.registry()) {
-                keyed.extend_from_slice(&sig);
-            }
-            keyed.extend_from_slice(&g.key_bytes());
-            g
-        } else {
-            GuestContexts::default()
-        };
-        let revision = context::revision(&git_blob_id(&content), &keyed);
-        if existing.is_some_and(|f| f.provenance.revision == revision) {
-            return Ok(Action::Skip);
-        }
-        match extractor.extract_full(&ExtractInput {
-            repo: &key.repo,
-            path: &key.path,
-            revision: &revision,
-            content: &content,
-            context: &ctx,
-        }) {
-            Ok(katalogr_model::Extraction {
-                mut fragment,
-                mut errors,
-                embedded,
-            }) => {
-                errors.extend(embed::apply(
-                    engine.registry(),
-                    &key.repo,
-                    &key.path,
-                    extractor.id(),
-                    &embedded,
-                    &guests,
-                    &mut fragment,
-                ));
-                profiles.apply(&mut fragment);
-                let errors = errors
-                    .into_iter()
-                    .map(|e| ErrorRow {
-                        span: match &e {
-                            ExtractError::Parse { span, .. } => *span,
-                            ExtractError::Unsupported(_) => None,
-                        },
-                        message: e.to_string(),
-                    })
-                    .collect();
-                let leaf = Utf8Path::new(&fin).file_name().unwrap_or("shard");
-                let parent = Utf8Path::new(&fin).parent().unwrap_or(Utf8Path::new(""));
-                Ok(Action::Replace {
-                    fragment: Box::new(fragment),
-                    errors,
-                    tmp: parent.join(format!(".tmp-{seq}-{leaf}")).to_string(),
-                    fin,
-                })
-            }
-            Err(e) => Ok(Action::Failed(e.to_string())),
-        }
-    }
-}
-
-impl Processor<'_> {
-    /// A history path (`@history/<sha>`) names a commit, not a file: its fragment comes from the
-    /// repository's history. A commit's fragment never changes, so an existing shard is current.
-    fn plan_history(
-        &self,
-        key: &PendingKey,
-        seq: u64,
-        root: &Utf8Path,
-        sha: &str,
-        fin: String,
-    ) -> Result<Action, EngineError> {
-        let dir = self.engine.dir();
-        let has_shard = dir.shard_path(&key.repo, &key.path).exists();
-        let existing = dir.read_shard(&key.repo, &key.path).unwrap_or_default();
-        if existing.is_some_and(|f| f.provenance.revision == sha) {
-            return Ok(Action::Skip);
-        }
-        let opts = crate::history::HistoryOptions::default();
-        match crate::history::history_fragment(&key.repo, root.as_std_path(), sha, &opts) {
-            Ok(Some(fragment)) => {
-                let leaf = Utf8Path::new(&fin).file_name().unwrap_or("shard");
-                let parent = Utf8Path::new(&fin).parent().unwrap_or(Utf8Path::new(""));
-                Ok(Action::Replace {
-                    fragment: Box::new(fragment),
-                    errors: Vec::new(),
-                    tmp: parent.join(format!(".tmp-{seq}-{leaf}")).to_string(),
-                    fin,
-                })
-            }
-            Ok(None) => Ok(Action::Delete {
-                fin: has_shard.then_some(fin),
-            }),
-            Err(e) => Ok(Action::Failed(e.to_string())),
-        }
-    }
-}
-
-fn relative_shard(root: &Utf8Path, full: &Utf8Path) -> String {
-    full.strip_prefix(root).unwrap_or(full).to_string()
-}
-
-fn write_synced(path: &Utf8Path, bytes: &[u8]) -> Result<(), EngineError> {
-    use std::io::Write;
-    let io = |e| EngineError::io(path, e);
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| EngineError::io(parent, e))?;
-    }
-    let mut f = File::create(path).map_err(io)?;
-    f.write_all(bytes).map_err(io)?;
-    f.sync_all().map_err(io)
 }
 
 /// The `.tmp-*` files under `dir`, recursively, sorted. A missing directory has none.

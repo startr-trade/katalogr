@@ -23,7 +23,7 @@ use std::ops::Bound;
 use std::time::{Duration, Instant};
 
 /// Stored in `meta`; a different number rebuilds the cache from the shards.
-pub const CACHE_SCHEMA: u32 = 8;
+pub const CACHE_SCHEMA: u32 = 9;
 
 /// `meta` key: the watermark the stored rank reflects.
 const RANK_WATERMARK_META: &str = "rank_watermark";
@@ -264,6 +264,22 @@ fn export_prefix(namespace: &str) -> Vec<u8> {
 fn export_key(k: &ExportKey) -> Vec<u8> {
     let mut out = export_prefix(&k.namespace);
     out.extend_from_slice(k.key.as_bytes());
+    out
+}
+
+/// Scan prefix of the `refs_by_key` rows of one export key: `lp(namespace) || lp(key)`. The
+/// length prefixes keep `fn:a` from matching `fn:ab`.
+fn ref_by_key_prefix(k: &ExportKey) -> Vec<u8> {
+    let mut out = Vec::new();
+    lp(&mut out, &k.namespace);
+    lp(&mut out, &k.key);
+    out
+}
+
+/// `refs_by_key` row key: the prefix, then the 16-byte artifact id and the big-endian index.
+fn ref_by_key_key(k: &ExportKey, r: RefId) -> Vec<u8> {
+    let mut out = ref_by_key_prefix(k);
+    out.extend_from_slice(&ref_key(r));
     out
 }
 
@@ -1030,11 +1046,17 @@ pub trait Reader {
 
     /// The references that name `key` among their candidates, sorted.
     fn refs_by_key(&self, key: &ExportKey) -> Result<Vec<RefId>, StoreError> {
-        Ok(self
-            .raw_get(TableId::RefsByKey, &export_key(key))?
-            .map(|v| de(&v))
-            .transpose()?
-            .unwrap_or_default())
+        let prefix = ref_by_key_prefix(key);
+        self.raw_scan_keys(TableId::RefsByKey, &prefix)?
+            .iter()
+            .map(|k| {
+                let tail = k.len().checked_sub(20).filter(|&n| n >= prefix.len());
+                match tail {
+                    Some(n) => decode_ref_key(&k[n..]),
+                    None => Err(StoreError::Row("malformed key".into())),
+                }
+            })
+            .collect()
     }
 
     fn unresolved(&self, r: RefId) -> Result<Option<OutRef>, StoreError> {
@@ -1392,13 +1414,14 @@ impl WriteTx<'_> {
         }
     }
 
-    /// An empty set removes the row.
-    pub fn put_refs_by_key(&mut self, key: &ExportKey, refs: &[RefId]) -> Result<(), StoreError> {
-        if refs.is_empty() {
-            self.del(TableId::RefsByKey, &export_key(key))
-        } else {
-            self.put(TableId::RefsByKey, &export_key(key), &ser(&refs)?)
-        }
+    /// Insert the row `(key, r)`; idempotent.
+    pub fn add_ref_by_key(&mut self, key: &ExportKey, r: RefId) -> Result<(), StoreError> {
+        self.put(TableId::RefsByKey, &ref_by_key_key(key, r), &[])
+    }
+
+    /// Delete the row `(key, r)`; absent is fine.
+    pub fn remove_ref_by_key(&mut self, key: &ExportKey, r: RefId) -> Result<(), StoreError> {
+        self.del(TableId::RefsByKey, &ref_by_key_key(key, r))
     }
 
     pub fn put_unresolved(&mut self, r: RefId, out: &OutRef) -> Result<(), StoreError> {
@@ -1937,4 +1960,86 @@ fn quarantine(dir: &ProjectDir, repo: &str, path: &RelPath) -> Result<(), StoreE
         std::fs::create_dir_all(parent).map_err(|e| StoreError::io(parent, e))?;
     }
     std::fs::rename(&from, &to).map_err(|e| StoreError::io(&from, e))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{Kindex, ProjectConfig, ProjectName, Restitch};
+    use camino::Utf8PathBuf;
+    use katalogr_model::{ArtifactName, Fragment};
+    use std::time::Duration;
+
+    struct Noop;
+
+    impl Restitch for Noop {
+        fn replace_fragment(&self, _: &mut WriteTx, _: Fragment) -> Result<(), StoreError> {
+            Ok(())
+        }
+        fn remove_artifact(&self, _: &mut WriteTx, _: &ArtifactName) -> Result<(), StoreError> {
+            Ok(())
+        }
+    }
+
+    fn cache(t: &tempfile::TempDir) -> Cache {
+        let root = Utf8PathBuf::from_path_buf(t.path().join("kx")).unwrap();
+        let dir = Kindex::init(&root)
+            .unwrap()
+            .create_project(&ProjectName::new("p").unwrap(), ProjectConfig::default())
+            .unwrap();
+        Cache::open_or_rebuild(&dir, &Noop, Instant::now() + Duration::from_secs(5)).unwrap()
+    }
+
+    fn key(ns: &str, k: &str) -> ExportKey {
+        ExportKey {
+            namespace: ns.into(),
+            key: k.into(),
+        }
+    }
+
+    fn rid(a: u8, index: u32) -> RefId {
+        RefId {
+            artifact: Id([a; 16]),
+            index,
+        }
+    }
+
+    #[test]
+    fn refs_by_key_rows_sorted() {
+        let t = tempfile::tempdir().unwrap();
+        let c = cache(&t);
+        let k = key("fn", "a");
+        let mut tx = c.write().unwrap();
+        let rows = [rid(2, 0), rid(1, 300), rid(1, 2), rid(3, 1)];
+        for r in rows {
+            tx.add_ref_by_key(&k, r).unwrap();
+        }
+        tx.add_ref_by_key(&k, rid(1, 2)).unwrap(); // idempotent
+        let mut want = rows.to_vec();
+        want.sort();
+        assert_eq!(tx.refs_by_key(&k).unwrap(), want);
+        tx.remove_ref_by_key(&k, rid(1, 300)).unwrap();
+        tx.remove_ref_by_key(&k, rid(9, 9)).unwrap(); // absent is fine
+        want.retain(|r| *r != rid(1, 300));
+        assert_eq!(tx.refs_by_key(&k).unwrap(), want);
+        tx.commit().unwrap();
+        assert_eq!(c.read().unwrap().refs_by_key(&k).unwrap(), want);
+    }
+
+    #[test]
+    fn refs_by_key_prefix_isolated() {
+        let t = tempfile::tempdir().unwrap();
+        let c = cache(&t);
+        let mut tx = c.write().unwrap();
+        tx.add_ref_by_key(&key("fn", "a"), rid(1, 0)).unwrap();
+        tx.add_ref_by_key(&key("fn", "ab"), rid(2, 0)).unwrap();
+        tx.add_ref_by_key(&key("f", "na"), rid(3, 0)).unwrap();
+        assert_eq!(tx.refs_by_key(&key("fn", "a")).unwrap(), vec![rid(1, 0)]);
+        assert_eq!(tx.refs_by_key(&key("fn", "ab")).unwrap(), vec![rid(2, 0)]);
+        assert_eq!(tx.refs_by_key(&key("f", "na")).unwrap(), vec![rid(3, 0)]);
+        assert!(tx.refs_by_key(&key("fn", "")).unwrap().is_empty());
+        tx.remove_ref_by_key(&key("fn", "a"), rid(1, 0)).unwrap();
+        assert!(tx.refs_by_key(&key("fn", "a")).unwrap().is_empty());
+        assert_eq!(tx.refs_by_key(&key("fn", "ab")).unwrap(), vec![rid(2, 0)]);
+    }
 }

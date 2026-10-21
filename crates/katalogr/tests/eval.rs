@@ -226,6 +226,34 @@ mod eval {
         assert_eq!(code, 0, "{out} {err}");
     }
 
+    /// FEAT-072 R-2. The same gate against the same baseline at one thread.
+    #[test]
+    fn fixture_suite_meets_baseline_one_thread() {
+        let out = Command::new(env!("CARGO_BIN_EXE_katalogr"))
+            .current_dir(root())
+            .env_remove("KATALOGR_KINDEX")
+            .env_remove("KATALOGR_PROJECT")
+            .env("KATALOGR_THREADS", "1")
+            .args([
+                "eval",
+                "run",
+                "--sets",
+                "fixtures/eval",
+                "--baseline",
+                "fixtures/eval/baseline.json",
+                "--gate",
+            ])
+            .output()
+            .expect("run katalogr");
+        assert_eq!(
+            out.status.code(),
+            Some(0),
+            "{} {}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+
     #[test]
     fn sweep_reports_each_combination() {
         let (code, out, err) = run(&[

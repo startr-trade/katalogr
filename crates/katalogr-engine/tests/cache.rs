@@ -127,6 +127,31 @@ mod cache {
     }
 
     #[test]
+    fn schema_8_cache_rebuilds() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = project(&tmp);
+        for (p, t) in [
+            ("a.tx", "sym fn A\nexport ns:k A\n"),
+            ("b.tx", "sym fn B\nref B calls ns:k\n"),
+            ("c.tx", "sym fn C\nref C calls ns:k\n"),
+        ] {
+            dir.write_shard(&extract(p, t)).unwrap();
+        }
+        let cache = Cache::open_or_rebuild(&dir, &Stitcher::new(), soon()).unwrap();
+        let before = cache.read().unwrap().dump_graph().unwrap();
+        {
+            let mut tx = cache.write().unwrap();
+            tx.set_meta("cache_schema", &8u32.to_le_bytes()).unwrap();
+            tx.commit().unwrap();
+        }
+        drop(cache);
+
+        let cache = Cache::open_or_rebuild(&dir, &Stitcher::new(), soon()).unwrap();
+        assert_eq!(cache.report().replaced, 3, "rebuilt from the shards");
+        assert_eq!(cache.read().unwrap().dump_graph().unwrap(), before);
+    }
+
+    #[test]
     fn index_errors_all_sorted() {
         use katalogr_store::ErrorRow;
         let tmp = tempfile::tempdir().unwrap();

@@ -170,6 +170,74 @@ mod graph {
 mod stitch {
     use super::*;
 
+    /// The skip is checked by `debug_assert!` in debug builds (the skipped scan still runs and
+    /// must change nothing); here the graph must equal a fresh build from the final texts.
+    #[test]
+    fn fresh_skip_same_graph() {
+        let a = env();
+        a.put("a.tx", "sym fn A\nexport ns:k A\n");
+        a.put("b.tx", "sym fn B\nref B calls ns:k\nref B calls ns:nope\n");
+        a.put("c.tx", "sym fn C\nexport ns:z C\nref C calls ns:k\n");
+        a.put(
+            "b.tx",
+            "sym fn B\nsym fn B2\nref B calls ns:z\nref B2 calls ns:k\n",
+        );
+        a.put("b.tx", "sym fn B\nref B calls ns:k\n");
+        a.put("c.tx", "sym fn C\nexport ns:nope C\n");
+
+        let b = env();
+        b.put("a.tx", "sym fn A\nexport ns:k A\n");
+        b.put("b.tx", "sym fn B\nref B calls ns:k\n");
+        b.put("c.tx", "sym fn C\nexport ns:nope C\n");
+        let (ga, gb) = (
+            a.cache.read().unwrap().dump_graph().unwrap(),
+            b.cache.read().unwrap().dump_graph().unwrap(),
+        );
+        for ((name, ra), (_, rb)) in ga.iter().zip(&gb) {
+            if [
+                "symbols",
+                "links_out",
+                "links_in",
+                "artifacts",
+                "exports",
+                "refs_by_key",
+                "refs_unresolved",
+            ]
+            .contains(name)
+            {
+                assert_eq!(ra, rb, "{name}");
+            }
+        }
+    }
+
+    #[test]
+    fn prepared_matches_replace_fragment() {
+        let (a, b) = (env(), env());
+        let steps = [
+            ("a.tx", "sym fn A\nexport ns:k A\n"),
+            ("b.tx", "sym fn B\nref B calls ns:k\nref B calls ns:nope\n"),
+            ("c.tx", "sym fn C\nexport ns:k C\nref C calls ns:k\n"),
+            (
+                "b.tx",
+                "sym fn B\nsym fn B2\nexport ns:nope B2\nref B2 calls ns:k\n",
+            ),
+            ("a.tx", "sym fn A\nsym fn A2\n"),
+        ];
+        for (path, text) in steps {
+            let d1 = a.put(path, text);
+            let mut tx = b.cache.write().unwrap();
+            let p = Stitcher::prepare(extract(path, text)).unwrap();
+            let d2 = b.stitcher.apply(&mut tx, p).unwrap();
+            tx.commit().unwrap();
+            assert_eq!(d1, d2, "{path}");
+            assert_eq!(
+                a.cache.read().unwrap().dump_graph().unwrap(),
+                b.cache.read().unwrap().dump_graph().unwrap(),
+                "{path}"
+            );
+        }
+    }
+
     #[test]
     fn ambiguous_ref_links_all_inferred() {
         let e = env();

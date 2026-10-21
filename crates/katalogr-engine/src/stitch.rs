@@ -4,8 +4,8 @@
 use crate::error::EngineError;
 use crate::lexicon;
 use katalogr_model::{
-    ArtifactName, Confidence, ContractRole, Export, ExportKey, Fragment, Id, LinkKind, Name,
-    OutRef, Provenance,
+    ArtifactName, Binding, Confidence, ContractName, ContractRole, Export, ExportKey, Fragment, Id,
+    Link, LinkKind, Name, OutRef, Provenance, RefBinding,
 };
 use katalogr_store::{
     ArtifactRow, BindingRow, ContractRow, LinkEntry, LinkKey, LinkOrigin, LinkRow, Reader, RefId,
@@ -29,6 +29,29 @@ impl StitchDelta {
         self.links_removed.extend(other.links_removed);
         self.refs_resolved.extend(other.refs_resolved);
     }
+}
+
+/// Everything `replace_fragment` derives from a fragment alone, computed without the cache
+/// (see [`Stitcher::prepare`]).
+pub struct PreparedFragment {
+    pub(crate) aid: Id,
+    pub(crate) name: ArtifactName,
+    /// Symbol ids in fragment order with their rows, up to the first id repeated within the
+    /// fragment.
+    pub(crate) symbols: Vec<(Id, SymbolRow)>,
+    /// The first id repeated within the fragment and its canonical name; `apply` raises it
+    /// after the symbols before it.
+    pub(crate) dup: Option<(Id, String)>,
+    /// Exports sorted and deduplicated, with the file key.
+    pub(crate) row: ArtifactRow,
+    pub(crate) pairs: BTreeSet<(ExportKey, Id)>,
+    pub(crate) links: Vec<Link>,
+    /// Plain bindings, filtered, sorted and deduplicated.
+    pub(crate) bindings: Vec<Binding>,
+    /// Bound references that count as a binding of their `from` symbol, in reference order.
+    pub(crate) bound_refs: Vec<(Id, ContractName, ContractRole)>,
+    /// Lexicon documents in `row.symbols` order.
+    pub(crate) docs: Vec<(Id, lexicon::Doc)>,
 }
 
 /// Stateless apart from the delta recorded by the [`Restitch`] entry points.
@@ -55,52 +78,33 @@ impl Stitcher {
         tx: &mut WriteTx,
         f: Fragment,
     ) -> Result<StitchDelta, EngineError> {
-        let mut cx = Cx::default();
-        let aid = f.artifact.name.id();
-        let old = tx.artifact(aid)?;
-        if let Some(o) = &old
-            && o.name != f.artifact.name
-        {
-            return Err(EngineError::IdCollision {
-                id: aid,
-                existing: o.name.canonical(),
-                new: f.artifact.name.canonical(),
-            });
-        }
-        let old_pairs = old.as_ref().map(export_pairs).unwrap_or_default();
-        if let Some(o) = &old {
-            lexicon::unindex_artifact(tx, o)?;
-            purge(tx, &mut cx, aid, o)?;
-        }
+        self.apply(tx, Self::prepare(f)?)
+    }
 
-        let mut symbols = BTreeSet::new();
+    /// Pure: everything `replace_fragment` derives from a fragment alone, without the cache,
+    /// so it is safe on any thread. Never fails today; it returns `Result` so a later check can
+    /// refuse a fragment before the writer sees it.
+    pub fn prepare(f: Fragment) -> Result<PreparedFragment, EngineError> {
+        let aid = f.artifact.name.id();
+        let mut ids = BTreeSet::new();
+        let mut symbols = Vec::with_capacity(f.symbols.len());
+        let mut dup = None;
         for s in &f.symbols {
             let id = s.name.id();
-            let new = s.name.canonical();
-            if !symbols.insert(id) {
-                return Err(EngineError::IdCollision {
-                    id,
-                    existing: new.clone(),
-                    new,
-                });
+            if !ids.insert(id) {
+                dup = Some((id, s.name.canonical()));
+                break;
             }
-            if let Some(row) = tx.symbol(id)? {
-                return Err(EngineError::IdCollision {
-                    id,
-                    existing: row.name.canonical(),
-                    new,
-                });
-            }
-            tx.put_symbol(
+            symbols.push((
                 id,
-                &SymbolRow {
+                SymbolRow {
                     name: s.name.clone(),
                     artifact: aid,
                     kind: s.kind.clone(),
                     span: s.span,
                     facts: s.facts.clone(),
                 },
-            )?;
+            ));
         }
 
         let mut exports: Vec<Export> = f.exports.clone();
@@ -116,14 +120,110 @@ impl Stitcher {
             extension: f.extension.clone(),
             provenance: f.provenance.clone(),
             facts: f.artifact.facts.clone(),
-            symbols: symbols.into_iter().collect(),
+            symbols: ids.into_iter().collect(),
             exports,
             refs: f.refs.clone(),
         };
-        tx.put_artifact(aid, &row)?;
-        lexicon::index_artifact(tx, &row)?;
+        let pairs = export_pairs(&row);
 
-        for l in &f.links {
+        let mut bindings: Vec<Binding> = f
+            .bindings
+            .iter()
+            .filter(|b| {
+                (b.symbol == aid || row.symbols.binary_search(&b.symbol).is_ok())
+                    && b.contract.validate().is_ok()
+            })
+            .cloned()
+            .collect();
+        bindings.sort_by_key(|b| (b.contract.canonical(), b.role, b.symbol));
+        bindings.dedup_by_key(|b| (b.contract.id(), b.role, b.symbol));
+        // A bound reference counts like a binding of the registering symbol; its links are
+        // written when it resolves. Duplicates of a plain binding or of another reference
+        // count once.
+        let mut held: BTreeSet<(Id, ContractRole, Id)> = bindings
+            .iter()
+            .map(|b| (b.contract.id(), b.role, b.symbol))
+            .collect();
+        let mut bound_refs = Vec::new();
+        for r in &f.refs {
+            let Some(b) = &r.binds else { continue };
+            if !(r.from == aid || row.symbols.binary_search(&r.from).is_ok())
+                || b.contract.validate().is_err()
+                || !held.insert((b.contract.id(), b.role, r.from))
+            {
+                continue;
+            }
+            bound_refs.push((r.from, b.contract.clone(), b.role));
+        }
+        let docs = lexicon::docs_of_artifact(&row, &symbols);
+        Ok(PreparedFragment {
+            aid,
+            name: f.artifact.name,
+            symbols,
+            dup,
+            row,
+            pairs,
+            links: f.links,
+            bindings,
+            bound_refs,
+            docs,
+        })
+    }
+
+    /// The writer half: the exact sequence of cache reads and writes `replace_fragment`
+    /// performed before the split, fed from `p`. Same errors, same order, same delta.
+    pub fn apply(&self, tx: &mut WriteTx, p: PreparedFragment) -> Result<StitchDelta, EngineError> {
+        let mut cx = Cx::default();
+        let PreparedFragment {
+            aid,
+            name,
+            symbols,
+            dup,
+            row,
+            pairs: new_pairs,
+            links,
+            bindings,
+            bound_refs,
+            docs,
+        } = p;
+        let old = tx.artifact(aid)?;
+        if let Some(o) = &old
+            && o.name != name
+        {
+            return Err(EngineError::IdCollision {
+                id: aid,
+                existing: o.name.canonical(),
+                new: name.canonical(),
+            });
+        }
+        let old_pairs = old.as_ref().map(export_pairs).unwrap_or_default();
+        if let Some(o) = &old {
+            lexicon::unindex_artifact(tx, o)?;
+            purge(tx, &mut cx, aid, o)?;
+        }
+
+        for (id, srow) in &symbols {
+            if let Some(existing) = tx.symbol(*id)? {
+                return Err(EngineError::IdCollision {
+                    id: *id,
+                    existing: existing.name.canonical(),
+                    new: srow.name.canonical(),
+                });
+            }
+            tx.put_symbol(*id, srow)?;
+        }
+        if let Some((id, canonical)) = dup {
+            return Err(EngineError::IdCollision {
+                id,
+                existing: canonical.clone(),
+                new: canonical,
+            });
+        }
+
+        tx.put_artifact(aid, &row)?;
+        lexicon::index_docs(tx, &docs)?;
+
+        for l in &links {
             let key = LinkKey {
                 from: l.from,
                 kind: l.kind.clone(),
@@ -143,11 +243,19 @@ impl Stitcher {
                 },
             )?;
         }
-        add_bindings(tx, &mut cx, &f, aid, &row)?;
+        add_bindings(tx, &mut cx, aid, &row, &bindings, &bound_refs)?;
         add_exports(tx, &row.exports)?;
         register_refs(tx, aid, &row)?;
+        cx.fresh = (0..row.refs.len() as u32)
+            .map(|index| RefId {
+                artifact: aid,
+                index,
+            })
+            .collect();
+        cx.fresh_from = std::iter::once(aid)
+            .chain(row.symbols.iter().copied())
+            .collect();
 
-        let new_pairs = export_pairs(&row);
         let mut changed: BTreeSet<ExportKey> = BTreeSet::new();
         for (k, _) in old_pairs.symmetric_difference(&new_pairs) {
             changed.insert(k.clone());
@@ -222,6 +330,17 @@ struct Cx {
     removed: BTreeSet<LinkKey>,
     resolved: BTreeSet<RefId>,
     rows: BTreeMap<Id, ArtifactRow>,
+    /// References of the artifact `apply` just purged and re-registered that `resolve` has not
+    /// yet seen (FEAT-072 R-10): the purge already removed the link entries they would drop.
+    fresh: BTreeSet<RefId>,
+    /// The artifact and its symbols: the only `from` nodes the purge cleared of `Ref` entries.
+    fresh_from: BTreeSet<Id>,
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Resolutions that skipped their origin scan (R-10).
+    static FRESH_SKIPS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 impl Cx {
@@ -293,9 +412,13 @@ fn purge(tx: &mut WriteTx, cx: &mut Cx, aid: Id, old: &ArtifactRow) -> Result<()
     }
     for index in 0..old.refs.len() {
         for key in distinct_candidates(old, index) {
-            let mut set = tx.refs_by_key(key)?;
-            set.retain(|r| !(r.artifact == aid && r.index == index as u32));
-            tx.put_refs_by_key(key, &set)?;
+            tx.remove_ref_by_key(
+                key,
+                RefId {
+                    artifact: aid,
+                    index: index as u32,
+                },
+            )?;
         }
     }
     for e in &old.exports {
@@ -334,53 +457,31 @@ fn withdraw_bindings(tx: &mut WriteTx, aid: Id) -> Result<(), EngineError> {
 /// Record the fragment's bindings: count them on their contract nodes (creating a node on first
 /// use) and write `symbol --<role>--> contract` links. Duplicates count once. A binding whose
 /// symbol is neither in the fragment nor the artifact, or whose contract kind is malformed,
-/// is ignored.
+/// was dropped by `prepare`.
 fn add_bindings(
     tx: &mut WriteTx,
     cx: &mut Cx,
-    f: &Fragment,
     aid: Id,
     row: &ArtifactRow,
+    bindings: &[Binding],
+    bound_refs: &[(Id, ContractName, ContractRole)],
 ) -> Result<(), EngineError> {
-    let mut bindings: Vec<&katalogr_model::Binding> = f
-        .bindings
-        .iter()
-        .filter(|b| {
-            (b.symbol == aid || row.symbols.binary_search(&b.symbol).is_ok())
-                && b.contract.validate().is_ok()
-        })
-        .collect();
-    bindings.sort_by_key(|b| (b.contract.canonical(), b.role, b.symbol));
-    bindings.dedup_by_key(|b| (b.contract.id(), b.role, b.symbol));
     let provenance: &Provenance = &row.provenance;
     let mut rows = Vec::with_capacity(bindings.len());
-    // A bound reference counts like a binding of the registering symbol; its links are written
-    // when it resolves. Duplicates of a plain binding or of another reference count once.
-    let mut held: BTreeSet<(Id, ContractRole, Id)> = bindings
-        .iter()
-        .map(|b| (b.contract.id(), b.role, b.symbol))
-        .collect();
-    for r in &f.refs {
-        let Some(b) = &r.binds else { continue };
-        if !(r.from == aid || row.symbols.binary_search(&r.from).is_ok())
-            || b.contract.validate().is_err()
-            || !held.insert((b.contract.id(), b.role, r.from))
-        {
-            continue;
-        }
-        let cid = b.contract.id();
+    for (from, contract, role) in bound_refs {
+        let cid = contract.id();
         let mut c = tx.contract(cid)?.unwrap_or_else(|| ContractRow {
-            name: b.contract.clone(),
+            name: contract.clone(),
             providers: 0,
             consumers: 0,
             declarers: 0,
         });
-        c.adjust(b.role, 1);
+        c.adjust(*role, 1);
         tx.put_contract(cid, &c)?;
         rows.push(BindingRow {
-            symbol: r.from,
+            symbol: *from,
             contract: cid,
-            role: b.role,
+            role: *role,
         });
     }
     for b in bindings {
@@ -438,11 +539,7 @@ fn register_refs(tx: &mut WriteTx, aid: Id, row: &ArtifactRow) -> Result<(), Eng
             index: index as u32,
         };
         for key in distinct_candidates(row, index) {
-            let mut set = tx.refs_by_key(key)?;
-            if let Err(pos) = set.binary_search(&me) {
-                set.insert(pos, me);
-                tx.put_refs_by_key(key, &set)?;
-            }
+            tx.add_ref_by_key(key, me)?;
         }
     }
     Ok(())
@@ -477,13 +574,15 @@ fn drop_origin(
     from: Id,
     kind: &LinkKind,
     origin: LinkOrigin,
-) -> Result<(), EngineError> {
+) -> Result<usize, EngineError> {
+    let mut changed = 0;
     for (key, mut row) in tx.links_out(from, Some(kind))? {
         let before = row.entries.len();
         row.entries.retain(|e| e.origin != origin);
         if row.entries.len() == before {
             continue;
         }
+        changed += 1;
         if row.entries.is_empty() {
             tx.remove_link(&key)?;
             cx.removed.insert(key);
@@ -491,7 +590,7 @@ fn drop_origin(
             tx.put_link(&key, &row)?;
         }
     }
-    Ok(())
+    Ok(changed)
 }
 
 /// Resolution of one reference (FEAT-001 section 6): the first candidate with exports wins; one
@@ -509,11 +608,24 @@ fn resolve(tx: &mut WriteTx, cx: &mut Cx, rid: RefId) -> Result<(), EngineError>
         return Ok(());
     };
     let provenance = row.provenance.clone();
+    // R-10: a reference resolved for the first time right after its artifact was purged and
+    // re-registered has no entries left to drop.
+    let fresh = cx.fresh.remove(&rid) && cx.fresh_from.contains(&r.from);
 
     if let Some(b) = &r.binds {
-        return resolve_bound(tx, cx, rid, &r, b.contract.id(), b.role, provenance);
+        return resolve_bound(tx, cx, rid, &r, b, provenance, fresh);
     }
-    drop_origin(tx, cx, r.from, &r.kind, LinkOrigin::Ref(rid.index))?;
+    if fresh {
+        #[cfg(test)]
+        FRESH_SKIPS.with(|c| c.set(c.get() + 1));
+        #[cfg(debug_assertions)]
+        {
+            let n = drop_origin(tx, cx, r.from, &r.kind, LinkOrigin::Ref(rid.index))?;
+            debug_assert_eq!(n, 0, "fresh reference {rid:?} had origin entries to drop");
+        }
+    } else {
+        drop_origin(tx, cx, r.from, &r.kind, LinkOrigin::Ref(rid.index))?;
+    }
     tx.remove_unresolved(rid)?;
 
     let mut targets = Vec::new();
@@ -562,7 +674,8 @@ fn drop_bound(
     contract: Id,
     role: ContractRole,
     origin: LinkOrigin,
-) -> Result<(), EngineError> {
+) -> Result<usize, EngineError> {
+    let mut changed = 0;
     let kind = LinkKind(role.as_str().to_string());
     for key in tx.links_in(contract)? {
         if key.kind != kind {
@@ -576,6 +689,7 @@ fn drop_bound(
         if row.entries.len() == before {
             continue;
         }
+        changed += 1;
         if row.entries.is_empty() {
             tx.remove_link(&key)?;
             cx.removed.insert(key);
@@ -583,7 +697,7 @@ fn drop_bound(
             tx.put_link(&key, &row)?;
         }
     }
-    Ok(())
+    Ok(changed)
 }
 
 /// Resolution of a reference that holds a contract binding (ADR-0022): every resolved target
@@ -594,15 +708,26 @@ fn resolve_bound(
     cx: &mut Cx,
     rid: RefId,
     r: &OutRef,
-    contract: Id,
-    role: ContractRole,
+    b: &RefBinding,
     provenance: Provenance,
+    fresh: bool,
 ) -> Result<(), EngineError> {
+    let (contract, role) = (b.contract.id(), b.role);
     let origin = LinkOrigin::Bound {
         artifact: rid.artifact,
         index: rid.index,
     };
-    drop_bound(tx, cx, contract, role, origin)?;
+    if fresh {
+        #[cfg(test)]
+        FRESH_SKIPS.with(|c| c.set(c.get() + 1));
+        #[cfg(debug_assertions)]
+        {
+            let n = drop_bound(tx, cx, contract, role, origin)?;
+            debug_assert_eq!(n, 0, "fresh bound reference {rid:?} had links to drop");
+        }
+    } else {
+        drop_bound(tx, cx, contract, role, origin)?;
+    }
     tx.remove_unresolved(rid)?;
     let mut targets = Vec::new();
     for cand in &r.candidates {
@@ -643,4 +768,164 @@ fn resolve_bound(
     }
     cx.resolved.insert(rid);
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use camino::Utf8PathBuf;
+    use katalogr_model::{ArtifactNode, RelPath, Segment, Span, SymbolName, SymbolNode};
+    use katalogr_store::{Cache, Kindex, ProjectConfig, ProjectName, RepoConfig};
+    use std::time::{Duration, Instant};
+
+    fn cache(t: &tempfile::TempDir) -> (Cache, Stitcher) {
+        let root = Utf8PathBuf::from_path_buf(t.path().join("kx")).unwrap();
+        let dir = Kindex::init(&root)
+            .unwrap()
+            .create_project(
+                &ProjectName::new("p").unwrap(),
+                ProjectConfig {
+                    repos: vec![RepoConfig::new("r")],
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        let stitcher = Stitcher::new();
+        let c = Cache::open_or_rebuild(&dir, &stitcher, Instant::now() + Duration::from_secs(5))
+            .unwrap();
+        (c, stitcher)
+    }
+
+    fn key(ns: &str, k: &str) -> ExportKey {
+        ExportKey {
+            namespace: ns.into(),
+            key: k.into(),
+        }
+    }
+
+    /// A fragment of `path` with one function symbol per name; `exports` are `(key, symbol
+    /// index)`, `refs` are `(from symbol index, candidate key)`.
+    fn frag(
+        path: &str,
+        names: &[&str],
+        exports: &[(&str, usize)],
+        refs: &[(usize, &str)],
+    ) -> Fragment {
+        let artifact = ArtifactName::new("r", path).unwrap();
+        let symbols: Vec<SymbolNode> = names
+            .iter()
+            .map(|n| SymbolNode {
+                name: SymbolName {
+                    artifact: artifact.clone(),
+                    segments: vec![Segment {
+                        kind: "fn".into(),
+                        name: (*n).into(),
+                    }],
+                    ordinal: 1,
+                },
+                kind: "fn".into(),
+                span: Span {
+                    start_line: 1,
+                    start_col: 1,
+                    end_line: 1,
+                    end_col: 1,
+                },
+                facts: BTreeMap::new(),
+            })
+            .collect();
+        let id = |i: usize| symbols[i].name.id();
+        Fragment {
+            provenance: Provenance {
+                repo: "r".into(),
+                path: RelPath::new(path).unwrap(),
+                revision: "ce013625030ba8dba906f756967f9e9ca394464a".into(),
+            },
+            extension: "test".into(),
+            artifact: ArtifactNode {
+                name: artifact,
+                facts: BTreeMap::new(),
+            },
+            links: Vec::new(),
+            refs: refs
+                .iter()
+                .map(|(from, cand)| OutRef {
+                    from: id(*from),
+                    kind: LinkKind("calls".into()),
+                    span: None,
+                    candidates: vec![key("ns", cand)],
+                    confidence: Confidence::Extracted,
+                    origin: None,
+                    binds: None,
+                })
+                .collect(),
+            exports: exports
+                .iter()
+                .map(|(k, i)| Export {
+                    key: key("ns", k),
+                    target: id(*i),
+                })
+                .collect(),
+            bindings: Vec::new(),
+            symbols,
+        }
+    }
+
+    fn sequence() -> Vec<Fragment> {
+        vec![
+            frag("a.tx", &["A", "A2"], &[("k", 0), ("z", 1)], &[]),
+            frag("b.tx", &["B"], &[], &[(0, "k"), (0, "missing")]),
+            frag("c.tx", &["C"], &[("k", 0)], &[(0, "z")]),
+            // Re-replace with changed refs and exports.
+            frag(
+                "b.tx",
+                &["B", "B2"],
+                &[("missing", 1)],
+                &[(0, "k"), (1, "z")],
+            ),
+            frag("a.tx", &["A"], &[("k", 0)], &[]),
+        ]
+    }
+
+    #[test]
+    fn fresh_resolution_skips_drop_origin() {
+        let t = tempfile::tempdir().unwrap();
+        let (c, s) = cache(&t);
+        let put = |f: Fragment| {
+            FRESH_SKIPS.with(|n| n.set(0));
+            let mut tx = c.write().unwrap();
+            s.replace_fragment(&mut tx, f).unwrap();
+            tx.commit().unwrap();
+            FRESH_SKIPS.with(|n| n.get())
+        };
+        put(frag("a.tx", &["A"], &[("k", 0)], &[]));
+        // Three references of the artifact being written, resolved right after the purge and
+        // re-registration: none scans for old entries.
+        let b = frag("b.tx", &["B"], &[], &[(0, "k"), (0, "k"), (0, "none")]);
+        assert_eq!(put(b.clone()), 3);
+        assert_eq!(put(b), 3, "a re-replace purges first, so it skips as well");
+        // A reference elsewhere re-resolved because an export key changed is not fresh.
+        let skipped = put(frag("a.tx", &["A", "A2"], &[("k", 1), ("none", 0)], &[]));
+        assert_eq!(skipped, 0);
+    }
+
+    #[test]
+    fn prepared_apply_equals_replace() {
+        let (t1, t2) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let (c1, s1) = cache(&t1);
+        let (c2, s2) = cache(&t2);
+        for f in sequence() {
+            let mut tx = c1.write().unwrap();
+            let d1 = s1.replace_fragment(&mut tx, f.clone()).unwrap();
+            tx.commit().unwrap();
+            let mut tx = c2.write().unwrap();
+            let p = Stitcher::prepare(f).unwrap();
+            let d2 = s2.apply(&mut tx, p).unwrap();
+            tx.commit().unwrap();
+            assert_eq!(d1, d2);
+            assert_eq!(
+                c1.read().unwrap().dump_graph().unwrap(),
+                c2.read().unwrap().dump_graph().unwrap()
+            );
+        }
+    }
 }
