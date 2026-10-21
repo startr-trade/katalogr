@@ -21,13 +21,56 @@ fn home_dirs() -> Vec<String> {
         .collect()
 }
 
-fn needle(s: &str) -> Option<String> {
-    let t = s.trim_end_matches(['/', '\\']);
-    if t.is_empty() {
-        None
+/// A guard needle built from `raw`, or None when it cannot be machine-specific: it must be an
+/// absolute path (leading '/', a drive prefix `X:\` or `X:/`, or a leading `\\`) with at least
+/// one character after the root once trailing separators are trimmed.
+fn needle(raw: &str) -> Option<String> {
+    let t = raw.trim_end_matches(['/', '\\']);
+    let b = t.as_bytes();
+    let root_len = if raw.starts_with('/') {
+        1
+    } else if raw.starts_with("\\\\") {
+        2
+    } else if raw.len() >= 3
+        && raw.as_bytes()[0].is_ascii_alphabetic()
+        && raw.as_bytes()[1] == b':'
+        && matches!(raw.as_bytes()[2], b'\\' | b'/')
+    {
+        3
     } else {
+        return None;
+    };
+    if b.len() > root_len {
         Some(t.to_string())
+    } else {
+        None
     }
+}
+
+fn is_word(c: char) -> bool {
+    c.is_alphanumeric() || matches!(c, '_' | '-' | '.')
+}
+
+/// True when `needle` occurs in `hay` as a whole path: neither neighbour of the match is a word
+/// character (alphanumeric, '_', '-' or '.').
+fn contains_path(hay: &str, needle: &str) -> bool {
+    hay.match_indices(needle).any(|(i, m)| {
+        let before = hay[..i].chars().next_back();
+        let after = hay[i + m.len()..].chars().next();
+        !before.is_some_and(is_word) && !after.is_some_and(is_word)
+    })
+}
+
+/// The needles for these raw values after the `needle` filter, in order, without duplicates.
+#[doc(hidden)]
+pub fn needles_from<'a>(raw: impl IntoIterator<Item = &'a str>) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for n in raw.into_iter().filter_map(needle) {
+        if !out.contains(&n) {
+            out.push(n);
+        }
+    }
+    out
 }
 
 fn check(ctx: &Ctx, field: &str, s: &str) -> Result<(), GuardError> {
@@ -56,7 +99,7 @@ fn check(ctx: &Ctx, field: &str, s: &str) -> Result<(), GuardError> {
         && matches!(b[2], b'\\' | b'/')
     {
         Some("starts with a drive prefix")
-    } else if ctx.needles.iter().any(|n| s.contains(n.as_str())) {
+    } else if ctx.needles.iter().any(|n| contains_path(s, n)) {
         Some("contains the home directory, the temp directory or the kindex root")
     } else {
         None
@@ -72,25 +115,34 @@ fn check(ctx: &Ctx, field: &str, s: &str) -> Result<(), GuardError> {
 
 fn facts(
     ctx: &Ctx,
-    path: &str,
+    path: &mut String,
     m: &std::collections::BTreeMap<String, Fact>,
 ) -> Result<(), GuardError> {
+    let base = path.len();
     for (k, v) in m {
-        let p = format!("{path}.{k}");
-        check(ctx, &p, k)?;
-        fact(ctx, &p, v)?;
+        path.push('.');
+        path.push_str(k);
+        let r = check(ctx, path, k).and_then(|()| fact(ctx, path, v));
+        path.truncate(base);
+        r?;
     }
     Ok(())
 }
 
-fn fact(ctx: &Ctx, path: &str, f: &Fact) -> Result<(), GuardError> {
+fn fact(ctx: &Ctx, path: &mut String, f: &Fact) -> Result<(), GuardError> {
     match f {
         Fact::Str(s) => check(ctx, path, s),
         Fact::Int(_) | Fact::Bool(_) => Ok(()),
-        Fact::List(l) => l
-            .iter()
-            .enumerate()
-            .try_for_each(|(i, v)| fact(ctx, &format!("{path}[{i}]"), v)),
+        Fact::List(l) => {
+            let base = path.len();
+            for (i, v) in l.iter().enumerate() {
+                path.push_str(&format!("[{i}]"));
+                let r = fact(ctx, path, v);
+                path.truncate(base);
+                r?;
+            }
+            Ok(())
+        }
         Fact::Map(m) => facts(ctx, path, m),
     }
 }
@@ -105,20 +157,32 @@ fn prov(ctx: &Ctx, path: &str, p: &katalogr_model::Provenance) -> Result<(), Gua
 /// contains the user's home directory (HOME / USERPROFILE) or `kindex_root`. The error names the
 /// field path (for example `symbols[3].facts.source`) and never echoes the value.
 pub fn scan_for_absolute(f: &Fragment, kindex_root: Option<&Utf8Path>) -> Result<(), GuardError> {
-    let mut needles: Vec<String> = home_dirs().iter().filter_map(|h| needle(h)).collect();
-    needles.extend(kindex_root.and_then(|r| needle(r.as_str())));
-    needles.extend(std::env::temp_dir().to_str().and_then(needle));
-    let ctx = Ctx { needles };
+    let homes = home_dirs();
+    let temp = std::env::temp_dir();
+    let raw = homes
+        .iter()
+        .map(String::as_str)
+        .chain(kindex_root.map(|r| r.as_str()))
+        .chain(temp.to_str());
+    scan_for_absolute_with(f, &needles_from(raw))
+}
+
+/// As `scan_for_absolute` with explicit needles (already filtered by `needles_from`).
+#[doc(hidden)]
+pub fn scan_for_absolute_with(f: &Fragment, needles: &[String]) -> Result<(), GuardError> {
+    let ctx = Ctx {
+        needles: needles.to_vec(),
+    };
     let c = &ctx;
     prov(c, "provenance", &f.provenance)?;
     check(c, "extension", &f.extension)?;
     check(c, "artifact.name", &f.artifact.name.canonical())?;
-    facts(c, "artifact.facts", &f.artifact.facts)?;
+    facts(c, &mut "artifact.facts".to_string(), &f.artifact.facts)?;
     for (i, s) in f.symbols.iter().enumerate() {
         let p = format!("symbols[{i}]");
         check(c, &format!("{p}.name"), &s.name.canonical())?;
         check(c, &format!("{p}.kind"), &s.kind)?;
-        facts(c, &format!("{p}.facts"), &s.facts)?;
+        facts(c, &mut format!("{p}.facts"), &s.facts)?;
     }
     for (i, l) in f.links.iter().enumerate() {
         let p = format!("links[{i}]");

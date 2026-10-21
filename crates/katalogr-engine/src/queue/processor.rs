@@ -15,7 +15,7 @@ use camino::{Utf8Path, Utf8PathBuf};
 use katalogr_model::{ArtifactName, ExtractError, ExtractInput, Extractor, Fragment, RelPath};
 use katalogr_store::blob::git_blob_id;
 use katalogr_store::{
-    ErrorRow, JournalEntry, PendingKey, RANK_CONTEXT, ReadTx, Reader, WriteTx, pagerank,
+    ErrorRow, JournalEntry, PendingKey, RANK_CONTEXT, ReadTx, Reader, StoreError, WriteTx, pagerank,
 };
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
@@ -249,14 +249,26 @@ impl<'a> Processor<'a> {
         // Shard bytes go to temp files first; they become visible only through the journal.
         let mut journal: Vec<JournalEntry> = Vec::new();
         let mut written: Vec<(Utf8PathBuf, Vec<u8>)> = Vec::new();
-        for p in &planned {
-            if let Action::Replace {
+        for p in &mut planned {
+            let refused = if let Action::Replace {
                 fragment, tmp, fin, ..
             } = &p.action
             {
-                let bytes = dir.encode_shard(fragment)?;
-                written.push((dir.root().join(tmp), bytes));
-                journal.push((tmp.clone(), fin.clone()));
+                match dir.encode_shard(fragment) {
+                    Ok(bytes) => {
+                        written.push((dir.root().join(tmp), bytes));
+                        journal.push((tmp.clone(), fin.clone()));
+                        None
+                    }
+                    // A guard refusal fails only this file; its earlier shard stays.
+                    Err(StoreError::Guard(g)) => Some(format!("shard refused: {g}")),
+                    Err(other) => return Err(other.into()),
+                }
+            } else {
+                None
+            };
+            if let Some(message) = refused {
+                p.action = Action::Failed(message);
             }
             if let Action::Delete { fin: Some(fin) } = &p.action {
                 journal.push((String::new(), fin.clone()));
