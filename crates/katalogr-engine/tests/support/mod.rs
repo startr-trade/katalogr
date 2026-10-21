@@ -2,6 +2,7 @@
 #![allow(dead_code)]
 
 use camino::{Utf8Path, Utf8PathBuf};
+use katalogr_engine::parallel::Parallelism;
 use katalogr_engine::registry::ExtensionRegistry;
 use katalogr_engine::{Consistency, Engine, EventKind, NewEvent, QueryOptions, Scope};
 use katalogr_model::{
@@ -666,14 +667,126 @@ pub fn open_engine(kx: &Utf8Path, work: &Utf8Path) -> Engine {
     open_engine_with(kx, work, reg)
 }
 
-/// Like [`open_engine`] with a registry of the caller's choosing.
+/// Like [`open_engine`] with a registry of the caller's choosing. One thread: the existing
+/// suites exercise the sequential path; the parallel path has its own variants.
 pub fn open_engine_with(kx: &Utf8Path, work: &Utf8Path, reg: ExtensionRegistry) -> Engine {
+    open_engine_par(kx, work, reg, Parallelism::sequential())
+}
+
+/// [`open_engine`] with `n` threads.
+pub fn open_engine_threads(kx: &Utf8Path, work: &Utf8Path, n: usize) -> Engine {
+    let mut reg = ExtensionRegistry::new();
+    reg.register(Box::new(TestExtractor));
+    reg.register(Box::new(TestAltExtractor));
+    reg.register(Box::new(TestGuest("1")));
+    let p = Parallelism {
+        threads: std::num::NonZeroUsize::new(n).unwrap(),
+        ..Parallelism::sequential()
+    };
+    open_engine_par(kx, work, reg, p)
+}
+
+/// Like [`open_engine_with`] with the parallelism of the caller's choosing.
+pub fn open_engine_par(
+    kx: &Utf8Path,
+    work: &Utf8Path,
+    reg: ExtensionRegistry,
+    par: Parallelism,
+) -> Engine {
     let dir = Kindex::open(kx)
         .unwrap()
         .project(&ProjectName::new("p").unwrap())
         .unwrap();
     let roots = BTreeMap::from([("r".to_string(), work.to_path_buf())]);
-    Engine::open(dir, reg, roots, Instant::now() + Duration::from_secs(10)).unwrap()
+    let mut e = Engine::open(dir, reg, roots, Instant::now() + Duration::from_secs(10)).unwrap();
+    e.set_parallelism(par);
+    e
+}
+
+/// The cache as raw rows: every graph table, then the lexicon and shard-hash tables.
+pub type CacheDump = Vec<(String, Vec<(Vec<u8>, Vec<u8>)>)>;
+
+pub fn cache_dump(e: &Engine) -> CacheDump {
+    use katalogr_store::Reader;
+    use katalogr_store::cache::TableId;
+    let r = e.cache().read().unwrap();
+    let mut out: CacheDump = r
+        .dump_graph()
+        .unwrap()
+        .into_iter()
+        .map(|(n, rows)| (n.to_string(), rows))
+        .collect();
+    for (name, t) in [
+        ("postings", TableId::Postings),
+        ("doc_len", TableId::DocLen),
+        ("lexicon_stats", TableId::LexiconStats),
+        ("shard_hashes", TableId::ShardHashes),
+    ] {
+        out.push((name.to_string(), r.raw_scan(t, &[]).unwrap()));
+    }
+    out
+}
+
+/// Every file under the project's `shards/` as `(relative path, bytes)`.
+pub fn shard_bytes(kx: &Utf8Path) -> BTreeMap<String, Vec<u8>> {
+    fn walk(root: &std::path::Path, dir: &std::path::Path, out: &mut BTreeMap<String, Vec<u8>>) {
+        let Ok(rd) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for e in rd {
+            let p = e.unwrap().path();
+            if p.is_dir() {
+                walk(root, &p, out);
+            } else {
+                let rel = p.strip_prefix(root).unwrap().to_string_lossy().to_string();
+                out.insert(rel, std::fs::read(&p).unwrap());
+            }
+        }
+    }
+    let root = kx.join("projects/p/shards");
+    let mut out = BTreeMap::new();
+    walk(root.as_std_path(), root.as_std_path(), &mut out);
+    out
+}
+
+/// Handles `*<suffix>`: sleeps `delay`, records the name of the extracting thread, then
+/// extracts like [`TestExtractor`].
+pub struct TestProbe {
+    pub id: &'static str,
+    pub suffix: &'static str,
+    pub delay: Duration,
+    pub seen: Arc<std::sync::Mutex<std::collections::BTreeSet<String>>>,
+}
+
+impl Extractor for TestProbe {
+    fn id(&self) -> &'static str {
+        self.id
+    }
+
+    fn handles(&self, path: &RelPath) -> bool {
+        path.as_str().ends_with(self.suffix)
+    }
+
+    fn extract(&self, input: &ExtractInput) -> Result<Fragment, ExtractError> {
+        let name = std::thread::current().name().unwrap_or("").to_string();
+        self.seen.lock().unwrap().insert(name);
+        if !self.delay.is_zero() {
+            std::thread::sleep(self.delay);
+        }
+        let mut f = TestExtractor.extract(input)?;
+        f.extension = self.id.to_string();
+        Ok(f)
+    }
+}
+
+/// The sleeping test extractor `slow`: handles `*.slow`, sleeps 20 ms per file.
+pub fn test_slow() -> TestProbe {
+    TestProbe {
+        id: "slow",
+        suffix: ".slow",
+        delay: Duration::from_millis(20),
+        seen: Arc::default(),
+    }
 }
 
 /// Drain the queue (wait-all) and return the canonical graph.

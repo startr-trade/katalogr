@@ -239,6 +239,113 @@ mod cli {
         );
     }
 
+    /// Run `katalogr` with an extra environment variable.
+    fn katalogr_env(dir: &Path, args: &[&str], key: &str, val: &str) -> std::process::Output {
+        Command::new(env!("CARGO_BIN_EXE_katalogr"))
+            .current_dir(dir)
+            .env_remove("KATALOGR_KINDEX")
+            .env_remove("KATALOGR_PROJECT")
+            .env(key, val)
+            .args(args)
+            .output()
+            .expect("run katalogr")
+    }
+
+    fn copy_tree(from: &Path, to: &Path) {
+        std::fs::create_dir_all(to).unwrap();
+        for e in std::fs::read_dir(from).unwrap() {
+            let e = e.unwrap();
+            let dest = to.join(e.file_name());
+            if e.file_type().unwrap().is_dir() {
+                copy_tree(&e.path(), &dest);
+            } else {
+                std::fs::copy(e.path(), dest).unwrap();
+            }
+        }
+    }
+
+    /// Every file under `dir` as `(relative path, bytes)`.
+    fn tree_bytes(dir: &Path) -> std::collections::BTreeMap<String, Vec<u8>> {
+        fn walk(root: &Path, dir: &Path, out: &mut std::collections::BTreeMap<String, Vec<u8>>) {
+            for e in std::fs::read_dir(dir).unwrap() {
+                let p = e.unwrap().path();
+                if p.is_dir() {
+                    walk(root, &p, out);
+                } else {
+                    let rel = p.strip_prefix(root).unwrap().to_string_lossy().to_string();
+                    out.insert(rel, std::fs::read(&p).unwrap());
+                }
+            }
+        }
+        let mut out = std::collections::BTreeMap::new();
+        walk(dir, dir, &mut out);
+        out
+    }
+
+    /// A project holding a polyglot copy of the fixtures, fully indexed with `threads`
+    /// threads; returns the shard tree.
+    fn shards_at(threads: &str) -> std::collections::BTreeMap<String, Vec<u8>> {
+        let tmp = tempfile::tempdir().unwrap();
+        let (kx, repo) = setup(tmp.path());
+        let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures");
+        for (i, sub) in ["rust/calls", "rust/items", "ts/calls", "md", "sql"]
+            .iter()
+            .enumerate()
+        {
+            let from = fixtures.join(sub);
+            if from.is_dir() {
+                copy_tree(&from, &repo.join(format!("f{i}")));
+            }
+        }
+        for i in 0..24 {
+            std::fs::write(
+                repo.join(format!("t{i}.tx")),
+                format!(
+                    "sym fn f{i}\nexport ns:k{i} f{i}\nref f{i} calls ns:k{}\n",
+                    (i + 1) % 24
+                ),
+            )
+            .unwrap();
+        }
+        let out = katalogr_env(&repo, &["index", "--full"], "KATALOGR_THREADS", threads);
+        assert!(
+            out.status.success(),
+            "index failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let shards = tree_bytes(&kx.join("projects/demo/shards"));
+        assert!(shards.len() > 24, "shards written: {}", shards.len());
+        shards
+    }
+
+    /// R-2. The shards of a full index are byte-identical at 1 and 8 threads.
+    #[test]
+    fn index_threads_identical() {
+        assert_eq!(shards_at("1"), shards_at("8"));
+    }
+
+    /// R-3. One thread indexes sequentially and succeeds.
+    #[test]
+    fn index_threads_one_sequential() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (_kx, repo) = query_project(tmp.path());
+        let out = katalogr_env(&repo, &["index", "--full"], "KATALOGR_THREADS", "1");
+        assert_eq!(out.status.code(), Some(0));
+        let out = katalogr_env(&repo, &["find", "caller"], "KATALOGR_THREADS", "1");
+        assert_eq!(out.status.code(), Some(0));
+    }
+
+    /// R-3. A bad `KATALOGR_THREADS` is a usage error naming the variable.
+    #[test]
+    fn index_threads_bad_env_exit_2() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (_kx, repo) = setup(tmp.path());
+        let out = katalogr_env(&repo, &["index"], "KATALOGR_THREADS", "abc");
+        assert_eq!(out.status.code(), Some(2));
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert!(err.contains("KATALOGR_THREADS"), "{err}");
+    }
+
     #[test]
     fn notify_then_index() {
         let tmp = tempfile::tempdir().unwrap();

@@ -12,6 +12,7 @@ mod setup;
 mod span;
 #[cfg(feature = "test-extractor")]
 mod test_extractor;
+mod threads;
 
 pub use claude::{
     BEGIN_MARKER, DEFAULT_SESSION_BUDGET, END_MARKER, InstallOutcome, SESSION_BUDGET_KEY, SKILL_MD,
@@ -28,6 +29,7 @@ use katalogr_query::{
 };
 pub use katalogr_query::{ReplaceResult, ShowResult};
 pub use setup::{ProjectCreated, kindex_init, project_init};
+pub use threads::{BATCH_BYTES_KEY, THREADS_ENV, THREADS_KEY, resolve_parallelism};
 
 use camino::{Utf8Path, Utf8PathBuf};
 use katalogr_analytics::{
@@ -468,6 +470,10 @@ impl Katalogr {
             deadline,
         )?;
         engine.set_builtin_profiles(builtin_profiles());
+        engine.set_parallelism(resolve_parallelism(
+            &self.project.config().settings,
+            std::env::var(THREADS_ENV).ok().as_deref(),
+        )?);
         for repo in &self.project.config().repos {
             engine.set_repo_filters(&repo.name, repo.include.clone(), repo.exclude.clone());
         }

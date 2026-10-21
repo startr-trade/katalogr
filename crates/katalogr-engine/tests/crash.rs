@@ -11,7 +11,10 @@ use katalogr_engine::queue::Processor;
 use katalogr_store::Reader;
 use sha2::{Digest, Sha256};
 use std::process::Command;
-use support::{drained_graph, file_event, fresh_index, full_index, init_project, open_engine};
+use support::{
+    drained_graph, file_event, fresh_index, full_index, init_project, open_engine,
+    open_engine_threads,
+};
 
 const CHILD_ENV: &str = "KATALOGR_CRASH_CHILD";
 /// The paths the child reports, in order. `a` is rewritten, `b` deleted, `c` new.
@@ -65,10 +68,11 @@ fn scenario() -> Scenario {
 }
 
 /// Run the child test in a new process with the failpoint set; it must die.
-fn run_child(s: &Scenario, failpoint: &str) {
+fn run_child(s: &Scenario, failpoint: &str, threads: usize) {
     let status = Command::new(std::env::current_exe().unwrap())
         .args(["--exact", "crash_child", "--nocapture", "--test-threads=1"])
         .env(CHILD_ENV, format!("{}|{}", s.kx, s.work))
+        .env("KATALOGR_THREADS", threads.to_string())
         .env("KATALOGR_FAILPOINT", failpoint)
         .status()
         .unwrap();
@@ -85,7 +89,11 @@ fn crash_child() {
     let (kx, work) = spec.split_once('|').unwrap();
     let (kx, work) = (Utf8Path::new(kx), Utf8Path::new(work));
     let acks = kx.with_file_name("acks.txt");
-    let e = open_engine(kx, work);
+    let threads = std::env::var("KATALOGR_THREADS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(1);
+    let e = open_engine_threads(kx, work, threads);
     for p in PATHS {
         let id = e.inbox().append(&file_event(p)).unwrap();
         // The acknowledgement is recorded only after `append` returned.
@@ -122,14 +130,14 @@ fn check_hashes(e: &Engine) {
 mod queue {
     use super::*;
 
-    #[test]
-    fn crash_injection_no_loss() {
+    /// The crash-injection scenario with the child (and the recovering parent) at `threads`.
+    fn no_loss(threads: usize) {
         for name in FAILPOINTS {
             let s = scenario();
-            run_child(&s, name);
+            run_child(&s, name, threads);
             let acks = acked(&s);
 
-            let e = open_engine(&s.kx, &s.work);
+            let e = open_engine_threads(&s.kx, &s.work, threads);
 
             // Every acknowledged event is either ingested or still in the inbox.
             let inbox: Vec<String> = e
@@ -192,9 +200,19 @@ mod queue {
     }
 
     #[test]
+    fn crash_injection_no_loss() {
+        no_loss(1);
+    }
+
+    #[test]
+    fn crash_injection_no_loss_parallel() {
+        no_loss(4);
+    }
+
+    #[test]
     fn ack_after_durable_append() {
         let s = scenario();
-        run_child(&s, "after_inbox_rename");
+        run_child(&s, "after_inbox_rename", 1);
         assert!(acked(&s).is_empty(), "the child died before acknowledging");
 
         // The event file exists after the crash, and is ingested on reopen.
