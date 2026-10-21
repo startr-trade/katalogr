@@ -921,6 +921,7 @@ mod retrieval {
             consistency: Some(Consistency::WaitAll),
             timeout: None,
             diagnostic: false,
+            expand: false,
         };
         for q in ["apply rate code", "rate", "apply"] {
             let plain = k.search(q, 10, &o).unwrap();

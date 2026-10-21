@@ -33,6 +33,7 @@ katalogr has already parsed this project into a graph of artifacts, symbols, con
 5. **Follow relationships.**
    - `refs <symbol>`: everything that points at it, including through re-exports.
    - `callers <symbol> --depth 2`: who calls it, and who calls those.
+   - `refs` and `callers` fold a name with 50 or more same-named targets into one line; add `--expand` to list them.
    - `path <a> <b>`: the shortest chain between two things, with each link's kind and confidence.
    - `why <file>:<line>`: the symbol at that line, the board items and goals it serves, and the commit that last changed it.
 6. **Orient in an unfamiliar project.** `katalogr map --budget 1500` gives the most central symbols first (PageRank).

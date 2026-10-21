@@ -70,7 +70,7 @@ Reach for these before reading whole files:\n\
 - `katalogr find <name>`: symbols whose name matches\n\
 - `katalogr explain <symbol>`: signature, doc, links and rationale\n\
 - `katalogr show <symbol>`: just that symbol's lines\n\
-- `katalogr refs <symbol>`: what references it\n\
+- `katalogr refs <symbol>`: what references it (a name with 50 or more same-named targets folds into one line; add `--expand` to list them)\n\
 - `katalogr why <file>:<line>`: why that line exists\n\
 - `katalogr doctor`: check the index and print fixes\n\
 \n\

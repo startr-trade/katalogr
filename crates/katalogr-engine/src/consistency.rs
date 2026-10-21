@@ -232,6 +232,12 @@ impl Engine {
         &self.stitcher
     }
 
+    /// Forwards to `Stitcher::set_fan_rows_from` (tests and benches only).
+    #[doc(hidden)]
+    pub fn set_fan_rows_from(&self, n: u32) {
+        self.stitcher.set_fan_rows_from(n);
+    }
+
     pub fn roots(&self) -> &BTreeMap<String, Utf8PathBuf> {
         &self.roots
     }

@@ -392,6 +392,30 @@ impl Partial {
     }
 }
 
+/// Hits of `refs` or `callers` folded into one summary because they reach their node only
+/// through an export key with `FOLD_FROM` or more targets (FEAT-077). `--expand` lists them.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
+pub struct Fold {
+    /// The export key, `namespace:key`.
+    pub key: String,
+    /// Link kind of the folded hits (`calls` for callers).
+    pub kind: String,
+    /// The key's current target count.
+    pub targets: u64,
+    /// Hits folded.
+    pub hits: u64,
+    /// The first folded hits (referrer or caller), in today's order.
+    pub first: Vec<SymbolHit>,
+    /// The number of `result` entries that come before this fold in today's order.
+    pub at: u64,
+    /// `refs`: the re-export chain of the folded hits, nearest the target first.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub via: Vec<String>,
+    /// `callers`: the depth of the folded callers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub depth: Option<u32>,
+}
+
 /// What `--json` prints.
 #[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]
 pub struct Envelope<T> {
@@ -410,6 +434,10 @@ pub struct Envelope<T> {
     /// The trace of the query, present only with `--diagnostic` (FEAT-065).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub diagnostic: Option<Trace>,
+    /// `refs` and `callers` only: hits folded into summaries (absent with `--expand` and
+    /// whenever nothing was folded).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub folded: Vec<Fold>,
 }
 
 #[cfg(test)]

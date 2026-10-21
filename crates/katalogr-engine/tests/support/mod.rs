@@ -439,6 +439,16 @@ impl TestExtractor {
                     origin: None,
                     binds: None,
                 }),
+                // A reference with several candidates, tried in the order given.
+                ["refs", from, kind, cands @ ..] if !cands.is_empty() => refs.push(OutRef {
+                    from: find(from)?,
+                    kind: LinkKind(kind.to_string()),
+                    span: Some(span),
+                    candidates: cands.iter().map(|c| key(c)).collect::<Result<_, _>>()?,
+                    confidence: Confidence::Extracted,
+                    origin: None,
+                    binds: None,
+                }),
                 // A reference holding a contract binding (ADR-0022).
                 ["boundref", from, role, contract, cand] => {
                     let role = parse_role(role).map_err(|m| bad(Some(span), m))?;

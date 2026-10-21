@@ -174,4 +174,70 @@ mod bench {
         assert!(with_git < Duration::from_millis(5000), "{with_git:?}");
         assert!(without < Duration::from_millis(1500), "{without:?}");
     }
+
+    /// FEAT-077 R-11: 5,000 references that each resolve to the same 100 targets stitch in
+    /// 5 s, stored as 5,000 fan rows and no per-target `calls` link row.
+    #[test]
+    #[ignore = "benchmark: run in release with --ignored"]
+    fn fanout_stitch_budget() {
+        use katalogr_engine::Stitcher;
+        use katalogr_model::{ExtractInput, Extractor};
+        use katalogr_store::cache::TableId;
+        use katalogr_store::{Cache, Kindex, ProjectConfig, ProjectName, RepoConfig};
+
+        const FILES: usize = 50;
+        let tmp = tempfile::tempdir().unwrap();
+        let root = Utf8PathBuf::from_path_buf(tmp.path().join("kx")).unwrap();
+        let dir = Kindex::init(&root)
+            .unwrap()
+            .create_project(
+                &ProjectName::new("p").unwrap(),
+                ProjectConfig {
+                    repos: vec![RepoConfig::new("r")],
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        let stitcher = Stitcher::new();
+        let cache =
+            Cache::open_or_rebuild(&dir, &stitcher, Instant::now() + Duration::from_secs(60))
+                .unwrap();
+        let fragments: Vec<_> = (0..FILES)
+            .map(|f| {
+                let mut text = String::new();
+                for e in 0..2 {
+                    text.push_str(&format!("sym fn e{e}\nexport m:area e{e}\n"));
+                }
+                for c in 0..100 {
+                    text.push_str(&format!("sym fn c{c}\nref c{c} calls m:area\n"));
+                }
+                let path = RelPath::new(&format!("f{f}.tx")).unwrap();
+                support::TestExtractor
+                    .extract(&ExtractInput {
+                        repo: "r",
+                        path: &path,
+                        revision: "ce013625030ba8dba906f756967f9e9ca394464a",
+                        content: text.as_bytes(),
+                        context: &[],
+                    })
+                    .unwrap()
+            })
+            .collect();
+        let t = Instant::now();
+        for f in fragments {
+            let mut tx = cache.write().unwrap();
+            stitcher.replace_fragment(&mut tx, f).unwrap();
+            tx.commit().unwrap();
+        }
+        let took = t.elapsed();
+        let rx = cache.read().unwrap();
+        let fans = rx.fans_all().unwrap().len();
+        let stored = rx.raw_scan(TableId::LinksOut, &[]).unwrap().len();
+        let expanded = rx.links_all().unwrap().len();
+        println!(
+            "stitched {FILES} files in {took:?}: {fans} fan rows, {stored} stored link rows, {expanded} expanded"
+        );
+        assert_eq!((fans, stored, expanded), (5000, 0, 500_000));
+        assert!(took < Duration::from_millis(5000), "{took:?}");
+    }
 }

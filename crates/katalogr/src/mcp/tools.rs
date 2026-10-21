@@ -8,7 +8,7 @@ use std::any::Any;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use katalogr_dist::{DistError, Katalogr};
+use katalogr_dist::{DistError, Katalogr, Options};
 use rmcp::model::{CallToolResult, ContentBlock, JsonObject, MetaObject, Tool};
 use serde_json::{Value, json};
 
@@ -90,13 +90,17 @@ pub const TOOLS: &[ToolSpec] = &[
         name: "refs",
         description: "What references a symbol, including through re-exports.",
         query: true,
-        args: &[req("symbol", Ty::Str)],
+        args: &[req("symbol", Ty::Str), opt("expand", Ty::Bool)],
     },
     ToolSpec {
         name: "callers",
         description: "Callers of a symbol, up to depth hops.",
         query: true,
-        args: &[req("symbol", Ty::Str), opt_int("depth", 1, 1)],
+        args: &[
+            req("symbol", Ty::Str),
+            opt_int("depth", 1, 1),
+            opt("expand", Ty::Bool),
+        ],
     },
     ToolSpec {
         name: "explain",
@@ -427,13 +431,25 @@ pub fn call(cfg: &ServeConfig, name: &str, args: &Value) -> Result<JsonAnswer, U
         "find" => answer(Katalogr::find(&k, p.need("text"), opts), |r| {
             render_json::list(r, budget, "find")
         }),
-        "refs" => answer(Katalogr::refs(&k, p.need("symbol"), opts), |r| {
-            render_json::list(r, budget, "refs")
-        }),
-        "callers" => answer(
-            Katalogr::callers(&k, p.need("symbol"), p.int("depth", 1), opts),
-            |r| render_json::list(r, budget, "callers"),
-        ),
+        "refs" => {
+            let opts = &Options {
+                expand: p.flag("expand"),
+                ..opts.clone()
+            };
+            answer(Katalogr::refs(&k, p.need("symbol"), opts), |r| {
+                render_json::list_folded(r, budget, "refs")
+            })
+        }
+        "callers" => {
+            let opts = &Options {
+                expand: p.flag("expand"),
+                ..opts.clone()
+            };
+            answer(
+                Katalogr::callers(&k, p.need("symbol"), p.int("depth", 1), opts),
+                |r| render_json::list_folded(r, budget, "callers"),
+            )
+        }
         "explain" => answer(
             Katalogr::explain(&k, p.need("symbol"), p.int("per_side", 10) as usize, opts),
             |r| render_json::explain(r, budget),

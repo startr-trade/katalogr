@@ -12,9 +12,9 @@ use katalogr_dist::analytics::{
 };
 use katalogr_dist::eval::{EvalReport, SweepReport};
 use katalogr_dist::query::{
-    CallerHit, DanglingRef, Direction, Explain, FieldShape, HintSource, MapEntry, MirrorDrift,
-    Partial, PathStep, RefHit, ReplaceResult, SearchHit, Serialize, ShowResult, SymbolHit, TestHit,
-    Trace, WhyResult, budget, hints,
+    CallerHit, DanglingRef, Direction, Explain, FieldShape, Fold, HintSource, MapEntry,
+    MirrorDrift, Partial, PathStep, RefHit, ReplaceResult, SearchHit, Serialize, ShowResult,
+    SymbolHit, TestHit, Trace, WhyResult, budget, hints,
 };
 use katalogr_dist::{Outcome, Reply, Report};
 
@@ -155,6 +155,24 @@ fn print_list<T: Serialize>(
     cli: &Cli,
     report: &Report,
     items: Vec<T>,
+    partial: Vec<Partial>,
+    line: impl Fn(&T) -> String,
+    command: &str,
+    trace: Option<Trace>,
+) where
+    Vec<T>: HintSource,
+{
+    print_list_with(cli, report, items, &[], partial, line, command, trace);
+}
+
+/// [`print_list`], with each fold's line placed among the item lines (FEAT-077). Fold lines
+/// count as lines under `--budget`.
+#[allow(clippy::too_many_arguments)]
+fn print_list_with<T: Serialize>(
+    cli: &Cli,
+    report: &Report,
+    items: Vec<T>,
+    folds: &[Fold],
     mut partial: Vec<Partial>,
     line: impl Fn(&T) -> String,
     command: &str,
@@ -164,7 +182,7 @@ fn print_list<T: Serialize>(
 {
     note_stale(report);
     let next = hints(command, &items);
-    let lines: Vec<String> = items.iter().map(line).collect();
+    let lines = interleave(items.iter().map(line).collect(), folds, command);
     if let Some(b) = cli.budget {
         set_packing(&mut trace, &lines, b);
     }
@@ -279,6 +297,12 @@ pub fn diagnostic_text(t: &Trace) -> Vec<String> {
             w.weight
         ));
     }
+    for f in &t.folds {
+        out.push(format!(
+            "diagnostic: fold key={} kind={} targets={} hits={} at={}",
+            f.key, f.kind, f.targets, f.hits, f.at
+        ));
+    }
     if let Some(p) = &t.packing {
         out.push(format!(
             "diagnostic: pack budget={} estimator={} considered={} kept={} omitted={} used={} next-needed={}",
@@ -366,6 +390,84 @@ where
         other => other_outcomes(cli, &reply.report, other, reply.diagnostic),
     }
     code
+}
+
+/// [`list`] for `refs` and `callers`: folded hits show as one line each at their place.
+pub fn list_folded<T: Serialize>(
+    cli: &Cli,
+    reply: Reply<Vec<T>>,
+    line: fn(&T) -> String,
+    command: &str,
+) -> ExitCode
+where
+    Vec<T>: HintSource,
+{
+    if cli.json {
+        return emit(&json::list_folded(reply, cli.budget, command));
+    }
+    let code = exit_for(&reply);
+    match reply.outcome {
+        Outcome::Found(items) => {
+            print_list_with(
+                cli,
+                &reply.report,
+                items,
+                &reply.folded,
+                reply.partial,
+                line,
+                command,
+                reply.diagnostic,
+            );
+        }
+        other => other_outcomes(cli, &reply.report, other, reply.diagnostic),
+    }
+    code
+}
+
+/// The text line of a fold. `command` is `refs` or `callers`.
+pub fn fold_line(f: &Fold, command: &str) -> String {
+    let names: Vec<&str> = f.first.iter().map(|h| h.name.as_str()).collect();
+    let first = names.join(", ");
+    if command == "callers" {
+        format!(
+            "folded  calls  {}  {} targets  {} callers  depth {}  first {}  [Inferred]  (--expand lists all)",
+            f.key,
+            f.targets,
+            f.hits,
+            f.depth.unwrap_or(1),
+            first
+        )
+    } else {
+        let via = if f.via.is_empty() {
+            String::new()
+        } else {
+            format!("  via {}", f.via.join(" > "))
+        };
+        format!(
+            "folded  {}  {}  {} targets  {} refs  first {}  [Inferred]{via}  (--expand lists all)",
+            f.kind, f.key, f.targets, f.hits, first
+        )
+    }
+}
+
+/// `lines` (one per result entry) with each fold's line inserted before entry `at`; folds
+/// sharing `at` keep their order.
+fn interleave(lines: Vec<String>, folds: &[Fold], command: &str) -> Vec<String> {
+    if folds.is_empty() {
+        return lines;
+    }
+    let mut out = Vec::with_capacity(lines.len() + folds.len());
+    let mut pending = folds.iter().peekable();
+    for (i, l) in lines.into_iter().enumerate() {
+        while let Some(f) = pending.next_if(|f| f.at as usize <= i) {
+            out.push(fold_line(f, command));
+        }
+        out.push(l);
+    }
+    for f in pending {
+        out.push(fold_line(f, command));
+    }
+    out
 }
 
 pub fn dangling_line(d: &DanglingRef) -> String {

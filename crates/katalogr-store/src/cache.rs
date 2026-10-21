@@ -5,6 +5,7 @@
 //! row types, which are deterministic because every map in them is ordered.
 
 use crate::error::StoreError;
+use crate::fan;
 use crate::kindex::ProjectDir;
 use camino::Utf8PathBuf;
 use katalogr_model::{
@@ -17,13 +18,13 @@ use redb::{
 };
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use sha2::{Digest, Sha256};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::marker::PhantomData;
 use std::ops::Bound;
 use std::time::{Duration, Instant};
 
 /// Stored in `meta`; a different number rebuilds the cache from the shards.
-pub const CACHE_SCHEMA: u32 = 9;
+pub const CACHE_SCHEMA: u32 = 10;
 
 /// `meta` key: the watermark the stored rank reflects.
 const RANK_WATERMARK_META: &str = "rank_watermark";
@@ -72,6 +73,7 @@ pub struct LinkBrief {
 
 #[derive(Deserialize)]
 struct RawLinkEntry {
+    origin: LinkOrigin,
     confidence: Confidence,
     fanout: Option<u32>,
 }
@@ -205,6 +207,16 @@ pub struct LinkKey {
     pub to: Id,
 }
 
+/// One stored multi-target resolution (FEAT-077): the referring node, the link kind, and the
+/// export key whose targets (`exports(key)`) the reference resolved to. Ordered like its
+/// encoded key: `from`, then `kind`, then `key`.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct FanKey {
+    pub from: Id,
+    pub kind: LinkKind,
+    pub key: ExportKey,
+}
+
 /// A reference: the artifact that holds it and its position in `ArtifactRow::refs`.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct RefId {
@@ -250,7 +262,7 @@ pub type JournalEntry = (String, String);
 
 // ---------------------------------------------------------------- keys
 
-fn lp(out: &mut Vec<u8>, s: &str) {
+pub(crate) fn lp(out: &mut Vec<u8>, s: &str) {
     out.extend_from_slice(&(s.len() as u32).to_be_bytes());
     out.extend_from_slice(s.as_bytes());
 }
@@ -337,7 +349,7 @@ fn decode_stats(v: &[u8]) -> Result<LexiconStats, StoreError> {
     })
 }
 
-fn split_lp(b: &[u8]) -> Result<(&str, &[u8]), StoreError> {
+pub(crate) fn split_lp(b: &[u8]) -> Result<(&str, &[u8]), StoreError> {
     let bad = || StoreError::Row("malformed key".into());
     let len = u32::from_be_bytes(b.get(..4).ok_or_else(bad)?.try_into().unwrap()) as usize;
     let s = b.get(4..4 + len).ok_or_else(bad)?;
@@ -392,7 +404,7 @@ fn link_prefix(from: Id, kind: &LinkKind) -> Vec<u8> {
     k
 }
 
-fn link_out_key(k: &LinkKey) -> Vec<u8> {
+pub(crate) fn link_out_key(k: &LinkKey) -> Vec<u8> {
     let mut out = link_prefix(k.from, &k.kind);
     out.extend_from_slice(&k.to.0);
     out
@@ -404,6 +416,23 @@ fn link_in_key(k: &LinkKey) -> Vec<u8> {
         kind: k.kind.clone(),
         to: k.from,
     })
+}
+
+/// `stored` keys arriving at `to` plus the keys of `fans` (rows that reach `to`), sorted by
+/// `links_in` key bytes and deduplicated.
+fn merge_links_in(stored: Vec<LinkKey>, to: Id, fans: Vec<FanKey>) -> Vec<LinkKey> {
+    let mut all: Vec<(Vec<u8>, LinkKey)> = stored
+        .into_iter()
+        .chain(fans.into_iter().map(|f| LinkKey {
+            from: f.from,
+            kind: f.kind,
+            to,
+        }))
+        .map(|k| (link_in_key(&k), k))
+        .collect();
+    all.sort_by(|a, b| a.0.cmp(&b.0));
+    all.dedup_by(|a, b| a.0 == b.0);
+    all.into_iter().map(|(_, k)| k).collect()
 }
 
 fn decode_link_key(b: &[u8]) -> Result<LinkKey, StoreError> {
@@ -500,10 +529,13 @@ pub enum TableId {
     Rank,
     Contracts,
     BindingsByArtifact,
+    FanOut,
+    FanIn,
+    ExportsByTarget,
 }
 
 impl TableId {
-    const ALL: [TableId; 23] = [
+    const ALL: [TableId; 26] = [
         TableId::Meta,
         TableId::ShardHashes,
         TableId::Artifacts,
@@ -527,10 +559,13 @@ impl TableId {
         TableId::Rank,
         TableId::Contracts,
         TableId::BindingsByArtifact,
+        TableId::FanOut,
+        TableId::FanIn,
+        TableId::ExportsByTarget,
     ];
 
     /// The graph tables, in the order `dump_graph` reports them.
-    const GRAPH: [TableId; 10] = [
+    const GRAPH: [TableId; 13] = [
         TableId::Artifacts,
         TableId::Symbols,
         TableId::LinksOut,
@@ -541,6 +576,9 @@ impl TableId {
         TableId::IndexErrors,
         TableId::Contracts,
         TableId::BindingsByArtifact,
+        TableId::FanOut,
+        TableId::FanIn,
+        TableId::ExportsByTarget,
     ];
 
     fn name(self) -> &'static str {
@@ -568,6 +606,9 @@ impl TableId {
             TableId::Rank => "rank",
             TableId::Contracts => "contracts",
             TableId::BindingsByArtifact => "bindings_by_artifact",
+            TableId::FanOut => "fan_out",
+            TableId::FanIn => "fan_in",
+            TableId::ExportsByTarget => "exports_by_target",
         }
     }
 
@@ -742,14 +783,16 @@ pub trait Reader {
             .collect()
     }
 
-    fn link(&self, key: &LinkKey) -> Result<Option<LinkRow>, StoreError> {
+    /// The stored `links_out` row of `key`, without fan rows (FEAT-077). The stitcher uses only
+    /// the stored-only reads.
+    fn stored_link(&self, key: &LinkKey) -> Result<Option<LinkRow>, StoreError> {
         self.raw_get(TableId::LinksOut, &link_out_key(key))?
             .map(|v| de(&v))
             .transpose()
     }
 
-    /// Links leaving `from`, optionally only of one kind.
-    fn links_out(
+    /// Stored rows leaving `from` (optionally of one kind), sorted by key bytes; no fan rows.
+    fn stored_links_out(
         &self,
         from: Id,
         kind: Option<&LinkKind>,
@@ -812,36 +855,227 @@ pub trait Reader {
         Ok(out)
     }
 
-    /// The [`LinkBrief`] of many links, in order (None for a link that does not exist); the
-    /// reads share one table lookup.
-    fn link_briefs_many(&self, keys: &[LinkKey]) -> Result<Vec<Option<LinkBrief>>, StoreError> {
-        let raw: Vec<Vec<u8>> = keys.iter().map(link_out_key).collect();
-        self.raw_get_many(TableId::LinksOut, &raw)?
+    /// The targets of `key` through a per-call cache, so each key's exports are decoded once.
+    #[doc(hidden)]
+    fn cached_targets<'c>(
+        &self,
+        cache: &'c mut HashMap<ExportKey, Vec<Id>>,
+        key: &ExportKey,
+    ) -> Result<&'c [Id], StoreError> {
+        if !cache.contains_key(key) {
+            let t = self.exports(key)?;
+            cache.insert(key.clone(), t);
+        }
+        Ok(&cache[key])
+    }
+
+    /// The fan row of `key`, if stored.
+    fn fan(&self, key: &FanKey) -> Result<Option<LinkRow>, StoreError> {
+        self.raw_get(TableId::FanOut, &fan::fan_out_key(key))?
+            .map(|v| de(&v))
+            .transpose()
+    }
+
+    /// Fan rows leaving `from` (optionally of one kind), sorted by encoded key.
+    fn fans_out(
+        &self,
+        from: Id,
+        kind: Option<&LinkKind>,
+    ) -> Result<Vec<(FanKey, LinkRow)>, StoreError> {
+        self.raw_scan(TableId::FanOut, &fan::fan_out_prefix(from, kind))?
             .into_iter()
-            .map(|v| {
-                v.map(|v| {
-                    let row: RawLinkRow =
-                        serde_json::from_slice(&v).map_err(|e| StoreError::Row(e.to_string()))?;
-                    let first = row
-                        .entries
-                        .first()
-                        .ok_or_else(|| StoreError::Row("link without entries".into()))?;
-                    let weight = row
-                        .entries
-                        .iter()
-                        .map(|e| match (e.confidence, e.fanout) {
-                            (Confidence::Inferred, Some(n)) if n > 1 => 1.0 / f64::from(n),
-                            _ => 1.0,
-                        })
-                        .fold(0.0f64, f64::max);
-                    Ok(LinkBrief {
-                        confidence: first.confidence,
-                        weight,
-                    })
-                })
-                .transpose()
-            })
+            .map(|(k, v)| Ok((fan::decode_fan_out_key(&k)?, de(&v)?)))
             .collect()
+    }
+
+    /// The keys of the fan rows leaving `from` with `kind`, without decoding their rows.
+    #[doc(hidden)]
+    fn fan_keys_out(&self, from: Id, kind: &LinkKind) -> Result<Vec<FanKey>, StoreError> {
+        self.raw_scan_keys(TableId::FanOut, &fan::fan_out_prefix(from, Some(kind)))?
+            .iter()
+            .map(|k| fan::decode_fan_out_key(k))
+            .collect()
+    }
+
+    /// Every fan row, sorted by encoded key.
+    fn fans_all(&self) -> Result<Vec<(FanKey, LinkRow)>, StoreError> {
+        self.raw_scan(TableId::FanOut, &[])?
+            .into_iter()
+            .map(|(k, v)| Ok((fan::decode_fan_out_key(&k)?, de(&v)?)))
+            .collect()
+    }
+
+    /// The fan rows whose key is `key` (from `fan_in`), sorted by `(from, kind)` bytes.
+    fn fans_in(&self, key: &ExportKey) -> Result<Vec<FanKey>, StoreError> {
+        self.raw_scan_keys(TableId::FanIn, &fan::fan_in_prefix(key))?
+            .iter()
+            .map(|k| fan::decode_fan_in_key(k))
+            .collect()
+    }
+
+    /// The export keys with two or more targets that include `target`, sorted by encoded key.
+    fn fan_keys_of(&self, target: Id) -> Result<Vec<ExportKey>, StoreError> {
+        self.raw_scan_keys(TableId::ExportsByTarget, &fan::by_target_prefix(target))?
+            .iter()
+            .map(|k| Ok(fan::decode_by_target_key(k)?.1))
+            .collect()
+    }
+
+    /// The fan keys of `from` and `kind` that reach `to`, each with its row.
+    #[doc(hidden)]
+    fn fans_reaching(&self, key: &LinkKey) -> Result<Vec<(FanKey, LinkRow)>, StoreError> {
+        let mut out = Vec::new();
+        for fk in self.fan_keys_out(key.from, &key.kind)? {
+            if self
+                .raw_get(
+                    TableId::ExportsByTarget,
+                    &fan::by_target_key(key.to, &fk.key),
+                )?
+                .is_none()
+            {
+                continue;
+            }
+            if let Some(row) = self.fan(&fk)? {
+                out.push((fk, row));
+            }
+        }
+        Ok(out)
+    }
+
+    /// The fan rows that contribute to the expanded link `key`, as (export key, target
+    /// count), sorted by encoded fan key. Empty for a link that has only stored entries.
+    fn fan_sources(&self, key: &LinkKey) -> Result<Vec<(ExportKey, u32)>, StoreError> {
+        let mut out = Vec::new();
+        for fk in self.fan_keys_out(key.from, &key.kind)? {
+            if self
+                .raw_get(
+                    TableId::ExportsByTarget,
+                    &fan::by_target_key(key.to, &fk.key),
+                )?
+                .is_none()
+            {
+                continue;
+            }
+            let n = self.export_count(&fk.key)?;
+            out.push((fk.key, u32::try_from(n).unwrap_or(u32::MAX)));
+        }
+        Ok(out)
+    }
+
+    /// One link: the stored row and every fan row that reaches `key.to`, merged in origin
+    /// order, each fan entry with a fan-out of its key's current target count.
+    fn link(&self, key: &LinkKey) -> Result<Option<LinkRow>, StoreError> {
+        let stored = self.stored_link(key)?;
+        let fans = self.fans_reaching(key)?;
+        if fans.is_empty() {
+            return Ok(stored);
+        }
+        let mut entries = stored.map(|r| r.entries).unwrap_or_default();
+        for (fk, row) in &fans {
+            let n = self.export_count(&fk.key)?;
+            entries.extend(fan::expanded_entries(row, n));
+        }
+        entries.sort_by_key(|e| e.origin);
+        Ok(Some(LinkRow { entries }))
+    }
+
+    /// Links leaving `from`, optionally only of one kind: stored rows and expanded fan rows.
+    fn links_out(
+        &self,
+        from: Id,
+        kind: Option<&LinkKind>,
+    ) -> Result<Vec<(LinkKey, LinkRow)>, StoreError> {
+        let stored = self.stored_links_out(from, kind)?;
+        let fans = self.fans_out(from, kind)?;
+        if fans.is_empty() {
+            return Ok(stored);
+        }
+        let mut ex = fan::Expansion::default();
+        for (k, r) in stored {
+            ex.add_stored(k, r);
+        }
+        let mut cache = HashMap::new();
+        for (fk, row) in &fans {
+            let targets = self.cached_targets(&mut cache, &fk.key)?;
+            ex.add_fan(fk, row, targets);
+        }
+        Ok(ex.finish())
+    }
+
+    /// Every link row, sorted by `(from, kind, to)` key bytes: stored rows and expanded fan rows.
+    fn links_all(&self) -> Result<Vec<(LinkKey, LinkRow)>, StoreError> {
+        let stored: Vec<(LinkKey, LinkRow)> = self
+            .raw_scan(TableId::LinksOut, &[])?
+            .into_iter()
+            .map(|(k, v)| Ok((decode_link_key(&k)?, de(&v)?)))
+            .collect::<Result<_, StoreError>>()?;
+        let fans = self.fans_all()?;
+        if fans.is_empty() {
+            return Ok(stored);
+        }
+        let mut ex = fan::Expansion::default();
+        for (k, r) in stored {
+            ex.add_stored(k, r);
+        }
+        let mut cache = HashMap::new();
+        for (fk, row) in &fans {
+            let targets = self.cached_targets(&mut cache, &fk.key)?;
+            ex.add_fan(fk, row, targets);
+        }
+        Ok(ex.finish())
+    }
+
+    /// Keys of the links arriving at `to` (each is a `from -> to` link, reported in link
+    /// direction), in `links_in` key order: stored keys and the keys of fan rows that reach `to`.
+    fn links_in(&self, to: Id) -> Result<Vec<LinkKey>, StoreError> {
+        let stored = self.stored_links_in(to)?;
+        let keys = self.fan_keys_of(to)?;
+        if keys.is_empty() {
+            return Ok(stored);
+        }
+        let mut fans = Vec::new();
+        for k in &keys {
+            fans.extend(self.fans_in(k)?);
+        }
+        Ok(merge_links_in(stored, to, fans))
+    }
+
+    /// The keys of the links leaving `from` with `kind`, without decoding their rows.
+    fn link_keys_out(&self, from: Id, kind: &LinkKind) -> Result<Vec<LinkKey>, StoreError> {
+        let stored: Vec<LinkKey> = self
+            .raw_scan_keys(TableId::LinksOut, &link_prefix(from, kind))?
+            .iter()
+            .map(|k| decode_link_key(k))
+            .collect::<Result<_, _>>()?;
+        let fans = self.fan_keys_out(from, kind)?;
+        let mut cache = HashMap::new();
+        self.merge_fan_targets(stored, from, kind, &fans, &mut cache)
+    }
+
+    #[doc(hidden)]
+    fn merge_fan_targets(
+        &self,
+        mut keys: Vec<LinkKey>,
+        from: Id,
+        kind: &LinkKind,
+        fans: &[FanKey],
+        cache: &mut HashMap<ExportKey, Vec<Id>>,
+    ) -> Result<Vec<LinkKey>, StoreError> {
+        if fans.is_empty() {
+            return Ok(keys);
+        }
+        for fk in fans {
+            for t in self.cached_targets(cache, &fk.key)? {
+                keys.push(LinkKey {
+                    from,
+                    kind: kind.clone(),
+                    to: *t,
+                });
+            }
+        }
+        keys.sort_by_key(|k| k.to);
+        keys.dedup();
+        Ok(keys)
     }
 
     /// [`Reader::link_keys_out`] for many sources, in order.
@@ -851,16 +1085,33 @@ pub trait Reader {
         kind: &LinkKind,
     ) -> Result<Vec<Vec<LinkKey>>, StoreError> {
         let prefixes: Vec<Vec<u8>> = froms.iter().map(|f| link_prefix(*f, kind)).collect();
-        self.raw_scan_keys_many(TableId::LinksOut, &prefixes)?
-            .into_iter()
-            .map(|keys| keys.iter().map(|k| decode_link_key(k)).collect())
-            .collect()
+        let stored = self.raw_scan_keys_many(TableId::LinksOut, &prefixes)?;
+        let fan_prefixes: Vec<Vec<u8>> = froms
+            .iter()
+            .map(|f| fan::fan_out_prefix(*f, Some(kind)))
+            .collect();
+        let fans = self.raw_scan_keys_many(TableId::FanOut, &fan_prefixes)?;
+        let mut cache = HashMap::new();
+        let mut out = Vec::with_capacity(froms.len());
+        for ((from, keys), fks) in froms.iter().zip(stored).zip(fans) {
+            let keys: Vec<LinkKey> = keys
+                .iter()
+                .map(|k| decode_link_key(k))
+                .collect::<Result<_, _>>()?;
+            let fks: Vec<FanKey> = fks
+                .iter()
+                .map(|k| fan::decode_fan_out_key(k))
+                .collect::<Result<_, _>>()?;
+            out.push(self.merge_fan_targets(keys, *from, kind, &fks, &mut cache)?);
+        }
+        Ok(out)
     }
 
     /// [`Reader::links_in`] for many targets, in order.
     fn links_in_many(&self, tos: &[Id]) -> Result<Vec<Vec<LinkKey>>, StoreError> {
         let prefixes: Vec<Vec<u8>> = tos.iter().map(|t| t.0.to_vec()).collect();
-        self.raw_scan_keys_many(TableId::LinksIn, &prefixes)?
+        let stored: Vec<Vec<LinkKey>> = self
+            .raw_scan_keys_many(TableId::LinksIn, &prefixes)?
             .into_iter()
             .map(|keys| {
                 keys.iter()
@@ -874,37 +1125,184 @@ pub trait Reader {
                     })
                     .collect()
             })
-            .collect()
-    }
-
-    /// The keys of the links leaving `from` with `kind`, without decoding their rows.
-    fn link_keys_out(&self, from: Id, kind: &LinkKind) -> Result<Vec<LinkKey>, StoreError> {
-        self.raw_scan_keys(TableId::LinksOut, &link_prefix(from, kind))?
+            .collect::<Result<_, StoreError>>()?;
+        let by_target: Vec<Vec<Vec<u8>>> = self.raw_scan_keys_many(
+            TableId::ExportsByTarget,
+            &tos.iter()
+                .map(|t| fan::by_target_prefix(*t))
+                .collect::<Vec<_>>(),
+        )?;
+        if by_target.iter().all(|k| k.is_empty()) {
+            return Ok(stored);
+        }
+        let mut per_to: Vec<Vec<ExportKey>> = Vec::with_capacity(tos.len());
+        let mut distinct: BTreeSet<ExportKey> = BTreeSet::new();
+        for keys in &by_target {
+            let ks: Vec<ExportKey> = keys
+                .iter()
+                .map(|k| Ok(fan::decode_by_target_key(k)?.1))
+                .collect::<Result<_, StoreError>>()?;
+            distinct.extend(ks.iter().cloned());
+            per_to.push(ks);
+        }
+        let distinct: Vec<ExportKey> = distinct.into_iter().collect();
+        let fan_prefixes: Vec<Vec<u8>> = distinct.iter().map(fan::fan_in_prefix).collect();
+        let mut fans_of: HashMap<ExportKey, Vec<FanKey>> = HashMap::new();
+        for (k, rows) in distinct
             .iter()
-            .map(|k| decode_link_key(k))
-            .collect()
-    }
-
-    /// Number of links arriving at each target, all kinds, from one scan of `links_in`. A symbol
-    /// with no incoming link is absent.
-    fn in_degrees(&self) -> Result<BTreeMap<Id, u64>, StoreError> {
-        let mut out: BTreeMap<Id, u64> = BTreeMap::new();
-        for (key, _) in self.raw_scan(TableId::LinksIn, &[])? {
-            let target: [u8; 16] = key
-                .get(..16)
-                .and_then(|b| b.try_into().ok())
-                .ok_or_else(|| StoreError::Row("malformed key".into()))?;
-            *out.entry(Id(target)).or_default() += 1;
+            .zip(self.raw_scan_keys_many(TableId::FanIn, &fan_prefixes)?)
+        {
+            let fks: Vec<FanKey> = rows
+                .iter()
+                .map(|r| fan::decode_fan_in_key(r))
+                .collect::<Result<_, _>>()?;
+            fans_of.insert(k.clone(), fks);
+        }
+        let mut out = Vec::with_capacity(tos.len());
+        for ((to, st), ks) in tos.iter().zip(stored).zip(per_to) {
+            let mut fans = Vec::new();
+            for k in &ks {
+                if let Some(f) = fans_of.get(k) {
+                    fans.extend(f.iter().cloned());
+                }
+            }
+            out.push(if fans.is_empty() {
+                st
+            } else {
+                merge_links_in(st, *to, fans)
+            });
         }
         Ok(out)
     }
 
-    /// Every link row, sorted by `(from, kind, to)` key bytes.
-    fn links_all(&self) -> Result<Vec<(LinkKey, LinkRow)>, StoreError> {
-        self.raw_scan(TableId::LinksOut, &[])?
+    /// The [`LinkBrief`] of many links, in order (None for a link that does not exist); the
+    /// reads share one table lookup. A link that fan rows reach is briefed over its merged
+    /// entries.
+    fn link_briefs_many(&self, keys: &[LinkKey]) -> Result<Vec<Option<LinkBrief>>, StoreError> {
+        let raw: Vec<Vec<u8>> = keys.iter().map(link_out_key).collect();
+        let stored = self.raw_get_many(TableId::LinksOut, &raw)?;
+        // The fan keys of each distinct (from, kind) among the keys.
+        let pairs: Vec<(Id, LinkKind)> = keys
+            .iter()
+            .map(|k| (k.from, k.kind.clone()))
+            .collect::<BTreeSet<_>>()
             .into_iter()
-            .map(|(k, v)| Ok((decode_link_key(&k)?, de(&v)?)))
-            .collect()
+            .collect();
+        let prefixes: Vec<Vec<u8>> = pairs
+            .iter()
+            .map(|(f, k)| fan::fan_out_prefix(*f, Some(k)))
+            .collect();
+        let mut fans_of: HashMap<(Id, LinkKind), Vec<FanKey>> = HashMap::new();
+        for (pair, rows) in pairs
+            .iter()
+            .zip(self.raw_scan_keys_many(TableId::FanOut, &prefixes)?)
+        {
+            if rows.is_empty() {
+                continue;
+            }
+            let fks: Vec<FanKey> = rows
+                .iter()
+                .map(|r| fan::decode_fan_out_key(r))
+                .collect::<Result<_, _>>()?;
+            fans_of.insert(pair.clone(), fks);
+        }
+        // Fan rows that reach a key: one batched by-target lookup.
+        let mut probes: Vec<(usize, FanKey)> = Vec::new();
+        for (i, k) in keys.iter().enumerate() {
+            if let Some(fks) = fans_of.get(&(k.from, k.kind.clone())) {
+                for fk in fks {
+                    probes.push((i, fk.clone()));
+                }
+            }
+        }
+        let probe_keys: Vec<Vec<u8>> = probes
+            .iter()
+            .map(|(i, fk)| fan::by_target_key(keys[*i].to, &fk.key))
+            .collect();
+        let hit = self.raw_get_many(TableId::ExportsByTarget, &probe_keys)?;
+        let mut extra: HashMap<usize, Vec<RawLinkEntry>> = HashMap::new();
+        let mut rows: HashMap<FanKey, Vec<RawLinkEntry>> = HashMap::new();
+        let mut counts: HashMap<ExportKey, usize> = HashMap::new();
+        for ((i, fk), h) in probes.iter().zip(hit) {
+            if h.is_none() {
+                continue;
+            }
+            if !rows.contains_key(fk) {
+                let row = self
+                    .fan(fk)?
+                    .ok_or_else(|| StoreError::Row("fan_in without fan_out".into()))?;
+                rows.insert(
+                    fk.clone(),
+                    row.entries
+                        .iter()
+                        .map(|e| RawLinkEntry {
+                            origin: e.origin,
+                            confidence: e.confidence,
+                            fanout: None,
+                        })
+                        .collect(),
+                );
+            }
+            if !counts.contains_key(&fk.key) {
+                counts.insert(fk.key.clone(), self.export_count(&fk.key)?);
+            }
+            let n = u32::try_from(counts[&fk.key]).unwrap_or(u32::MAX);
+            extra
+                .entry(*i)
+                .or_default()
+                .extend(rows[fk].iter().map(|e| RawLinkEntry {
+                    origin: e.origin,
+                    confidence: e.confidence,
+                    fanout: Some(n),
+                }));
+        }
+        let mut out = Vec::with_capacity(keys.len());
+        for (i, v) in stored.into_iter().enumerate() {
+            let mut entries: Option<Vec<RawLinkEntry>> = match v {
+                Some(v) => Some(
+                    serde_json::from_slice::<RawLinkRow>(&v)
+                        .map_err(|e| StoreError::Row(e.to_string()))?
+                        .entries,
+                ),
+                None => None,
+            };
+            if let Some(more) = extra.remove(&i) {
+                let all = entries.get_or_insert_with(Vec::new);
+                all.extend(more);
+                all.sort_by_key(|e| e.origin);
+            }
+            out.push(
+                entries
+                    .map(|entries| {
+                        let first = entries
+                            .first()
+                            .ok_or_else(|| StoreError::Row("link without entries".into()))?;
+                        let weight = entries
+                            .iter()
+                            .map(|e| match (e.confidence, e.fanout) {
+                                (Confidence::Inferred, Some(n)) if n > 1 => 1.0 / f64::from(n),
+                                _ => 1.0,
+                            })
+                            .fold(0.0f64, f64::max);
+                        Ok::<LinkBrief, StoreError>(LinkBrief {
+                            confidence: first.confidence,
+                            weight,
+                        })
+                    })
+                    .transpose()?,
+            );
+        }
+        Ok(out)
+    }
+
+    /// Number of links arriving at each target, all kinds. A symbol with no incoming link is
+    /// absent. Counts the expanded links.
+    fn in_degrees(&self) -> Result<BTreeMap<Id, u64>, StoreError> {
+        let mut out: BTreeMap<Id, u64> = BTreeMap::new();
+        for (key, _) in self.links_all()? {
+            *out.entry(key.to).or_default() += 1;
+        }
+        Ok(out)
     }
 
     /// The postings of one exact term, sorted by `(field, symbol)`.
@@ -977,12 +1375,12 @@ pub trait Reader {
         }
     }
 
-    /// Keys of the links arriving at `to` (each is a `from -> to` link, reported in link direction).
-    fn links_in(&self, to: Id) -> Result<Vec<LinkKey>, StoreError> {
-        self.raw_scan(TableId::LinksIn, &to.0)?
-            .into_iter()
-            .map(|(k, _)| {
-                let r = decode_link_key(&k)?;
+    /// Keys of the stored rows arriving at `to`, in `links_in` key order; no fan rows.
+    fn stored_links_in(&self, to: Id) -> Result<Vec<LinkKey>, StoreError> {
+        self.raw_scan_keys(TableId::LinksIn, &to.0)?
+            .iter()
+            .map(|k| {
+                let r = decode_link_key(k)?;
                 Ok(LinkKey {
                     from: r.to,
                     kind: r.kind,
@@ -1023,6 +1421,16 @@ pub trait Reader {
             .map(|v| de(&v))
             .transpose()?
             .unwrap_or_default())
+    }
+
+    /// The number of targets exported under `key`, without decoding the ids.
+    fn export_count(&self, key: &ExportKey) -> Result<usize, StoreError> {
+        match self.raw_get(TableId::Exports, &export_key(key))? {
+            Some(v) => serde_json::from_slice::<Vec<serde::de::IgnoredAny>>(&v)
+                .map(|l| l.len())
+                .map_err(|e| StoreError::Row(e.to_string())),
+            None => Ok(0),
+        }
     }
 
     /// Every `(key, targets)` in a namespace.
@@ -1293,6 +1701,9 @@ pub struct WriteTx<'a> {
 struct RankTouched {
     links: BTreeMap<LinkKey, Option<f64>>,
     symbols: BTreeMap<Id, bool>,
+    /// Fan rows and export keys with their stored bytes when first touched (FEAT-077).
+    fans: BTreeMap<FanKey, Option<Vec<u8>>>,
+    exports: BTreeMap<ExportKey, Option<Vec<u8>>>,
 }
 
 impl Reader for WriteTx<'_> {
@@ -1405,12 +1816,45 @@ impl WriteTx<'_> {
         }
     }
 
-    /// An empty set removes the row.
+    /// Write the fan row `key` (entries sorted by origin, never empty, each `fanout: None`) to
+    /// `fan_out` and its key-only reverse row to `fan_in`. Recorded for rank tracking.
+    pub fn put_fan(&mut self, key: &FanKey, row: &LinkRow) -> Result<(), StoreError> {
+        debug_assert!(!row.entries.is_empty(), "fan row without entries");
+        self.touch_fan(key)?;
+        self.put(TableId::FanOut, &fan::fan_out_key(key), &ser(row)?)?;
+        self.put(TableId::FanIn, &fan::fan_in_key(key), &[])
+    }
+
+    /// Delete the fan row and its `fan_in` row; absent is fine.
+    pub fn remove_fan(&mut self, key: &FanKey) -> Result<(), StoreError> {
+        self.touch_fan(key)?;
+        self.del(TableId::FanOut, &fan::fan_out_key(key))?;
+        self.del(TableId::FanIn, &fan::fan_in_key(key))
+    }
+
+    /// An empty set removes the row. Also keeps `exports_by_target`: a row `(t, key)` exists
+    /// exactly when `t` is in `targets` and `targets` has two or more entries.
     pub fn put_exports(&mut self, key: &ExportKey, targets: &[Id]) -> Result<(), StoreError> {
+        let ek = export_key(key);
+        let old_raw = self.raw_get(TableId::Exports, &ek)?;
+        let old: Vec<Id> = match &old_raw {
+            Some(v) => de(v)?,
+            None => Vec::new(),
+        };
+        self.touched.exports.entry(key.clone()).or_insert(old_raw);
+        let no_rows: &[Id] = &[];
+        let old_rows = if old.len() >= 2 { &old[..] } else { no_rows };
+        let new_rows = if targets.len() >= 2 { targets } else { no_rows };
+        for t in old_rows.iter().filter(|t| !new_rows.contains(t)) {
+            self.del(TableId::ExportsByTarget, &fan::by_target_key(*t, key))?;
+        }
+        for t in new_rows.iter().filter(|t| !old_rows.contains(t)) {
+            self.put(TableId::ExportsByTarget, &fan::by_target_key(*t, key), &[])?;
+        }
         if targets.is_empty() {
-            self.del(TableId::Exports, &export_key(key))
+            self.del(TableId::Exports, &ek)
         } else {
-            self.put(TableId::Exports, &export_key(key), &ser(&targets)?)
+            self.put(TableId::Exports, &ek, &ser(&targets)?)
         }
     }
 
@@ -1567,8 +2011,17 @@ impl WriteTx<'_> {
     /// Remember the rank weight a link had when this transaction first touched it.
     fn touch_link(&mut self, key: &LinkKey) -> Result<(), StoreError> {
         if !self.touched.links.contains_key(key) {
-            let weight = self.link(key)?.map(|r| crate::rank::row_weight(&r));
+            let weight = self.stored_link(key)?.map(|r| crate::rank::row_weight(&r));
             self.touched.links.insert(key.clone(), weight);
+        }
+        Ok(())
+    }
+
+    /// Remember the stored bytes a fan row had when this transaction first touched it.
+    fn touch_fan(&mut self, key: &FanKey) -> Result<(), StoreError> {
+        if !self.touched.fans.contains_key(key) {
+            let was = self.raw_get(TableId::FanOut, &fan::fan_out_key(key))?;
+            self.touched.fans.insert(key.clone(), was);
         }
         Ok(())
     }
@@ -1582,8 +2035,23 @@ impl WriteTx<'_> {
             }
         }
         for (key, was) in &self.touched.links {
-            let now = self.link(key)?.map(|r| crate::rank::row_weight(&r));
+            let now = self.stored_link(key)?.map(|r| crate::rank::row_weight(&r));
             if now != *was {
+                return Ok(true);
+            }
+        }
+        for (key, was) in &self.touched.fans {
+            if self.raw_get(TableId::FanOut, &fan::fan_out_key(key))? != *was {
+                return Ok(true);
+            }
+        }
+        // A changed export key moves the weights of the fan rows that name it.
+        for (key, was) in &self.touched.exports {
+            if self.raw_get(TableId::Exports, &export_key(key))? != *was
+                && !self
+                    .raw_scan_keys(TableId::FanIn, &fan::fan_in_prefix(key))?
+                    .is_empty()
+            {
                 return Ok(true);
             }
         }
@@ -2041,5 +2509,331 @@ mod tests {
         tx.remove_ref_by_key(&key("fn", "a"), rid(1, 0)).unwrap();
         assert!(tx.refs_by_key(&key("fn", "a")).unwrap().is_empty());
         assert_eq!(tx.refs_by_key(&key("fn", "ab")).unwrap(), vec![rid(2, 0)]);
+    }
+
+    fn nid(n: u8) -> Id {
+        Id([n; 16])
+    }
+
+    fn lk(from: u8, kind: &str, to: u8) -> LinkKey {
+        LinkKey {
+            from: nid(from),
+            kind: LinkKind(kind.into()),
+            to: nid(to),
+        }
+    }
+
+    fn fk(from: u8, kind: &str, k: &ExportKey) -> FanKey {
+        FanKey {
+            from: nid(from),
+            kind: LinkKind(kind.into()),
+            key: k.clone(),
+        }
+    }
+
+    fn entry(origin: LinkOrigin, confidence: Confidence, fanout: Option<u32>) -> LinkEntry {
+        LinkEntry {
+            origin,
+            confidence,
+            span: None,
+            provenance: Provenance {
+                repo: "r".into(),
+                path: RelPath::new("a.tx").unwrap(),
+                revision: "0".repeat(40),
+            },
+            fanout,
+            produced_by: None,
+        }
+    }
+
+    fn fan_row(origins: &[u32]) -> LinkRow {
+        LinkRow {
+            entries: origins
+                .iter()
+                .map(|i| entry(LinkOrigin::Ref(*i), Confidence::Inferred, None))
+                .collect(),
+        }
+    }
+
+    fn count(tx: &impl Reader, t: TableId) -> usize {
+        tx.raw_scan(t, &[]).unwrap().len()
+    }
+
+    #[test]
+    fn put_fan_writes_both_tables() {
+        let t = tempfile::tempdir().unwrap();
+        let c = cache(&t);
+        let k = key("ns", "k");
+        let f = fk(1, "calls", &k);
+        let mut tx = c.write().unwrap();
+        tx.put_fan(&f, &fan_row(&[0, 1])).unwrap();
+        assert_eq!(count(&tx, TableId::FanOut), 1);
+        assert_eq!(count(&tx, TableId::FanIn), 1);
+        assert_eq!(tx.fan(&f).unwrap(), Some(fan_row(&[0, 1])));
+        assert_eq!(tx.fans_in(&k).unwrap(), vec![f.clone()]);
+        assert_eq!(
+            tx.fans_out(nid(1), None).unwrap(),
+            vec![(f.clone(), fan_row(&[0, 1]))]
+        );
+        assert_eq!(tx.fans_all().unwrap().len(), 1);
+        tx.remove_fan(&f).unwrap();
+        tx.remove_fan(&f).unwrap(); // absent is fine
+        assert_eq!(count(&tx, TableId::FanOut), 0);
+        assert_eq!(count(&tx, TableId::FanIn), 0);
+    }
+
+    #[test]
+    fn exports_by_target_tracks_multi_target_keys() {
+        let t = tempfile::tempdir().unwrap();
+        let c = cache(&t);
+        let k = key("ns", "k");
+        let mut tx = c.write().unwrap();
+        let keys_of = |tx: &WriteTx, n: u8| tx.fan_keys_of(nid(n)).unwrap();
+        tx.put_exports(&k, &[nid(1)]).unwrap();
+        assert_eq!(count(&tx, TableId::ExportsByTarget), 0);
+        tx.put_exports(&k, &[nid(1), nid(2)]).unwrap();
+        assert_eq!(keys_of(&tx, 1), vec![k.clone()]);
+        assert_eq!(keys_of(&tx, 2), vec![k.clone()]);
+        tx.put_exports(&k, &[nid(1), nid(2), nid(3)]).unwrap();
+        assert_eq!(count(&tx, TableId::ExportsByTarget), 3);
+        tx.put_exports(&k, &[nid(2)]).unwrap();
+        assert_eq!(count(&tx, TableId::ExportsByTarget), 0);
+        tx.put_exports(&k, &[nid(2), nid(5)]).unwrap();
+        tx.put_exports(&k, &[]).unwrap();
+        assert_eq!(count(&tx, TableId::ExportsByTarget), 0);
+        assert!(tx.exports(&k).unwrap().is_empty());
+    }
+
+    /// A fan row on `k` (targets 1..=3) from node 9 plus a stored row to node 2.
+    fn fan_graph(c: &Cache) {
+        let k = key("ns", "k");
+        let mut tx = c.write().unwrap();
+        tx.put_exports(&k, &[nid(1), nid(2), nid(3)]).unwrap();
+        tx.put_fan(&fk(9, "calls", &k), &fan_row(&[4])).unwrap();
+        tx.put_link(
+            &lk(9, "calls", 2),
+            &LinkRow {
+                entries: vec![entry(LinkOrigin::Intra, Confidence::Extracted, None)],
+            },
+        )
+        .unwrap();
+        tx.put_link(
+            &lk(8, "calls", 3),
+            &LinkRow {
+                entries: vec![entry(LinkOrigin::Intra, Confidence::Extracted, None)],
+            },
+        )
+        .unwrap();
+        tx.commit().unwrap();
+    }
+
+    #[test]
+    fn expanded_links_all_sorted_and_merged() {
+        let t = tempfile::tempdir().unwrap();
+        let c = cache(&t);
+        fan_graph(&c);
+        let rx = c.read().unwrap();
+        let all = rx.links_all().unwrap();
+        let keys: Vec<LinkKey> = all.iter().map(|(k, _)| k.clone()).collect();
+        assert_eq!(
+            keys,
+            vec![
+                lk(8, "calls", 3),
+                lk(9, "calls", 1),
+                lk(9, "calls", 2),
+                lk(9, "calls", 3)
+            ]
+        );
+        let merged = &all[2].1;
+        let origins: Vec<LinkOrigin> = merged.entries.iter().map(|e| e.origin).collect();
+        assert_eq!(origins, vec![LinkOrigin::Intra, LinkOrigin::Ref(4)]);
+        assert_eq!(merged.entries[1].fanout, Some(3));
+        assert_eq!(merged.entries[1].confidence, Confidence::Inferred);
+        let out = rx.links_out(nid(9), None).unwrap();
+        assert_eq!(out, all[1..].to_vec());
+        assert_eq!(
+            rx.links_out(nid(9), Some(&LinkKind("other".into())))
+                .unwrap(),
+            vec![]
+        );
+        assert_eq!(rx.in_degrees().unwrap()[&nid(3)], 2);
+    }
+
+    #[test]
+    fn link_point_read_merges_fan_entries() {
+        let t = tempfile::tempdir().unwrap();
+        let c = cache(&t);
+        fan_graph(&c);
+        let rx = c.read().unwrap();
+        let merged = rx.link(&lk(9, "calls", 2)).unwrap().unwrap();
+        assert_eq!(merged.entries.len(), 2);
+        let only_fan = rx.link(&lk(9, "calls", 1)).unwrap().unwrap();
+        assert_eq!(only_fan.entries.len(), 1);
+        assert_eq!(only_fan.entries[0].fanout, Some(3));
+        assert!(rx.link(&lk(9, "calls", 7)).unwrap().is_none());
+        assert!(rx.link(&lk(9, "other", 1)).unwrap().is_none());
+        let stored = rx.link(&lk(8, "calls", 3)).unwrap().unwrap();
+        assert_eq!(stored.entries.len(), 1);
+        assert_eq!(rx.stored_link(&lk(9, "calls", 1)).unwrap(), None);
+    }
+
+    #[test]
+    fn links_in_includes_fan_targets() {
+        let t = tempfile::tempdir().unwrap();
+        let c = cache(&t);
+        fan_graph(&c);
+        let rx = c.read().unwrap();
+        assert_eq!(
+            rx.links_in(nid(3)).unwrap(),
+            vec![lk(8, "calls", 3), lk(9, "calls", 3)]
+        );
+        assert_eq!(rx.links_in(nid(1)).unwrap(), vec![lk(9, "calls", 1)]);
+        // Stored and fan on the same link: one key.
+        assert_eq!(rx.links_in(nid(2)).unwrap(), vec![lk(9, "calls", 2)]);
+        assert_eq!(rx.stored_links_in(nid(1)).unwrap(), vec![]);
+        let many = rx.links_in_many(&[nid(3), nid(1), nid(7)]).unwrap();
+        assert_eq!(many[0], rx.links_in(nid(3)).unwrap());
+        assert_eq!(many[1], rx.links_in(nid(1)).unwrap());
+        assert!(many[2].is_empty());
+    }
+
+    #[test]
+    fn briefs_and_keys_many_see_fan_targets() {
+        let t = tempfile::tempdir().unwrap();
+        let c = cache(&t);
+        fan_graph(&c);
+        let rx = c.read().unwrap();
+        let keys = [
+            lk(9, "calls", 1),
+            lk(9, "calls", 2),
+            lk(8, "calls", 3),
+            lk(9, "calls", 6),
+        ];
+        let briefs = rx.link_briefs_many(&keys).unwrap();
+        let rows: Vec<Option<LinkRow>> = keys.iter().map(|k| rx.link(k).unwrap()).collect();
+        for (b, r) in briefs.iter().zip(&rows) {
+            let want = r.as_ref().map(|r| LinkBrief {
+                confidence: r.entries[0].confidence,
+                weight: crate::rank::row_weight(r),
+            });
+            assert_eq!(*b, want);
+        }
+        assert!(briefs[3].is_none());
+        let kind = LinkKind("calls".into());
+        let one = rx.link_keys_out(nid(9), &kind).unwrap();
+        assert_eq!(
+            one,
+            vec![lk(9, "calls", 1), lk(9, "calls", 2), lk(9, "calls", 3)]
+        );
+        let many = rx
+            .link_keys_out_many(&[nid(9), nid(8), nid(7)], &kind)
+            .unwrap();
+        assert_eq!(many[0], one);
+        assert_eq!(many[1], vec![lk(8, "calls", 3)]);
+        assert!(many[2].is_empty());
+    }
+
+    #[test]
+    fn fanout_derived_from_target_count() {
+        let t = tempfile::tempdir().unwrap();
+        let c = cache(&t);
+        fan_graph(&c);
+        let k = key("ns", "k");
+        let mut tx = c.write().unwrap();
+        assert_eq!(
+            tx.link(&lk(9, "calls", 1)).unwrap().unwrap().entries[0].fanout,
+            Some(3)
+        );
+        tx.put_exports(&k, &[nid(1), nid(2), nid(3), nid(4)])
+            .unwrap();
+        assert_eq!(
+            tx.link(&lk(9, "calls", 1)).unwrap().unwrap().entries[0].fanout,
+            Some(4)
+        );
+        assert!(tx.link(&lk(9, "calls", 4)).unwrap().is_some());
+        let w = tx.link_briefs_many(&[lk(9, "calls", 1)]).unwrap();
+        assert_eq!(w[0].unwrap().weight, 0.25);
+    }
+
+    #[test]
+    fn fan_sources_names_keys_and_counts() {
+        let t = tempfile::tempdir().unwrap();
+        let c = cache(&t);
+        let (a, b) = (key("ns", "a"), key("ns", "b"));
+        let mut tx = c.write().unwrap();
+        tx.put_exports(&a, &[nid(1), nid(2)]).unwrap();
+        tx.put_exports(&b, &[nid(2), nid(3), nid(4)]).unwrap();
+        tx.put_fan(&fk(9, "calls", &a), &fan_row(&[0])).unwrap();
+        tx.put_fan(&fk(9, "calls", &b), &fan_row(&[1])).unwrap();
+        tx.put_link(
+            &lk(9, "calls", 2),
+            &LinkRow {
+                entries: vec![entry(LinkOrigin::Intra, Confidence::Extracted, None)],
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            tx.fan_sources(&lk(9, "calls", 2)).unwrap(),
+            vec![(a.clone(), 2), (b.clone(), 3)]
+        );
+        assert_eq!(tx.fan_sources(&lk(9, "calls", 1)).unwrap(), vec![(a, 2)]);
+        assert_eq!(tx.fan_sources(&lk(9, "calls", 4)).unwrap(), vec![(b, 3)]);
+        assert!(tx.fan_sources(&lk(9, "calls", 6)).unwrap().is_empty());
+        assert!(tx.fan_sources(&lk(9, "other", 2)).unwrap().is_empty());
+    }
+
+    #[test]
+    fn fan_change_invalidates_rank() {
+        let t = tempfile::tempdir().unwrap();
+        let c = cache(&t);
+        fan_graph(&c);
+        let k = key("ns", "k");
+        let mut tx = c.write().unwrap();
+        assert!(!tx.rank_inputs_changed().unwrap());
+        tx.put_fan(&fk(9, "calls", &k), &fan_row(&[4, 5])).unwrap();
+        assert!(tx.rank_inputs_changed().unwrap());
+        drop(tx);
+        let mut tx = c.write().unwrap();
+        tx.remove_fan(&fk(9, "calls", &k)).unwrap();
+        assert!(tx.rank_inputs_changed().unwrap());
+        drop(tx);
+        let mut tx = c.write().unwrap();
+        tx.put_fan(&fk(7, "calls", &k), &fan_row(&[0])).unwrap();
+        assert!(tx.rank_inputs_changed().unwrap());
+    }
+
+    #[test]
+    fn export_change_under_fan_invalidates_rank() {
+        let t = tempfile::tempdir().unwrap();
+        let c = cache(&t);
+        fan_graph(&c);
+        let k = key("ns", "k");
+        let mut tx = c.write().unwrap();
+        tx.put_exports(&k, &[nid(1), nid(2), nid(3), nid(4)])
+            .unwrap();
+        assert!(tx.rank_inputs_changed().unwrap());
+        drop(tx);
+        // A key no fan row names does not.
+        let mut tx = c.write().unwrap();
+        tx.put_exports(&key("ns", "other"), &[nid(1), nid(2)])
+            .unwrap();
+        assert!(!tx.rank_inputs_changed().unwrap());
+    }
+
+    #[test]
+    fn unchanged_fan_keeps_rank() {
+        let t = tempfile::tempdir().unwrap();
+        let c = cache(&t);
+        fan_graph(&c);
+        let k = key("ns", "k");
+        let mut tx = c.write().unwrap();
+        tx.put_fan(&fk(9, "calls", &k), &fan_row(&[4])).unwrap();
+        tx.put_exports(&k, &[nid(1), nid(2)]).unwrap();
+        tx.put_exports(&k, &[nid(1), nid(2), nid(3)]).unwrap();
+        assert!(!tx.rank_inputs_changed().unwrap());
+        // Removed and written back.
+        tx.remove_fan(&fk(9, "calls", &k)).unwrap();
+        tx.put_fan(&fk(9, "calls", &k), &fan_row(&[4])).unwrap();
+        assert!(!tx.rank_inputs_changed().unwrap());
     }
 }

@@ -8,6 +8,7 @@ mod codec;
 pub mod error;
 #[cfg(feature = "failpoints")]
 pub mod failpoint;
+mod fan;
 pub mod guard;
 pub mod inspect;
 pub mod kindex;
@@ -17,7 +18,7 @@ pub mod shard;
 
 pub use cache::ShardKey;
 pub use cache::{
-    ArtifactRow, BindingRow, CACHE_SCHEMA, Cache, ContractRow, ErrorRow, JournalEntry,
+    ArtifactRow, BindingRow, CACHE_SCHEMA, Cache, ContractRow, ErrorRow, FanKey, JournalEntry,
     LEXICON_FIELDS, LexiconStats, LinkBrief, LinkEntry, LinkKey, LinkOrigin, LinkRow, PendingKey,
     Posting, ReadTx, Reader, RefId, Restitch, ShardStat, Snapshot, SymbolBrief, SymbolRow,
     SyncReport, WriteTx,

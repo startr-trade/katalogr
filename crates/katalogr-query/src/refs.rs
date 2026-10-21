@@ -1,10 +1,11 @@
 //! `refs`: everything that points at a symbol, including through re-exports.
 
-use crate::diagnostic::{DIAG_REFS, Diagnostic, WeightTrace};
+use crate::diagnostic::{DIAG_REFS, Diagnostic, FoldTrace, WeightTrace};
+use crate::fold::{Folded, fold};
 use crate::resolve::hit;
 use crate::result::{RefHit, SymbolHit};
 use crate::search::round6;
-use katalogr_model::{Confidence, Id};
+use katalogr_model::{Confidence, ExportKey, Id};
 use katalogr_store::{LinkKey, LinkRow, Reader, StoreError, link_weight, row_weight};
 use std::collections::{BTreeSet, VecDeque};
 
@@ -62,10 +63,23 @@ pub fn refs_traced(
     target: &SymbolHit,
     diag: &mut Diagnostic,
 ) -> Result<Vec<RefHit>, StoreError> {
+    Ok(refs_keyed(tx, target, diag)?
+        .into_iter()
+        .map(|(h, _)| h)
+        .collect())
+}
+
+/// [`refs_traced`], each hit with the link it arrived by (from the referrer to the node the
+/// hit arrived at: the target or a re-exporter).
+pub(crate) fn refs_keyed(
+    tx: &impl Reader,
+    target: &SymbolHit,
+    diag: &mut Diagnostic,
+) -> Result<Vec<(RefHit, LinkKey)>, StoreError> {
     let root = Id::of(&target.name);
     let mut seen = BTreeSet::from([root]);
     let mut queue = VecDeque::from([(root, Vec::<String>::new())]);
-    let mut out: Vec<(RefHit, Id)> = Vec::new();
+    let mut out: Vec<(RefHit, LinkKey)> = Vec::new();
     while let Some((id, via)) = queue.pop_front() {
         for key in tx.links_in(id)? {
             let Some(row) = tx.symbol(key.from)? else {
@@ -80,11 +94,11 @@ pub fn refs_traced(
             out.push((
                 RefHit {
                     confidence: link_confidence(tx, &key)?,
-                    kind: key.kind.0,
+                    kind: key.kind.0.clone(),
                     from,
                     via: via.clone(),
                 },
-                id,
+                key,
             ));
         }
     }
@@ -92,23 +106,61 @@ pub fn refs_traced(
         (a.0.via.len(), &a.0.from.name, &a.0.kind).cmp(&(b.0.via.len(), &b.0.from.name, &b.0.kind))
     });
     if let Some(d) = diag.on() {
-        for (h, to) in out.iter().take(DIAG_REFS) {
-            let key = LinkKey {
-                from: Id::of(&h.from.name),
-                kind: katalogr_model::LinkKind(h.kind.clone()),
-                to: *to,
-            };
-            let to_name = match tx.symbol(*to)? {
+        for (h, key) in out.iter().take(DIAG_REFS) {
+            let to_name = match tx.symbol(key.to)? {
                 Some(row) => hit(&row).name,
                 None => target.name.clone(),
             };
-            if let Some(row) = tx.link(&key)?
-                && let Some(w) = weight_trace(&to_name, &h.from.name, &key, &row)
+            if let Some(row) = tx.link(key)?
+                && let Some(w) = weight_trace(&to_name, &h.from.name, key, &row)
             {
                 d.weights.push(w);
             }
         }
         d.add_omitted("weights", out.len().saturating_sub(DIAG_REFS) as u64);
     }
-    Ok(out.into_iter().map(|(h, _)| h).collect())
+    Ok(out)
+}
+
+/// [`refs_traced`], then folded with `fold_from` (None: no folding, `hits` is the whole
+/// answer). The trace's weights come from the unfolded answer; each fold adds a `FoldTrace`.
+pub fn refs_folded_traced(
+    tx: &impl Reader,
+    target: &SymbolHit,
+    fold_from: Option<u32>,
+    diag: &mut Diagnostic,
+) -> Result<Folded<RefHit>, StoreError> {
+    let keyed = refs_keyed(tx, target, diag)?;
+    let keyed: Vec<(RefHit, Option<LinkKey>)> =
+        keyed.into_iter().map(|(h, k)| (h, Some(k))).collect();
+    let Some(from) = fold_from else {
+        return Ok(Folded {
+            hits: keyed.into_iter().map(|(h, _)| h).collect(),
+            folds: Vec::new(),
+        });
+    };
+    let folded = fold(
+        tx,
+        keyed,
+        from,
+        |h: &RefHit, k: &ExportKey| (h.via.clone(), h.kind.clone(), k.clone()),
+        |h| h.from.clone(),
+        |g, f| {
+            f.via = g.0.clone();
+            f.kind = g.1.clone();
+        },
+    )?;
+    if let Some(d) = diag.on() {
+        for f in folded.folds.iter().take(DIAG_REFS) {
+            d.folds.push(FoldTrace {
+                key: f.key.clone(),
+                kind: f.kind.clone(),
+                targets: f.targets,
+                hits: f.hits,
+                at: f.at,
+            });
+        }
+        d.add_omitted("folds", folded.folds.len().saturating_sub(DIAG_REFS) as u64);
+    }
+    Ok(folded)
 }

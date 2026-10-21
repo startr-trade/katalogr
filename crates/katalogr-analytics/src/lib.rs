@@ -5,6 +5,8 @@ mod coverage;
 mod cycles;
 mod dead;
 pub mod eval;
+#[cfg(test)]
+mod fan_answers;
 mod graph;
 mod hints;
 mod hubs;
