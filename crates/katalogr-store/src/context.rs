@@ -79,6 +79,9 @@ pub struct ContextManifest {
     pub root: Option<Utf8PathBuf>,
     /// The base commit this was copied from.
     pub seed_commit: Option<String>,
+    /// The commit a `Commit` context reads, as full hex; absent for a checkout.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub commit: Option<String>,
 }
 
 impl ContextManifest {

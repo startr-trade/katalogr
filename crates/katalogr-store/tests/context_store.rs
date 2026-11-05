@@ -36,6 +36,7 @@ mod context_store {
             repo: "r".into(),
             root: Some(Utf8PathBuf::from("/work/r")),
             seed_commit: Some("ab".repeat(20)),
+            commit: None,
         }
     }
 

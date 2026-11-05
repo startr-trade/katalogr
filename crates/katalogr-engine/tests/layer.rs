@@ -73,6 +73,7 @@ mod context {
             repo: "r".into(),
             root: None,
             seed_commit: None,
+            commit: None,
         };
         seed_layer(&base, &l, &m, dl()).unwrap();
         engine(l, &s.work)

@@ -2,13 +2,51 @@
 
 use crate::{Consistency, DistError, Katalogr, Options, Report};
 use camino::Utf8Path;
-use katalogr_engine::base::{branch_tip, default_branch, plan_base_advance};
+use katalogr_engine::base::{branch_tip, default_branch, plan_base_advance, resolve_commit};
 use katalogr_engine::queue::Inbox;
 use katalogr_engine::queue::lock::lock_until;
 use katalogr_engine::{FileSource, NewEvent, scan::ScanError};
 use katalogr_store::{CACHE_SCHEMA, Cache, CacheInspection};
 use katalogr_store::{ContextId, ContextKind, ContextManifest, ProjectDir, Reader, seed_layer};
 use std::time::Instant;
+
+/// What `context list` shows about one context. No absolute path is ever part of it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ContextInfo {
+    pub id: String,
+    /// `base`, `checkout` or `commit`.
+    pub kind: String,
+    pub repo: Option<String>,
+    /// The commit a `commit` context reads.
+    pub commit: Option<String>,
+    /// The base commit a layer was copied from.
+    pub seed_commit: Option<String>,
+    /// Bytes of the layer's directory.
+    pub bytes: u64,
+    /// Seconds since the epoch of the last use; `None` for the base.
+    pub last_used: Option<u64>,
+    /// This invocation's own context.
+    pub current: bool,
+}
+
+/// `contexts.max` when the project does not set it.
+pub const CONTEXTS_MAX_DEFAULT: usize = 8;
+
+fn dir_bytes(dir: &Utf8Path) -> u64 {
+    let mut total = 0;
+    if let Ok(rd) = std::fs::read_dir(dir) {
+        for e in rd.flatten() {
+            if let Ok(m) = e.metadata() {
+                total += if m.is_dir() {
+                    Utf8Path::from_path(&e.path()).map_or(0, dir_bytes)
+                } else {
+                    m.len()
+                };
+            }
+        }
+    }
+    total
+}
 
 /// Which context a command reads and writes.
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
@@ -39,6 +77,187 @@ impl ContextChoice {
 impl Katalogr {
     pub fn set_context(&mut self, c: ContextChoice) {
         self.context = c;
+    }
+
+    /// The repo of the nearest marker.
+    pub fn current_repo(&self) -> Result<&str, DistError> {
+        self.current().map(|(r, _)| r)
+    }
+
+    /// `contexts.max` of the project settings.
+    pub fn contexts_max(&self) -> usize {
+        self.project
+            .config()
+            .settings
+            .get("contexts.max")
+            .and_then(|v| v.as_u64())
+            .map_or(CONTEXTS_MAX_DEFAULT, |n| n as usize)
+    }
+
+    /// The id of this invocation's own checkout context, when it has one.
+    fn own_id(&self) -> Option<ContextId> {
+        let root = self.repo.as_deref().and_then(|r| self.roots.get(r))?;
+        if !root.join(".git").exists() {
+            return None;
+        }
+        Some(ContextId::for_checkout(&root.canonicalize_utf8().ok()?))
+    }
+
+    fn info_of(&self, m: &ContextManifest, dir: &ProjectDir) -> ContextInfo {
+        let used = std::fs::metadata(dir.root().join(".used"))
+            .and_then(|md| md.modified())
+            .ok()
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|d| d.as_secs());
+        let chosen = match &self.context {
+            ContextChoice::Named(id) => Some(id.clone()),
+            ContextChoice::Current => self.own_id(),
+            ContextChoice::Base => None,
+        };
+        ContextInfo {
+            id: m.id.to_string(),
+            kind: match m.kind {
+                ContextKind::Checkout => "checkout",
+                ContextKind::Commit => "commit",
+            }
+            .to_string(),
+            repo: Some(m.repo.clone()),
+            commit: m.commit.clone(),
+            seed_commit: m.seed_commit.clone(),
+            bytes: dir_bytes(dir.root()),
+            last_used: used,
+            current: chosen.as_ref() == Some(&m.id),
+        }
+    }
+
+    /// The base, then every layer, sorted by id. Unreadable layers are left out.
+    pub fn context_list(&self) -> Result<Vec<ContextInfo>, DistError> {
+        let base_current = matches!(self.context, ContextChoice::Base)
+            || (matches!(self.context, ContextChoice::Current) && self.own_id().is_none());
+        let mut out = vec![ContextInfo {
+            id: ContextId::BASE.to_string(),
+            kind: "base".to_string(),
+            repo: None,
+            commit: None,
+            seed_commit: None,
+            bytes: dir_bytes(&self.project.cache_dir())
+                .saturating_sub(dir_bytes(&self.project.cache_dir().join("contexts"))),
+            last_used: None,
+            current: base_current,
+        }];
+        for m in self.project.contexts()? {
+            let dir = self.project.layer(&m.id);
+            out.push(self.info_of(&m, &dir));
+        }
+        Ok(out)
+    }
+
+    /// A context that reads `commit` of `repo` from git objects, with no checkout. Built and
+    /// ready when this returns.
+    pub fn context_add_commit(
+        &self,
+        repo: &str,
+        commit: &str,
+        o: &Options,
+    ) -> Result<ContextInfo, DistError> {
+        let timeout = o.timeout()?;
+        let deadline = Instant::now() + timeout;
+        let root = self
+            .roots
+            .get(repo)
+            .ok_or_else(|| crate::unknown_root(repo))?;
+        let full = resolve_commit(root.as_std_path(), commit)?;
+        let id = ContextId::for_commit(repo, &full);
+        let layer = self.project.layer(&id);
+        if !layer.root().join(ContextManifest::FILE).is_file() {
+            let m = ContextManifest {
+                format: ContextManifest::FORMAT,
+                id: id.clone(),
+                kind: ContextKind::Commit,
+                repo: repo.to_string(),
+                root: None,
+                seed_commit: None,
+                commit: Some(full),
+            };
+            self.evict_for_seed(&id);
+            self.seed_from(&layer, &m, deadline)?;
+        }
+        let layer = self.current_layer(layer, deadline)?;
+        let engine = self.engine_on(layer.clone(), deadline)?;
+        self.read(&engine, Consistency::WaitAll, timeout, 0, Vec::new())?;
+        drop(engine);
+        let m = ContextManifest::read(layer.root())?;
+        Ok(self.info_of(&m, &layer))
+    }
+
+    /// Remove contexts until at most `keep` remain: those whose checkout no longer exists
+    /// first, then the least recently used. The base, this invocation's own context and any
+    /// context whose processor lock is held are never removed. Returns the removed ids.
+    pub fn context_prune(&self, keep: usize) -> Result<Vec<ContextId>, DistError> {
+        self.prune_keeping(keep, None)
+    }
+
+    fn prune_keeping(
+        &self,
+        keep: usize,
+        also_keep: Option<&ContextId>,
+    ) -> Result<Vec<ContextId>, DistError> {
+        let own = self.own_id();
+        let named = match &self.context {
+            ContextChoice::Named(id) => Some(id.clone()),
+            _ => None,
+        };
+        let all = self.project.contexts()?;
+        let mut excess = all.len().saturating_sub(keep);
+        // Removal order: missing root first, then oldest use.
+        let mut order: Vec<(bool, u64, ContextManifest)> = all
+            .into_iter()
+            .map(|m| {
+                let missing = m.root.as_ref().is_some_and(|r| !r.exists());
+                let used = std::fs::metadata(self.project.layer(&m.id).root().join(".used"))
+                    .and_then(|md| md.modified())
+                    .ok()
+                    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                    .map_or(0, |d| d.as_secs());
+                (!missing, used, m)
+            })
+            .collect();
+        order.sort_by(|a, b| (a.0, a.1, &a.2.id).cmp(&(b.0, b.1, &b.2.id)));
+        let mut removed = Vec::new();
+        for (_, _, m) in order {
+            if excess == 0 {
+                break;
+            }
+            if Some(&m.id) == own.as_ref()
+                || Some(&m.id) == named.as_ref()
+                || Some(&m.id) == also_keep
+            {
+                continue;
+            }
+            let layer = self.project.layer(&m.id);
+            // A held lock means a process is using it.
+            let Some(lock) = katalogr_engine::queue::lock::try_lock(&layer.cache_dir())? else {
+                continue;
+            };
+            std::fs::remove_dir_all(layer.root()).map_err(|e| DistError::io(layer.root(), e))?;
+            drop(lock);
+            removed.push(m.id);
+            excess -= 1;
+        }
+        Ok(removed)
+    }
+
+    /// Make room before a seed: past `contexts.max`, the oldest go.
+    fn evict_for_seed(&self, new: &ContextId) {
+        let max = self.contexts_max().max(1);
+        if let Ok(removed) = self.prune_keeping(max - 1, Some(new))
+            && !removed.is_empty()
+        {
+            self.note(format!(
+                "contexts.max {max}: removed {} context(s) to make room",
+                removed.len()
+            ));
+        }
     }
 
     pub(crate) fn take_notes(&self) -> Vec<String> {
@@ -126,7 +345,9 @@ impl Katalogr {
             repo: repo.to_string(),
             root: Some(root.to_owned()),
             seed_commit: None,
+            commit: None,
         };
+        self.evict_for_seed(id);
         self.seed_from(layer, &m, deadline)
     }
 

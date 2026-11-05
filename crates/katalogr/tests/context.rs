@@ -352,4 +352,156 @@ mod context {
         assert!(!layer.join("shards/app/junk.kshard.json").exists());
         assert_eq!(layers(&p).len(), 1);
     }
+
+    /// A second checkout of the same repo, with its marker, as a worktree on a new branch.
+    fn add_worktree(p: &P, name: &str) -> PathBuf {
+        let wt = p.repo.with_file_name(name);
+        git(
+            &p.repo,
+            &["worktree", "add", "-q", wt.to_str().unwrap(), "-b", name],
+        );
+        std::fs::copy(p.repo.join(".katalogr"), wt.join(".katalogr")).unwrap();
+        wt
+    }
+
+    fn layer_of(wt: &Path) -> String {
+        let canon = std::fs::canonicalize(wt).unwrap();
+        katalogr_store::ContextId::for_checkout(camino::Utf8Path::from_path(&canon).unwrap())
+            .to_string()
+    }
+
+    fn set_used(layer: &Path, secs_ago: u64) {
+        let f = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(layer.join(".used"))
+            .unwrap();
+        f.set_modified(std::time::SystemTime::now() - std::time::Duration::from_secs(secs_ago))
+            .unwrap();
+    }
+
+    #[test]
+    fn commit_context_reads_commit() {
+        let p = based();
+        let c1 = git(&p.repo, &["rev-parse", "HEAD"]);
+        std::fs::write(p.repo.join("c.tx"), "sym fn GammaNew\n").unwrap();
+        git(&p.repo, &["commit", "-qam", "c2"]);
+        // The disk and the checkout move on; the commit context does not.
+        std::fs::write(p.repo.join("c.tx"), "sym fn GammaDirty\n").unwrap();
+        let k = katalogr(&p.repo, ContextChoice::Current);
+        let info = k
+            .context_add_commit("app", &c1, &Options::default())
+            .unwrap();
+        assert_eq!(info.kind, "commit");
+        assert_eq!(info.commit.as_deref(), Some(c1.as_str()));
+        let id = katalogr_store::ContextId::new(&info.id).unwrap();
+        assert!(has(&p.repo, ContextChoice::Named(id.clone()), "Gamma"));
+        assert!(!has(&p.repo, ContextChoice::Named(id.clone()), "GammaNew"));
+        assert!(!has(&p.repo, ContextChoice::Named(id), "GammaDirty"));
+        // Adding it again finds the same context.
+        let again = k
+            .context_add_commit("app", &c1[..10], &Options::default())
+            .unwrap();
+        assert_eq!(again.id, info.id);
+        assert_eq!(
+            k.context_list()
+                .unwrap()
+                .iter()
+                .filter(|i| i.kind == "commit")
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn prune_removes_missing_roots_first() {
+        let p = based();
+        let (w1, w2) = (add_worktree(&p, "wt1"), add_worktree(&p, "wt2"));
+        for at in [&p.repo, &w1, &w2] {
+            assert!(has(at, ContextChoice::Current, "Alpha"));
+        }
+        let (id1, id2) = (layer_of(&w1), layer_of(&w2));
+        let (l1, l2) = (layer_root(&p).join(&id1), layer_root(&p).join(&id2));
+        // wt1 was used longest ago, wt2 more recently; but wt2's checkout is gone.
+        set_used(&l1, 5000);
+        set_used(&l2, 10);
+        std::fs::remove_dir_all(&w2).unwrap();
+        let k = katalogr(&p.repo, ContextChoice::Current);
+        assert_eq!(k.context_list().unwrap().len(), 4);
+        let removed = k.context_prune(2).unwrap();
+        assert_eq!(
+            removed.iter().map(|i| i.to_string()).collect::<Vec<_>>(),
+            [id2]
+        );
+        assert!(l1.exists() && !l2.exists());
+        // Next the least recently used; never the current context.
+        let removed = k.context_prune(0).unwrap();
+        assert_eq!(
+            removed.iter().map(|i| i.to_string()).collect::<Vec<_>>(),
+            [id1]
+        );
+        let left = k.context_list().unwrap();
+        assert_eq!(left.len(), 2, "{left:?}");
+        assert!(left.iter().any(|i| i.id == "base"));
+        assert!(left.iter().any(|i| i.current));
+    }
+
+    #[test]
+    fn prune_skips_locked() {
+        use fs4::FileExt;
+        let p = based();
+        let (w1, w2) = (add_worktree(&p, "wt1"), add_worktree(&p, "wt2"));
+        for at in [&p.repo, &w1, &w2] {
+            assert!(has(at, ContextChoice::Current, "Alpha"));
+        }
+        let (l1, l2) = (
+            layer_root(&p).join(layer_of(&w1)),
+            layer_root(&p).join(layer_of(&w2)),
+        );
+        set_used(&l1, 9000);
+        set_used(&l2, 100);
+        // A process is using the oldest one.
+        let held = std::fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .write(true)
+            .open(l1.join(".cache/processor.lock"))
+            .unwrap();
+        FileExt::try_lock(&held).unwrap();
+        let k = katalogr(&p.repo, ContextChoice::Current);
+        let removed = k.context_prune(0).unwrap();
+        assert_eq!(
+            removed.iter().map(|i| i.to_string()).collect::<Vec<_>>(),
+            [layer_of(&w2)]
+        );
+        assert!(l1.exists() && !l2.exists());
+    }
+
+    #[test]
+    fn seeding_past_contexts_max_removes_the_oldest() {
+        let p = based();
+        let w1 = add_worktree(&p, "wt1");
+        assert!(has(&p.repo, ContextChoice::Current, "Alpha"));
+        assert!(has(&w1, ContextChoice::Current, "Alpha"));
+        let l_main = layers(&p)
+            .into_iter()
+            .find(|l| !l.ends_with(layer_of(&w1)))
+            .unwrap();
+        set_used(&l_main, 9000);
+        // Room for two: a third checkout makes the oldest (not itself) go.
+        let cfg = p.kx.join("projects/demo/config.yaml");
+        let text = std::fs::read_to_string(&cfg).unwrap();
+        let mut kept: Vec<&str> = text
+            .lines()
+            .filter(|l| !l.starts_with("settings:"))
+            .collect();
+        kept.push("settings:");
+        kept.push("  contexts.max: 2");
+        std::fs::write(&cfg, kept.join("\n") + "\n").unwrap();
+        let w2 = add_worktree(&p, "wt2");
+        assert!(has(&w2, ContextChoice::Current, "Alpha"));
+        assert_eq!(layers(&p).len(), 2);
+        assert!(!l_main.exists());
+    }
 }

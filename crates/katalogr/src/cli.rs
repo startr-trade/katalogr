@@ -381,6 +381,11 @@ pub enum Command {
         #[arg(long, value_name = "KIND")]
         kind: Vec<String>,
     },
+    /// List, add and remove contexts: the base, each checkout's own, and pinned commits.
+    Context {
+        #[command(subcommand)]
+        action: ContextAction,
+    },
     /// Show the profiles in force, or print a built-in profile so it can be copied.
     Profiles {
         #[command(subcommand)]
@@ -438,6 +443,33 @@ pub enum EvalAction {
         /// The metric to order combinations by.
         #[arg(long, default_value = "retrieval.ndcg@10", value_name = "METRIC")]
         objective: String,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum ContextAction {
+    /// List the base and every context on this machine (no paths).
+    List,
+    /// Show one context by id.
+    Show {
+        /// An id from `context list`, or `base`.
+        id: String,
+    },
+    /// Add a context that reads a commit from git objects, with no checkout.
+    Add {
+        /// The commit (or any revision) to read.
+        #[arg(long, value_name = "REV")]
+        commit: String,
+        /// The repo; default: the current one.
+        #[arg(long, value_name = "NAME")]
+        repo: Option<String>,
+    },
+    /// Remove contexts down to `contexts.max` (default 8): missing checkouts first, then the
+    /// least recently used. Never the base, the current context or one in use.
+    Prune {
+        /// Keep at most this many.
+        #[arg(long, value_name = "N")]
+        keep: Option<usize>,
     },
 }
 

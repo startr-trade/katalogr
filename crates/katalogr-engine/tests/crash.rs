@@ -255,6 +255,7 @@ fn seed_manifest(id: &katalogr_store::ContextId) -> katalogr_store::ContextManif
         repo: "r".into(),
         root: None,
         seed_commit: None,
+        commit: None,
     }
 }
 

@@ -138,4 +138,43 @@ mod cli {
             assert_eq!(code, 2, "{bad}: {out}{err}");
         }
     }
+
+    #[test]
+    fn context_list_no_absolute_paths() {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = project(tmp.path(), &[("a.tx", "sym fn A\n")]);
+        ok(&repo, &["index"]);
+        let c1 = {
+            let out = Command::new("git")
+                .current_dir(&repo)
+                .args(["rev-parse", "HEAD"])
+                .output()
+                .unwrap();
+            String::from_utf8(out.stdout).unwrap().trim().to_string()
+        };
+        ok(&repo, &["context", "add", "--commit", &c1]);
+        for args in [&["--json", "context", "list"][..], &["context", "list"][..]] {
+            let out = ok(&repo, args);
+            let root = tmp.path().to_str().unwrap();
+            assert!(!out.contains(root), "{out}");
+            assert!(!out.contains("/tmp/"), "{out}");
+        }
+        let v: serde_json::Value =
+            serde_json::from_str(&ok(&repo, &["--json", "context", "list"])).unwrap();
+        let kinds: Vec<&str> = v["result"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|i| i["kind"].as_str().unwrap())
+            .collect();
+        assert!(kinds.contains(&"base") && kinds.contains(&"commit"));
+        for i in v["result"].as_array().unwrap() {
+            assert!(i.get("root").is_none());
+        }
+        // Prune and show work from the command line.
+        let id = v["result"][0]["id"].as_str().unwrap().to_string();
+        assert!(ok(&repo, &["context", "show", &id]).contains("base"));
+        assert_eq!(run(&repo, &["context", "show", "w-nosuch"]).0, 2);
+        ok(&repo, &["context", "prune", "--keep", "5"]);
+    }
 }

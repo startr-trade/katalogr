@@ -100,3 +100,19 @@ pub fn head_is_branch(repo_root: &Path, branch: &str) -> bool {
             .is_some_and(|n| n.as_bstr() == format!("refs/heads/{branch}").as_bytes())
     })
 }
+
+/// The full commit id a revision names in the repo, as lower-case hex.
+pub fn resolve_commit(repo_root: &Path, rev: &str) -> Result<String, ScanError> {
+    let repo = open(repo_root)?;
+    let bad = |e: &dyn std::fmt::Display| ScanError::BadRevision {
+        rev: rev.to_string(),
+        message: e.to_string(),
+    };
+    let id = repo.rev_parse_single(rev).map_err(|e| bad(&e))?;
+    let commit = id
+        .object()
+        .map_err(|e| bad(&e))?
+        .peel_to_commit()
+        .map_err(|e| bad(&e))?;
+    Ok(commit.id().to_hex().to_string())
+}

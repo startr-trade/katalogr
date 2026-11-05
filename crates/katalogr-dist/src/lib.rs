@@ -497,6 +497,20 @@ impl Katalogr {
     /// An engine over `dir`: the base, or one of its layers.
     fn engine_on(&self, dir: ProjectDir, deadline: Instant) -> Result<Engine, DistError> {
         let mut engine = Engine::open(dir, build_registry(), self.roots.clone(), deadline)?;
+        // A commit context reads git objects at its commit, never the disk.
+        if engine.dir().is_layer()
+            && let Ok(m) = katalogr_store::ContextManifest::read(engine.dir().root())
+            && m.kind == katalogr_store::ContextKind::Commit
+            && let (Some(commit), Some(root)) = (m.commit.clone(), self.roots.get(&m.repo))
+        {
+            engine.set_source(
+                &m.repo,
+                katalogr_engine::FileSource::Commit {
+                    repo_root: root.clone(),
+                    commit,
+                },
+            );
+        }
         engine.set_builtin_profiles(builtin_profiles());
         engine.set_parallelism(resolve_parallelism(
             &self.project.config().settings,
