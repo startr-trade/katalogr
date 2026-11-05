@@ -1,0 +1,137 @@
+//! A synthetic graph builder shared by the `doc_impact` tests and benchmark.
+#![allow(dead_code)]
+
+use camino::Utf8PathBuf;
+use katalogr_model::{
+    ArtifactName, Confidence, Fragment, Id, LinkKind, Name, Provenance, RelPath, Segment, Span,
+    SymbolName,
+};
+use katalogr_store::{
+    ArtifactRow, Cache, Kindex, LinkEntry, LinkKey, LinkOrigin, LinkRow, ProjectConfig,
+    ProjectName, RepoConfig, Restitch, StoreError, SymbolRow, WriteTx,
+};
+use std::time::{Duration, Instant};
+
+struct NoShards;
+
+impl Restitch for NoShards {
+    fn replace_fragment(&self, _: &mut WriteTx, _: Fragment) -> Result<(), StoreError> {
+        Ok(())
+    }
+    fn remove_artifact(&self, _: &mut WriteTx, _: &ArtifactName) -> Result<(), StoreError> {
+        Ok(())
+    }
+}
+
+pub fn open(tmp: &tempfile::TempDir, repos: &[&str]) -> Cache {
+    let root = Utf8PathBuf::from_path_buf(tmp.path().join("kx")).unwrap();
+    let dir = Kindex::init(&root)
+        .unwrap()
+        .create_project(
+            &ProjectName::new("docs").unwrap(),
+            ProjectConfig {
+                repos: repos.iter().map(|r| RepoConfig::new(r)).collect(),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    Cache::open_or_rebuild(&dir, &NoShards, Instant::now() + Duration::from_secs(60)).unwrap()
+}
+
+pub fn provenance(repo: &str, path: &RelPath) -> Provenance {
+    Provenance {
+        repo: repo.into(),
+        path: path.clone(),
+        revision: "ce013625030ba8dba906f756967f9e9ca394464a".into(),
+    }
+}
+
+pub fn span(a: u32, b: u32) -> Span {
+    Span {
+        start_line: a,
+        start_col: 1,
+        end_line: b,
+        end_col: 1,
+    }
+}
+
+/// Add an artifact with the given `(name, first line, last line)` symbols; returns the artifact
+/// id and the symbol ids in order.
+pub fn artifact(
+    tx: &mut WriteTx,
+    repo: &str,
+    path: &str,
+    syms: &[(&str, u32, u32)],
+) -> (Id, Vec<Id>) {
+    let rel = RelPath::new(path).unwrap();
+    let name = ArtifactName {
+        repo: repo.into(),
+        path: rel.clone(),
+    };
+    let aid = name.id();
+    let mut ids = Vec::new();
+    for (n, a, b) in syms {
+        let sn = SymbolName {
+            artifact: name.clone(),
+            segments: vec![Segment {
+                kind: "fn".into(),
+                name: (*n).into(),
+            }],
+            ordinal: 1,
+        };
+        let id = sn.id();
+        tx.put_symbol(
+            id,
+            &SymbolRow {
+                name: sn,
+                artifact: aid,
+                kind: "fn".into(),
+                span: span(*a, *b),
+                facts: Default::default(),
+            },
+        )
+        .unwrap();
+        ids.push(id);
+    }
+    let mut sorted = ids.clone();
+    sorted.sort();
+    tx.put_artifact(
+        aid,
+        &ArtifactRow {
+            name,
+            extension: "tx".into(),
+            provenance: provenance(repo, &rel),
+            facts: Default::default(),
+            symbols: sorted,
+            exports: Vec::new(),
+            refs: Vec::new(),
+        },
+    )
+    .unwrap();
+    (aid, ids)
+}
+
+pub fn link_row(repo: &str, path: &str) -> LinkRow {
+    LinkRow {
+        entries: vec![LinkEntry {
+            origin: LinkOrigin::Intra,
+            confidence: Confidence::Extracted,
+            span: Some(span(1, 1)),
+            provenance: provenance(repo, &RelPath::new(path).unwrap()),
+            fanout: None,
+            produced_by: None,
+        }],
+    }
+}
+
+pub fn link(tx: &mut WriteTx, repo: &str, path: &str, from: Id, kind: &str, to: Id) {
+    tx.put_link(
+        &LinkKey {
+            from,
+            kind: LinkKind(kind.into()),
+            to,
+        },
+        &link_row(repo, path),
+    )
+    .unwrap();
+}
