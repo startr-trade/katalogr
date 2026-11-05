@@ -1,10 +1,11 @@
 //! `katalogr render <op> [args] [--format F]`, plus the doc-tool modes `mdbook` and `filter`.
 
 use clap::ValueEnum;
-use katalogr_dist::DistError;
+use katalogr_dist::query::{Partial, cap};
 use katalogr_dist::render::{
     ViewGraph, ViewSpec, to_dot, to_graphml, to_mermaid, to_structurizr, to_svg,
 };
+use katalogr_dist::{DistError, Outcome, Reply, ViewBytes};
 
 use crate::cli::{Cli, RenderAction, RenderFormat};
 use crate::cmd::{options, render_doc, resolve};
@@ -32,8 +33,52 @@ pub fn run(
     }
     let (format, words) = take_format(format, words)?;
     let spec = ViewSpec::parse(&line_of(&words)).map_err(|e| DistError::Usage(e.to_string()))?;
-    let reply = resolve(cli)?.view_graph(&spec, &options(cli))?;
-    render::view(cli, reply, |g| draw(g, format))
+    // The graph comes from the stored view when there is one; a format is never a new
+    // computation (FEAT-088).
+    let reply = resolve(cli)?.view(&spec, &options(cli))?;
+    render::view(cli, graph_reply(&spec, reply)?, |g| draw(g, format))
+}
+
+/// The reply of `Katalogr::view` as a reply holding its graph. A cut view is marked partial
+/// whether it was computed or read back.
+fn graph_reply(spec: &ViewSpec, reply: Reply<ViewBytes>) -> Result<Reply<ViewGraph>, DistError> {
+    let Reply {
+        outcome,
+        report,
+        diagnostic,
+        mut partial,
+        folded,
+    } = reply;
+    let outcome = match outcome {
+        Outcome::Found(vb) => {
+            let answer: serde_json::Value = serde_json::from_slice(&vb.body)
+                .map_err(|e| DistError::Usage(format!("stored view: {e}")))?;
+            let g: ViewGraph = serde_json::from_value(answer["graph"].clone())
+                .map_err(|e| DistError::Usage(format!("stored view: {e}")))?;
+            if partial.is_empty() && g.total > g.shown {
+                let cap = ["max-nodes", "limit"]
+                    .iter()
+                    .find_map(|k| spec.args.get(*k))
+                    .and_then(|v| v.parse::<u64>().ok())
+                    .unwrap_or(g.shown);
+                partial.push(Partial::new(cap::LIMIT, cap, g.shown, Some(g.total)));
+            }
+            Outcome::Found(g)
+        }
+        Outcome::Ambiguous(c) => Outcome::Ambiguous(c),
+        Outcome::NoMatch(m) => Outcome::NoMatch(m),
+        Outcome::StaleFile(m) => Outcome::StaleFile(m),
+        Outcome::PositionUnavailable { wanted, available } => {
+            Outcome::PositionUnavailable { wanted, available }
+        }
+    };
+    Ok(Reply {
+        outcome,
+        report,
+        diagnostic,
+        partial,
+        folded,
+    })
 }
 
 /// A `--format F` or `--format=F` among the view's words: the words after the op are taken
@@ -97,13 +142,14 @@ fn draw(g: &ViewGraph, format: RenderFormat) -> Result<String, DistError> {
 /// Global flags that take a value.
 const VALUE_FLAGS: &[&str] = &[
     "--kindex",
+    "--at",
     "--project",
     "--consistency",
     "--timeout",
     "--budget",
 ];
 
-/// `render` takes its view's words whole, so a global flag written after the op (for example
+/// `render` and `view` take their view's words whole, so a global flag written after the op (for example
 /// `render structure --json`) would be read as one of the view's flags. This moves the global
 /// flags after `render` to just before it; anything else is left as it was.
 pub fn hoist_globals(args: Vec<std::ffi::OsString>) -> Vec<std::ffi::OsString> {
@@ -118,7 +164,7 @@ pub fn hoist_globals(args: Vec<std::ffi::OsString>) -> Vec<std::ffi::OsString> {
         } else if a.starts_with('-') {
             i += 1;
         } else {
-            if a == "render" {
+            if a == "render" || a == "view" {
                 at = Some(i);
             }
             break;

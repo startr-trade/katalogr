@@ -33,6 +33,9 @@ pub struct JsonAnswer {
     /// `diagnostic:` lines the CLI prints on stderr when an answer has no envelope to carry
     /// the trace (no match, stale file).
     pub diagnostic: Vec<String>,
+    /// Extra response headers of the API; the CLI and MCP ignore them (`X-Katalogr-View` on a
+    /// generated view).
+    pub headers: Vec<(&'static str, String)>,
 }
 
 impl JsonAnswer {
@@ -43,6 +46,7 @@ impl JsonAnswer {
             message: None,
             warnings: Vec::new(),
             diagnostic: Vec::new(),
+            headers: Vec::new(),
         }
     }
 }
@@ -518,6 +522,23 @@ pub fn view(
             found(exit, &reply.report, line(&e))
         }
         other => other_outcome(exit, &reply.report, other, budget_tokens, None),
+    }
+}
+
+/// A generated view (FEAT-088): the bytes of the answer as they are stored and sent, not
+/// wrapped in an envelope. Ambiguity and no match answer as for `callers`.
+pub fn view_answer(reply: Reply<katalogr_dist::ViewBytes>) -> JsonAnswer {
+    let exit = exit_for(&reply);
+    match reply.outcome {
+        Outcome::Found(b) => {
+            let path = if b.from_store { "hit" } else { "miss" };
+            let body = String::from_utf8(b.body).expect("a view answer is UTF-8 JSON");
+            JsonAnswer {
+                headers: vec![("X-Katalogr-View", path.to_string())],
+                ..found(exit, &reply.report, body)
+            }
+        }
+        other => other_outcome(exit, &reply.report, other, None, None),
     }
 }
 

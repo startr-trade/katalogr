@@ -29,6 +29,7 @@ fn schema_text(name: &str) -> Option<&'static str> {
         "search" => include_str!("../../../../schema/v1/search.schema.json"),
         "show" => include_str!("../../../../schema/v1/show.schema.json"),
         "tests" => include_str!("../../../../schema/v1/tests.schema.json"),
+        "view" => include_str!("../../../../schema/v1/view.schema.json"),
         "why" => include_str!("../../../../schema/v1/why.schema.json"),
         _ => return None,
     })

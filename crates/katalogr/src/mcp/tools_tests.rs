@@ -14,6 +14,7 @@ fn ans(exit: ExitCode, stdout: Option<&str>, message: Option<&str>) -> JsonAnswe
         message: message.map(str::to_string),
         warnings: Vec::new(),
         diagnostic: Vec::new(),
+        headers: Vec::new(),
     }
 }
 

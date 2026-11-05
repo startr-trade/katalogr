@@ -1209,4 +1209,18 @@ mod archtest {
         }
         parts.join(".").parse().expect("semver")
     }
+
+    /// FEAT-088 R-13. Views are answered through the query layer and their own store: the
+    /// sources of `views.rs` and `view_store.rs` read no shard, so removing shards (FEAT-094)
+    /// does not touch them.
+    #[test]
+    fn views_use_query_layer() {
+        let src = workspace_root().join("crates/katalogr-dist/src");
+        for file in ["views.rs", "view_store.rs"] {
+            let text = std::fs::read_to_string(src.join(file)).expect("read source");
+            for banned in ["read_shard", "shard_path", "shard::"] {
+                assert!(!text.contains(banned), "{file} uses `{banned}`");
+            }
+        }
+    }
 }

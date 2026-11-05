@@ -1069,6 +1069,33 @@ pub fn view(
     Ok(code)
 }
 
+/// Render a generated view (FEAT-088): the answer's JSON with `--json`, else its Mermaid on
+/// stdout. The view ID of an exact answer goes to stderr, so stdout stays a diagram.
+pub fn view_bytes(cli: &Cli, reply: Reply<katalogr_dist::ViewBytes>) -> ExitCode {
+    if cli.json {
+        return emit(&json::view_answer(reply));
+    }
+    let code = exit_for(&reply);
+    match reply.outcome {
+        Outcome::Found(b) => {
+            let v: serde_json::Value =
+                serde_json::from_slice(&b.body).unwrap_or(serde_json::Value::Null);
+            note_stale(&reply.report);
+            let text = v["mermaid"].as_str().unwrap_or_default();
+            print!("{text}");
+            if !text.ends_with('\n') {
+                println!();
+            }
+            match v["view_id"].as_str() {
+                Some(id) => eprintln!("katalogr: view {id}"),
+                None => eprintln!("katalogr: view not exact: it has no id and is not stored"),
+            }
+        }
+        other => other_outcomes(cli, &reply.report, other, None),
+    }
+    code
+}
+
 /// Render an insight report as text or a JSON envelope. The budget trims whole `items`; the
 /// summary stays and the envelope records the truncation.
 pub fn insight<R>(cli: &Cli, reply: Reply<R>, command: &str, shape: &Shape<R>) -> ExitCode
