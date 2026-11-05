@@ -30,4 +30,5 @@ tempfile.workspace = true
 
 [dev-dependencies]
 katalogr-query.workspace = true
+redb.workspace = true
 proptest.workspace = true

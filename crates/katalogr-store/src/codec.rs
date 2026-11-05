@@ -309,6 +309,65 @@ pub(crate) fn link_from_wire(w: WireLinkRow, res: &dyn Resolver) -> Result<LinkR
     Ok(LinkRow { entries })
 }
 
+/// The provenance id of an encoded artifact row, without decoding the rest.
+pub(crate) fn artifact_pid(b: &[u8]) -> Result<Pid, StoreError> {
+    #[derive(Deserialize)]
+    struct Head {
+        _name: ArtifactName,
+        _extension: Vid,
+        prov: Pid,
+    }
+    let (h, _): (Head, _) =
+        postcard::take_from_bytes(b).map_err(|e| StoreError::Row(e.to_string()))?;
+    Ok(h.prov)
+}
+
+/// The provenance ids of the entries of an encoded link row.
+pub(crate) fn link_pids(b: &[u8]) -> Result<Vec<Pid>, StoreError> {
+    let w: WireLinkRow = dec(b)?;
+    Ok(w.entries.iter().map(|e| e.prov).collect())
+}
+
+/// What path scoring and the reference walks need of one link entry.
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub(crate) struct EntryBrief {
+    pub(crate) origin: LinkOrigin,
+    pub(crate) confidence: Confidence,
+    pub(crate) fanout: Option<u32>,
+}
+
+/// The origin, confidence and fan-out of every entry of an encoded link row.
+pub(crate) fn link_brief(b: &[u8]) -> Result<Vec<EntryBrief>, StoreError> {
+    let w: WireLinkRow = dec(b)?;
+    Ok(w.entries
+        .into_iter()
+        .map(|e| EntryBrief {
+            origin: match e.origin {
+                WireOrigin::Intra => LinkOrigin::Intra,
+                WireOrigin::Ref(i) => LinkOrigin::Ref(i),
+                WireOrigin::Bound { artifact, index } => LinkOrigin::Bound { artifact, index },
+            },
+            confidence: e.confidence,
+            fanout: e.fanout,
+        })
+        .collect())
+}
+
+/// The name and facts of an encoded symbol row.
+pub(crate) fn symbol_name_facts(
+    b: &[u8],
+) -> Result<(SymbolName, BTreeMap<String, Fact>), StoreError> {
+    let w: WireSymbolRow = dec(b)?;
+    Ok((w.name, w.facts))
+}
+
+/// The number of items of an encoded `Vec<Id>`, without decoding them.
+pub(crate) fn id_list_len(b: &[u8]) -> Result<usize, StoreError> {
+    let (n, _): (u32, _) =
+        postcard::take_from_bytes(b).map_err(|e| StoreError::Row(e.to_string()))?;
+    Ok(n as usize)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

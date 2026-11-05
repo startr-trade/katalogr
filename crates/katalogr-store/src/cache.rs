@@ -1,12 +1,19 @@
 //! Local redb cache rebuilt from the shards (FEAT-003 section 3 to 8, FEAT-001 section 5).
 //!
 //! Every table is `&[u8] -> &[u8]`. Keys are built by the functions below (big-endian, length
-//! prefixed strings, so ranges by prefix are exact). Values are compact `serde_json` bytes of the
-//! row types, which are deterministic because every map in them is ordered.
+//! prefixed strings, so ranges by prefix are exact). Since schema 13 (FEAT-075) the graph rows are
+//! postcard bytes of the wire structs in `codec.rs`, with link kinds, namespaces and provenance
+//! interned through the dictionaries in `dict.rs`; readers give back the logical rows.
 
+use crate::codec::{self, EntryBrief, Pid, Vid};
+use crate::compact::{
+    self, COMPACTED_BYTES_META, CompactMode, CompactOutcome, CompactPolicy, CompactReport,
+};
+use crate::dict;
 use crate::error::StoreError;
 use crate::fan;
 use crate::kindex::ProjectDir;
+use crate::postings::{self, PostingBuf};
 use camino::{Utf8Path, Utf8PathBuf};
 use katalogr_model::{
     ArtifactName, Confidence, ContractName, ContractRole, Export, ExportKey, Fact, Fragment, Id,
@@ -16,15 +23,15 @@ use redb::{
     ConcurrencyMode, Database, DatabaseError, ReadOnlyDatabase, ReadTransaction, ReadableDatabase,
     ReadableTable, StorageError, TableDefinition, WriteTransaction,
 };
-use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::marker::PhantomData;
-use std::sync::{PoisonError, RwLock};
+use std::sync::{Mutex, PoisonError, RwLock};
 use std::time::{Duration, Instant};
 
 /// Stored in `meta`; a different number rebuilds the cache from the shards.
-pub const CACHE_SCHEMA: u32 = 12;
+pub const CACHE_SCHEMA: u32 = 13;
 
 /// `meta` key: the watermark the stored rank reflects.
 const RANK_WATERMARK_META: &str = "rank_watermark";
@@ -96,39 +103,19 @@ pub struct LinkBrief {
     pub weight: f64,
 }
 
-#[derive(Deserialize)]
-struct RawLinkEntry {
-    origin: LinkOrigin,
-    confidence: Confidence,
-    fanout: Option<u32>,
-}
-
-#[derive(Deserialize)]
-struct RawLinkRow {
-    entries: Vec<RawLinkEntry>,
-}
-
-#[derive(Deserialize)]
-struct RawBrief<'a> {
-    #[serde(borrow)]
-    name: std::borrow::Cow<'a, str>,
-    facts: BTreeMap<String, Fact>,
-}
-
-impl RawBrief<'_> {
-    fn brief(self) -> SymbolBrief {
-        // `<artifact>#<kind>:<name>/…[~<ordinal>]`: '/' and '~' inside a name are escaped.
-        let body = self.name.split_once('#').map_or("", |(_, b)| b);
-        let last = body.rsplit('/').next().unwrap_or("");
-        let last = match last.rsplit_once('~') {
-            Some((l, n)) if !n.is_empty() && n.bytes().all(|c| c.is_ascii_digit()) => l,
-            _ => last,
-        };
-        let raw = last.split_once(':').map_or("", |(_, n)| n);
-        SymbolBrief {
-            leaf: percent_decode(raw),
-            facts: self.facts,
-        }
+/// The brief of a symbol from its canonical name and facts.
+fn symbol_brief(name: &str, facts: BTreeMap<String, Fact>) -> SymbolBrief {
+    // `<artifact>#<kind>:<name>/…[~<ordinal>]`: '/' and '~' inside a name are escaped.
+    let body = name.split_once('#').map_or("", |(_, b)| b);
+    let last = body.rsplit('/').next().unwrap_or("");
+    let last = match last.rsplit_once('~') {
+        Some((l, n)) if !n.is_empty() && n.bytes().all(|c| c.is_ascii_digit()) => l,
+        _ => last,
+    };
+    let raw = last.split_once(':').map_or("", |(_, n)| n);
+    SymbolBrief {
+        leaf: percent_decode(raw),
+        facts,
     }
 }
 
@@ -258,12 +245,14 @@ pub struct ErrorRow {
 /// Number of searchable fields per document (see `katalogr_model::Field`).
 pub const LEXICON_FIELDS: usize = 4;
 
-/// One posting: a term occurs `tf` times in `field` of `symbol`.
+/// One posting: a term occurs `tf` times in `field` of `symbol`, whose per-field token counts
+/// are `doc_len`.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct Posting {
     pub field: u8,
     pub symbol: Id,
     pub tf: u32,
+    pub doc_len: [u32; LEXICON_FIELDS],
 }
 
 /// Document count and per-field total lengths, for BM25.
@@ -345,15 +334,15 @@ fn core_decode(b: &[u8]) -> Result<SymbolCore, StoreError> {
     })
 }
 
-fn export_prefix(namespace: &str) -> Vec<u8> {
-    let mut k = Vec::new();
-    lp(&mut k, namespace);
-    k
+/// `exports` scan prefix: the namespace's vocabulary id.
+fn export_prefix(ns: Vid) -> Vec<u8> {
+    ns.to_be_bytes().to_vec()
 }
 
-fn export_key(k: &ExportKey) -> Vec<u8> {
-    let mut out = export_prefix(&k.namespace);
-    out.extend_from_slice(k.key.as_bytes());
+/// `exports` key: `vid(namespace) || key bytes`.
+fn export_key(ns: Vid, key: &str) -> Vec<u8> {
+    let mut out = export_prefix(ns);
+    out.extend_from_slice(key.as_bytes());
     out
 }
 
@@ -365,18 +354,17 @@ fn journal_parents(root: &Utf8Path, entries: &[JournalEntry]) -> BTreeSet<Utf8Pa
         .collect()
 }
 
-/// Scan prefix of the `refs_by_key` rows of one export key: `lp(namespace) || lp(key)`. The
-/// length prefixes keep `fn:a` from matching `fn:ab`.
-fn ref_by_key_prefix(k: &ExportKey) -> Vec<u8> {
-    let mut out = Vec::new();
-    lp(&mut out, &k.namespace);
-    lp(&mut out, &k.key);
+/// Scan prefix of the `refs_by_key` rows of one export key: `vid(namespace) || lp(key)`. The
+/// length prefix keeps `fn:a` from matching `fn:ab`.
+fn ref_by_key_prefix(ns: Vid, key: &str) -> Vec<u8> {
+    let mut out = ns.to_be_bytes().to_vec();
+    lp(&mut out, key);
     out
 }
 
 /// `refs_by_key` row key: the prefix, then the 16-byte artifact id and the big-endian index.
-fn ref_by_key_key(k: &ExportKey, r: RefId) -> Vec<u8> {
-    let mut out = ref_by_key_prefix(k);
+fn ref_by_key_key(ns: Vid, key: &str, r: RefId) -> Vec<u8> {
+    let mut out = ref_by_key_prefix(ns, key);
     out.extend_from_slice(&ref_key(r));
     out
 }
@@ -392,20 +380,6 @@ fn ext_context_key(repo: &str, extension: &str) -> Vec<u8> {
     let mut k = Vec::new();
     lp(&mut k, repo);
     k.extend_from_slice(extension.as_bytes());
-    k
-}
-
-/// Terms are alphanumeric, so a NUL ends the term; `term NUL` is an exact-term prefix.
-fn posting_prefix(term: &str) -> Vec<u8> {
-    let mut k = term.as_bytes().to_vec();
-    k.push(0);
-    k
-}
-
-fn posting_key(term: &str, field: u8, symbol: Id) -> Vec<u8> {
-    let mut k = posting_prefix(term);
-    k.push(field);
-    k.extend_from_slice(&symbol.0);
     k
 }
 
@@ -484,53 +458,71 @@ fn u64_value(v: Vec<u8>) -> Result<u64, StoreError> {
     })?))
 }
 
-pub(crate) fn link_prefix(from: Id, kind: &LinkKind) -> Vec<u8> {
+/// `links_out` scan prefix: `from`, then the kind's vocabulary id when a kind is given.
+fn link_prefix(from: Id, kind: Option<Vid>) -> Vec<u8> {
     let mut k = from.0.to_vec();
-    lp(&mut k, &kind.0);
+    if let Some(v) = kind {
+        k.extend_from_slice(&v.to_be_bytes());
+    }
     k
 }
 
-pub(crate) fn link_out_key(k: &LinkKey) -> Vec<u8> {
-    let mut out = link_prefix(k.from, &k.kind);
+/// `links_out` key: `from || vid(kind) || to`; the `links_in` key is the mirror.
+fn link_out_key(from: Id, kind: Vid, to: Id) -> Vec<u8> {
+    let mut out = link_prefix(from, Some(kind));
+    out.extend_from_slice(&to.0);
+    out
+}
+
+/// The schema-9 order of link keys: `from || lp(kind) || to`. Rows are stored by vocabulary id
+/// now, and every reader still answers in this order.
+pub(crate) fn link_order_key(k: &LinkKey) -> Vec<u8> {
+    let mut out = k.from.0.to_vec();
+    lp(&mut out, &k.kind.0);
     out.extend_from_slice(&k.to.0);
     out
 }
 
-fn link_in_key(k: &LinkKey) -> Vec<u8> {
-    link_out_key(&LinkKey {
-        from: k.to,
-        kind: k.kind.clone(),
-        to: k.from,
-    })
+/// Kind strings in the order of their length-prefixed bytes.
+fn kind_cmp(a: &str, b: &str) -> std::cmp::Ordering {
+    a.len().cmp(&b.len()).then_with(|| a.cmp(b))
+}
+
+/// Link keys in `links_out` schema-9 key order.
+fn link_cmp(a: &LinkKey, b: &LinkKey) -> std::cmp::Ordering {
+    a.from
+        .cmp(&b.from)
+        .then_with(|| kind_cmp(&a.kind.0, &b.kind.0))
+        .then_with(|| a.to.cmp(&b.to))
 }
 
 /// `stored` keys arriving at `to` plus the keys of `fans` (rows that reach `to`), sorted by
-/// `links_in` key bytes and deduplicated.
+/// the schema-9 `links_in` key bytes and deduplicated.
 fn merge_links_in(stored: Vec<LinkKey>, to: Id, fans: Vec<FanKey>) -> Vec<LinkKey> {
-    let mut all: Vec<(Vec<u8>, LinkKey)> = stored
+    let mut all: Vec<LinkKey> = stored
         .into_iter()
         .chain(fans.into_iter().map(|f| LinkKey {
             from: f.from,
             kind: f.kind,
             to,
         }))
-        .map(|k| (link_in_key(&k), k))
         .collect();
-    all.sort_by(|a, b| a.0.cmp(&b.0));
-    all.dedup_by(|a, b| a.0 == b.0);
-    all.into_iter().map(|(_, k)| k).collect()
+    all.sort_by(|a, b| kind_cmp(&a.kind.0, &b.kind.0).then_with(|| a.from.cmp(&b.from)));
+    all.dedup_by(|a, b| a.kind == b.kind && a.from == b.from);
+    all
 }
 
-pub(crate) fn decode_link_key(b: &[u8]) -> Result<LinkKey, StoreError> {
+/// `(from, kind id, to)` of a `links_out` key; a `links_in` key reads as `(to, kind id, from)`.
+fn decode_link_key(b: &[u8]) -> Result<(Id, Vid, Id), StoreError> {
     let bad = || StoreError::Row("malformed key".into());
-    let from: [u8; 16] = b.get(..16).ok_or_else(bad)?.try_into().unwrap();
-    let (kind, rest) = split_lp(&b[16..])?;
-    let to: [u8; 16] = rest.try_into().map_err(|_| bad())?;
-    Ok(LinkKey {
-        from: Id(from),
-        kind: LinkKind(kind.to_string()),
-        to: Id(to),
-    })
+    if b.len() != 34 {
+        return Err(bad());
+    }
+    Ok((
+        Id(b[..16].try_into().map_err(|_| bad())?),
+        Vid::from_be_bytes(b[16..18].try_into().map_err(|_| bad())?),
+        Id(b[18..].try_into().map_err(|_| bad())?),
+    ))
 }
 
 fn ref_key(r: RefId) -> Vec<u8> {
@@ -563,14 +555,14 @@ fn prefix_end(prefix: &[u8]) -> Option<Vec<u8>> {
 }
 
 fn ser<T: Serialize>(v: &T) -> Result<Vec<u8>, StoreError> {
-    serde_json::to_vec(v).map_err(|e| StoreError::Row(e.to_string()))
+    codec::enc(v)
 }
 
-pub(crate) fn de<T: DeserializeOwned>(b: &[u8]) -> Result<T, StoreError> {
-    serde_json::from_slice(b).map_err(|e| StoreError::Row(e.to_string()))
+fn de<T: for<'a> Deserialize<'a>>(b: &[u8]) -> Result<T, StoreError> {
+    codec::dec(b)
 }
 
-fn db<E: Into<redb::Error>>(e: E) -> StoreError {
+pub(crate) fn db<E: Into<redb::Error>>(e: E) -> StoreError {
     match e.into() {
         redb::Error::DatabaseAlreadyOpen => StoreError::Busy,
         other => StoreError::Db(other.to_string()),
@@ -610,7 +602,8 @@ pub enum TableId {
     Journal,
     ExtContext,
     Postings,
-    DocLen,
+    DocOrd,
+    DocByOrd,
     LexiconStats,
     Rank,
     Contracts,
@@ -620,10 +613,14 @@ pub enum TableId {
     ExportsByTarget,
     BoundRefsByKey,
     SymbolCore,
+    Vocab,
+    VocabIx,
+    Prov,
+    ProvIx,
 }
 
 impl TableId {
-    const ALL: [TableId; 28] = [
+    pub const ALL: [TableId; 33] = [
         TableId::Meta,
         TableId::ShardHashes,
         TableId::Artifacts,
@@ -642,7 +639,8 @@ impl TableId {
         TableId::Journal,
         TableId::ExtContext,
         TableId::Postings,
-        TableId::DocLen,
+        TableId::DocOrd,
+        TableId::DocByOrd,
         TableId::LexiconStats,
         TableId::Rank,
         TableId::Contracts,
@@ -652,6 +650,10 @@ impl TableId {
         TableId::ExportsByTarget,
         TableId::BoundRefsByKey,
         TableId::SymbolCore,
+        TableId::Vocab,
+        TableId::VocabIx,
+        TableId::Prov,
+        TableId::ProvIx,
     ];
 
     /// The graph tables, in the order `dump_graph` reports them.
@@ -693,7 +695,8 @@ impl TableId {
             TableId::Journal => "journal",
             TableId::ExtContext => "ext_context",
             TableId::Postings => "postings",
-            TableId::DocLen => "doc_len",
+            TableId::DocOrd => "doc_ord",
+            TableId::DocByOrd => "doc_by_ord",
             TableId::LexiconStats => "lexicon_stats",
             TableId::Rank => "rank",
             TableId::Contracts => "contracts",
@@ -703,10 +706,14 @@ impl TableId {
             TableId::ExportsByTarget => "exports_by_target",
             TableId::BoundRefsByKey => "bound_refs_by_key",
             TableId::SymbolCore => "symbol_core",
+            TableId::Vocab => "vocab",
+            TableId::VocabIx => "vocab_ix",
+            TableId::Prov => "prov",
+            TableId::ProvIx => "prov_ix",
         }
     }
 
-    fn def(self) -> TableDefinition<'static, &'static [u8], &'static [u8]> {
+    pub(crate) fn def(self) -> TableDefinition<'static, &'static [u8], &'static [u8]> {
         TableDefinition::new(self.name())
     }
 }
@@ -760,6 +767,9 @@ fn scan_keys_in<T: ReadableTable<&'static [u8], &'static [u8]>>(
 /// Typed reads, shared by [`ReadTx`] (a snapshot) and [`WriteTx`] (sees its own writes).
 /// Collections are materialised; ranges are exact prefix scans.
 pub trait Reader {
+    /// The dictionary ids this reader has resolved so far.
+    #[doc(hidden)]
+    fn memo(&self) -> &dict::Memo;
     #[doc(hidden)]
     fn raw_get(&self, t: TableId, key: &[u8]) -> Result<Option<Vec<u8>>, StoreError>;
     #[doc(hidden)]
@@ -844,29 +854,44 @@ pub trait Reader {
         Ok(out)
     }
 
+    /// The vocabulary id of `s`; `None` when no row ever used it.
+    #[doc(hidden)]
+    fn vid_of(&self, s: &str) -> Result<Option<Vid>, StoreError> {
+        dict::vid_of(self, s)
+    }
+
+    /// The string of vocabulary id `id`.
+    #[doc(hidden)]
+    fn vocab_str(&self, id: Vid) -> Result<String, StoreError> {
+        dict::vocab_str(self, id)
+    }
+
     fn artifact(&self, id: Id) -> Result<Option<ArtifactRow>, StoreError> {
         self.raw_get(TableId::Artifacts, &id.0)?
-            .map(|v| de(&v))
+            .map(|v| dec_artifact(self, id, &v))
             .transpose()
     }
 
     fn artifacts(&self) -> Result<Vec<(Id, ArtifactRow)>, StoreError> {
         self.raw_scan(TableId::Artifacts, &[])?
             .into_iter()
-            .map(|(k, v)| Ok((Id(id_bytes(&k)?), de(&v)?)))
+            .map(|(k, v)| {
+                let id = Id(id_bytes(&k)?);
+                Ok((id, dec_artifact(self, id, &v)?))
+            })
             .collect()
     }
 
     fn symbol(&self, id: Id) -> Result<Option<SymbolRow>, StoreError> {
         self.raw_get(TableId::Symbols, &id.0)?
-            .map(|v| de(&v))
+            .map(|v| dec_symbol(self, &v))
             .transpose()
     }
 
     fn symbols(&self) -> Result<Vec<(Id, SymbolRow)>, StoreError> {
         self.raw_scan(TableId::Symbols, &[])?
             .into_iter()
-            .map(|(k, v)| Ok((Id(id_bytes(&k)?), de(&v)?)))
+            .map(|(k, v)| Ok((Id(id_bytes(&k)?), dec_symbol(self, &v)?)))
             .collect()
     }
 
@@ -933,25 +958,57 @@ pub trait Reader {
     /// order, without decoding spans or provenance. `weight` equals [`crate::row_weight`] and
     /// `strong` the analytics row strength of the expanded row.
     fn for_each_link(&self, f: &mut dyn FnMut(Id, &str, Id, f64, bool)) -> Result<(), StoreError> {
-        let stored = self.raw_scan(TableId::LinksOut, &[])?;
+        let (kinds, mut stored) = self.stored_briefs()?;
+        let rank = kind_ranks(&kinds);
+        stored.sort_by_key(|s| (s.0, rank[s.1 as usize], s.2));
         let fans = self.raw_scan(TableId::FanOut, &[])?;
-        walk_links(self, &stored, &fans, f)
+        walk_links(self, &kinds, &stored, &fans, f)
+    }
+
+    /// Every stored link row as `(from, kind index, to, weight, strong)` in key order of the
+    /// file, with the kind strings the indexes refer to. The one walk of `links_out` that the
+    /// link walk and the rank edges share; it decodes no span and no provenance.
+    #[doc(hidden)]
+    fn stored_briefs(&self) -> Result<(Vec<String>, Vec<StoredBrief>), StoreError> {
+        let mut kinds: Vec<String> = Vec::new();
+        let mut index: HashMap<Vid, u32> = HashMap::new();
+        let mut out = Vec::new();
+        for (k, v) in self.raw_scan(TableId::LinksOut, &[])? {
+            let (from, vid, to) = decode_link_key(&k)?;
+            let ki = match index.get(&vid) {
+                Some(i) => *i,
+                None => {
+                    let i = kinds.len() as u32;
+                    kinds.push(self.vocab_str(vid)?);
+                    index.insert(vid, i);
+                    i
+                }
+            };
+            let (w, s) = link_row_brief(&v, None)?;
+            out.push((from, ki, to, w, s));
+        }
+        Ok((kinds, out))
     }
 
     /// The distinct kinds in `links_out` and `fan_out` keys, decoding no value.
     fn link_kinds(&self) -> Result<BTreeSet<String>, StoreError> {
         let mut out = BTreeSet::new();
-        for t in [TableId::LinksOut, TableId::FanOut] {
-            let mut last: Option<Vec<u8>> = None;
-            for k in self.raw_scan_keys(t, &[])? {
-                let (kind, _) = split_lp(
-                    k.get(16..)
-                        .ok_or_else(|| StoreError::Row("malformed key".into()))?,
-                )?;
-                if last.as_deref() != Some(kind.as_bytes()) {
-                    out.insert(kind.to_string());
-                    last = Some(kind.as_bytes().to_vec());
-                }
+        let mut vids: BTreeSet<Vid> = BTreeSet::new();
+        for k in self.raw_scan_keys(TableId::LinksOut, &[])? {
+            vids.insert(decode_link_key(&k)?.1);
+        }
+        for v in vids {
+            out.insert(self.vocab_str(v)?);
+        }
+        let mut last: Option<Vec<u8>> = None;
+        for k in self.raw_scan_keys(TableId::FanOut, &[])? {
+            let (kind, _) = split_lp(
+                k.get(16..)
+                    .ok_or_else(|| StoreError::Row("malformed key".into()))?,
+            )?;
+            if last.as_deref() != Some(kind.as_bytes()) {
+                out.insert(kind.to_string());
+                last = Some(kind.as_bytes().to_vec());
             }
         }
         Ok(out)
@@ -961,15 +1018,28 @@ pub trait Reader {
     /// stored or fan row, per fan row and not per target. A fan row whose key has no target
     /// calls nothing.
     fn for_each_ref_entry(&self, f: &mut dyn FnMut(Id, &str, u32, bool)) -> Result<(), StoreError> {
+        let mut kinds: HashMap<Vid, String> = HashMap::new();
+        let mut stored: Vec<(Id, Vid, u32, bool)> = Vec::new();
         for (k, v) in self.raw_scan(TableId::LinksOut, &[])? {
-            let from = Id(id_bytes(k.get(..16).unwrap_or(&[]))?);
-            let (kind, _) = split_lp(&k[16..])?;
-            let row: RawLinkRow = de(&v)?;
-            for e in &row.entries {
+            let (from, vid, _) = decode_link_key(&k)?;
+            for e in codec::link_brief(&v)? {
                 if let LinkOrigin::Ref(i) = e.origin {
-                    f(from, kind, i, entry_strong(e.confidence, e.fanout));
+                    stored.push((from, vid, i, entry_strong(e.confidence, e.fanout)));
                 }
             }
+        }
+        for (_, vid, _, _) in &stored {
+            if !kinds.contains_key(vid) {
+                kinds.insert(*vid, self.vocab_str(*vid)?);
+            }
+        }
+        // The order of the schema-9 key: `from`, then the kind's length-prefixed bytes.
+        stored.sort_by(|a, b| {
+            a.0.cmp(&b.0)
+                .then_with(|| kind_cmp(&kinds[&a.1], &kinds[&b.1]))
+        });
+        for (from, vid, i, strong) in stored {
+            f(from, &kinds[&vid], i, strong);
         }
         let mut counts: HashMap<ExportKey, usize> = HashMap::new();
         for (k, v) in self.raw_scan(TableId::FanOut, &[])? {
@@ -986,8 +1056,7 @@ pub trait Reader {
                 continue;
             }
             let n = u32::try_from(n).unwrap_or(u32::MAX);
-            let row: RawLinkRow = de(&v)?;
-            for e in &row.entries {
+            for e in codec::link_brief(&v)? {
                 if let LinkOrigin::Ref(i) = e.origin {
                     f(fk.from, &fk.kind.0, i, entry_strong(e.confidence, Some(n)));
                 }
@@ -999,8 +1068,11 @@ pub trait Reader {
     /// The stored `links_out` row of `key`, without fan rows (FEAT-077). The stitcher uses only
     /// the stored-only reads.
     fn stored_link(&self, key: &LinkKey) -> Result<Option<LinkRow>, StoreError> {
-        self.raw_get(TableId::LinksOut, &link_out_key(key))?
-            .map(|v| de(&v))
+        let Some(vid) = self.vid_of(&key.kind.0)? else {
+            return Ok(None);
+        };
+        self.raw_get(TableId::LinksOut, &link_out_key(key.from, vid, key.to))?
+            .map(|v| dec_link(self, &v))
             .transpose()
     }
 
@@ -1011,13 +1083,32 @@ pub trait Reader {
         kind: Option<&LinkKind>,
     ) -> Result<Vec<(LinkKey, LinkRow)>, StoreError> {
         let prefix = match kind {
-            Some(k) => link_prefix(from, k),
-            None => from.0.to_vec(),
+            Some(k) => match self.vid_of(&k.0)? {
+                Some(v) => link_prefix(from, Some(v)),
+                None => return Ok(Vec::new()),
+            },
+            None => link_prefix(from, None),
         };
-        self.raw_scan(TableId::LinksOut, &prefix)?
+        let mut out: Vec<(LinkKey, LinkRow)> = self
+            .raw_scan(TableId::LinksOut, &prefix)?
             .into_iter()
-            .map(|(k, v)| Ok((decode_link_key(&k)?, de(&v)?)))
-            .collect()
+            .map(|(k, v)| Ok((self.link_key_of(&k)?, dec_link(self, &v)?)))
+            .collect::<Result<_, StoreError>>()?;
+        if kind.is_none() {
+            out.sort_by(|a, b| link_cmp(&a.0, &b.0));
+        }
+        Ok(out)
+    }
+
+    /// The key of a `links_out` row.
+    #[doc(hidden)]
+    fn link_key_of(&self, k: &[u8]) -> Result<LinkKey, StoreError> {
+        let (from, vid, to) = decode_link_key(k)?;
+        Ok(LinkKey {
+            from,
+            kind: LinkKind(self.vocab_str(vid)?),
+            to,
+        })
     }
 
     /// [`Reader::symbol`] for many ids, in order; the reads share one table lookup.
@@ -1025,7 +1116,7 @@ pub trait Reader {
         let keys: Vec<Vec<u8>> = ids.iter().map(|i| i.0.to_vec()).collect();
         self.raw_get_many(TableId::Symbols, &keys)?
             .into_iter()
-            .map(|v| v.map(|v| de(&v)).transpose())
+            .map(|v| v.map(|v| dec_symbol(self, &v)).transpose())
             .collect()
     }
 
@@ -1037,9 +1128,8 @@ pub trait Reader {
         let decode = |v: &Option<Vec<u8>>| -> Result<Option<SymbolBrief>, StoreError> {
             v.as_ref()
                 .map(|v| {
-                    serde_json::from_slice::<RawBrief>(v)
-                        .map(RawBrief::brief)
-                        .map_err(|e| StoreError::Row(e.to_string()))
+                    let (name, facts) = codec::symbol_name_facts(v)?;
+                    Ok(symbol_brief(&name.canonical(), facts))
                 })
                 .transpose()
         };
@@ -1085,7 +1175,7 @@ pub trait Reader {
     /// The fan row of `key`, if stored.
     fn fan(&self, key: &FanKey) -> Result<Option<LinkRow>, StoreError> {
         self.raw_get(TableId::FanOut, &fan::fan_out_key(key))?
-            .map(|v| de(&v))
+            .map(|v| dec_link(self, &v))
             .transpose()
     }
 
@@ -1097,7 +1187,7 @@ pub trait Reader {
     ) -> Result<Vec<(FanKey, LinkRow)>, StoreError> {
         self.raw_scan(TableId::FanOut, &fan::fan_out_prefix(from, kind))?
             .into_iter()
-            .map(|(k, v)| Ok((fan::decode_fan_out_key(&k)?, de(&v)?)))
+            .map(|(k, v)| Ok((fan::decode_fan_out_key(&k)?, dec_link(self, &v)?)))
             .collect()
     }
 
@@ -1114,7 +1204,7 @@ pub trait Reader {
     fn fans_all(&self) -> Result<Vec<(FanKey, LinkRow)>, StoreError> {
         self.raw_scan(TableId::FanOut, &[])?
             .into_iter()
-            .map(|(k, v)| Ok((fan::decode_fan_out_key(&k)?, de(&v)?)))
+            .map(|(k, v)| Ok((fan::decode_fan_out_key(&k)?, dec_link(self, &v)?)))
             .collect()
     }
 
@@ -1217,11 +1307,12 @@ pub trait Reader {
 
     /// Every link row, sorted by `(from, kind, to)` key bytes: stored rows and expanded fan rows.
     fn links_all(&self) -> Result<Vec<(LinkKey, LinkRow)>, StoreError> {
-        let stored: Vec<(LinkKey, LinkRow)> = self
+        let mut stored: Vec<(LinkKey, LinkRow)> = self
             .raw_scan(TableId::LinksOut, &[])?
             .into_iter()
-            .map(|(k, v)| Ok((decode_link_key(&k)?, de(&v)?)))
+            .map(|(k, v)| Ok((self.link_key_of(&k)?, dec_link(self, &v)?)))
             .collect::<Result<_, StoreError>>()?;
+        stored.sort_by(|a, b| link_cmp(&a.0, &b.0));
         let fans = self.fans_all()?;
         if fans.is_empty() {
             return Ok(stored);
@@ -1255,11 +1346,14 @@ pub trait Reader {
 
     /// The keys of the links leaving `from` with `kind`, without decoding their rows.
     fn link_keys_out(&self, from: Id, kind: &LinkKind) -> Result<Vec<LinkKey>, StoreError> {
-        let stored: Vec<LinkKey> = self
-            .raw_scan_keys(TableId::LinksOut, &link_prefix(from, kind))?
-            .iter()
-            .map(|k| decode_link_key(k))
-            .collect::<Result<_, _>>()?;
+        let stored: Vec<LinkKey> = match self.vid_of(&kind.0)? {
+            Some(v) => self
+                .raw_scan_keys(TableId::LinksOut, &link_prefix(from, Some(v)))?
+                .iter()
+                .map(|k| self.link_key_of(k))
+                .collect::<Result<_, _>>()?,
+            None => Vec::new(),
+        };
         let fans = self.fan_keys_out(from, kind)?;
         let mut cache = HashMap::new();
         self.merge_fan_targets(stored, from, kind, &fans, &mut cache)
@@ -1297,8 +1391,16 @@ pub trait Reader {
         froms: &[Id],
         kind: &LinkKind,
     ) -> Result<Vec<Vec<LinkKey>>, StoreError> {
-        let prefixes: Vec<Vec<u8>> = froms.iter().map(|f| link_prefix(*f, kind)).collect();
-        let stored = self.raw_scan_keys_many(TableId::LinksOut, &prefixes)?;
+        let vid = self.vid_of(&kind.0)?;
+        // Without a vocabulary id no stored row has this kind: the empty prefix list is skipped.
+        let stored = match vid {
+            Some(v) => {
+                let prefixes: Vec<Vec<u8>> =
+                    froms.iter().map(|f| link_prefix(*f, Some(v))).collect();
+                self.raw_scan_keys_many(TableId::LinksOut, &prefixes)?
+            }
+            None => vec![Vec::new(); froms.len()],
+        };
         let fan_prefixes: Vec<Vec<u8>> = froms
             .iter()
             .map(|f| fan::fan_out_prefix(*f, Some(kind)))
@@ -1309,7 +1411,7 @@ pub trait Reader {
         for ((from, keys), fks) in froms.iter().zip(stored).zip(fans) {
             let keys: Vec<LinkKey> = keys
                 .iter()
-                .map(|k| decode_link_key(k))
+                .map(|k| self.link_key_of(k))
                 .collect::<Result<_, _>>()?;
             let fks: Vec<FanKey> = fks
                 .iter()
@@ -1327,16 +1429,12 @@ pub trait Reader {
             .raw_scan_keys_many(TableId::LinksIn, &prefixes)?
             .into_iter()
             .map(|keys| {
-                keys.iter()
-                    .map(|k| {
-                        let r = decode_link_key(k)?;
-                        Ok(LinkKey {
-                            from: r.to,
-                            kind: r.kind,
-                            to: r.from,
-                        })
-                    })
-                    .collect()
+                let mut ks: Vec<LinkKey> = keys
+                    .iter()
+                    .map(|k| self.link_in_key_of(k))
+                    .collect::<Result<_, _>>()?;
+                ks.sort_by(|a, b| kind_cmp(&a.kind.0, &b.kind.0).then_with(|| a.from.cmp(&b.from)));
+                Ok(ks)
             })
             .collect::<Result<_, StoreError>>()?;
         let by_target: Vec<Vec<Vec<u8>>> = self.raw_scan_keys_many(
@@ -1392,7 +1490,14 @@ pub trait Reader {
     /// reads share one table lookup. A link that fan rows reach is briefed over its merged
     /// entries.
     fn link_briefs_many(&self, keys: &[LinkKey]) -> Result<Vec<Option<LinkBrief>>, StoreError> {
-        let raw: Vec<Vec<u8>> = keys.iter().map(link_out_key).collect();
+        // A kind without a vocabulary id has no stored row: an empty key never matches.
+        let mut raw: Vec<Vec<u8>> = Vec::with_capacity(keys.len());
+        for k in keys {
+            raw.push(match self.vid_of(&k.kind.0)? {
+                Some(v) => link_out_key(k.from, v, k.to),
+                None => Vec::new(),
+            });
+        }
         let stored = self.raw_get_many(TableId::LinksOut, &raw)?;
         // The fan keys of each distinct (from, kind) among the keys.
         let pairs: Vec<(Id, LinkKind)> = keys
@@ -1433,26 +1538,22 @@ pub trait Reader {
             .map(|(i, fk)| fan::by_target_key(keys[*i].to, &fk.key))
             .collect();
         let hit = self.raw_get_many(TableId::ExportsByTarget, &probe_keys)?;
-        let mut extra: HashMap<usize, Vec<RawLinkEntry>> = HashMap::new();
-        let mut rows: HashMap<FanKey, Vec<RawLinkEntry>> = HashMap::new();
+        let mut extra: HashMap<usize, Vec<EntryBrief>> = HashMap::new();
+        let mut rows: HashMap<FanKey, Vec<EntryBrief>> = HashMap::new();
         let mut counts: HashMap<ExportKey, usize> = HashMap::new();
         for ((i, fk), h) in probes.iter().zip(hit) {
             if h.is_none() {
                 continue;
             }
             if !rows.contains_key(fk) {
-                let row = self
-                    .fan(fk)?
+                let raw = self
+                    .raw_get(TableId::FanOut, &fan::fan_out_key(fk))?
                     .ok_or_else(|| StoreError::Row("fan_in without fan_out".into()))?;
                 rows.insert(
                     fk.clone(),
-                    row.entries
-                        .iter()
-                        .map(|e| RawLinkEntry {
-                            origin: e.origin,
-                            confidence: e.confidence,
-                            fanout: None,
-                        })
+                    codec::link_brief(&raw)?
+                        .into_iter()
+                        .map(|e| EntryBrief { fanout: None, ..e })
                         .collect(),
                 );
             }
@@ -1463,20 +1564,15 @@ pub trait Reader {
             extra
                 .entry(*i)
                 .or_default()
-                .extend(rows[fk].iter().map(|e| RawLinkEntry {
-                    origin: e.origin,
-                    confidence: e.confidence,
+                .extend(rows[fk].iter().map(|e| EntryBrief {
                     fanout: Some(n),
+                    ..*e
                 }));
         }
         let mut out = Vec::with_capacity(keys.len());
         for (i, v) in stored.into_iter().enumerate() {
-            let mut entries: Option<Vec<RawLinkEntry>> = match v {
-                Some(v) => Some(
-                    serde_json::from_slice::<RawLinkRow>(&v)
-                        .map_err(|e| StoreError::Row(e.to_string()))?
-                        .entries,
-                ),
+            let mut entries: Option<Vec<EntryBrief>> = match v {
+                Some(v) => Some(codec::link_brief(&v)?),
                 None => None,
             };
             if let Some(more) = extra.remove(&i) {
@@ -1520,22 +1616,18 @@ pub trait Reader {
 
     /// The postings of one exact term, sorted by `(field, symbol)`.
     fn postings(&self, term: &str) -> Result<Vec<Posting>, StoreError> {
-        let prefix = posting_prefix(term);
-        self.raw_scan(TableId::Postings, &prefix)?
-            .into_iter()
-            .map(|(k, v)| {
-                let bad = || StoreError::Row("malformed posting".into());
-                let rest = &k[prefix.len()..];
-                if rest.len() != 17 {
-                    return Err(bad());
-                }
-                Ok(Posting {
-                    field: rest[0],
-                    symbol: Id(rest[1..].try_into().map_err(|_| bad())?),
-                    tf: u32::from_le_bytes(v.as_slice().try_into().map_err(|_| bad())?),
-                })
-            })
-            .collect()
+        let prefix = postings::prefix(term);
+        let mut entries: Vec<postings::Entry> = Vec::new();
+        for (k, v) in self.raw_scan(TableId::Postings, &prefix)? {
+            if k.len() != prefix.len() + 4 {
+                return Err(StoreError::Row("malformed posting".into()));
+            }
+            let base = postings::block_of_key(&k)? * postings::POSTING_BLOCK;
+            entries.extend(postings::decode_block(base, &v)?);
+        }
+        let mut out = resolve_postings(self, &entries)?;
+        out.sort_by_key(|p| (p.field, p.symbol));
+        Ok(out)
     }
 
     /// The postings of the indexed terms that `prefix` strictly prefixes (the exact term
@@ -1548,37 +1640,53 @@ pub trait Reader {
         limit: usize,
     ) -> Result<Vec<(String, Vec<Posting>)>, StoreError> {
         let bad = || StoreError::Row("malformed posting".into());
-        let mut by_term: BTreeMap<String, (u64, Vec<Posting>)> = BTreeMap::new();
+        let mut by_term: BTreeMap<String, (u64, Vec<postings::Entry>)> = BTreeMap::new();
         for (k, v) in self.raw_scan(TableId::Postings, prefix.as_bytes())? {
             let nul = k.iter().position(|b| *b == 0).ok_or_else(bad)?;
-            let rest = &k[nul + 1..];
-            if rest.len() != 17 {
+            if k.len() != nul + 5 {
                 return Err(bad());
             }
             if nul == prefix.len() {
                 continue;
             }
             let term = String::from_utf8(k[..nul].to_vec()).map_err(|_| bad())?;
-            let tf = u32::from_le_bytes(v.as_slice().try_into().map_err(|_| bad())?);
+            let base = postings::block_of_key(&k)? * postings::POSTING_BLOCK;
             let entry = by_term.entry(term).or_default();
-            entry.0 += u64::from(tf);
-            entry.1.push(Posting {
-                field: rest[0],
-                symbol: Id(rest[1..].try_into().map_err(|_| bad())?),
-                tf,
-            });
+            for e in postings::decode_block(base, &v)? {
+                entry.0 += u64::from(e.2);
+                entry.1.push(e);
+            }
         }
-        let mut terms: Vec<(String, (u64, Vec<Posting>))> = by_term.into_iter().collect();
+        let mut terms: Vec<(String, (u64, Vec<postings::Entry>))> = by_term.into_iter().collect();
         terms.sort_by(|a, b| b.1.0.cmp(&a.1.0).then_with(|| a.0.cmp(&b.0)));
         terms.truncate(limit);
-        Ok(terms.into_iter().map(|(t, (_, p))| (t, p)).collect())
+        // One lookup of the documents of every selected term.
+        let all: Vec<postings::Entry> = terms
+            .iter()
+            .flat_map(|(_, (_, e))| e.iter().copied())
+            .collect();
+        let resolved = resolve_postings(self, &all)?;
+        let mut at = 0;
+        let mut out = Vec::with_capacity(terms.len());
+        for (term, (_, entries)) in terms {
+            let mut ps = resolved[at..at + entries.len()].to_vec();
+            at += entries.len();
+            ps.sort_by_key(|p| (p.field, p.symbol));
+            out.push((term, ps));
+        }
+        Ok(out)
     }
 
     /// Per-field token counts of one indexed symbol.
     fn doc_len(&self, id: Id) -> Result<Option<[u32; LEXICON_FIELDS]>, StoreError> {
-        self.raw_get(TableId::DocLen, &id.0)?
-            .map(|v| decode_doc_len(&v))
-            .transpose()
+        let Some(ord) = self.raw_get(TableId::DocOrd, &id.0)? else {
+            return Ok(None);
+        };
+        let ord = postings::decode_ord(&ord)?;
+        let row = self
+            .raw_get(TableId::DocByOrd, &ord.to_be_bytes())?
+            .ok_or_else(|| StoreError::Row("doc_ord without doc_by_ord".into()))?;
+        Ok(Some(postings::decode_doc(&row)?.1))
     }
 
     fn lexicon_stats(&self) -> Result<LexiconStats, StoreError> {
@@ -1590,17 +1698,24 @@ pub trait Reader {
 
     /// Keys of the stored rows arriving at `to`, in `links_in` key order; no fan rows.
     fn stored_links_in(&self, to: Id) -> Result<Vec<LinkKey>, StoreError> {
-        self.raw_scan_keys(TableId::LinksIn, &to.0)?
+        let mut out: Vec<LinkKey> = self
+            .raw_scan_keys(TableId::LinksIn, &to.0)?
             .iter()
-            .map(|k| {
-                let r = decode_link_key(k)?;
-                Ok(LinkKey {
-                    from: r.to,
-                    kind: r.kind,
-                    to: r.from,
-                })
-            })
-            .collect()
+            .map(|k| self.link_in_key_of(k))
+            .collect::<Result<_, _>>()?;
+        out.sort_by(|a, b| kind_cmp(&a.kind.0, &b.kind.0).then_with(|| a.from.cmp(&b.from)));
+        Ok(out)
+    }
+
+    /// The link a `links_in` key stands for, in link direction.
+    #[doc(hidden)]
+    fn link_in_key_of(&self, k: &[u8]) -> Result<LinkKey, StoreError> {
+        let (to, vid, from) = decode_link_key(k)?;
+        Ok(LinkKey {
+            from,
+            kind: LinkKind(self.vocab_str(vid)?),
+            to,
+        })
     }
 
     /// The contract node `id` names, if any binding still does.
@@ -1627,10 +1742,19 @@ pub trait Reader {
             .unwrap_or_default())
     }
 
+    /// The raw `exports` row of `key`, if stored.
+    #[doc(hidden)]
+    fn exports_raw(&self, key: &ExportKey) -> Result<Option<Vec<u8>>, StoreError> {
+        match self.vid_of(&key.namespace)? {
+            Some(ns) => self.raw_get(TableId::Exports, &export_key(ns, &key.key)),
+            None => Ok(None),
+        }
+    }
+
     /// Targets exported under `key` (empty when none), sorted.
     fn exports(&self, key: &ExportKey) -> Result<Vec<Id>, StoreError> {
         Ok(self
-            .raw_get(TableId::Exports, &export_key(key))?
+            .exports_raw(key)?
             .map(|v| de(&v))
             .transpose()?
             .unwrap_or_default())
@@ -1638,17 +1762,18 @@ pub trait Reader {
 
     /// The number of targets exported under `key`, without decoding the ids.
     fn export_count(&self, key: &ExportKey) -> Result<usize, StoreError> {
-        match self.raw_get(TableId::Exports, &export_key(key))? {
-            Some(v) => serde_json::from_slice::<Vec<serde::de::IgnoredAny>>(&v)
-                .map(|l| l.len())
-                .map_err(|e| StoreError::Row(e.to_string())),
+        match self.exports_raw(key)? {
+            Some(v) => codec::id_list_len(&v),
             None => Ok(0),
         }
     }
 
     /// Every `(key, targets)` in a namespace.
     fn exports_in(&self, namespace: &str) -> Result<Vec<(ExportKey, Vec<Id>)>, StoreError> {
-        let prefix = export_prefix(namespace);
+        let Some(ns) = self.vid_of(namespace)? else {
+            return Ok(Vec::new());
+        };
+        let prefix = export_prefix(ns);
         self.raw_scan(TableId::Exports, &prefix)?
             .into_iter()
             .map(|(k, v)| {
@@ -1667,23 +1792,21 @@ pub trait Reader {
 
     /// The references that name `key` among their candidates, sorted.
     fn refs_by_key(&self, key: &ExportKey) -> Result<Vec<RefId>, StoreError> {
-        let prefix = ref_by_key_prefix(key);
-        self.raw_scan_keys(TableId::RefsByKey, &prefix)?
-            .iter()
-            .map(|k| {
-                let tail = k.len().checked_sub(20).filter(|&n| n >= prefix.len());
-                match tail {
-                    Some(n) => decode_ref_key(&k[n..]),
-                    None => Err(StoreError::Row("malformed key".into())),
-                }
-            })
-            .collect()
+        self.ref_rows(TableId::RefsByKey, key)
     }
 
     /// The references with a contract binding that name `key`, in key order.
     fn bound_refs_by_key(&self, key: &ExportKey) -> Result<Vec<RefId>, StoreError> {
-        let prefix = ref_by_key_prefix(key);
-        self.raw_scan_keys(TableId::BoundRefsByKey, &prefix)?
+        self.ref_rows(TableId::BoundRefsByKey, key)
+    }
+
+    #[doc(hidden)]
+    fn ref_rows(&self, t: TableId, key: &ExportKey) -> Result<Vec<RefId>, StoreError> {
+        let Some(ns) = self.vid_of(&key.namespace)? else {
+            return Ok(Vec::new());
+        };
+        let prefix = ref_by_key_prefix(ns, &key.key);
+        self.raw_scan_keys(t, &prefix)?
             .iter()
             .map(|k| {
                 let tail = k.len().checked_sub(20).filter(|&n| n >= prefix.len());
@@ -1695,19 +1818,50 @@ pub trait Reader {
             .collect()
     }
 
+    /// The unresolved reference `r`, read from its artifact row.
     fn unresolved(&self, r: RefId) -> Result<Option<OutRef>, StoreError> {
-        self.raw_get(TableId::RefsUnresolved, &ref_key(r))?
-            .map(|v| de(&v))
-            .transpose()
+        if self
+            .raw_get(TableId::RefsUnresolved, &ref_key(r))?
+            .is_none()
+        {
+            return Ok(None);
+        }
+        let art = self
+            .artifact(r.artifact)?
+            .ok_or_else(|| StoreError::Row("unresolved ref without artifact row".into()))?;
+        art.refs
+            .get(r.index as usize)
+            .cloned()
+            .map(Some)
+            .ok_or_else(|| StoreError::Row("unresolved ref without artifact row".into()))
     }
 
     /// Unresolved references of one artifact (`Some`) or of all (`None`).
     fn unresolved_refs(&self, artifact: Option<Id>) -> Result<Vec<(RefId, OutRef)>, StoreError> {
         let prefix = artifact.map(|a| a.0.to_vec()).unwrap_or_default();
-        self.raw_scan(TableId::RefsUnresolved, &prefix)?
-            .into_iter()
-            .map(|(k, v)| Ok((decode_ref_key(&k)?, de(&v)?)))
-            .collect()
+        let keys: Vec<RefId> = self
+            .raw_scan_keys(TableId::RefsUnresolved, &prefix)?
+            .iter()
+            .map(|k| decode_ref_key(k))
+            .collect::<Result<_, _>>()?;
+        let mut out = Vec::with_capacity(keys.len());
+        let mut current: Option<(Id, ArtifactRow)> = None;
+        for r in keys {
+            if current.as_ref().is_none_or(|(id, _)| *id != r.artifact) {
+                let row = self
+                    .artifact(r.artifact)?
+                    .ok_or_else(|| StoreError::Row("unresolved ref without artifact row".into()))?;
+                current = Some((r.artifact, row));
+            }
+            let row = &current.as_ref().expect("set above").1;
+            let o = row
+                .refs
+                .get(r.index as usize)
+                .cloned()
+                .ok_or_else(|| StoreError::Row("unresolved ref without artifact row".into()))?;
+            out.push((r, o));
+        }
+        Ok(out)
     }
 
     fn index_errors(&self, repo: &str, path: &RelPath) -> Result<Vec<ErrorRow>, StoreError> {
@@ -1832,29 +1986,164 @@ pub trait Reader {
         Ok(Some((h.try_into().expect("32 bytes"), bytes.to_vec())))
     }
 
-    /// Every graph table as raw `(key, value)` rows, in a fixed table order. Two caches built
-    /// from the same shards give equal dumps.
+    /// Every graph table as its logical rows, in a fixed table order: keys in the schema-9
+    /// encoding (length-prefixed strings) and values as compact JSON of the logical rows, sorted
+    /// by those key bytes. Two caches that hold the same graph give equal dumps, whatever ids
+    /// their dictionaries assigned.
     fn dump_graph(&self) -> Result<Vec<(&'static str, RawRows)>, StoreError> {
-        TableId::GRAPH
-            .iter()
-            .map(|t| Ok((t.name(), self.raw_scan(*t, &[])?)))
-            .collect()
+        fn js<T: Serialize>(v: &T) -> Result<Vec<u8>, StoreError> {
+            serde_json::to_vec(v).map_err(|e| StoreError::Row(e.to_string()))
+        }
+        fn lp_ns_key(ns: &str, key: &[u8]) -> Vec<u8> {
+            let mut k = Vec::new();
+            lp(&mut k, ns);
+            k.extend_from_slice(key);
+            k
+        }
+        let mut out = Vec::new();
+        for t in TableId::GRAPH {
+            let mut rows: RawRows = Vec::new();
+            match t {
+                TableId::Artifacts => {
+                    for (id, row) in self.artifacts()? {
+                        rows.push((id.0.to_vec(), js(&row)?));
+                    }
+                }
+                TableId::Symbols => {
+                    for (id, row) in self.symbols()? {
+                        rows.push((id.0.to_vec(), js(&row)?));
+                    }
+                }
+                TableId::LinksOut => {
+                    for (k, v) in self.raw_scan(t, &[])? {
+                        let key = self.link_key_of(&k)?;
+                        rows.push((link_order_key(&key), js(&dec_link(self, &v)?)?));
+                    }
+                }
+                TableId::LinksIn => {
+                    for k in self.raw_scan_keys(t, &[])? {
+                        let key = self.link_in_key_of(&k)?;
+                        let mirror = LinkKey {
+                            from: key.to,
+                            kind: key.kind,
+                            to: key.from,
+                        };
+                        rows.push((link_order_key(&mirror), Vec::new()));
+                    }
+                }
+                TableId::Exports => {
+                    for (k, v) in self.raw_scan(t, &[])? {
+                        let ns = Vid::from_be_bytes(
+                            k.get(..2)
+                                .and_then(|b| b.try_into().ok())
+                                .ok_or_else(|| StoreError::Row("malformed key".into()))?,
+                        );
+                        let targets: Vec<Id> = de(&v)?;
+                        rows.push((lp_ns_key(&self.vocab_str(ns)?, &k[2..]), js(&targets)?));
+                    }
+                }
+                TableId::RefsByKey | TableId::BoundRefsByKey => {
+                    for k in self.raw_scan_keys(t, &[])? {
+                        let ns = Vid::from_be_bytes(
+                            k.get(..2)
+                                .and_then(|b| b.try_into().ok())
+                                .ok_or_else(|| StoreError::Row("malformed key".into()))?,
+                        );
+                        rows.push((lp_ns_key(&self.vocab_str(ns)?, &k[2..]), Vec::new()));
+                    }
+                }
+                TableId::RefsUnresolved => {
+                    for (r, o) in self.unresolved_refs(None)? {
+                        rows.push((ref_key(r), js(&o)?));
+                    }
+                }
+                TableId::IndexErrors => {
+                    for (k, v) in self.raw_scan(t, &[])? {
+                        let e: Vec<ErrorRow> = de(&v)?;
+                        rows.push((k, js(&e)?));
+                    }
+                }
+                TableId::Contracts => {
+                    for (id, row) in self.contracts()? {
+                        rows.push((id.0.to_vec(), js(&row)?));
+                    }
+                }
+                TableId::BindingsByArtifact => {
+                    for (k, v) in self.raw_scan(t, &[])? {
+                        let b: Vec<BindingRow> = de(&v)?;
+                        rows.push((k, js(&b)?));
+                    }
+                }
+                TableId::FanOut => {
+                    for (k, v) in self.raw_scan(t, &[])? {
+                        rows.push((k, js(&dec_link(self, &v)?)?));
+                    }
+                }
+                _ => rows = self.raw_scan(t, &[])?,
+            }
+            rows.sort_by(|a, b| a.0.cmp(&b.0));
+            out.push((t.name(), rows));
+        }
+        Ok(out)
     }
 }
 
-fn encode_doc_len(l: &[u32; LEXICON_FIELDS]) -> Vec<u8> {
-    l.iter().flat_map(|n| n.to_le_bytes()).collect()
+/// A decoded artifact row (`id` is the artifact's own id).
+fn dec_artifact<R: Reader + ?Sized>(tx: &R, id: Id, v: &[u8]) -> Result<ArtifactRow, StoreError> {
+    codec::artifact_from_wire(id, codec::dec(v)?, &dict::TxRes(tx))
 }
 
-fn decode_doc_len(v: &[u8]) -> Result<[u32; LEXICON_FIELDS], StoreError> {
-    if v.len() != 4 * LEXICON_FIELDS {
-        return Err(StoreError::Row("bad doc_len row".into()));
+fn dec_symbol<R: Reader + ?Sized>(tx: &R, v: &[u8]) -> Result<SymbolRow, StoreError> {
+    codec::symbol_from_wire(codec::dec(v)?, &dict::TxRes(tx))
+}
+
+fn dec_link<R: Reader + ?Sized>(tx: &R, v: &[u8]) -> Result<LinkRow, StoreError> {
+    codec::link_from_wire(codec::dec(v)?, &dict::TxRes(tx))
+}
+
+/// One stored link row, briefly: `(from, kind index, to, weight, strong)`.
+#[doc(hidden)]
+pub type StoredBrief = (Id, u32, Id, f64, bool);
+
+/// The rank of each kind in the order of the kinds' length-prefixed bytes.
+fn kind_ranks(kinds: &[String]) -> Vec<u32> {
+    let mut order: Vec<usize> = (0..kinds.len()).collect();
+    order.sort_by(|a, b| kind_cmp(&kinds[*a], &kinds[*b]));
+    let mut rank = vec![0u32; kinds.len()];
+    for (pos, i) in order.into_iter().enumerate() {
+        rank[i] = pos as u32;
     }
-    let mut out = [0u32; LEXICON_FIELDS];
-    for (i, o) in out.iter_mut().enumerate() {
-        *o = u32::from_le_bytes(v[i * 4..i * 4 + 4].try_into().expect("4 bytes"));
+    rank
+}
+
+/// The postings of `entries` (in the order given), with their symbols and lengths filled in from
+/// `doc_by_ord`; one lookup per distinct ordinal.
+fn resolve_postings<R: Reader + ?Sized>(
+    tx: &R,
+    entries: &[postings::Entry],
+) -> Result<Vec<Posting>, StoreError> {
+    let mut ords: Vec<u32> = entries.iter().map(|e| e.0).collect();
+    ords.sort_unstable();
+    ords.dedup();
+    let keys: Vec<Vec<u8>> = ords.iter().map(|o| o.to_be_bytes().to_vec()).collect();
+    let rows = tx.raw_get_many(TableId::DocByOrd, &keys)?;
+    let mut docs: HashMap<u32, (Id, [u32; LEXICON_FIELDS])> = HashMap::with_capacity(ords.len());
+    for (ord, row) in ords.iter().zip(rows) {
+        let row = row.ok_or_else(|| StoreError::Row("posting without document".into()))?;
+        docs.insert(*ord, postings::decode_doc(&row)?);
     }
-    Ok(out)
+    Ok(entries
+        .iter()
+        .map(|(ord, field, tf)| {
+            let (symbol, doc_len) = docs[ord];
+            Posting {
+                field: *field,
+                symbol,
+                tf: *tf,
+                doc_len,
+            }
+        })
+        .collect())
 }
 
 /// Whether one link entry is strong: not inferred, and its fan-out at most one.
@@ -1866,10 +2155,9 @@ fn entry_strong(confidence: Confidence, fanout: Option<u32>) -> bool {
 /// [`crate::link_weight`] of its entries and whether any entry is strong, each entry's fan-out
 /// replaced by `fanout_override` when given. The only row decoder the link walk uses.
 fn link_row_brief(v: &[u8], fanout_override: Option<u32>) -> Result<(f64, bool), StoreError> {
-    let row: RawLinkRow = de(v)?;
     let mut weight = 0.0f64;
     let mut strong = false;
-    for e in &row.entries {
+    for e in &codec::link_brief(v)? {
         let fanout = fanout_override.or(e.fanout);
         let w = match (e.confidence, fanout) {
             (Confidence::Inferred, Some(n)) if n > 1 => 1.0 / f64::from(n),
@@ -1888,48 +2176,61 @@ fn group_prefix(k: &[u8]) -> Result<&[u8], StoreError> {
     k.get(..20 + len as usize).ok_or_else(bad)
 }
 
-/// Merges raw `links_out` and `fan_out` rows (each in key order) by `(from, kind)` group, in
-/// [`Reader::links_all`] order.
+/// Merges the stored link briefs (sorted by `(from, kind rank, to)`) and the raw `fan_out` rows
+/// (in key order) by `(from, kind)` group, in [`Reader::links_all`] order.
 fn walk_links(
     tx: &(impl Reader + ?Sized),
-    stored: &[(Vec<u8>, Vec<u8>)],
+    kinds: &[String],
+    stored: &[StoredBrief],
     fans: &[(Vec<u8>, Vec<u8>)],
     f: &mut dyn FnMut(Id, &str, Id, f64, bool),
 ) -> Result<(), StoreError> {
     let (mut si, mut fi) = (0usize, 0usize);
     let mut targets: HashMap<ExportKey, Vec<Id>> = HashMap::new();
     let mut group: HashMap<Id, (f64, bool)> = HashMap::new();
+    let stored_prefix = |s: &StoredBrief| {
+        let mut p = s.0.0.to_vec();
+        lp(&mut p, &kinds[s.1 as usize]);
+        p
+    };
     while si < stored.len() || fi < fans.len() {
-        let sp = stored.get(si).map(|(k, _)| group_prefix(k)).transpose()?;
+        let sp = stored.get(si).map(stored_prefix);
         let fp = fans.get(fi).map(|(k, _)| group_prefix(k)).transpose()?;
-        let prefix = match (sp, fp) {
-            (Some(a), Some(b)) => a.min(b),
-            (Some(a), None) | (None, Some(a)) => a,
+        let (prefix, from_stored): (Vec<u8>, bool) = match (sp, fp) {
+            (Some(a), Some(b)) => {
+                if a.as_slice() > b {
+                    (b.to_vec(), false)
+                } else {
+                    (a, true)
+                }
+            }
+            (Some(a), None) => (a, true),
+            (None, Some(b)) => (b.to_vec(), false),
             (None, None) => break,
+        };
+        let s_end = if from_stored {
+            si + stored[si..]
+                .iter()
+                .take_while(|s| s.0 == stored[si].0 && s.1 == stored[si].1)
+                .count()
+        } else {
+            si
         };
         let from = Id(id_bytes(&prefix[..16])?);
         let (kind, _) = split_lp(&prefix[16..])?;
-        let s_end = si
-            + stored[si..]
-                .iter()
-                .take_while(|(k, _)| k.starts_with(prefix))
-                .count();
         let f_end = fi
             + fans[fi..]
                 .iter()
-                .take_while(|(k, _)| k.starts_with(prefix))
+                .take_while(|(k, _)| k.starts_with(&prefix))
                 .count();
         if fi == f_end {
-            for (k, v) in &stored[si..s_end] {
-                let to = Id(id_bytes(&k[prefix.len()..])?);
-                let (w, s) = link_row_brief(v, None)?;
-                f(from, kind, to, w, s);
+            for (_, _, to, w, s) in &stored[si..s_end] {
+                f(from, kind, *to, *w, *s);
             }
         } else {
             group.clear();
-            for (k, v) in &stored[si..s_end] {
-                let to = Id(id_bytes(&k[prefix.len()..])?);
-                group.insert(to, link_row_brief(v, None)?);
+            for (_, _, to, w, s) in &stored[si..s_end] {
+                group.insert(*to, (*w, *s));
             }
             for (k, v) in &fans[fi..f_end] {
                 let key = fan::decode_fan_out_key(k)?.key;
@@ -1967,6 +2268,7 @@ fn id_bytes(k: &[u8]) -> Result<[u8; 16], StoreError> {
 /// MVCC snapshot of the cache.
 pub struct ReadTx<'a> {
     txn: ReadTransaction,
+    memo: dict::Memo,
     _cache: PhantomData<&'a ()>,
 }
 
@@ -1976,6 +2278,7 @@ impl ReadTx<'_> {
     pub(crate) fn from_txn(txn: ReadTransaction) -> Self {
         ReadTx {
             txn,
+            memo: dict::Memo::default(),
             _cache: PhantomData,
         }
     }
@@ -1985,6 +2288,10 @@ impl ReadTx<'_> {
 pub type Snapshot<'a> = ReadTx<'a>;
 
 impl Reader for ReadTx<'_> {
+    fn memo(&self) -> &dict::Memo {
+        &self.memo
+    }
+
     fn raw_get(&self, t: TableId, key: &[u8]) -> Result<Option<Vec<u8>>, StoreError> {
         get_in(&self.txn.open_table(t.def()).map_err(db)?, key)
     }
@@ -2023,6 +2330,14 @@ pub struct WriteTx<'a> {
     txn: WriteTransaction,
     _cache: PhantomData<&'a Cache>,
     touched: RankTouched,
+    /// Dictionary ids resolved or assigned in this transaction.
+    memo: dict::Memo,
+    /// Provenance reference counts to apply at commit.
+    prov_delta: BTreeMap<Pid, i64>,
+    /// Posting writes not yet applied; flushed before a postings read and at commit.
+    postings: Mutex<PostingBuf>,
+    /// Ordinals given up by `remove_doc_postings` in this transaction, until commit or reuse.
+    released: BTreeMap<Id, u32>,
 }
 
 /// What a write transaction touched of the rank's inputs (FEAT-057): each link with its rank
@@ -2037,20 +2352,84 @@ struct RankTouched {
 }
 
 impl Reader for WriteTx<'_> {
+    fn memo(&self) -> &dict::Memo {
+        &self.memo
+    }
+
     fn raw_get(&self, t: TableId, key: &[u8]) -> Result<Option<Vec<u8>>, StoreError> {
+        if t == TableId::Postings {
+            self.flush_postings()?;
+        }
         get_in(&self.txn.open_table(t.def()).map_err(db)?, key)
     }
 
     fn raw_scan(&self, t: TableId, prefix: &[u8]) -> Result<RawRows, StoreError> {
+        if t == TableId::Postings {
+            self.flush_postings()?;
+        }
         scan_in(&self.txn.open_table(t.def()).map_err(db)?, prefix)
     }
 
     fn raw_scan_keys(&self, t: TableId, prefix: &[u8]) -> Result<Vec<Vec<u8>>, StoreError> {
+        if t == TableId::Postings {
+            self.flush_postings()?;
+        }
         scan_keys_in(&self.txn.open_table(t.def()).map_err(db)?, prefix)
+    }
+
+    /// A symbol whose postings were removed in this transaction is not indexed, though its
+    /// ordinal rows stay until commit.
+    fn doc_len(&self, id: Id) -> Result<Option<[u32; LEXICON_FIELDS]>, StoreError> {
+        if self.released.contains_key(&id) {
+            return Ok(None);
+        }
+        let Some(ord) = self.raw_get(TableId::DocOrd, &id.0)? else {
+            return Ok(None);
+        };
+        let ord = postings::decode_ord(&ord)?;
+        let row = self
+            .raw_get(TableId::DocByOrd, &ord.to_be_bytes())?
+            .ok_or_else(|| StoreError::Row("doc_ord without doc_by_ord".into()))?;
+        Ok(Some(postings::decode_doc(&row)?.1))
     }
 }
 
 impl WriteTx<'_> {
+    fn new(txn: WriteTransaction) -> Self {
+        WriteTx {
+            txn,
+            _cache: PhantomData,
+            touched: RankTouched::default(),
+            memo: dict::Memo::default(),
+            prov_delta: BTreeMap::new(),
+            postings: Mutex::new(PostingBuf::default()),
+            released: BTreeMap::new(),
+        }
+    }
+
+    /// Applies the buffered posting writes.
+    fn flush_postings(&self) -> Result<(), StoreError> {
+        let mut buf = self.postings.lock().unwrap_or_else(PoisonError::into_inner);
+        postings::flush(&mut buf, &self.txn)
+    }
+
+    /// The interner of this transaction: assigns vocabulary and provenance ids, and counts the
+    /// provenance references the rows it encodes will hold.
+    fn dict(&mut self) -> dict::TxDict<'_> {
+        dict::TxDict {
+            txn: &self.txn,
+            memo: &self.memo,
+            delta: &mut self.prov_delta,
+        }
+    }
+
+    /// Count `pids` (the provenance ids of a row about to be replaced or removed) as released.
+    fn release_pids(&mut self, pids: Vec<Pid>) {
+        for p in pids {
+            *self.prov_delta.entry(p).or_insert(0) -= 1;
+        }
+    }
+
     fn put(&mut self, t: TableId, key: &[u8], value: &[u8]) -> Result<(), StoreError> {
         let mut table = self.txn.open_table(t.def()).map_err(db)?;
         table.insert(key, value).map_err(db)?;
@@ -2098,16 +2477,26 @@ impl WriteTx<'_> {
     }
 
     pub fn put_artifact(&mut self, id: Id, row: &ArtifactRow) -> Result<(), StoreError> {
-        self.put(TableId::Artifacts, &id.0, &ser(row)?)
+        if let Some(old) = self.raw_get(TableId::Artifacts, &id.0)? {
+            let pid = codec::artifact_pid(&old)?;
+            self.release_pids(vec![pid]);
+        }
+        let wire = codec::artifact_to_wire(id, row, &mut self.dict())?;
+        self.put(TableId::Artifacts, &id.0, &codec::enc(&wire)?)
     }
 
     pub fn remove_artifact_row(&mut self, id: Id) -> Result<(), StoreError> {
+        if let Some(old) = self.raw_get(TableId::Artifacts, &id.0)? {
+            let pid = codec::artifact_pid(&old)?;
+            self.release_pids(vec![pid]);
+        }
         self.del(TableId::Artifacts, &id.0)
     }
 
     pub fn put_symbol(&mut self, id: Id, row: &SymbolRow) -> Result<(), StoreError> {
         self.touch_symbol(id)?;
-        self.put(TableId::Symbols, &id.0, &ser(row)?)?;
+        let wire = codec::symbol_to_wire(row, &mut self.dict())?;
+        self.put(TableId::Symbols, &id.0, &codec::enc(&wire)?)?;
         self.put(TableId::SymbolCore, &core_key(row, id), &core_value(row))
     }
 
@@ -2116,7 +2505,8 @@ impl WriteTx<'_> {
     #[doc(hidden)]
     pub fn put_symbol_row_only(&mut self, id: Id, row: &SymbolRow) -> Result<(), StoreError> {
         self.touch_symbol(id)?;
-        self.put(TableId::Symbols, &id.0, &ser(row)?)
+        let wire = codec::symbol_to_wire(row, &mut self.dict())?;
+        self.put(TableId::Symbols, &id.0, &codec::enc(&wire)?)
     }
 
     pub fn remove_symbol(&mut self, id: Id) -> Result<(), StoreError> {
@@ -2131,15 +2521,37 @@ impl WriteTx<'_> {
     /// Writes `links_out` and the matching `links_in` entry.
     pub fn put_link(&mut self, key: &LinkKey, row: &LinkRow) -> Result<(), StoreError> {
         self.touch_link(key)?;
-        self.put(TableId::LinksOut, &link_out_key(key), &ser(row)?)?;
-        self.put(TableId::LinksIn, &link_in_key(key), &[])
+        if let Some(vid) = self.vid_of(&key.kind.0)?
+            && let Some(old) =
+                self.raw_get(TableId::LinksOut, &link_out_key(key.from, vid, key.to))?
+        {
+            let pids = codec::link_pids(&old)?;
+            self.release_pids(pids);
+        }
+        let mut dict = self.dict();
+        let vid = codec::Interner::vid(&mut dict, &key.kind.0)?;
+        let wire = codec::link_to_wire(row, &mut dict)?;
+        self.put(
+            TableId::LinksOut,
+            &link_out_key(key.from, vid, key.to),
+            &codec::enc(&wire)?,
+        )?;
+        self.put(TableId::LinksIn, &link_out_key(key.to, vid, key.from), &[])
     }
 
     /// Removes `links_out` and the matching `links_in` entry.
     pub fn remove_link(&mut self, key: &LinkKey) -> Result<(), StoreError> {
         self.touch_link(key)?;
-        self.del(TableId::LinksOut, &link_out_key(key))?;
-        self.del(TableId::LinksIn, &link_in_key(key))
+        let Some(vid) = self.vid_of(&key.kind.0)? else {
+            return Ok(());
+        };
+        let out = link_out_key(key.from, vid, key.to);
+        if let Some(old) = self.raw_get(TableId::LinksOut, &out)? {
+            let pids = codec::link_pids(&old)?;
+            self.release_pids(pids);
+        }
+        self.del(TableId::LinksOut, &out)?;
+        self.del(TableId::LinksIn, &link_out_key(key.to, vid, key.from))
     }
 
     pub fn put_contract(&mut self, id: Id, row: &ContractRow) -> Result<(), StoreError> {
@@ -2164,13 +2576,22 @@ impl WriteTx<'_> {
     pub fn put_fan(&mut self, key: &FanKey, row: &LinkRow) -> Result<(), StoreError> {
         debug_assert!(!row.entries.is_empty(), "fan row without entries");
         self.touch_fan(key)?;
-        self.put(TableId::FanOut, &fan::fan_out_key(key), &ser(row)?)?;
+        if let Some(old) = self.raw_get(TableId::FanOut, &fan::fan_out_key(key))? {
+            let pids = codec::link_pids(&old)?;
+            self.release_pids(pids);
+        }
+        let wire = codec::link_to_wire(row, &mut self.dict())?;
+        self.put(TableId::FanOut, &fan::fan_out_key(key), &codec::enc(&wire)?)?;
         self.put(TableId::FanIn, &fan::fan_in_key(key), &[])
     }
 
     /// Delete the fan row and its `fan_in` row; absent is fine.
     pub fn remove_fan(&mut self, key: &FanKey) -> Result<(), StoreError> {
         self.touch_fan(key)?;
+        if let Some(old) = self.raw_get(TableId::FanOut, &fan::fan_out_key(key))? {
+            let pids = codec::link_pids(&old)?;
+            self.release_pids(pids);
+        }
         self.del(TableId::FanOut, &fan::fan_out_key(key))?;
         self.del(TableId::FanIn, &fan::fan_in_key(key))
     }
@@ -2178,8 +2599,7 @@ impl WriteTx<'_> {
     /// An empty set removes the row. Also keeps `exports_by_target`: a row `(t, key)` exists
     /// exactly when `t` is in `targets` and `targets` has two or more entries.
     pub fn put_exports(&mut self, key: &ExportKey, targets: &[Id]) -> Result<(), StoreError> {
-        let ek = export_key(key);
-        let old_raw = self.raw_get(TableId::Exports, &ek)?;
+        let old_raw = self.exports_raw(key)?;
         let old: Vec<Id> = match &old_raw {
             Some(v) => de(v)?,
             None => Vec::new(),
@@ -2201,34 +2621,54 @@ impl WriteTx<'_> {
             self.put(TableId::ExportsByTarget, &fan::by_target_key(*t, key), &[])?;
         }
         if targets.is_empty() {
-            self.del(TableId::Exports, &ek)
+            match self.vid_of(&key.namespace)? {
+                Some(ns) => self.del(TableId::Exports, &export_key(ns, &key.key)),
+                None => Ok(()),
+            }
         } else {
-            self.put(TableId::Exports, &ek, &ser(&targets)?)
+            let ns = codec::Interner::vid(&mut self.dict(), &key.namespace)?;
+            self.put(TableId::Exports, &export_key(ns, &key.key), &ser(&targets)?)
+        }
+    }
+
+    /// Insert the row `(key, r)` into `t`; idempotent.
+    fn add_ref_row(&mut self, t: TableId, key: &ExportKey, r: RefId) -> Result<(), StoreError> {
+        let ns = codec::Interner::vid(&mut self.dict(), &key.namespace)?;
+        self.put(t, &ref_by_key_key(ns, &key.key, r), &[])
+    }
+
+    /// Delete the row `(key, r)` from `t`; absent is fine.
+    fn remove_ref_row(&mut self, t: TableId, key: &ExportKey, r: RefId) -> Result<(), StoreError> {
+        match self.vid_of(&key.namespace)? {
+            Some(ns) => self.del(t, &ref_by_key_key(ns, &key.key, r)),
+            None => Ok(()),
         }
     }
 
     /// Insert the row `(key, r)`; idempotent.
     pub fn add_ref_by_key(&mut self, key: &ExportKey, r: RefId) -> Result<(), StoreError> {
-        self.put(TableId::RefsByKey, &ref_by_key_key(key, r), &[])
+        self.add_ref_row(TableId::RefsByKey, key, r)
     }
 
     /// Insert the bound-reference row `(key, r)`; idempotent.
     pub fn add_bound_ref_by_key(&mut self, key: &ExportKey, r: RefId) -> Result<(), StoreError> {
-        self.put(TableId::BoundRefsByKey, &ref_by_key_key(key, r), &[])
+        self.add_ref_row(TableId::BoundRefsByKey, key, r)
     }
 
     /// Delete the bound-reference row `(key, r)`; absent is fine.
     pub fn remove_bound_ref_by_key(&mut self, key: &ExportKey, r: RefId) -> Result<(), StoreError> {
-        self.del(TableId::BoundRefsByKey, &ref_by_key_key(key, r))
+        self.remove_ref_row(TableId::BoundRefsByKey, key, r)
     }
 
     /// Delete the row `(key, r)`; absent is fine.
     pub fn remove_ref_by_key(&mut self, key: &ExportKey, r: RefId) -> Result<(), StoreError> {
-        self.del(TableId::RefsByKey, &ref_by_key_key(key, r))
+        self.remove_ref_row(TableId::RefsByKey, key, r)
     }
 
-    pub fn put_unresolved(&mut self, r: RefId, out: &OutRef) -> Result<(), StoreError> {
-        self.put(TableId::RefsUnresolved, &ref_key(r), &ser(out)?)
+    /// Marks the reference unresolved. The row holds only the key: the reference itself is read
+    /// from its artifact row, so `_out` is not stored.
+    pub fn put_unresolved(&mut self, r: RefId, _out: &OutRef) -> Result<(), StoreError> {
+        self.put(TableId::RefsUnresolved, &ref_key(r), &[])
     }
 
     pub fn remove_unresolved(&mut self, r: RefId) -> Result<(), StoreError> {
@@ -2313,21 +2753,47 @@ impl WriteTx<'_> {
 
     /// Index one symbol: its postings `(term, field, tf)` and per-field lengths. Adds the
     /// lengths to the lexicon statistics. Call [`WriteTx::remove_doc_postings`] first when the
-    /// symbol is already indexed.
+    /// symbol is already indexed. The symbol keeps the ordinal it has (or had earlier in this
+    /// transaction); a new one is the next unused number.
     pub fn put_doc_postings(
         &mut self,
         id: Id,
         lens: [u32; LEXICON_FIELDS],
         terms: &[(String, u8, u32)],
     ) -> Result<(), StoreError> {
-        for (term, field, tf) in terms {
-            self.put(
-                TableId::Postings,
-                &posting_key(term, *field, id),
-                &tf.to_le_bytes(),
-            )?;
+        let ord = match self.released.remove(&id) {
+            Some(ord) => ord,
+            None => match self.raw_get(TableId::DocOrd, &id.0)? {
+                Some(v) => postings::decode_ord(&v)?,
+                None => {
+                    let next = match self.meta(postings::DOC_NEXT_ORD_META)? {
+                        Some(v) => u32::from_le_bytes(
+                            v.as_slice()
+                                .try_into()
+                                .map_err(|_| StoreError::Row("bad doc_next_ord".into()))?,
+                        ),
+                        None => 0,
+                    };
+                    let after = next
+                        .checked_add(1)
+                        .ok_or_else(|| StoreError::Row("posting ordinals exhausted".into()))?;
+                    self.set_meta(postings::DOC_NEXT_ORD_META, &after.to_le_bytes())?;
+                    next
+                }
+            },
+        };
+        self.put(TableId::DocOrd, &id.0, &postings::encode_ord(ord))?;
+        self.put(
+            TableId::DocByOrd,
+            &ord.to_be_bytes(),
+            &postings::encode_doc(id, &lens),
+        )?;
+        {
+            let mut buf = self.postings.lock().unwrap_or_else(PoisonError::into_inner);
+            for (term, field, tf) in terms {
+                buf.add(term, ord, *field, *tf);
+            }
         }
-        self.put(TableId::DocLen, &id.0, &encode_doc_len(&lens))?;
         let mut stats = self.lexicon_stats()?;
         stats.docs += 1;
         for (t, l) in stats.total_len.iter_mut().zip(lens) {
@@ -2337,7 +2803,8 @@ impl WriteTx<'_> {
     }
 
     /// Remove the postings `(term, field)` of one symbol and its length row, subtracting the
-    /// lengths from the lexicon statistics. A symbol that is not indexed changes nothing.
+    /// lengths from the lexicon statistics. A symbol that is not indexed changes nothing. The
+    /// ordinal is given back at commit unless the symbol is indexed again first.
     pub fn remove_doc_postings(
         &mut self,
         id: Id,
@@ -2346,16 +2813,34 @@ impl WriteTx<'_> {
         let Some(lens) = self.doc_len(id)? else {
             return Ok(());
         };
-        for (term, field) in terms {
-            self.del(TableId::Postings, &posting_key(term, *field, id))?;
+        let ord = postings::decode_ord(
+            &self
+                .raw_get(TableId::DocOrd, &id.0)?
+                .ok_or_else(|| StoreError::Row("doc_len without doc_ord".into()))?,
+        )?;
+        {
+            let mut buf = self.postings.lock().unwrap_or_else(PoisonError::into_inner);
+            for (term, _) in terms {
+                buf.remove(term, ord);
+            }
         }
-        self.del(TableId::DocLen, &id.0)?;
+        self.released.insert(id, ord);
         let mut stats = self.lexicon_stats()?;
         stats.docs = stats.docs.saturating_sub(1);
         for (t, l) in stats.total_len.iter_mut().zip(lens) {
             *t = t.saturating_sub(u64::from(l));
         }
         self.put(TableId::LexiconStats, STATS_KEY, &encode_stats(&stats))
+    }
+
+    /// Applies the buffered postings and gives back the ordinals nobody claimed again.
+    fn finish_postings(&mut self) -> Result<(), StoreError> {
+        self.flush_postings()?;
+        for (id, ord) in std::mem::take(&mut self.released) {
+            self.del(TableId::DocOrd, &id.0)?;
+            self.del(TableId::DocByOrd, &ord.to_be_bytes())?;
+        }
+        Ok(())
     }
 
     /// Remember the state a symbol had when this transaction first touched it.
@@ -2406,7 +2891,7 @@ impl WriteTx<'_> {
         }
         // A changed export key moves the weights of the fan rows that name it.
         for (key, was) in &self.touched.exports {
-            if self.raw_get(TableId::Exports, &export_key(key))? != *was
+            if self.exports_raw(key)? != *was
                 && !self
                     .raw_scan_keys(TableId::FanIn, &fan::fan_in_prefix(key))?
                     .is_empty()
@@ -2453,6 +2938,8 @@ impl WriteTx<'_> {
     /// Commits. A transaction that changed the rank's inputs also drops the stored rank's
     /// watermark, so no reader can take a rank that does not match the graph it reads.
     pub fn commit(mut self) -> Result<(), StoreError> {
+        self.finish_postings()?;
+        dict::apply_prov_deltas(&self.txn, &self.prov_delta)?;
         if self.rank_inputs_changed()? {
             self.del(TableId::Meta, RANK_WATERMARK_META.as_bytes())?;
         }
@@ -2549,6 +3036,8 @@ enum Handle {
 pub struct Cache {
     db: RwLock<Handle>,
     report: SyncReport,
+    /// `.cache/index.redb`.
+    path: Utf8PathBuf,
 }
 
 const BACKOFF_START: Duration = Duration::from_millis(5);
@@ -2591,12 +3080,12 @@ fn open_db(
     path: &Utf8PathBuf,
     busy_until: Instant,
     deadline: Instant,
-) -> Result<Database, StoreError> {
+) -> Result<(Database, bool), StoreError> {
     let mut wait = BACKOFF_START;
     let mut recreated = false;
     loop {
         match writer_builder(deadline).create(path.as_std_path()) {
-            Ok(d) => return Ok(d),
+            Ok(d) => return Ok((d, recreated)),
             Err(DatabaseError::DatabaseAlreadyOpen) => {
                 let now = Instant::now();
                 if now >= busy_until {
@@ -2619,20 +3108,23 @@ fn open_db(
     }
 }
 
-/// The writer open: creates the file, and recreates it when its schema differs.
+/// The writer open: creates the file, and recreates it when its schema differs. The flag is
+/// true when the database is new: the file was missing, corrupt or of another schema.
 fn open_writer(
     path: &Utf8PathBuf,
     busy_until: Instant,
     deadline: Instant,
-) -> Result<Database, StoreError> {
-    let mut database = open_db(path, busy_until, deadline)?;
+) -> Result<(Database, bool), StoreError> {
+    let existed = path.exists();
+    let (mut database, mut recreated) = open_db(path, busy_until, deadline)?;
     if !schema_current(&database)? {
         drop(database);
         std::fs::remove_file(path).map_err(|e| StoreError::io(path, e))?;
-        database = open_db(path, busy_until, deadline)?;
+        (database, _) = open_db(path, busy_until, deadline)?;
         schema_current(&database)?;
+        recreated = true;
     }
-    Ok(database)
+    Ok((database, recreated || !existed))
 }
 
 impl Cache {
@@ -2663,12 +3155,22 @@ impl Cache {
         let cache_dir = dir.cache_dir();
         std::fs::create_dir_all(&cache_dir).map_err(|e| StoreError::io(&cache_dir, e))?;
         let path = cache_dir.join("index.redb");
-        let database = open_writer(&path, busy_until, deadline)?;
+        let (database, created) = open_writer(&path, busy_until, deadline)?;
+        // This process holds the database now, so no other process is mid-rewrite: a rewrite
+        // file that exists is an orphan.
+        crate::compact::remove_orphan(&cache_dir);
         let mut cache = Cache {
             db: RwLock::new(Handle::Writer(database)),
             report: SyncReport::default(),
+            path,
         };
         cache.report = cache.after_open(dir, stitch, deadline)?;
+        // A database built from the shards by this open holds the rows in the order the rounds
+        // wrote them: rewrite it sorted (the "sorted bulk load").
+        if created && cache.report.replaced > 0 && !cache.report.deadline_hit {
+            let (c, _) = cache.compact(dir, CompactMode::preferred(), deadline)?;
+            cache = c;
+        }
         Ok(cache)
     }
 
@@ -2717,10 +3219,7 @@ impl Cache {
         if !TableId::ALL.iter().all(|t| txn.open_table(t.def()).is_ok()) {
             return Ok(None);
         }
-        let rx = ReadTx {
-            txn,
-            _cache: PhantomData,
-        };
+        let rx = ReadTx::from_txn(txn);
         match rx.meta("cache_schema")? {
             Some(v) if v == CACHE_SCHEMA.to_le_bytes() => {}
             _ => return Ok(None),
@@ -2729,6 +3228,7 @@ impl Cache {
         Ok(Some(Cache {
             db: RwLock::new(Handle::Reader(database)),
             report: SyncReport::default(),
+            path,
         }))
     }
 
@@ -2773,10 +3273,7 @@ impl Cache {
             Handle::Reader(d) => d.begin_read(),
         }
         .map_err(db)?;
-        Ok(ReadTx {
-            txn,
-            _cache: PhantomData,
-        })
+        Ok(ReadTx::from_txn(txn))
     }
 
     pub fn write(&self) -> Result<WriteTx<'_>, StoreError> {
@@ -2784,11 +3281,7 @@ impl Cache {
             Handle::Writer(d) => d.begin_write().map_err(db)?,
             Handle::Reader(_) => return Err(StoreError::Busy),
         };
-        Ok(WriteTx {
-            txn,
-            _cache: PhantomData,
-            touched: RankTouched::default(),
-        })
+        Ok(WriteTx::new(txn))
     }
 
     /// Finish an interrupted publish (FEAT-047, ADR-0014): for each journal entry, rename the
@@ -2840,6 +3333,155 @@ impl Cache {
     /// What the last `open_or_rebuild` did.
     pub fn report(&self) -> &SyncReport {
         &self.report
+    }
+
+    /// Bytes of `.cache/index.redb` on disk.
+    pub fn file_bytes(&self) -> Result<u64, StoreError> {
+        std::fs::metadata(&self.path)
+            .map(|m| m.len())
+            .map_err(|e| StoreError::io(&self.path, e))
+    }
+
+    /// File size right after the last compaction (`meta.compacted_bytes`), if any.
+    pub fn compacted_bytes(&self) -> Result<Option<u64>, StoreError> {
+        self.read()?
+            .meta(COMPACTED_BYTES_META)?
+            .map(u64_value)
+            .transpose()
+    }
+
+    /// Whether `policy` asks for a compaction now (see [`CompactPolicy::due`]).
+    pub fn compaction_due(&self, policy: &CompactPolicy) -> Result<bool, StoreError> {
+        Ok(policy.due(self.file_bytes()?, self.compacted_bytes()?))
+    }
+
+    /// Compact the cache (R-6, R-7). Consumes the cache because a rewrite swaps the file.
+    /// Errors before the swap are absorbed: the original cache comes back with
+    /// [`CompactOutcome::Skipped`]. After the swap, a reopen that stays busy until `deadline`
+    /// gives `Err(StoreError::Busy)`; the data is safe in the new file.
+    ///
+    /// A read-only handle (see [`Cache::open_reader`]) is never compacted.
+    pub fn compact(
+        self,
+        dir: &ProjectDir,
+        mode: CompactMode,
+        deadline: Instant,
+    ) -> Result<(Cache, CompactReport), StoreError> {
+        let started = Instant::now();
+        let Cache { db, report, path } = self;
+        let handle = db.into_inner().unwrap_or_else(PoisonError::into_inner);
+        let bytes_before = std::fs::metadata(&path).map_or(0, |m| m.len());
+        let report_of = |outcome: CompactOutcome, after: u64| CompactReport {
+            mode,
+            outcome,
+            bytes_before,
+            bytes_after: after,
+            millis: started.elapsed().as_millis() as u64,
+        };
+        let mut database = match handle {
+            Handle::Writer(d) => d,
+            reader @ Handle::Reader(_) => {
+                let cache = Cache {
+                    db: RwLock::new(reader),
+                    report,
+                    path,
+                };
+                let r = report_of(
+                    CompactOutcome::Skipped("the cache is open read-only".into()),
+                    bytes_before,
+                );
+                return Ok((cache, r));
+            }
+        };
+        let tmp = dir.cache_dir().join(compact::REWRITE_FILE);
+        let skipped = |database: Database, why: String, report: SyncReport, path: Utf8PathBuf| {
+            let after = std::fs::metadata(&path).map_or(bytes_before, |m| m.len());
+            let cache = Cache {
+                db: RwLock::new(Handle::Writer(database)),
+                report,
+                path,
+            };
+            Ok((cache, report_of(CompactOutcome::Skipped(why), after)))
+        };
+        match mode {
+            CompactMode::InPlace => {
+                if let Err(e) = database.compact() {
+                    return skipped(
+                        database,
+                        format!("in-place compaction failed: {e}"),
+                        report,
+                        path,
+                    );
+                }
+            }
+            CompactMode::Rewrite => {
+                // Steps 1 to 5: any failure leaves the original file as it was.
+                let built = std::fs::remove_file(&tmp)
+                    .or_else(|e| {
+                        if e.kind() == std::io::ErrorKind::NotFound {
+                            Ok(())
+                        } else {
+                            Err(e)
+                        }
+                    })
+                    .map_err(|e| format!("the rewrite file cannot be removed ({:?})", e.kind()))
+                    .and_then(|()| {
+                        compact::rewrite(&database, &tmp, deadline)
+                            .map_err(|e| format!("rewrite failed: {e}"))
+                    });
+                if let Err(why) = built {
+                    let _ = std::fs::remove_file(&tmp);
+                    return skipped(database, why, report, path);
+                }
+                #[cfg(feature = "failpoints")]
+                crate::failpoint::hit("before_rewrite_rename");
+                // The rename happens while this process still holds the old file.
+                if let Err(e) = compact::swap(&tmp, &path) {
+                    let _ = std::fs::remove_file(&tmp);
+                    return skipped(
+                        database,
+                        format!(
+                            "the rewritten file cannot replace the cache ({:?})",
+                            e.kind()
+                        ),
+                        report,
+                        path,
+                    );
+                }
+                #[cfg(feature = "failpoints")]
+                crate::failpoint::hit("after_rewrite_rename");
+                drop(database);
+                database = open_db(&path, deadline, deadline)?.0;
+            }
+        }
+        let cache = Cache {
+            db: RwLock::new(Handle::Writer(database)),
+            report,
+            path,
+        };
+        if mode == CompactMode::InPlace {
+            // The rewrite recorded its size in the new file before the swap.
+            cache.record_compacted_bytes()?;
+        }
+        let after = cache.file_bytes()?;
+        Ok((cache, report_of(CompactOutcome::Done, after)))
+    }
+
+    /// Writes `meta.compacted_bytes` as the size of the file. The write can itself grow the
+    /// file, so it repeats until the stored number is the size it left (a few rounds at most).
+    fn record_compacted_bytes(&self) -> Result<(), StoreError> {
+        let mut size = self.file_bytes()?;
+        for _ in 0..4 {
+            let mut tx = self.write()?;
+            tx.set_meta(COMPACTED_BYTES_META, &size.to_le_bytes())?;
+            tx.commit()?;
+            let now = self.file_bytes()?;
+            if now == size {
+                break;
+            }
+            size = now;
+        }
+        Ok(())
     }
 
     /// Compare the shard files with the stored hashes and stats on a read snapshot: true when
@@ -2978,10 +3620,7 @@ fn schema_current(database: &Database) -> Result<bool, StoreError> {
         let txn = database.begin_read().map_err(db)?;
         let all_tables = TableId::ALL.iter().all(|t| txn.open_table(t.def()).is_ok());
         if all_tables {
-            let rx = ReadTx {
-                txn,
-                _cache: PhantomData,
-            };
+            let rx = ReadTx::from_txn(txn);
             match rx.meta("cache_schema")? {
                 Some(v) if v == CACHE_SCHEMA.to_le_bytes() => return Ok(true),
                 Some(_) => return Ok(false),
@@ -2990,11 +3629,7 @@ fn schema_current(database: &Database) -> Result<bool, StoreError> {
         }
     }
     let txn = database.begin_write().map_err(db)?;
-    let mut tx = WriteTx {
-        txn,
-        _cache: PhantomData,
-        touched: RankTouched::default(),
-    };
+    let mut tx = WriteTx::new(txn);
     for t in TableId::ALL {
         tx.txn.open_table(t.def()).map_err(db)?;
     }
@@ -3449,5 +4084,360 @@ mod tests {
         tx.remove_fan(&fk(9, "calls", &k)).unwrap();
         tx.put_fan(&fk(9, "calls", &k), &fan_row(&[4])).unwrap();
         assert!(!tx.rank_inputs_changed().unwrap());
+    }
+
+    // ------------------------------------------------ dictionaries (FEAT-075 T4)
+
+    fn prov_at(path: &str, rev: &str) -> Provenance {
+        Provenance {
+            repo: "r".into(),
+            path: RelPath::new(path).unwrap(),
+            revision: rev.repeat(40),
+        }
+    }
+
+    fn link_at(path: &str, rev: &str) -> LinkRow {
+        let mut e = entry(LinkOrigin::Intra, Confidence::Extracted, None);
+        e.provenance = prov_at(path, rev);
+        LinkRow { entries: vec![e] }
+    }
+
+    fn prov_rows(tx: &impl Reader) -> Vec<(Vec<u8>, crate::codec::WireProv)> {
+        tx.raw_scan(TableId::Prov, &[])
+            .unwrap()
+            .into_iter()
+            .map(|(k, v)| (k, crate::codec::dec(&v).unwrap()))
+            .collect()
+    }
+
+    #[test]
+    fn prov_interned_once() {
+        let t = tempfile::tempdir().unwrap();
+        let c = cache(&t);
+        let mut tx = c.write().unwrap();
+        for i in 1..=5u8 {
+            tx.put_link(&lk(i, "calls", 9), &link_at("a.tx", "0"))
+                .unwrap();
+        }
+        tx.commit().unwrap();
+        let rx = c.read().unwrap();
+        let rows = prov_rows(&rx);
+        assert_eq!(rows.len(), 1, "one provenance row for five links");
+        assert_eq!(rows[0].1.refs, 5);
+        assert_eq!(count(&rx, TableId::ProvIx), 1);
+        assert_eq!(rx.links_all().unwrap().len(), 5);
+        assert_eq!(
+            rx.links_out(nid(1), None).unwrap()[0].1.entries[0].provenance,
+            prov_at("a.tx", "0")
+        );
+    }
+
+    #[test]
+    fn prov_refcount_tracks_writes() {
+        let t = tempfile::tempdir().unwrap();
+        let c = cache(&t);
+        let mut tx = c.write().unwrap();
+        tx.put_link(&lk(1, "calls", 2), &link_at("a.tx", "0"))
+            .unwrap();
+        tx.put_link(&lk(1, "calls", 3), &link_at("a.tx", "0"))
+            .unwrap();
+        tx.commit().unwrap();
+        assert_eq!(prov_rows(&c.read().unwrap())[0].1.refs, 2);
+
+        // Replacing a row moves its count to the new provenance.
+        let mut tx = c.write().unwrap();
+        tx.put_link(&lk(1, "calls", 2), &link_at("b.tx", "1"))
+            .unwrap();
+        tx.commit().unwrap();
+        let rows = prov_rows(&c.read().unwrap());
+        let by_path = |p: &str| {
+            rows.iter()
+                .find(|(_, w)| w.path.as_str() == p)
+                .unwrap()
+                .1
+                .refs
+        };
+        assert_eq!((by_path("a.tx"), by_path("b.tx")), (1, 1));
+
+        // Removing the last reference collects the row and its index entry.
+        let mut tx = c.write().unwrap();
+        tx.remove_link(&lk(1, "calls", 3)).unwrap();
+        tx.commit().unwrap();
+        let rx = c.read().unwrap();
+        let rows = prov_rows(&rx);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].1.path.as_str(), "b.tx");
+        assert_eq!(count(&rx, TableId::ProvIx), 1);
+
+        // A write and its removal inside one transaction leave nothing behind.
+        let mut tx = c.write().unwrap();
+        tx.put_link(&lk(4, "calls", 5), &link_at("z.tx", "2"))
+            .unwrap();
+        tx.remove_link(&lk(4, "calls", 5)).unwrap();
+        tx.commit().unwrap();
+        assert_eq!(prov_rows(&c.read().unwrap()).len(), 1);
+    }
+
+    #[test]
+    fn aborted_tx_leaves_dictionary() {
+        let t = tempfile::tempdir().unwrap();
+        let c = cache(&t);
+        let before_vocab = count(&c.read().unwrap(), TableId::Vocab);
+        {
+            let mut tx = c.write().unwrap();
+            tx.put_link(&lk(1, "brand_new_kind", 2), &link_at("a.tx", "0"))
+                .unwrap();
+            assert_eq!(
+                count(&tx, TableId::Prov),
+                1,
+                "visible inside the transaction"
+            );
+            // dropped without commit
+        }
+        let rx = c.read().unwrap();
+        assert_eq!(count(&rx, TableId::Prov), 0);
+        assert_eq!(count(&rx, TableId::ProvIx), 0);
+        assert_eq!(count(&rx, TableId::Vocab), before_vocab);
+        assert_eq!(count(&rx, TableId::VocabIx), before_vocab);
+        assert!(rx.meta("prov_next").unwrap().is_none());
+        // The ids restart where the committed state ended.
+        drop(rx);
+        let mut tx = c.write().unwrap();
+        tx.put_link(&lk(1, "calls", 2), &link_at("a.tx", "0"))
+            .unwrap();
+        tx.commit().unwrap();
+        let rows = prov_rows(&c.read().unwrap());
+        assert_eq!(rows[0].0, 0u32.to_be_bytes().to_vec());
+    }
+
+    #[test]
+    fn vocab_assign_and_lookup() {
+        let t = tempfile::tempdir().unwrap();
+        let c = cache(&t);
+        let mut tx = c.write().unwrap();
+        for (i, k) in ["calls", "zz", "a", "calls"].iter().enumerate() {
+            tx.put_link(&lk(i as u8 + 1, k, 9), &link_at("a.tx", "0"))
+                .unwrap();
+        }
+        tx.commit().unwrap();
+        let rx = c.read().unwrap();
+        assert_eq!(rx.vid_of("calls").unwrap(), Some(0));
+        assert_eq!(rx.vid_of("zz").unwrap(), Some(1));
+        assert_eq!(rx.vid_of("a").unwrap(), Some(2));
+        assert_eq!(rx.vocab_str(1).unwrap(), "zz");
+        assert!(rx.vocab_str(77).is_err(), "a dangling id is an error");
+        let kinds: Vec<_> = rx.link_kinds().unwrap().into_iter().collect();
+        assert_eq!(kinds, ["a", "calls", "zz"]);
+        // Removing every row of a kind never frees its id.
+        drop(rx);
+        let mut tx = c.write().unwrap();
+        tx.remove_link(&lk(2, "zz", 9)).unwrap();
+        tx.commit().unwrap();
+        assert_eq!(c.read().unwrap().vid_of("zz").unwrap(), Some(1));
+    }
+
+    #[test]
+    fn vocab_full_is_error() {
+        let t = tempfile::tempdir().unwrap();
+        let c = cache(&t);
+        {
+            let mut tx = c.write().unwrap();
+            tx.put(TableId::Vocab, &0xFFFFu16.to_be_bytes(), b"last")
+                .unwrap();
+            tx.put(TableId::VocabIx, b"last", &0xFFFFu16.to_be_bytes())
+                .unwrap();
+            tx.commit().unwrap();
+        }
+        let mut tx = c.write().unwrap();
+        let err = tx
+            .put_link(&lk(1, "one_too_many", 2), &link_at("a.tx", "0"))
+            .unwrap_err();
+        assert!(matches!(err, StoreError::Row(m) if m.contains("full")));
+        // A string that has an id still works.
+        tx.put_link(&lk(1, "last", 2), &link_at("a.tx", "0"))
+            .unwrap();
+    }
+
+    #[test]
+    fn unknown_vocab_reads_empty() {
+        let t = tempfile::tempdir().unwrap();
+        let c = cache(&t);
+        let commits = commits_on_this_thread();
+        let rx = c.read().unwrap();
+        assert!(
+            rx.links_out(nid(1), Some(&LinkKind("nope".into())))
+                .unwrap()
+                .is_empty()
+        );
+        assert!(
+            rx.link_keys_out(nid(1), &LinkKind("nope".into()))
+                .unwrap()
+                .is_empty()
+        );
+        assert!(rx.exports_in("nope").unwrap().is_empty());
+        assert!(rx.exports(&key("nope", "k")).unwrap().is_empty());
+        assert_eq!(rx.export_count(&key("nope", "k")).unwrap(), 0);
+        assert!(rx.refs_by_key(&key("nope", "k")).unwrap().is_empty());
+        assert!(rx.bound_refs_by_key(&key("nope", "k")).unwrap().is_empty());
+        assert!(rx.link(&lk(1, "nope", 2)).unwrap().is_none());
+        assert_eq!(
+            rx.link_briefs_many(&[lk(1, "nope", 2)]).unwrap(),
+            vec![None]
+        );
+        drop(rx);
+        // Writes of rows that were never there do not create vocabulary entries.
+        let mut tx = c.write().unwrap();
+        tx.remove_link(&lk(1, "nope", 2)).unwrap();
+        tx.remove_ref_by_key(&key("nope", "k"), rid(1, 0)).unwrap();
+        tx.put_exports(&key("nope", "k"), &[]).unwrap();
+        tx.commit().unwrap();
+        let rx = c.read().unwrap();
+        assert_eq!(count(&rx, TableId::Vocab), 0);
+        assert_eq!(commits_on_this_thread(), commits + 1);
+    }
+
+    // ------------------------------------------------ packed postings (FEAT-075 T7)
+
+    fn terms(list: &[(&str, u8, u32)]) -> Vec<(String, u8, u32)> {
+        list.iter()
+            .map(|(t, f, n)| (t.to_string(), *f, *n))
+            .collect()
+    }
+
+    fn ord_of(tx: &impl Reader, id: Id) -> u32 {
+        let raw = tx.raw_get(TableId::DocOrd, &id.0).unwrap().unwrap();
+        crate::postings::decode_ord(&raw).unwrap()
+    }
+
+    #[test]
+    fn ordinal_kept_across_reindex() {
+        let t = tempfile::tempdir().unwrap();
+        let c = cache(&t);
+        let mut tx = c.write().unwrap();
+        tx.put_doc_postings(nid(1), [1, 0, 0, 0], &terms(&[("alpha", 0, 1)]))
+            .unwrap();
+        tx.put_doc_postings(nid(2), [2, 0, 0, 0], &terms(&[("alpha", 0, 2)]))
+            .unwrap();
+        tx.commit().unwrap();
+        let rx = c.read().unwrap();
+        let (o1, o2) = (ord_of(&rx, nid(1)), ord_of(&rx, nid(2)));
+        assert_ne!(o1, o2);
+        drop(rx);
+
+        // Remove and index again in one transaction: the ordinal stays.
+        let mut tx = c.write().unwrap();
+        tx.remove_doc_postings(nid(1), &[("alpha".into(), 0)])
+            .unwrap();
+        assert_eq!(
+            tx.doc_len(nid(1)).unwrap(),
+            None,
+            "removed inside the transaction"
+        );
+        tx.put_doc_postings(nid(1), [5, 0, 0, 0], &terms(&[("beta", 1, 3)]))
+            .unwrap();
+        tx.commit().unwrap();
+        let rx = c.read().unwrap();
+        assert_eq!(ord_of(&rx, nid(1)), o1);
+        assert_eq!(ord_of(&rx, nid(2)), o2);
+        assert_eq!(rx.doc_len(nid(1)).unwrap(), Some([5, 0, 0, 0]));
+        assert_eq!(
+            rx.postings("alpha").unwrap().len(),
+            1,
+            "only symbol 2 is left on alpha"
+        );
+        assert_eq!(rx.postings("beta").unwrap()[0].symbol, nid(1));
+        assert_eq!(rx.lexicon_stats().unwrap().docs, 2);
+        drop(rx);
+
+        // Removed in one transaction, indexed in a later one: a new ordinal; none is reused.
+        let mut tx = c.write().unwrap();
+        tx.remove_doc_postings(nid(1), &[("beta".into(), 1)])
+            .unwrap();
+        tx.commit().unwrap();
+        assert!(
+            c.read()
+                .unwrap()
+                .raw_get(TableId::DocOrd, &nid(1).0)
+                .unwrap()
+                .is_none()
+        );
+        let mut tx = c.write().unwrap();
+        tx.put_doc_postings(nid(1), [1, 0, 0, 0], &terms(&[("beta", 1, 1)]))
+            .unwrap();
+        tx.commit().unwrap();
+        let rx = c.read().unwrap();
+        let o1b = ord_of(&rx, nid(1));
+        assert!(o1b > o1 && o1b > o2);
+    }
+
+    #[test]
+    fn buffer_flushed_before_read() {
+        let t = tempfile::tempdir().unwrap();
+        let c = cache(&t);
+        let mut tx = c.write().unwrap();
+        tx.put_doc_postings(
+            nid(1),
+            [1, 0, 0, 0],
+            &terms(&[("alpha", 0, 4), ("alphabet", 2, 1)]),
+        )
+        .unwrap();
+        // Nothing is committed, yet the transaction reads its own postings.
+        let ps = tx.postings("alpha").unwrap();
+        assert_eq!(
+            ps,
+            vec![Posting {
+                field: 0,
+                symbol: nid(1),
+                tf: 4,
+                doc_len: [1, 0, 0, 0]
+            }]
+        );
+        let pre = tx.postings_prefix("alpha", 8).unwrap();
+        assert_eq!(pre.len(), 1, "the exact term is excluded");
+        assert_eq!(pre[0].0, "alphabet");
+        tx.remove_doc_postings(nid(1), &[("alpha".into(), 0), ("alphabet".into(), 2)])
+            .unwrap();
+        assert!(tx.postings("alpha").unwrap().is_empty());
+        assert!(tx.raw_scan(TableId::Postings, &[]).unwrap().is_empty());
+        tx.commit().unwrap();
+        let rx = c.read().unwrap();
+        assert!(rx.postings("alpha").unwrap().is_empty());
+        assert_eq!(count(&rx, TableId::DocOrd), 0);
+        assert_eq!(count(&rx, TableId::DocByOrd), 0);
+    }
+
+    #[test]
+    fn postings_span_blocks_and_rank_terms() {
+        let t = tempfile::tempdir().unwrap();
+        let c = cache(&t);
+        let mut tx = c.write().unwrap();
+        for i in 0..2100u32 {
+            let mut b = [0u8; 16];
+            b[..4].copy_from_slice(&i.to_be_bytes());
+            let tf = if i % 2 == 0 { 2 } else { 1 };
+            tx.put_doc_postings(
+                Id(b),
+                [i, 0, 0, 0],
+                &terms(&[("common", (i % 4) as u8, tf), ("commonly", 1, 1)]),
+            )
+            .unwrap();
+        }
+        tx.commit().unwrap();
+        let rx = c.read().unwrap();
+        // 2,100 ordinals: three blocks for each of the two terms.
+        assert_eq!(count(&rx, TableId::Postings), 6);
+        let ps = rx.postings("common").unwrap();
+        assert_eq!(ps.len(), 2100);
+        assert!(
+            ps.windows(2)
+                .all(|w| (w[0].field, w[0].symbol) < (w[1].field, w[1].symbol))
+        );
+        assert!(
+            ps.iter()
+                .all(|p| p.doc_len[0] == u32::from_be_bytes(p.symbol.0[..4].try_into().unwrap()))
+        );
+        let pre = rx.postings_prefix("common", 8).unwrap();
+        assert_eq!(pre.len(), 1);
+        assert_eq!(pre[0].1.len(), 2100);
     }
 }

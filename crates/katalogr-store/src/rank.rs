@@ -1,9 +1,7 @@
 //! PageRank over the reference graph (FEAT-025 section 6, FEAT-057). It lives in the store so
 //! the engine can compute and cache it at publish while the query crate serves it.
 
-use crate::cache::{
-    LinkEntry, LinkRow, Reader, SymbolRow, TableId, de, decode_link_key, link_prefix,
-};
+use crate::cache::{LinkEntry, LinkRow, Reader, SymbolRow};
 use crate::error::StoreError;
 use katalogr_model::{Confidence, ExportKey, Id};
 use std::collections::{BTreeMap, HashMap};
@@ -55,8 +53,12 @@ pub(crate) fn rank_edges(
 ) -> Result<Vec<(u32, u32, f64)>, StoreError> {
     // (from, kind ordinal in first-seen order, to, weight); 24 bytes each.
     let mut raw: Vec<(u32, u32, u32, f64)> = Vec::new();
-    let mut kinds: Vec<String> = Vec::new();
-    let mut ordinal: HashMap<String, u32> = HashMap::new();
+    let (mut kinds, stored) = tx.stored_briefs()?;
+    let mut ordinal: HashMap<String, u32> = kinds
+        .iter()
+        .enumerate()
+        .map(|(i, k)| (k.clone(), i as u32))
+        .collect();
     let mut intern = |kind: &str| -> u32 {
         if let Some(o) = ordinal.get(kind) {
             return *o;
@@ -67,16 +69,14 @@ pub(crate) fn rank_edges(
         o
     };
     let sym = |id: &Id| index.get(id).map(|i| *i as u32);
-    for (k, v) in tx.raw_scan(TableId::LinksOut, &[])? {
-        let key = decode_link_key(&k)?;
-        let (Some(a), Some(b)) = (sym(&key.from), sym(&key.to)) else {
+    for (from, ki, to, w, _) in stored {
+        let (Some(a), Some(b)) = (sym(&from), sym(&to)) else {
             continue;
         };
         if a == b {
             continue;
         }
-        let row: LinkRow = de(&v)?;
-        raw.push((a, intern(&key.kind.0), b, row_weight(&row)));
+        raw.push((a, ki, b, w));
     }
     let mut targets: HashMap<ExportKey, (usize, Vec<u32>)> = HashMap::new();
     for (fk, row) in tx.fans_all()? {
@@ -98,8 +98,11 @@ pub(crate) fn rank_edges(
     drop(targets);
     // Kind ordinals in `links_out` key order: the order of the length-prefixed kind bytes.
     let mut order: Vec<usize> = (0..kinds.len()).collect();
-    order.sort_by_cached_key(|i| {
-        link_prefix(Id([0; 16]), &katalogr_model::LinkKind(kinds[*i].clone()))
+    order.sort_by(|a, b| {
+        kinds[*a]
+            .len()
+            .cmp(&kinds[*b].len())
+            .then_with(|| kinds[*a].cmp(&kinds[*b]))
     });
     let mut rank_of = vec![0u32; kinds.len()];
     for (pos, i) in order.into_iter().enumerate() {

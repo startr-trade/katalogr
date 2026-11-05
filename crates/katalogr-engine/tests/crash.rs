@@ -20,6 +20,12 @@ const CHILD_ENV: &str = "KATALOGR_CRASH_CHILD";
 /// The paths the child reports, in order. `a` is rewritten, `b` deleted, `c` new.
 const PATHS: [&str; 3] = ["a.tx", "b.tx", "c.tx"];
 
+/// Set for the child to compact the cache with a rewrite after it drained (FEAT-075 R-7).
+const REWRITE_ENV: &str = "KATALOGR_CRASH_REWRITE";
+
+/// The failpoints of a cache rewrite.
+const REWRITE_FAILPOINTS: [&str; 2] = ["before_rewrite_rename", "after_rewrite_rename"];
+
 const FAILPOINTS: [&str; 6] = [
     "after_inbox_rename",
     "after_ingest_commit",
@@ -69,7 +75,15 @@ fn scenario() -> Scenario {
 
 /// Run the child test in a new process with the failpoint set; it must die.
 fn run_child(s: &Scenario, failpoint: &str, threads: usize) {
-    let status = Command::new(std::env::current_exe().unwrap())
+    run_child_with(s, failpoint, threads, false);
+}
+
+fn run_child_with(s: &Scenario, failpoint: &str, threads: usize, rewrite: bool) {
+    let mut cmd = Command::new(std::env::current_exe().unwrap());
+    if rewrite {
+        cmd.env(REWRITE_ENV, "1");
+    }
+    let status = cmd
         .args(["--exact", "crash_child", "--nocapture", "--test-threads=1"])
         .env(CHILD_ENV, format!("{}|{}", s.kx, s.work))
         .env("KATALOGR_THREADS", threads.to_string())
@@ -107,6 +121,11 @@ fn crash_child() {
         f.sync_all().unwrap();
     }
     drained_graph(&e);
+    if std::env::var(REWRITE_ENV).is_ok() {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        e.compact_cache(katalogr_store::CompactMode::Rewrite, deadline)
+            .unwrap();
+    }
 }
 
 fn acked(s: &Scenario) -> Vec<String> {
@@ -136,9 +155,13 @@ mod queue {
     }
 
     fn no_loss_at(threads: usize, failpoints: &[&str]) {
+        no_loss_with(threads, failpoints, false);
+    }
+
+    fn no_loss_with(threads: usize, failpoints: &[&str], rewrite: bool) {
         for &name in failpoints {
             let s = scenario();
-            run_child(&s, name, threads);
+            run_child_with(&s, name, threads, rewrite);
             let acks = acked(&s);
 
             let e = open_engine_threads(&s.kx, &s.work, threads);
@@ -220,6 +243,24 @@ mod queue {
         for threads in [1, 8] {
             no_loss_at(threads, &["mid_renames", "before_journal_clear"]);
         }
+    }
+
+    /// FEAT-075 R-7. A process that dies before or after the rename of a cache rewrite loses
+    /// nothing: the reopened cache holds the drained graph and every acknowledged event, and no
+    /// rewrite file is left behind.
+    #[test]
+    fn crash_during_rewrite_no_loss() {
+        no_loss_with(1, &REWRITE_FAILPOINTS, true);
+        no_loss_with(4, &REWRITE_FAILPOINTS, true);
+        // The orphan of a crash before the rename is removed by the next open.
+        let s = scenario();
+        run_child_with(&s, "before_rewrite_rename", 1, true);
+        let orphan =
+            s.kx.join("projects/p/.cache")
+                .join(katalogr_store::REWRITE_FILE);
+        assert!(orphan.exists(), "the child left its rewrite file");
+        let _e = open_engine(&s.kx, &s.work);
+        assert!(!orphan.exists());
     }
 
     #[test]

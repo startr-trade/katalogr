@@ -2,9 +2,9 @@
 
 pub mod blob;
 pub mod cache;
-// Not wired into the cache yet: FEAT-075 T5 switches the tables to it.
-#[allow(dead_code)]
 mod codec;
+pub mod compact;
+mod dict;
 pub mod error;
 #[cfg(feature = "failpoints")]
 pub mod failpoint;
@@ -13,6 +13,7 @@ pub mod guard;
 pub mod inspect;
 pub mod kindex;
 pub mod marker;
+mod postings;
 pub mod rank;
 pub mod shard;
 
@@ -23,6 +24,9 @@ pub use cache::{
     Posting, RANK_TOP_ENTRIES, RankTop, ReadTx, Reader, RefId, Restitch, ShardStat, Snapshot,
     SymbolBrief, SymbolCore, SymbolRow, SyncReport, WriteTx,
 };
+pub use compact::{CompactMode, CompactOutcome, CompactPolicy, CompactReport, REWRITE_FILE};
+#[doc(hidden)]
+pub use dict::Memo;
 pub use error::StoreError;
 pub use guard::{GuardError, needles_from, scan_for_absolute, scan_for_absolute_with};
 pub use inspect::{CacheInspection, InspectedTables, OpenCache};
