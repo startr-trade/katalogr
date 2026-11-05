@@ -1,6 +1,7 @@
 //! Result types. Their serialised form is the stable JSON contract (`schema/v1`).
 
 use crate::diagnostic::Trace;
+use crate::position::PositionRef;
 use katalogr_model::{Confidence, Span};
 use schemars::JsonSchema;
 use serde::Serialize;
@@ -438,6 +439,18 @@ pub struct Envelope<T> {
     /// whenever nothing was folded).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub folded: Vec<Fold>,
+    /// What the index reflects, one entry per repo sorted by repo (FEAT-084). Omitted when empty.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub positions: Vec<PositionRef>,
+    /// Nothing was pending and every checkout's position was the same before and after the read.
+    #[serde(default)]
+    pub exact: bool,
+    /// Identifies this answer; present only on an exact answer to a question that has one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub view_id: Option<String>,
+    /// The context the answer was read from, when it names one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context: Option<String>,
 }
 
 #[cfg(test)]

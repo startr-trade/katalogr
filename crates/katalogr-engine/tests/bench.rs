@@ -240,4 +240,284 @@ mod bench {
         assert_eq!((fans, stored, expanded), (5000, 0, 500_000));
         assert!(took < Duration::from_millis(5000), "{took:?}");
     }
+
+    /// A fresh cache and stitcher over a one-repository project.
+    fn stitch_env(tmp: &tempfile::TempDir) -> (katalogr_store::Cache, katalogr_engine::Stitcher) {
+        use katalogr_engine::Stitcher;
+        use katalogr_store::{Cache, Kindex, ProjectConfig, ProjectName, RepoConfig};
+        let root = Utf8PathBuf::from_path_buf(tmp.path().join("kx")).unwrap();
+        let dir = Kindex::init(&root)
+            .unwrap()
+            .create_project(
+                &ProjectName::new("p").unwrap(),
+                ProjectConfig {
+                    repos: vec![RepoConfig::new("r")],
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        let stitcher = Stitcher::new();
+        let cache =
+            Cache::open_or_rebuild(&dir, &stitcher, Instant::now() + Duration::from_secs(60))
+                .unwrap();
+        (cache, stitcher)
+    }
+
+    fn load_average() -> String {
+        std::fs::read_to_string("/proc/loadavg")
+            .map(|s| s.split_whitespace().next().unwrap_or("?").to_string())
+            .unwrap_or_else(|_| "?".into())
+    }
+
+    /// FEAT-093 R-12: files that each export and reference one stable key stitch in time and
+    /// re-resolutions that grow linearly with the file count, not quadratically.
+    #[test]
+    #[ignore = "benchmark: run in release with --ignored"]
+    fn stable_key_stitch_scales_linearly() {
+        use katalogr_model::{ExtractInput, Extractor};
+        let run = |files: usize| {
+            let tmp = tempfile::tempdir().unwrap();
+            let (cache, stitcher) = stitch_env(&tmp);
+            let fragments: Vec<_> = (0..files)
+                .map(|f| {
+                    let text = "sym fn e\nexport m:area e\nsym fn c\nref c calls m:area\n";
+                    let path = RelPath::new(&format!("f{f}.tx")).unwrap();
+                    support::TestExtractor
+                        .extract(&ExtractInput {
+                            repo: "r",
+                            path: &path,
+                            revision: "ce013625030ba8dba906f756967f9e9ca394464a",
+                            content: text.as_bytes(),
+                            context: &[],
+                        })
+                        .unwrap()
+                })
+                .collect();
+            let t = Instant::now();
+            let mut resolved = 0usize;
+            for f in fragments {
+                let mut tx = cache.write().unwrap();
+                resolved += stitcher
+                    .replace_fragment(&mut tx, f)
+                    .unwrap()
+                    .refs_resolved
+                    .len();
+                tx.commit().unwrap();
+            }
+            (t.elapsed(), resolved)
+        };
+        let (t1, r1) = run(1000);
+        let (t2, r2) = run(2000);
+        let time_ratio = t2.as_secs_f64() / t1.as_secs_f64();
+        let resolve_ratio = r2 as f64 / r1 as f64;
+        println!(
+            "load {}: 1000 files {t1:?} ({r1} re-resolves), 2000 files {t2:?} ({r2}); time x{time_ratio:.2}, re-resolves x{resolve_ratio:.2}",
+            load_average()
+        );
+        assert!(resolve_ratio <= 2.2, "re-resolves x{resolve_ratio:.2}");
+        assert!(time_ratio <= 3.0, "time x{time_ratio:.2}");
+    }
+
+    /// FEAT-093 R-13: ranking 8 million fan-row edges adds at most 800 MiB of resident memory.
+    #[test]
+    #[ignore = "benchmark: run in release with --ignored"]
+    #[cfg(target_os = "linux")]
+    fn rank_fan_expansion_memory() {
+        use katalogr_model::{ExtractInput, Extractor};
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+
+        fn rss_kib() -> u64 {
+            std::fs::read_to_string("/proc/self/status")
+                .unwrap()
+                .lines()
+                .find_map(|l| l.strip_prefix("VmRSS:"))
+                .and_then(|r| r.split_whitespace().next()?.parse().ok())
+                .unwrap_or(0)
+        }
+
+        const SOURCES: usize = 4000;
+        const TARGETS: usize = 2000;
+        let tmp = tempfile::tempdir().unwrap();
+        let (cache, stitcher) = stitch_env(&tmp);
+        let mut text = String::new();
+        for e in 0..TARGETS {
+            text.push_str(&format!("sym fn e{e}\nexport m:area e{e}\n"));
+        }
+        for c in 0..SOURCES {
+            text.push_str(&format!("sym fn c{c}\nref c{c} calls m:area\n"));
+        }
+        let path = RelPath::new("big.tx").unwrap();
+        let fragment = support::TestExtractor
+            .extract(&ExtractInput {
+                repo: "r",
+                path: &path,
+                revision: "ce013625030ba8dba906f756967f9e9ca394464a",
+                content: text.as_bytes(),
+                context: &[],
+            })
+            .unwrap();
+        let mut tx = cache.write().unwrap();
+        stitcher.replace_fragment(&mut tx, fragment).unwrap();
+        tx.commit().unwrap();
+
+        let rx = cache.read().unwrap();
+        let symbols = rx.symbols().unwrap();
+        assert_eq!(rx.fans_all().unwrap().len(), SOURCES);
+        let base = rss_kib();
+        let peak = Arc::new(AtomicU64::new(base));
+        let stop = Arc::new(AtomicBool::new(false));
+        let sampler = {
+            let (peak, stop) = (peak.clone(), stop.clone());
+            std::thread::spawn(move || {
+                while !stop.load(Ordering::Relaxed) {
+                    peak.fetch_max(rss_kib(), Ordering::Relaxed);
+                    std::thread::sleep(Duration::from_millis(2));
+                }
+            })
+        };
+        let t = Instant::now();
+        let scores = katalogr_store::pagerank(&rx, &symbols).unwrap();
+        let took = t.elapsed();
+        stop.store(true, Ordering::Relaxed);
+        sampler.join().unwrap();
+        std::hint::black_box(&scores);
+        let grown_mib = (peak.load(Ordering::Relaxed).saturating_sub(base)) / 1024;
+        println!(
+            "load {}: rank of {} edges in {took:?}, peak +{grown_mib} MiB",
+            load_average(),
+            SOURCES * TARGETS
+        );
+        assert!(grown_mib <= 800, "+{grown_mib} MiB");
+    }
+
+    /// FEAT-093 R-14: `put_exports` costs time linear in the list, so a 4x longer list costs at
+    /// most 6x.
+    #[test]
+    #[ignore = "benchmark: run in release with --ignored"]
+    fn put_exports_scales_linearly() {
+        use katalogr_model::{ExportKey, Id};
+        let tmp = tempfile::tempdir().unwrap();
+        let (cache, _stitcher) = stitch_env(&tmp);
+        let key = ExportKey {
+            namespace: "m".into(),
+            key: "area".into(),
+        };
+        let ids = |n: usize| -> Vec<Id> {
+            (0..n as u128)
+                .map(|i| {
+                    let mut b = [0u8; 16];
+                    b.copy_from_slice(&(i * 2 + 1).to_be_bytes());
+                    Id(b)
+                })
+                .collect()
+        };
+        let run = |n: usize| {
+            let (short, long) = (ids(n), ids(n + 1));
+            let mut tx = cache.write().unwrap();
+            tx.put_exports(&key, &short).unwrap();
+            let t = Instant::now();
+            for _ in 0..10 {
+                tx.put_exports(&key, &long).unwrap();
+                tx.put_exports(&key, &short).unwrap();
+            }
+            let took = t.elapsed();
+            tx.commit().unwrap();
+            took
+        };
+        let small = run(5000);
+        let large = run(20000);
+        let ratio = large.as_secs_f64() / small.as_secs_f64();
+        println!(
+            "load {}: 5000 targets {small:?}, 20000 targets {large:?}, x{ratio:.2}",
+            load_average()
+        );
+        assert!(ratio <= 6.0, "x{ratio:.2}");
+    }
+
+    /// FEAT-076 R-13: the `symbol_core` table adds at most 10% to the stitch and 12% to the
+    /// cache. 100,000 symbols are stitched; the stitch is timed whole, and the price of the core
+    /// rows is the difference between writing the same symbol rows with and without them.
+    #[test]
+    #[ignore = "benchmark: run in release with --ignored"]
+    fn symbol_core_stitch_overhead() {
+        use katalogr_model::{ExtractInput, Extractor};
+        use katalogr_store::cache::TableId;
+        const FILES: usize = 100;
+        const PER_FILE: usize = 1000;
+        let tmp = tempfile::tempdir().unwrap();
+        let (cache, stitcher) = stitch_env(&tmp);
+        let fragments: Vec<_> = (0..FILES)
+            .map(|f| {
+                let text: String = (0..PER_FILE)
+                    .map(|i| format!("sym fn function_{f}_{i}\n"))
+                    .collect();
+                let path = RelPath::new(&format!("d{}/f{f}.tx", f % 10)).unwrap();
+                support::TestExtractor
+                    .extract(&ExtractInput {
+                        repo: "r",
+                        path: &path,
+                        revision: "ce013625030ba8dba906f756967f9e9ca394464a",
+                        content: text.as_bytes(),
+                        context: &[],
+                    })
+                    .unwrap()
+            })
+            .collect();
+        let started = Instant::now();
+        let mut tx = cache.write().unwrap();
+        for f in fragments {
+            stitcher.replace_fragment(&mut tx, f).unwrap();
+        }
+        tx.commit().unwrap();
+        let stitch = started.elapsed();
+
+        let rx = cache.read().unwrap();
+        let symbols = rx.symbols().unwrap();
+        let core: u64 = rx
+            .raw_scan(TableId::SymbolCore, &[])
+            .unwrap()
+            .iter()
+            .map(|(k, v)| (k.len() + v.len()) as u64)
+            .sum();
+        drop(rx);
+        let file = std::fs::metadata(tmp.path().join("kx/projects/p/.cache/index.redb"))
+            .expect("the cache file")
+            .len();
+        // The price of the core rows: the same writes into fresh caches, with and without them.
+        let write_all = |with_core: bool| {
+            let t = tempfile::tempdir().unwrap();
+            let (cache, _) = stitch_env(&t);
+            let started = Instant::now();
+            let mut tx = cache.write().unwrap();
+            for (id, row) in &symbols {
+                if with_core {
+                    tx.put_symbol(*id, row).unwrap();
+                } else {
+                    tx.put_symbol_row_only(*id, row).unwrap();
+                }
+            }
+            tx.commit().unwrap();
+            started.elapsed()
+        };
+        let mut extra = Vec::new();
+        for _ in 0..3 {
+            let (with, without) = (write_all(true), write_all(false));
+            extra.push(with.as_secs_f64() - without.as_secs_f64());
+        }
+        extra.sort_by(|a, b| a.total_cmp(b));
+        let extra = extra[1].max(0.0);
+        let base = (stitch.as_secs_f64() - extra).max(f64::MIN_POSITIVE);
+        let time_pct = extra / base * 100.0;
+        let size_pct = core as f64 / (file.saturating_sub(core).max(1)) as f64 * 100.0;
+        println!(
+            "load {}: {} symbols, stitch {stitch:?} (core rows cost {:.0} ms = +{time_pct:.1}%), \
+             cache file {file} bytes, core rows {core} bytes = +{size_pct:.1}%",
+            load_average(),
+            symbols.len(),
+            extra * 1000.0,
+        );
+        assert!(time_pct <= 10.0, "stitch +{time_pct:.1}%");
+        assert!(size_pct <= 12.0, "cache +{size_pct:.1}%");
+    }
 }

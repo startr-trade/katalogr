@@ -32,6 +32,8 @@ pub enum StoreError {
     BadProjectName(String),
     #[error("invalid repo name: {0:?}")]
     BadRepoName(String),
+    #[error("invalid context id: {0:?}")]
+    BadContext(String),
     #[error("invalid shard: {0}")]
     BadShard(String),
     #[error("unsupported shard format: {0}")]

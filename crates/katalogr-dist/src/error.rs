@@ -30,6 +30,7 @@ impl DistError {
                 StoreError::NotConfigured
                     | StoreError::BadProjectName(_)
                     | StoreError::BadRepoName(_)
+                    | StoreError::BadContext(_)
                     | StoreError::ProjectExists(_)
                     | StoreError::ProjectNotFound(_)
                     | StoreError::NotAKindex(_)

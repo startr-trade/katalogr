@@ -1,5 +1,6 @@
 //! JSON Schemas of the `--json` output, one per command.
 
+use crate::position::PositionAnswer;
 use crate::result::{
     CallerHit, DanglingRef, Envelope, Explain, MapEntry, MirrorDrift, PathStep, RefHit, SearchHit,
     ShowResult, SymbolHit, TestHit, WhyResult,
@@ -28,4 +29,10 @@ pub fn schemas() -> BTreeMap<&'static str, Value> {
         ("explain", to_value(schema_for!(Envelope<Explain>))),
         ("tests", to_value(schema_for!(Envelope<Vec<TestHit>>))),
     ])
+}
+
+/// The schema of `katalogr position --json` (FEAT-084). It is not an envelope, so it is not
+/// among [`schemas`].
+pub fn position_schema() -> Value {
+    schema_for!(PositionAnswer).to_value()
 }

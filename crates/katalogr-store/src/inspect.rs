@@ -1,7 +1,7 @@
 //! Read-only inspection of the cache (FEAT-064 section 3): what `katalogr doctor` looks at.
 //!
 //! Unlike [`Cache::open_or_rebuild`], inspecting never creates the database, replays the journal,
-//! rebuilds anything or quarantines a shard. It opens redb's `ReadOnlyDatabase`, reads one
+//! rebuilds anything or quarantines a shard. It opens redb's read-only handle, reads one
 //! snapshot and closes it.
 
 use crate::cache::{
@@ -9,14 +9,15 @@ use crate::cache::{
 };
 use crate::error::StoreError;
 use crate::kindex::ProjectDir;
-use redb::{DatabaseError, ReadOnlyDatabase, ReadableDatabase, StorageError};
+use redb::{DatabaseError, ReadableDatabase, StorageError};
 
 /// What a read-only look at the cache found. Never creates, repairs or rebuilds anything.
 #[derive(Debug)]
 pub enum CacheInspection {
     /// No `index.redb` yet.
     Missing,
-    /// Another process holds the database exclusively, so nothing could be read.
+    /// Nothing could be read: another process holds the database exclusively (a writer of a
+    /// build without byte-range locks, or one repairing the file).
     InUse,
     /// The file exists but could not be read (corruption, or a redb format upgrade needed).
     /// The message names no path.
@@ -54,17 +55,20 @@ pub struct InspectedTables {
 const UNREADABLE_TABLES: &str = "the cache tables cannot be read";
 
 impl Cache {
-    /// Opens `<project>/.cache/index.redb` with `ReadOnlyDatabase`. Maps a database held by a
-    /// writer to `InUse`, a missing file to `Missing`, and corruption, a needed upgrade and any
+    /// Opens `<project>/.cache/index.redb` read-only, beside a running writer (FEAT-080). Maps a
+    /// database that cannot be shared (a repair running or needed, or no byte-range locks) to
+    /// `InUse`, a missing file to `Missing`, and corruption, a needed upgrade and any
     /// other open error to `Unreadable` (a message without paths). Reads one snapshot.
     pub fn inspect(dir: &ProjectDir) -> Result<CacheInspection, StoreError> {
         let path = dir.cache_dir().join("index.redb");
         if !path.exists() {
             return Ok(CacheInspection::Missing);
         }
-        let database = match ReadOnlyDatabase::open(path.as_std_path()) {
+        let database = match crate::cache::reader_builder().open_read_only(path.as_std_path()) {
             Ok(d) => d,
-            Err(DatabaseError::DatabaseAlreadyOpen) => return Ok(CacheInspection::InUse),
+            Err(DatabaseError::DatabaseAlreadyOpen) | Err(DatabaseError::RepairAborted) => {
+                return Ok(CacheInspection::InUse);
+            }
             Err(DatabaseError::Storage(StorageError::Corrupted(_))) => {
                 return Ok(CacheInspection::Unreadable("the cache is corrupt".into()));
             }

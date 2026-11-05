@@ -1,6 +1,7 @@
 //! Structure insights over one graph snapshot: hubs, communities, cycles, dead code and rationale (FEAT-030).
 
 mod communities;
+pub mod context_diff;
 mod coverage;
 mod cycles;
 mod dead;
@@ -10,6 +11,8 @@ mod fan_answers;
 mod graph;
 mod hints;
 mod hubs;
+#[cfg(test)]
+mod link_walk;
 mod louvain;
 pub mod metrics;
 pub mod options;
