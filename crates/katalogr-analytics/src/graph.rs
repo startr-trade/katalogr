@@ -6,8 +6,8 @@ use crate::result::{Level, NodeHit};
 use katalogr_model::insight::FACT_PACKAGE;
 use katalogr_model::{Confidence, Fact, Id, Name};
 use katalogr_store::{
-    ArtifactRow, ContractRow, LinkKey, LinkRow, RANK_CONTEXT, Reader, StoreError, SymbolRow,
-    pagerank, row_weight,
+    ArtifactRow, ContractRow, LinkKey, LinkRow, RANK_CONTEXT, Reader, StoreError, SymbolCore,
+    SymbolRow, pagerank,
 };
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
@@ -31,6 +31,7 @@ impl Strength {
 
 /// An entry is strong when it is not inferred and its fan-out is at most one; a row is strong
 /// when any entry is.
+#[cfg(test)]
 pub(crate) fn row_strength(row: &LinkRow) -> Strength {
     let strong = row
         .entries
@@ -43,31 +44,31 @@ pub(crate) fn row_strength(row: &LinkRow) -> Strength {
     }
 }
 
-/// Everything the insights read from one snapshot.
+/// Everything `rationale` reads from one snapshot.
 pub(crate) struct Snapshotted {
     pub symbols: Vec<(Id, SymbolRow)>,
     pub artifacts: Vec<(Id, ArtifactRow)>,
     pub links: Vec<(LinkKey, LinkRow)>,
-    pub contracts: Vec<(Id, ContractRow)>,
 }
 
-/// Read the symbols, artifacts, links and contracts of the snapshot, the four reads running
+/// Read the symbols, artifacts and links of the snapshot, the three reads running
 /// side by side (decoding the rows dominates the cost of an insight).
 pub(crate) fn read_all(tx: &(impl Reader + Sync)) -> Result<Snapshotted, StoreError> {
     std::thread::scope(|scope| {
         let artifacts = scope.spawn(|| tx.artifacts());
         let links = scope.spawn(|| tx.links_all());
-        let contracts = scope.spawn(|| tx.contracts());
         let symbols = tx.symbols();
         const PANIC: &str = "a reader thread panicked";
         Ok(Snapshotted {
             symbols: symbols?,
             artifacts: artifacts.join().expect(PANIC)?,
             links: links.join().expect(PANIC)?,
-            contracts: contracts.join().expect(PANIC)?,
         })
     })
 }
+
+/// The receiver of a link walk: `(from, kind, to, weight, strong)`.
+pub(crate) type LinkSink<'a> = dyn FnMut(Id, &str, Id, f64, bool) + 'a;
 
 /// One merged edge. In the forward lists `to` is the target; in the reverse lists it is the
 /// source.
@@ -185,18 +186,40 @@ pub(crate) fn common_dir<'a>(
 }
 
 impl InsightGraph {
-    /// One read of the symbols, artifacts, links and contracts of the snapshot.
+    /// One read of the symbols, artifacts, link kinds and contracts of the snapshot, side by
+    /// side, then one walk of the links.
     pub(crate) fn load(
         tx: &(impl Reader + Sync),
         opts: &GraphOptions,
     ) -> Result<InsightGraph, StoreError> {
-        let Snapshotted {
-            symbols,
-            artifacts,
-            links,
-            contracts,
-        } = read_all(tx)?;
+        const PANIC: &str = "a reader thread panicked";
+        let (symbols, artifacts, contracts, link_kinds) = std::thread::scope(|scope| {
+            let artifacts = scope.spawn(|| tx.artifacts());
+            let contracts = scope.spawn(|| tx.contracts());
+            let kinds = scope.spawn(|| tx.link_kinds());
+            let symbols = tx.symbol_cores();
+            Ok::<_, StoreError>((
+                symbols?,
+                artifacts.join().expect(PANIC)?,
+                contracts.join().expect(PANIC)?,
+                kinds.join().expect(PANIC)?,
+            ))
+        })?;
+        Self::build(symbols, artifacts, contracts, link_kinds, opts, &mut |f| {
+            tx.for_each_link(f)
+        })
+    }
 
+    /// The graph of the given rows, with the usage links delivered by `walk`: one call per link
+    /// row, in `links_all` order, as [`Reader::for_each_link`] gives them.
+    pub(crate) fn build(
+        symbols: Vec<(Id, SymbolCore)>,
+        artifacts: Vec<(Id, ArtifactRow)>,
+        contracts: Vec<(Id, ContractRow)>,
+        link_kinds: BTreeSet<String>,
+        opts: &GraphOptions,
+        walk: &mut dyn FnMut(&mut LinkSink<'_>) -> Result<(), StoreError>,
+    ) -> Result<InsightGraph, StoreError> {
         let package_of = |facts: &BTreeMap<String, Fact>| match facts.get(FACT_PACKAGE) {
             Some(Fact::Str(p)) => Some(p.clone()),
             _ => None,
@@ -216,9 +239,9 @@ impl InsightGraph {
                     node_of.insert(*id, i as u32);
                     nodes.push(NodeHit {
                         level: Level::Symbol,
-                        name: row.name.canonical(),
+                        name: row.name.clone(),
                         kind: row.kind.clone(),
-                        path: Some(row.name.artifact.path.as_str().to_string()),
+                        path: Some(row.path.clone()),
                         line: Some(row.span.start_line),
                     });
                     let next = file_index.len() as u32;
@@ -292,10 +315,9 @@ impl InsightGraph {
         // The kind table: every kind that can appear on an edge, sorted.
         let mut kind_set: BTreeSet<&str> = BTreeSet::new();
         kind_set.insert(CONTRACT_EDGE_KIND);
-        for (key, _) in &links {
-            let k = key.kind.0.as_str();
+        for k in &link_kinds {
             if !opts.exclude_kinds.iter().any(|x| x == k) {
-                kind_set.insert(k);
+                kind_set.insert(k.as_str());
             }
         }
         let kinds: Vec<String> = kind_set.iter().map(|k| k.to_string()).collect();
@@ -311,50 +333,48 @@ impl InsightGraph {
         let mut consumers: BTreeMap<Id, Side> = BTreeMap::new();
         let mut providers: BTreeMap<Id, Side> = BTreeMap::new();
         let mut raw: Vec<RawEdge> = Vec::new();
-        for (key, row) in &links {
-            let kind = key.kind.0.as_str();
-            let strength = row_strength(row);
-            if strength == Strength::Weak && !opts.include_inferred {
-                continue;
-            }
-            let weight = row_weight(row);
-            if weight <= 0.0 {
-                continue;
-            }
-            let Some(&a) = node_of.get(&key.from) else {
-                continue;
-            };
-            if contract_ids.contains(&key.to) {
-                match kind {
-                    "consumes" => consumers
-                        .entry(key.to)
-                        .or_default()
-                        .push((a, weight, strength)),
-                    "provides" => providers
-                        .entry(key.to)
-                        .or_default()
-                        .push((a, weight, strength)),
-                    _ => {}
+        walk(
+            &mut |from: Id, kind: &str, to: Id, weight: f64, strong: bool| {
+                let strength = if strong {
+                    Strength::Strong
+                } else {
+                    Strength::Weak
+                };
+                if strength == Strength::Weak && !opts.include_inferred {
+                    return;
                 }
-                continue;
-            }
-            if opts.exclude_kinds.iter().any(|x| x == kind) {
-                continue;
-            }
-            let Some(&b) = node_of.get(&key.to) else {
-                continue;
-            };
-            if a == b {
-                continue;
-            }
-            raw.push(RawEdge {
-                a,
-                b,
-                kind: kind_index[kind],
-                weight,
-                strength,
-            });
-        }
+                if weight <= 0.0 {
+                    return;
+                }
+                let Some(&a) = node_of.get(&from) else {
+                    return;
+                };
+                if contract_ids.contains(&to) {
+                    match kind {
+                        "consumes" => consumers.entry(to).or_default().push((a, weight, strength)),
+                        "provides" => providers.entry(to).or_default().push((a, weight, strength)),
+                        _ => {}
+                    }
+                    return;
+                }
+                if opts.exclude_kinds.iter().any(|x| x == kind) {
+                    return;
+                }
+                let Some(&b) = node_of.get(&to) else {
+                    return;
+                };
+                if a == b {
+                    return;
+                }
+                raw.push(RawEdge {
+                    a,
+                    b,
+                    kind: kind_index[kind],
+                    weight,
+                    strength,
+                });
+            },
+        )?;
         let mut skipped_contracts = 0u64;
         let via = kind_index[CONTRACT_EDGE_KIND];
         for (cid, cs) in &consumers {

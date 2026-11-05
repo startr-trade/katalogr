@@ -3,13 +3,13 @@
 //! only, and over all links; the difference is what is reached only through inferred or
 //! fan-out links.
 
-use crate::graph::{Snapshotted, Strength, read_all, row_strength};
+use crate::graph::LinkSink;
 use crate::options::DeadCodeOptions;
 use crate::result::{DeadCandidate, DeadClass, DeadCodeReport, DeadConfidence};
 use katalogr_model::insight::{FACT_ROOT, ROOT_API};
 use katalogr_model::{Fact, Id, Name};
 use katalogr_query::result::SymbolHit;
-use katalogr_store::{Reader, StoreError};
+use katalogr_store::{ArtifactRow, Reader, StoreError, SymbolRow};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 /// Why a provider of a contract is an entry point.
@@ -76,12 +76,26 @@ pub fn dead_code(
     tx: &(impl Reader + Sync),
     opts: &DeadCodeOptions,
 ) -> Result<DeadCodeReport, StoreError> {
-    let Snapshotted {
-        symbols,
-        artifacts,
-        links,
-        ..
-    } = read_all(tx)?;
+    // The symbols (with their facts) and artifacts are read side by side; the links are walked
+    // without being decoded in full.
+    let (symbols, artifacts) = std::thread::scope(|scope| {
+        let artifacts = scope.spawn(|| tx.artifacts());
+        let symbols = tx.symbols();
+        Ok::<_, StoreError>((
+            symbols?,
+            artifacts.join().expect("a reader thread panicked")?,
+        ))
+    })?;
+    dead_code_from(symbols, artifacts, opts, &mut |f| tx.for_each_link(f))
+}
+
+/// [`dead_code`] over the given rows, with the links delivered by `walk` in `links_all` order.
+pub(crate) fn dead_code_from(
+    symbols: Vec<(Id, SymbolRow)>,
+    artifacts: Vec<(Id, ArtifactRow)>,
+    opts: &DeadCodeOptions,
+    walk: &mut dyn FnMut(&mut LinkSink<'_>) -> Result<(), StoreError>,
+) -> Result<DeadCodeReport, StoreError> {
     let sym_count = symbols.len();
     let mut index: HashMap<Id, u32> = HashMap::with_capacity(sym_count + artifacts.len());
     for (i, (id, _)) in symbols.iter().enumerate() {
@@ -111,33 +125,33 @@ pub fn dead_code(
     let mut incoming = vec![0u64; n];
     let mut weak_incoming = vec![0u64; n];
     let mut providers: BTreeSet<u32> = BTreeSet::new();
-    for (key, row) in &links {
-        let kind = key.kind.0.as_str();
-        let Some(&a) = index.get(&key.from) else {
-            continue;
-        };
-        if kind == "provides" {
-            providers.insert(a);
-            continue;
-        }
-        let Some(&b) = index.get(&key.to) else {
-            continue;
-        };
-        if kind == "contains" {
-            // A reached member makes its container reachable.
-            edges.push((b, a, true));
-            continue;
-        }
-        if opts.exclude_kinds.iter().any(|x| x == kind) || a == b {
-            continue;
-        }
-        let strong = row_strength(row) == Strength::Strong;
-        edges.push((a, b, strong));
-        incoming[b as usize] += 1;
-        if !strong {
-            weak_incoming[b as usize] += 1;
-        }
-    }
+    walk(
+        &mut |from: Id, kind: &str, to: Id, _weight: f64, strong: bool| {
+            let Some(&a) = index.get(&from) else {
+                return;
+            };
+            if kind == "provides" {
+                providers.insert(a);
+                return;
+            }
+            let Some(&b) = index.get(&to) else {
+                return;
+            };
+            if kind == "contains" {
+                // A reached member makes its container reachable.
+                edges.push((b, a, true));
+                return;
+            }
+            if opts.exclude_kinds.iter().any(|x| x == kind) || a == b {
+                return;
+            }
+            edges.push((a, b, strong));
+            incoming[b as usize] += 1;
+            if !strong {
+                weak_incoming[b as usize] += 1;
+            }
+        },
+    )?;
     for (i, (_, row)) in symbols.iter().enumerate() {
         if let Some(&art) = index.get(&row.artifact) {
             edges.push((i as u32, art, true));

@@ -808,4 +808,167 @@ mod bench {
         katalogr_store::pagerank(&read, &symbols).unwrap();
         report("fanout_heavy_insights (pagerank)", start, 2000);
     }
+
+    /// FEAT-076 R-12: building the insight graph over 8 million fan links adds at most 800 MiB
+    /// of resident memory. 4,000 sources each name one key of 2,000 targets, so the stored rows
+    /// are 4,000 fan rows and the expanded graph is 8,000,000 links.
+    #[test]
+    #[ignore]
+    #[cfg(target_os = "linux")]
+    fn insight_graph_fan_memory() {
+        use katalogr_model::ExportKey;
+        use katalogr_store::FanKey;
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+
+        fn rss_kib() -> u64 {
+            std::fs::read_to_string("/proc/self/status")
+                .unwrap()
+                .lines()
+                .find_map(|l| l.strip_prefix("VmRSS:"))
+                .and_then(|r| r.split_whitespace().next()?.parse().ok())
+                .unwrap_or(0)
+        }
+
+        const SOURCES: usize = 4000;
+        const TARGETS: usize = 2000;
+        let tmp = tempfile::tempdir().unwrap();
+        let root = Utf8PathBuf::from_path_buf(tmp.path().join("kx")).unwrap();
+        let dir = Kindex::init(&root)
+            .unwrap()
+            .create_project(
+                &ProjectName::new("bench").unwrap(),
+                ProjectConfig {
+                    repos: vec![RepoConfig::new("r")],
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        let cache =
+            Cache::open_or_rebuild(&dir, &NoShards, Instant::now() + Duration::from_secs(60))
+                .unwrap();
+        let span = Span {
+            start_line: 1,
+            start_col: 1,
+            end_line: 1,
+            end_col: 1,
+        };
+        let path = RelPath::new("wide.tx").unwrap();
+        let provenance = Provenance {
+            repo: "r".into(),
+            path: path.clone(),
+            revision: "ce013625030ba8dba906f756967f9e9ca394464a".into(),
+        };
+        let artifact = ArtifactName {
+            repo: "r".into(),
+            path: path.clone(),
+        };
+        let aid = artifact.id();
+        let mut tx = cache.write().unwrap();
+        let mut ids: Vec<Id> = Vec::new();
+        for i in 0..SOURCES + TARGETS {
+            let name = SymbolName {
+                artifact: artifact.clone(),
+                segments: vec![Segment {
+                    kind: "fn".into(),
+                    name: format!("w{i}"),
+                }],
+                ordinal: 1,
+            };
+            let id = name.id();
+            tx.put_symbol(
+                id,
+                &SymbolRow {
+                    name,
+                    artifact: aid,
+                    kind: "fn".into(),
+                    span,
+                    facts: BTreeMap::new(),
+                },
+            )
+            .unwrap();
+            ids.push(id);
+        }
+        let mut symbols = ids.clone();
+        symbols.sort();
+        tx.put_artifact(
+            aid,
+            &ArtifactRow {
+                name: artifact,
+                extension: "test".into(),
+                provenance: provenance.clone(),
+                facts: BTreeMap::new(),
+                symbols,
+                exports: Vec::new(),
+                refs: Vec::new(),
+            },
+        )
+        .unwrap();
+        let key = ExportKey {
+            namespace: "m".into(),
+            key: "area".into(),
+        };
+        let mut targets: Vec<Id> = ids[..TARGETS].to_vec();
+        targets.sort();
+        tx.put_exports(&key, &targets).unwrap();
+        for id in &ids[TARGETS..] {
+            tx.put_fan(
+                &FanKey {
+                    from: *id,
+                    kind: LinkKind("calls".into()),
+                    key: key.clone(),
+                },
+                &LinkRow {
+                    entries: vec![LinkEntry {
+                        origin: LinkOrigin::Ref(0),
+                        confidence: Confidence::Inferred,
+                        span: Some(span),
+                        provenance: provenance.clone(),
+                        fanout: None,
+                        produced_by: None,
+                    }],
+                },
+            )
+            .unwrap();
+        }
+        tx.commit().unwrap();
+
+        let read = cache.read().unwrap();
+        assert_eq!(read.fans_all().unwrap().len(), SOURCES);
+        let base = rss_kib();
+        let peak = Arc::new(AtomicU64::new(base));
+        let stop = Arc::new(AtomicBool::new(false));
+        let sampler = {
+            let (peak, stop) = (peak.clone(), stop.clone());
+            std::thread::spawn(move || {
+                while !stop.load(Ordering::Relaxed) {
+                    peak.fetch_max(rss_kib(), Ordering::Relaxed);
+                    std::thread::sleep(Duration::from_millis(2));
+                }
+            })
+        };
+        let started = Instant::now();
+        let r = hubs(
+            &read,
+            &HubOptions {
+                graph: graph(Level::Symbol, true),
+                min_degree: 1.0,
+                limit: 20,
+            },
+        )
+        .unwrap();
+        let took = started.elapsed();
+        stop.store(true, Ordering::Relaxed);
+        sampler.join().unwrap();
+        let grown_mib = peak.load(Ordering::Relaxed).saturating_sub(base) / 1024;
+        println!(
+            "load {}: hubs over {} expanded links in {took:?}, peak +{grown_mib} MiB",
+            std::fs::read_to_string("/proc/loadavg")
+                .map(|s| s.split_whitespace().next().unwrap_or("?").to_string())
+                .unwrap_or_default(),
+            SOURCES * TARGETS,
+        );
+        assert!(!r.items.is_empty());
+        assert!(grown_mib <= 800, "+{grown_mib} MiB");
+    }
 }

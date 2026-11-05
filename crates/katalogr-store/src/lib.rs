@@ -20,8 +20,8 @@ pub use cache::ShardKey;
 pub use cache::{
     ArtifactRow, BindingRow, CACHE_SCHEMA, Cache, ContractRow, ErrorRow, FanKey, JournalEntry,
     LEXICON_FIELDS, LexiconStats, LinkBrief, LinkEntry, LinkKey, LinkOrigin, LinkRow, PendingKey,
-    Posting, ReadTx, Reader, RefId, Restitch, ShardStat, Snapshot, SymbolBrief, SymbolRow,
-    SyncReport, WriteTx,
+    Posting, RANK_TOP_ENTRIES, RankTop, ReadTx, Reader, RefId, Restitch, ShardStat, Snapshot,
+    SymbolBrief, SymbolCore, SymbolRow, SyncReport, WriteTx,
 };
 pub use error::StoreError;
 pub use guard::{GuardError, needles_from, scan_for_absolute, scan_for_absolute_with};

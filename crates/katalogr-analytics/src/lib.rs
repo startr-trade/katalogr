@@ -10,6 +10,8 @@ mod fan_answers;
 mod graph;
 mod hints;
 mod hubs;
+#[cfg(test)]
+mod link_walk;
 mod louvain;
 pub mod metrics;
 pub mod options;
