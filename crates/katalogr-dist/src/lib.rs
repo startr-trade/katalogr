@@ -538,6 +538,7 @@ impl Katalogr {
         mut engine: Engine,
         manifest: Option<katalogr_store::ContextManifest>,
     ) -> Result<Engine, DistError> {
+        let manifest_kind = manifest.clone();
         if let Some(m) = manifest
             && m.kind == katalogr_store::ContextKind::Commit
             && let (Some(commit), Some(root)) = (m.commit.clone(), self.roots.get(&m.repo))
@@ -550,7 +551,43 @@ impl Katalogr {
                 },
             );
         }
+        self.pin_positions(&mut engine, manifest_kind.as_ref())?;
         self.configure(engine)
+    }
+
+    /// FEAT-084. Fix the position of every repo this context does not read from a checkout: a
+    /// commit context's repo at its commit, every other repo of a layer at the commit the base
+    /// reflects (none if unknown), and, for the base itself, every repo with a git checkout.
+    /// A checkout layer's own repo and plain directories are read live.
+    fn pin_positions(
+        &self,
+        engine: &mut Engine,
+        manifest: Option<&katalogr_store::ContextManifest>,
+    ) -> Result<(), DistError> {
+        use katalogr_store::{ContextKind, Reader};
+        let snap = engine.cache().read()?;
+        let repos: Vec<String> = engine.roots().keys().cloned().collect();
+        let mut pins = Vec::new();
+        for repo in repos {
+            let pin = match manifest {
+                Some(m) if m.repo == repo && m.kind == ContextKind::Checkout => continue,
+                Some(m) if m.repo == repo => m.commit.clone(),
+                None if !engine.roots()[&repo].join(".git").exists() => continue,
+                _ => None,
+            };
+            let commit = match pin {
+                Some(c) => Some(c),
+                None => snap
+                    .meta(&contexts::base_commit_key(&repo))?
+                    .and_then(|b| String::from_utf8(b).ok()),
+            };
+            pins.push((repo, commit));
+        }
+        drop(snap);
+        for (repo, commit) in pins {
+            engine.set_pinned_position(&repo, commit);
+        }
+        Ok(())
     }
 
     /// Registry, profiles, parallelism and filters, shared by every open.

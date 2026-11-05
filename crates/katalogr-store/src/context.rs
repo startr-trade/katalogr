@@ -175,6 +175,24 @@ pub fn seed_layer(
             "layer_seed_commit",
             m.seed_commit.as_deref().unwrap_or("").as_bytes(),
         )?;
+        // FEAT-084. A checkout layer reflects the seed commit exactly, with no uncommitted part;
+        // the base's own record of its position does not carry over. With no seed commit the
+        // layer has no record, and the first read rescans.
+        let (pos_key, changed_key) = (
+            format!("position.{}", m.repo),
+            format!("position_changed.{}", m.repo),
+        );
+        match (&m.kind, m.seed_commit.as_deref()) {
+            (ContextKind::Checkout, Some(c)) if !c.is_empty() => {
+                let pos = serde_json::json!({"repo": m.repo, "commit": c, "dirty": null});
+                tx.set_meta(&pos_key, pos.to_string().as_bytes())?;
+                tx.set_meta(&changed_key, br#"{"over":false,"paths":[]}"#)?;
+            }
+            _ => {
+                tx.set_meta(&pos_key, b"")?;
+                tx.set_meta(&changed_key, b"")?;
+            }
+        }
         tx.commit()?;
         drop(cache);
         std::fs::File::open(&tmp)

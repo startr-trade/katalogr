@@ -116,6 +116,9 @@ pub struct Engine {
     roots: BTreeMap<String, Utf8PathBuf>,
     /// How each repo's files are read; `Disk` of the root unless replaced.
     sources: BTreeMap<String, FileSource>,
+    /// Repos whose position is fixed by the context, not read from a checkout: the commit the
+    /// context reflects (`None`: no commit known). Such a repo is never reconciled.
+    pins: BTreeMap<String, Option<String>>,
     /// Per repo `(include, exclude)` globs; a repo not listed uses the defaults.
     filters: BTreeMap<String, (Vec<String>, Vec<String>)>,
     /// Embedded profiles: `(file name, text)`, applied before the project's own.
@@ -193,6 +196,7 @@ impl Engine {
             stitcher,
             roots,
             sources,
+            pins: BTreeMap::new(),
             filters: BTreeMap::new(),
             builtin_profiles: Vec::new(),
             parallelism: Parallelism::from_cores(),
@@ -253,6 +257,19 @@ impl Engine {
     /// The built-in profiles, as `(file name, text)` pairs.
     pub fn builtin_profiles(&self) -> &[(String, String)] {
         &self.builtin_profiles
+    }
+
+    /// FEAT-084. Fix `repo`'s position at `commit` with no uncommitted part (`None`: no commit
+    /// known): a base, a commit context, or a repo that is not this context's checkout. A
+    /// pinned repo is not read from disk and nothing is queued for it.
+    pub fn set_pinned_position(&mut self, repo: &str, commit: Option<String>) {
+        self.pins.insert(repo.to_string(), commit);
+    }
+
+    /// FEAT-084. The position of `repo` as it is now: its pin, or the checkout read from disk
+    /// (through the stat cache).
+    pub fn live_position(&self, repo: &str) -> Result<PositionRef, EngineError> {
+        Ok(self.state_of(repo)?.position)
     }
 
     /// Set the include and exclude globs used to list a repo's files (default: those of
@@ -470,7 +487,16 @@ impl Engine {
     ) -> Result<BTreeMap<String, PositionRef>, EngineError> {
         let mut out = BTreeMap::new();
         for repo in self.roots.keys() {
-            if let Some(p) = recorded_position(snap, repo)? {
+            if let Some(commit) = self.pins.get(repo) {
+                out.insert(
+                    repo.clone(),
+                    PositionRef {
+                        repo: repo.clone(),
+                        commit: commit.clone(),
+                        dirty: None,
+                    },
+                );
+            } else if let Some(p) = recorded_position(snap, repo)? {
                 out.insert(repo.clone(), p);
             }
         }
@@ -478,6 +504,16 @@ impl Engine {
     }
 
     fn state_of(&self, repo: &str) -> Result<WorkingState, crate::scan::ScanError> {
+        if let Some(commit) = self.pins.get(repo) {
+            return Ok(WorkingState {
+                position: PositionRef {
+                    repo: repo.to_string(),
+                    commit: commit.clone(),
+                    dirty: None,
+                },
+                changed: Vec::new(),
+            });
+        }
         let root = &self.roots[repo];
         let (include, exclude) = self.repo_filters(repo);
         let cache = stat_cache_path(self.dir.cache_dir().as_std_path(), repo);
@@ -496,6 +532,12 @@ impl Engine {
         let snap = self.cache.read()?;
         let mut before = BTreeMap::new();
         for repo in self.roots.keys() {
+            if self.pins.contains_key(repo) {
+                if let Ok(s) = self.state_of(repo) {
+                    before.insert(repo.clone(), s);
+                }
+                continue;
+            }
             let state = match self.state_of(repo) {
                 Ok(s) => s,
                 Err(e) => {
@@ -641,9 +683,12 @@ impl Engine {
         }
         let changed: Vec<&WorkingState> = after
             .values()
+            .filter(|s| !self.pins.contains_key(&s.position.repo))
             .filter(|s| recorded.get(&s.position.repo) != Some(&s.position))
             .collect();
+        // A read-only handle cannot record; a later read through a writer does.
         if !changed.is_empty()
+            && !self.cache.is_reader()
             && let Some(_lock) = Processor::try_acquire(self)?
         {
             let mut tx = self.cache.write()?;

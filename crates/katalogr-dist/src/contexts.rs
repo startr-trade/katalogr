@@ -7,7 +7,7 @@ use katalogr_engine::Engine;
 use katalogr_engine::base::{branch_tip, default_branch, plan_base_advance, resolve_commit};
 use katalogr_engine::queue::Inbox;
 use katalogr_engine::queue::lock::lock_until;
-use katalogr_engine::{FileSource, NewEvent, scan::ScanError};
+use katalogr_engine::{EventKind, FileSource, NewEvent, scan::ScanError};
 use katalogr_store::{CACHE_SCHEMA, Cache, CacheInspection};
 use katalogr_store::{ContextId, ContextKind, ContextManifest, ProjectDir, Reader, seed_layer};
 use std::time::Instant;
@@ -469,12 +469,66 @@ impl Katalogr {
             m.seed_commit = None;
             seed_layer(&self.project, layer, &m, deadline)?;
             drop(lock);
-            // The checkout may differ from the seed in ways only a listing shows; unchanged
-            // files cost a read and a hash, never an extraction.
-            Inbox::new(layer).append(&NewEvent::rescan(repo))?;
+            self.queue_seed_delta(layer, repo)?;
         }
         let _ = std::fs::File::create(layer.root().join(".used"));
         Ok(layer.clone())
+    }
+
+    /// What a fresh layer still lacks (FEAT-043 Seed step 5, with FEAT-084). A checkout layer
+    /// is seeded with the position it reflects, so its first read queues the paths between that
+    /// commit and the checkout plus the uncommitted ones (reconcile). A commit layer queues the
+    /// paths between the seed commit and its own commit. With the seed commit unknown, the
+    /// whole repo is queued.
+    fn queue_seed_delta(&self, layer: &ProjectDir, repo: &str) -> Result<(), DistError> {
+        let m = ContextManifest::read(layer.root())?;
+        let inbox = Inbox::new(layer);
+        let seed = m.seed_commit.as_deref().filter(|c| !c.is_empty());
+        match m.kind {
+            ContextKind::Checkout => {
+                if seed.is_none() {
+                    inbox.append(&NewEvent::rescan(repo))?;
+                }
+            }
+            ContextKind::Commit => {
+                let (Some(seed), Some(commit), Some(root)) =
+                    (seed, m.commit.as_deref(), self.roots.get(repo))
+                else {
+                    inbox.append(&NewEvent::rescan(repo))?;
+                    return Ok(());
+                };
+                match katalogr_engine::scan::changed_paths(
+                    root.as_std_path(),
+                    &format!("{seed}..{commit}"),
+                ) {
+                    Ok(changes) => {
+                        use katalogr_engine::scan::PathChange as C;
+                        for c in changes {
+                            match c {
+                                C::Added(p) | C::Modified(p) => {
+                                    inbox.append(&NewEvent::file(repo, &p, EventKind::Changed))?;
+                                }
+                                C::Deleted(p) => {
+                                    inbox.append(&NewEvent::file(repo, &p, EventKind::Deleted))?;
+                                }
+                                C::Renamed { from, to } => {
+                                    inbox.append(&NewEvent::file(
+                                        repo,
+                                        &from,
+                                        EventKind::Deleted,
+                                    ))?;
+                                    inbox.append(&NewEvent::file(repo, &to, EventKind::Changed))?;
+                                }
+                            }
+                        }
+                    }
+                    Err(_) => {
+                        inbox.append(&NewEvent::rescan(repo))?;
+                    }
+                }
+            }
+        }
+        Ok(())
     }
 
     /// The base cache's view of a repo: the commit the base reflects, if recorded.
