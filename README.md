@@ -2,7 +2,11 @@
 
 Deterministic, technology- and protocol-neutral traceability graph for polyglot systems, built for humans and AI coding agents.
 
+Documentation: <https://katalogr.startr.trade>. To contribute, see [CONTRIBUTING](CONTRIBUTING.md); to report a vulnerability, see [SECURITY](SECURITY.md).
+
 ## Install
+
+> There is no public release yet, so the `curl` install below does not work until the first public release. Until then, build from source: `cargo build --release --locked -p katalogr`.
 
 ```sh
 curl --proto '=https' --tlsv1.2 -fsSL https://github.com/startr-trade/katalogr/releases/latest/download/install.sh | sh
