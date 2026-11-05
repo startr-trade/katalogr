@@ -383,7 +383,7 @@ impl Katalogr {
     pub fn profile_listing(&self) -> ProfileListing {
         let builtins: Vec<(&str, &str)> = BUILTIN_PROFILES.to_vec();
         let report = katalogr_engine::profiles::ProfileSet::load_full(
-            self.project.root(),
+            self.project.project_root(),
             &builtins,
             &BTreeMap::new(),
             &build_registry().normalisers(),

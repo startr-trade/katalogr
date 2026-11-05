@@ -2,6 +2,7 @@
 
 pub mod blob;
 pub mod cache;
+pub mod context;
 // Not wired into the cache yet: FEAT-075 T5 switches the tables to it.
 #[allow(dead_code)]
 mod codec;
@@ -23,6 +24,7 @@ pub use cache::{
     Posting, ReadTx, Reader, RefId, Restitch, ShardStat, Snapshot, SymbolBrief, SymbolRow,
     SyncReport, WriteTx,
 };
+pub use context::{ContextId, ContextKind, ContextManifest};
 pub use error::StoreError;
 pub use guard::{GuardError, needles_from, scan_for_absolute, scan_for_absolute_with};
 pub use inspect::{CacheInspection, InspectedTables, OpenCache};

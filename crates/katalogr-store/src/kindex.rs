@@ -1,6 +1,7 @@
 //! The kindex repository and its projects.
 
 use crate::cache::ShardKey;
+use crate::context::{ContextId, ContextManifest};
 use crate::error::StoreError;
 use crate::shard;
 use camino::{Utf8Path, Utf8PathBuf};
@@ -222,6 +223,7 @@ impl Kindex {
         })?;
         write_atomic(&dir.join("config.yaml"), yaml.as_bytes())?;
         Ok(ProjectDir {
+            project_root: dir.clone(),
             root: dir,
             kindex_root: self.root.clone(),
             config,
@@ -257,6 +259,7 @@ impl Kindex {
                 message: e.to_string(),
             })?;
         Ok(ProjectDir {
+            project_root: dir.clone(),
             root: dir,
             kindex_root: self.root.clone(),
             config,
@@ -303,6 +306,7 @@ pub enum GitState {
 #[derive(Clone, Debug)]
 pub struct ProjectDir {
     root: Utf8PathBuf,
+    project_root: Utf8PathBuf,
     kindex_root: Utf8PathBuf,
     config: ProjectConfig,
 }
@@ -314,6 +318,53 @@ impl ProjectDir {
 
     pub fn config(&self) -> &ProjectConfig {
         &self.config
+    }
+
+    /// The same project with its data root at `<project>/.cache/contexts/<id>`; config and
+    /// profiles still come from the project.
+    pub fn layer(&self, id: &ContextId) -> ProjectDir {
+        ProjectDir {
+            root: self
+                .project_root
+                .join(".cache")
+                .join("contexts")
+                .join(id.as_str()),
+            project_root: self.project_root.clone(),
+            kindex_root: self.kindex_root.clone(),
+            config: self.config.clone(),
+        }
+    }
+
+    /// Where `config.yaml` and `profiles/` live, for a layer too. `root()` keeps meaning the
+    /// data root, so journal and shard paths stay relative to it.
+    pub fn project_root(&self) -> &Utf8Path {
+        &self.project_root
+    }
+
+    pub fn is_layer(&self) -> bool {
+        self.root != self.project_root
+    }
+
+    /// Manifests under `.cache/contexts/`, sorted by id; an unreadable one is skipped.
+    pub fn contexts(&self) -> Result<Vec<ContextManifest>, StoreError> {
+        let dir = self.project_root.join(".cache").join("contexts");
+        let rd = match std::fs::read_dir(&dir) {
+            Ok(rd) => rd,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(e) => return Err(StoreError::io(&dir, e)),
+        };
+        let mut out = Vec::new();
+        for entry in rd {
+            let entry = entry.map_err(|e| StoreError::io(&dir, e))?;
+            let Ok(path) = Utf8PathBuf::from_path_buf(entry.path()) else {
+                continue;
+            };
+            if let Ok(m) = ContextManifest::read(&path) {
+                out.push(m);
+            }
+        }
+        out.sort_by(|a, b| a.id.cmp(&b.id));
+        Ok(out)
     }
 
     /// Reads this project's `format.json` without the newer-format refusal.

@@ -209,7 +209,7 @@ impl Engine {
             .collect();
         let normalisers = self.registry().normalisers();
         Ok(ProfileSet::load_full(
-            self.dir().root(),
+            self.dir().project_root(),
             &builtins,
             &previous,
             &normalisers,
