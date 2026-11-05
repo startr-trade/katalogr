@@ -1919,6 +1919,8 @@ mod render_json {
                 "positions"
             );
             assert!(o.remove("exact").is_some_and(|e| e.is_boolean()), "exact");
+            // An exact answer to a read command also carries its view ID.
+            o.remove("view_id");
             v
         };
         let golden = |s: &str| serde_json::from_str::<serde_json::Value>(s).unwrap();

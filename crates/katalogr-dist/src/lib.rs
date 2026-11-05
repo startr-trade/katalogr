@@ -70,6 +70,11 @@ pub fn schemas() -> BTreeMap<&'static str, serde_json::Value> {
         all.insert("doctor", doctor::schema()).is_none(),
         "schema name doctor is registered twice"
     );
+    assert!(
+        all.insert("position", katalogr_query::position_schema())
+            .is_none(),
+        "schema name position is registered twice"
+    );
     all
 }
 

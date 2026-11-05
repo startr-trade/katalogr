@@ -53,7 +53,7 @@ pub use result::{
     Partial, PathStep, RationaleLink, RefHit, ReplaceResult, Resolution, SearchHit, ShowResult,
     SymbolHit, TestHit, Truncation, WhyResult, cap,
 };
-pub use schema::schemas;
+pub use schema::{position_schema, schemas};
 pub use search::{SearchParams, search, search_traced, search_with, search_with_traced};
 pub use tests::{DEFAULT_TEST_DEPTH, TestsOptions, tests, tests_for};
 pub use why::{Blame, RATIONALE_KINDS, why};
