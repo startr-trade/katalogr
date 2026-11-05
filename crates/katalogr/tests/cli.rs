@@ -1003,7 +1003,17 @@ mod retrieval {
         );
         // The signature needs no file: it still works while the file is being edited.
         std::fs::write(repo.join("src/lib.rs"), "changed\n").unwrap();
-        let (code, out2, _) = run(&repo, &["show", "apply_rate_code", "--signature"]);
+        // (An edit with no event is now found by a waiting read, so this read asks not to wait.)
+        let (code, out2, _) = run(
+            &repo,
+            &[
+                "--consistency",
+                "stale-ok",
+                "show",
+                "apply_rate_code",
+                "--signature",
+            ],
+        );
         assert_eq!(code, 0);
         assert_eq!(out, out2);
     }
@@ -1359,14 +1369,25 @@ mod retrieval {
         // A file that changed behind the index's back is never touched: exit 5.
         let edited = format!("// edited\n{want}");
         std::fs::write(repo.join("src/lib.rs"), &edited).unwrap();
-        let (code, out, err) = run(&repo, &["replace", "rate", "--file", body_s]);
+        // (A waiting read would now index the edit, FEAT-084 R-9; stale-ok keeps the old path.)
+        let (code, out, err) = run(
+            &repo,
+            &[
+                "--consistency",
+                "stale-ok",
+                "replace",
+                "rate",
+                "--file",
+                body_s,
+            ],
+        );
         assert_eq!(code, 5, "{out}{err}");
         assert!(err.contains("stale"), "{err}");
         assert_eq!(
             std::fs::read_to_string(repo.join("src/lib.rs")).unwrap(),
             edited
         );
-        let (code, out, err) = run(&repo, &["show", "rate"]);
+        let (code, out, err) = run(&repo, &["--consistency", "stale-ok", "show", "rate"]);
         assert_eq!(code, 5, "{out}");
         assert_eq!(out, "", "no span is printed for a stale file");
         assert!(err.contains("katalogr index"), "{err}");

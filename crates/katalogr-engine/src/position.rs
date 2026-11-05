@@ -203,3 +203,27 @@ pub fn dirty_hash<'a>(
     }
     Some(h.finalize().iter().map(|b| format!("{b:02x}")).collect())
 }
+
+/// Benchmark comparison only: the number of paths `gix` status reports (tracked changes and
+/// untracked files) using the index's stat cache, without hashing anything. It is what a
+/// position built on status alone would start from.
+#[doc(hidden)]
+pub fn status_path_count(root: &Path) -> Result<usize, ScanError> {
+    let git = gix::open(root).map_err(|e| ScanError::RepoOpen {
+        path: root.display().to_string(),
+        message: e.to_string(),
+    })?;
+    let iter = git
+        .status(gix::progress::Discard)
+        .map_err(diff_err)?
+        .untracked_files(gix::status::UntrackedFiles::Files)
+        .index_worktree_rewrites(None)
+        .into_index_worktree_iter(Vec::<BString>::new())
+        .map_err(diff_err)?;
+    let mut n = 0;
+    for item in iter {
+        item.map_err(diff_err)?;
+        n += 1;
+    }
+    Ok(n)
+}

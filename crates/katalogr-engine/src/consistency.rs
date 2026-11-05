@@ -417,7 +417,11 @@ impl Engine {
                 }
             };
             let recorded = recorded_position(&snap, repo)?;
-            if recorded.as_ref() != Some(&state.position) {
+            // With no record, a rescan is the only way to know what the index reflects. Queued
+            // changes mean a producer is already feeding the index, so none is added then.
+            let unknown_but_fed =
+                recorded.is_none() && self.pending_in(&snap, &Scope::Project)? > 0;
+            if recorded.as_ref() != Some(&state.position) && !unknown_but_fed {
                 let old = recorded_changed(&snap, repo)?;
                 for ev in self.events_for_difference(repo, recorded.as_ref(), &state, old) {
                     // A rescan already waiting in the inbox covers the same ground.

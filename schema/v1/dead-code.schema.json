@@ -861,6 +861,7 @@
       "description": "The trace of the query, present only with `--diagnostic` (FEAT-065)."
     },
     "exact": {
+      "default": false,
       "description": "Nothing was pending and every checkout's position was the same before and after the read.",
       "type": "boolean"
     },
@@ -936,8 +937,7 @@
     "watermark",
     "pending",
     "stale",
-    "result",
-    "exact"
+    "result"
   ],
   "title": "Envelope",
   "type": "object"

@@ -443,6 +443,7 @@ pub struct Envelope<T> {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub positions: Vec<PositionRef>,
     /// Nothing was pending and every checkout's position was the same before and after the read.
+    #[serde(default)]
     pub exact: bool,
     /// Identifies this answer; present only on an exact answer to a question that has one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
