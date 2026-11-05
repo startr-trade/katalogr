@@ -2703,6 +2703,14 @@ impl Cache {
             {
                 return Ok(None);
             }
+            // A writer has created the file but not initialised it yet.
+            Err(_)
+                if std::fs::metadata(path.as_std_path())
+                    .map(|m| m.len() == 0)
+                    .unwrap_or(false) =>
+            {
+                return Ok(None);
+            }
             Err(e) => return Err(db(e)),
         };
         let txn = database.begin_read().map_err(db)?;
