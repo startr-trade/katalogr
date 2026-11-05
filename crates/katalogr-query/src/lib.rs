@@ -27,6 +27,7 @@ mod search;
 pub mod show;
 mod step;
 mod tests;
+mod view_answer;
 mod why;
 pub mod working_set;
 
@@ -48,7 +49,7 @@ pub use hints::{HintSource, hints};
 pub use map::{map, map_boosted_traced, map_top, map_top_behind, map_traced};
 pub use mirror::mirror_drift;
 pub use path::path;
-pub use position::{PositionAnswer, PositionError, PositionRef, ViewQuery, view_id};
+pub use position::{PositionAnswer, PositionError, PositionRef, VIEW_FORMAT, ViewQuery, view_id};
 pub use rank::{
     link_weight, rank, rank_cached_or_live, rank_cached_or_live_with_source, rank_live,
 };
@@ -65,6 +66,7 @@ pub use search::{
     SearchParams, search, search_boosted_traced, search_traced, search_with, search_with_traced,
 };
 pub use tests::{DEFAULT_TEST_DEPTH, TestsOptions, tests, tests_for};
+pub use view_answer::{ViewAnswer, ViewQueryJson, view_schema};
 pub use why::{Blame, DEFAULT_USE_LIMIT, RATIONALE_KINDS, attach_use, why, why_sources, why_use};
 pub use working_set::{Boost, Tier, Weights, WorkingSet, WorkingSetSummary, boost};
 

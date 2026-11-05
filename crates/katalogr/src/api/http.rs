@@ -116,7 +116,7 @@ pub fn parse_target(method: &str, url: &str, head_len: usize) -> Result<Target, 
     let (path, query) = url.split_once('?').unwrap_or((url, ""));
     let op = path
         .strip_prefix(PREFIX)
-        .filter(|op| !op.is_empty() && !op.contains('/'))
+        .filter(|op| !op.is_empty() && (!op.contains('/') || is_views_route(op)))
         .ok_or_else(|| HttpError::new(404, "not-found", "no such route"))?;
     let mut params = BTreeMap::new();
     for pair in query.split('&').filter(|p| !p.is_empty()) {
@@ -130,6 +130,11 @@ pub fn parse_target(method: &str, url: &str, head_len: usize) -> Result<Target, 
         op: op.to_string(),
         params,
     })
+}
+
+/// `views/` and `views/<op>`: the one place a route has a second segment (FEAT-088).
+fn is_views_route(op: &str) -> bool {
+    op.strip_prefix("views/").is_some_and(|r| !r.contains('/'))
 }
 
 /// Decode `%XX` and `+` (a space). A bad escape or non-UTF-8 is a 400.

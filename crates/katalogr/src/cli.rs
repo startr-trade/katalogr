@@ -261,6 +261,18 @@ pub enum Command {
         #[arg(allow_hyphen_values = true, value_name = "OP [ARGS]")]
         words: Vec<String>,
     },
+    /// A generated view as Mermaid and data, stored by its view ID and answered from the store
+    /// when it is there. The view is an op (`structure`, `contracts`, `callers <symbol>`,
+    /// `path <from> <to>`, `cycles`) with its flags, as in a `katalogr-query` block. With
+    /// `--json` the answer is what `GET /api/v1/views/<op>` returns.
+    View {
+        /// Compute the view again and compare it with the stored one; exit 1 on a difference.
+        #[arg(long)]
+        fresh: bool,
+        /// The view: an op, then its arguments and flags.
+        #[arg(allow_hyphen_values = true, value_name = "OP [ARGS]", required = true)]
+        words: Vec<String>,
+    },
     /// Describe a symbol: signature, doc, links and rationale.
     Explain {
         /// Canonical name or plain name.

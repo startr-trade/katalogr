@@ -1,0 +1,46 @@
+//! `katalogr view <op> [args] [--at P] [--fresh] [--json]` (FEAT-088): a generated view,
+//! answered from the store by its view ID when it is there. One facade call; the bytes it
+//! returns are what `GET /api/v1/views/<op>` sends.
+
+use katalogr_dist::render::ViewSpec;
+use katalogr_dist::{DistError, FreshCheck};
+
+use crate::cli::Cli;
+use crate::cmd::render::line_of;
+use crate::cmd::{options, resolve};
+use crate::exit::ExitCode;
+use crate::render;
+
+pub fn run(cli: &Cli, fresh: bool, words: &[String]) -> Result<ExitCode, DistError> {
+    // `--fresh` may come after the op, with the view's own flags.
+    let fresh = fresh || words.iter().any(|w| w == "--fresh");
+    let words: Vec<String> = words.iter().filter(|w| *w != "--fresh").cloned().collect();
+    let spec = ViewSpec::parse(&line_of(&words)).map_err(|e| DistError::Usage(e.to_string()))?;
+    let k = resolve(cli)?;
+    let opts = options(cli);
+    if fresh {
+        return Ok(match k.view_fresh(&spec, &opts)? {
+            FreshCheck::Same => state(cli, "same", None),
+            FreshCheck::NotStored => state(cli, "not-stored", None),
+            FreshCheck::Different { view_id } => {
+                eprintln!("katalogr: stored view {view_id} differs from a fresh computation");
+                state(cli, "different", Some(&view_id));
+                ExitCode::Error
+            }
+        });
+    }
+    Ok(render::view_bytes(cli, k.view(&spec, &opts)?))
+}
+
+/// What `--fresh` found: a JSON line with `--json`, else a word.
+fn state(cli: &Cli, found: &str, id: Option<&str>) -> ExitCode {
+    if cli.json {
+        println!(
+            "{}",
+            serde_json::json!({"schema": 1, "fresh": found, "view_id": id})
+        );
+    } else {
+        println!("fresh: {found}");
+    }
+    ExitCode::Ok
+}

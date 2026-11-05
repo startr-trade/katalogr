@@ -304,6 +304,7 @@ fn usage(message: String) -> JsonAnswer {
         message: Some(message),
         warnings: Vec::new(),
         diagnostic: Vec::new(),
+        headers: Vec::new(),
     }
 }
 
@@ -682,5 +683,6 @@ pub fn panic_answer(payload: Box<dyn Any + Send>) -> JsonAnswer {
         message: Some(format!("internal error: {p}")),
         warnings: Vec::new(),
         diagnostic: Vec::new(),
+        headers: Vec::new(),
     }
 }

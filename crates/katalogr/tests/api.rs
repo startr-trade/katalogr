@@ -521,6 +521,12 @@ mod api {
         ("context-list", ""),
         ("context-diff", "a=base&b=current"),
         ("context-conflicts", "a=base&b=current"),
+        ("views/", ""),
+        ("views/structure", ""),
+        ("views/contracts", ""),
+        ("views/callers", "symbol=target"),
+        ("views/path", "from=top&to=caller_a"),
+        ("views/cycles", ""),
     ];
 
     /// R-3. Every route answers, and a body that has a `schema/v1` file validates against it.
@@ -597,11 +603,12 @@ mod api {
             "help",
             // Polls and reindexes until interrupted, like `api`.
             "watch",
-            // Draws a view for a person; the `/api/v1/views/` prefix is reserved for it.
+            // Draws a view for a person; the generated views are `view`, served under
+            // `/api/v1/views/`.
             "render",
         ];
         // Served at another path.
-        let elsewhere = [("contract", "meta")];
+        let elsewhere = [("contract", "meta"), ("view", "views/")];
         let doc = {
             let server = serve(&repo, &[]);
             get(&server, "/api/v1/openapi.json").json()
@@ -750,13 +757,20 @@ mod api {
         }
     }
 
-    /// R-10. `/api/v1/views/` is reserved for the view API and answers 404 today.
+    /// FEAT-088 R-6. `/api/v1/views/` is served: the catalogue at the prefix, a view per op, and
+    /// still 404 for a name that is not an op.
     #[test]
-    fn views_prefix_reserved() {
+    fn views_prefix_served() {
         let tmp = tempfile::tempdir().unwrap();
         let (_kx, repo) = project(tmp.path());
         let server = serve(&repo, &[]);
-        for p in ["/api/v1/views", "/api/v1/views/", "/api/v1/views/graph"] {
+        let r = get(&server, "/api/v1/views/");
+        assert_eq!(r.status, 200, "{r:?}");
+        assert!(r.json()["views"].is_array());
+        let r = get(&server, "/api/v1/views/structure?consistency=wait");
+        assert_eq!(r.status, 200, "{r:?}");
+        assert!(r.json()["mermaid"].is_string());
+        for p in ["/api/v1/views", "/api/v1/views/graph"] {
             let r = get(&server, p);
             assert_eq!(r.status, 404, "{p}: {r:?}");
             assert_eq!(r.json()["error"], "not-found");

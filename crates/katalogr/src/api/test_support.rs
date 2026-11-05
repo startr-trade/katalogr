@@ -23,6 +23,7 @@ fn answer(exit: ExitCode, stdout: &str) -> JsonAnswer {
         message: None,
         warnings: Vec::new(),
         diagnostic: Vec::new(),
+        headers: Vec::new(),
     }
 }
 

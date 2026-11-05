@@ -42,6 +42,7 @@ pub mod skill;
 pub mod status;
 pub mod tests;
 pub mod version;
+pub mod view;
 pub mod watch;
 pub mod why;
 

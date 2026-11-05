@@ -170,6 +170,7 @@ fn run(cli: &Cli) -> Result<ExitCode, DistError> {
             format,
             words,
         }) => cmd::render::run(cli, action.as_ref(), *format, words),
+        Some(Command::View { fresh, words }) => cmd::view::run(cli, *fresh, words),
         Some(Command::Explain { symbol, per_side }) => cmd::explain::run(cli, symbol, *per_side),
         Some(Command::Replace { symbol, file }) => cmd::replace::run(cli, symbol, file),
         None => {

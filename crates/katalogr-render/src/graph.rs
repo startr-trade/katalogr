@@ -2,11 +2,11 @@
 //! each renderer, so output never depends on the order it was built in.
 
 use schemars::JsonSchema;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 /// One view: nodes and edges plus how much of the whole they show.
-#[derive(Clone, Debug, PartialEq, Serialize, JsonSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct ViewGraph {
     /// The query line that produced the view, for example `structure --level package`.
     pub title: String,
@@ -19,7 +19,7 @@ pub struct ViewGraph {
     pub total: u64,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, JsonSchema)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ViewNode {
     /// From [`node_id`] of the canonical name.
     pub id: String,
@@ -33,7 +33,7 @@ pub struct ViewNode {
     pub group: Option<String>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, JsonSchema)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ViewEdge {
     /// A node id.
     pub from: String,

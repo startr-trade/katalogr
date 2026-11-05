@@ -324,6 +324,24 @@ fn route(
 
 /// Run the op and turn its answer into a response (status table, `ETag`).
 fn answer_of(shared: &Shared, op: &Op, args: &Args, headers: &[(String, String)]) -> Out {
+    // A views route knows its ID before any read (FEAT-088): a client that holds it is told so.
+    if let Some(inm) = header(headers, "if-none-match")
+        && op.name.starts_with("views/")
+    {
+        let mut overrides = shared.cfg.overrides.clone();
+        overrides.context = args.opt("context").map(str::to_string);
+        if let Some(id) = ops::view_id_now(&shared.cfg.start_dir, op, args, &overrides) {
+            let etag = format!("\"{id}\"");
+            if inm
+                .split(',')
+                .any(|t| t.trim().trim_start_matches("W/") == etag)
+            {
+                let mut out = Out::json(304, String::new());
+                out.headers.push(("ETag", etag));
+                return out;
+            }
+        }
+    }
     let ans = execute(shared, op, args);
     let status = status_of(ans.exit);
     let (body, kind) = match (&ans.stdout, ans.exit) {
@@ -348,6 +366,7 @@ fn answer_of(shared: &Shared, op: &Op, args: &Args, headers: &[(String, String)]
         None => body,
     };
     let mut out = Out::json(status, body);
+    out.headers.extend(ans.headers.iter().cloned());
     if status == 200
         && let Some(id) = string_field(&out.body, "view_id")
     {
@@ -428,6 +447,7 @@ fn execute(shared: &Shared, op: &Op, args: &Args) -> JsonAnswer {
             message: Some("internal error".to_string()),
             warnings: Vec::new(),
             diagnostic: Vec::new(),
+            headers: Vec::new(),
         },
     }
 }

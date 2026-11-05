@@ -457,6 +457,7 @@ fn ok_answer() -> JsonAnswer {
         message: None,
         warnings: Vec::new(),
         diagnostic: Vec::new(),
+        headers: Vec::new(),
     }
 }
 
@@ -896,6 +897,76 @@ pub const OPS: &[Op] = &[
         Call::Project(context_diff)
     ),
     op!(
+        "views/",
+        "The view ops and their arguments.",
+        &[],
+        None,
+        Call::Free(views_catalogue)
+    ),
+    op!(
+        "views/structure",
+        "A structure view at a position: Mermaid and the graph.",
+        &[
+            dflt(
+                "level",
+                Ty::Enum(VIEW_LEVELS),
+                "package",
+                "node granularity"
+            ),
+            MAX_NODES,
+            dflt("inferred", Ty::Bool, "false", "also draw inferred links"),
+        ],
+        Some("view"),
+        Call::Project(view_structure)
+    ),
+    op!(
+        "views/contracts",
+        "A contracts view at a position: Mermaid and the graph.",
+        &[
+            opt("kind", Ty::Str, "only contracts of this kind"),
+            MAX_NODES
+        ],
+        Some("view"),
+        Call::Project(view_contracts)
+    ),
+    op!(
+        "views/callers",
+        "A callers view at a position: Mermaid and the graph.",
+        &[
+            req("symbol", "canonical name or plain name"),
+            dflt("depth", Ty::Int(1), "2", "call hops to follow"),
+            MAX_NODES,
+        ],
+        Some("view"),
+        Call::Project(view_callers)
+    ),
+    op!(
+        "views/path",
+        "A path view at a position: Mermaid and the graph.",
+        &[
+            req("from", "start symbol"),
+            req("to", "end symbol"),
+            dflt("max-len", Ty::Int(1), "6", "longest chain to look for"),
+        ],
+        Some("view"),
+        Call::Project(view_path)
+    ),
+    op!(
+        "views/cycles",
+        "A cycles view at a position: Mermaid and the graph.",
+        &[
+            dflt(
+                "level",
+                Ty::Enum(VIEW_LEVELS),
+                "package",
+                "node granularity"
+            ),
+            dflt("limit", Ty::Int(1), "5", "how many cycles to draw"),
+        ],
+        Some("view"),
+        Call::Project(view_cycles)
+    ),
+    op!(
         "context-conflicts",
         "Contracts that both contexts changed against the base.",
         &[
@@ -906,6 +977,116 @@ pub const OPS: &[Op] = &[
         Call::Project(context_conflicts)
     ),
 ];
+
+// ---- FEAT-088: generated views ----
+
+/// Parameters a view does not take, though every op accepts them: they would change the bytes
+/// of a stored answer.
+const NOT_FOR_VIEWS: &[&str] = &["budget", "diagnostic", "expand"];
+
+const VIEW_LEVELS: &[&str] = &["file", "package"];
+const MAX_NODES: Param = dflt("max-nodes", Ty::Int(1), "60", "most nodes drawn");
+
+/// The view question a request asks: the op's arguments, by name, from the validated
+/// parameters.
+fn view_spec(op: &str, a: &Args) -> Result<katalogr_dist::render::ViewSpec, DistError> {
+    if let Some(p) = NOT_FOR_VIEWS.iter().find(|p| a.opt(p).is_some()) {
+        return Err(DistError::Usage(format!(
+            "`{p}` is not a parameter of a view"
+        )));
+    }
+    let info = katalogr_dist::render::catalogue()
+        .into_iter()
+        .find(|o| o.name == op)
+        .ok_or_else(|| DistError::Usage(format!("unknown view op `{op}`")))?;
+    let given: BTreeMap<String, String> = info
+        .args
+        .iter()
+        .filter_map(|arg| {
+            a.opt(arg.name)
+                .map(|v| (arg.name.to_string(), v.to_string()))
+        })
+        .collect();
+    katalogr_dist::render::ViewSpec::from_args(op, &given)
+        .map_err(|e| DistError::Usage(e.to_string()))
+}
+
+fn view_of(op: &str, k: &Katalogr, a: &Args, o: &Options) -> JsonAnswer {
+    match view_spec(op, a) {
+        Ok(spec) => answer(k.view(&spec, o), render_json::view_answer),
+        Err(e) => render_json::error(&e),
+    }
+}
+
+macro_rules! view_fn {
+    ($name:ident, $op:expr) => {
+        fn $name(k: &Katalogr, a: &Args, o: &Options) -> JsonAnswer {
+            view_of($op, k, a, o)
+        }
+    };
+}
+view_fn!(view_structure, "structure");
+view_fn!(view_contracts, "contracts");
+view_fn!(view_callers, "callers");
+view_fn!(view_path, "path");
+view_fn!(view_cycles, "cycles");
+
+/// `GET /api/v1/views/`: the ops and their arguments, sorted by op.
+fn views_catalogue(_: &Path, _: &Overrides, a: &Args, _: &Options) -> JsonAnswer {
+    if let Some(p) = NOT_FOR_VIEWS.iter().find(|p| a.opt(p).is_some()) {
+        return render_json::error(&DistError::Usage(format!(
+            "`{p}` is not a parameter of a view"
+        )));
+    }
+    let views: Vec<serde_json::Value> = katalogr_dist::render::catalogue()
+        .iter()
+        .map(|op| {
+            let params: Vec<serde_json::Value> = op
+                .args
+                .iter()
+                .map(|p| {
+                    let mut v = serde_json::json!({
+                        "name": p.name,
+                        "type": p.ty,
+                        "required": p.required,
+                    });
+                    if let Some(d) = p.default {
+                        v["default"] = d.into();
+                    }
+                    if !p.values.is_empty() {
+                        v["values"] = p.values.into();
+                    }
+                    v
+                })
+                .collect();
+            serde_json::json!({"op": op.name, "params": params})
+        })
+        .collect();
+    let body = serde_json::json!({
+        "schema": katalogr_dist::query::RESULT_SCHEMA_VERSION,
+        "pele": katalogr_dist::render::PELE_VERSION,
+        "views": views,
+    });
+    JsonAnswer {
+        stdout: Some(body.to_string()),
+        ..ok_answer()
+    }
+}
+
+/// The view ID a request would get right now, with no query (`view_preflight`), for a views
+/// route; `None` for any other route or when it cannot be known.
+pub fn view_id_now(start: &Path, op: &Op, args: &Args, overrides: &Overrides) -> Option<String> {
+    let name = op.name.strip_prefix("views/").filter(|n| !n.is_empty())?;
+    let spec = view_spec(name, args).ok()?;
+    let k = Katalogr::resolve(start, overrides).ok()?;
+    let o = Options {
+        consistency: Some(katalogr_dist::Consistency::StaleOk),
+        timeout: args.float("timeout"),
+        at: args.opt("at").map(str::to_string),
+        ..Options::default()
+    };
+    k.view_preflight(&spec, &o).ok().flatten().map(|(id, _)| id)
+}
 
 /// The route of `name` in `ops`.
 pub fn find_op<'a>(ops: &'a [Op], name: &str) -> Option<&'a Op> {

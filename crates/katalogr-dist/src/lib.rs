@@ -24,7 +24,10 @@ mod test_extractor;
 #[cfg(feature = "test-extractor")]
 pub use test_extractor::extract_calls;
 mod threads;
+mod view_store;
+pub use view_store::ViewStore;
 mod views;
+pub use views::{FreshCheck, ViewBytes};
 pub mod watch;
 pub mod working_set;
 
@@ -87,6 +90,10 @@ pub fn schemas() -> BTreeMap<&'static str, serde_json::Value> {
         )
         .is_none(),
         "schema name render is registered twice"
+    );
+    assert!(
+        all.insert("view", katalogr_query::view_schema()).is_none(),
+        "schema name view is registered twice"
     );
     assert!(
         all.insert("doctor", doctor::schema()).is_none(),

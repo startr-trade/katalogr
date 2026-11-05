@@ -1,12 +1,59 @@
 //! Views (FEAT-032): a [`ViewSpec`] is answered by one read through the query layer and comes
 //! back as a [`ViewGraph`] for the renderers.
 
-use crate::{DistError, Katalogr, Options, Outcome, Reply, on_target, unresolved};
+use crate::view_store::ViewStore;
+use crate::{
+    Consistency, DistError, Katalogr, Options, Outcome, Reply, Report, on_target, unresolved,
+};
 use katalogr_analytics::{CycleOptions, GraphOptions, Level, structure};
-use katalogr_query::{Direction, Partial, PathStep, Resolution, SymbolHit, cap};
-use katalogr_render::{ViewEdge, ViewGraph, ViewNode, ViewSpec, node_id};
+use katalogr_query::{
+    Direction, Partial, PathStep, PositionRef, Resolution, SymbolHit, ViewAnswer, ViewQuery,
+    ViewQueryJson, cap,
+};
+use katalogr_render::{PELE_VERSION, ViewEdge, ViewGraph, ViewNode, ViewSpec, node_id, to_mermaid};
 use katalogr_store::StoreError;
 use std::collections::{BTreeMap, BTreeSet};
+use std::time::Instant;
+
+/// `views.store_cap_mb` when the project does not set it (provisional, FEAT-088).
+pub const DEFAULT_STORE_CAP_MB: u64 = 256;
+/// The project setting that bounds the view store.
+const STORE_CAP_KEY: &str = "views.store_cap_mb";
+
+/// The bytes of a [`ViewAnswer`] and where they came from.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ViewBytes {
+    /// Compact JSON, fields in declared order: what is stored and what is sent.
+    pub body: Vec<u8>,
+    /// True when the store answered and nothing was read from the index.
+    pub from_store: bool,
+}
+
+/// What `view_fresh` found.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FreshCheck {
+    /// No stored entry to compare (or the answer is not exact, so it has no ID).
+    NotStored,
+    /// The stored bytes equal a fresh computation.
+    Same,
+    /// The stored bytes differ from a fresh computation of the same ID.
+    Different { view_id: String },
+}
+
+/// The question as a view-ID query: the op is `view.<op>`, so it cannot collide with a plain
+/// read of the same name.
+pub(crate) fn to_view_query(spec: &ViewSpec) -> ViewQuery {
+    ViewQuery {
+        op: format!("view.{}", spec.op),
+        args: spec.args.clone(),
+    }
+}
+
+/// The one serialisation of an answer: compact, fields in declared order, `None` fields left
+/// out. The CLI and the API both send these bytes.
+pub fn answer_bytes(answer: &ViewAnswer) -> Vec<u8> {
+    serde_json::to_vec(answer).expect("serialise view answer")
+}
 
 /// Most members listed per cycle in a cycles view.
 const CYCLE_MEMBERS: usize = 60;
@@ -372,5 +419,210 @@ impl Katalogr {
             Ok(Outcome::Found(g))
         })?;
         Ok(with_partial(reply, partial))
+    }
+}
+
+impl Katalogr {
+    /// The store of this project, bounded by `views.store_cap_mb`.
+    fn view_store(&self) -> ViewStore {
+        let mb = self
+            .project
+            .config()
+            .settings
+            .get(STORE_CAP_KEY)
+            .and_then(serde_yaml_ng::Value::as_u64)
+            .unwrap_or(DEFAULT_STORE_CAP_MB);
+        ViewStore::open(&self.project, mb.saturating_mul(1 << 20))
+    }
+
+    /// The ID this question has right now, with no query, and the positions it covers. `None`
+    /// when a position cannot be read, or when `--at` names a position in a project of several
+    /// repos (the other repos' positions are then known only by reading).
+    pub fn view_preflight(
+        &self,
+        spec: &ViewSpec,
+        opts: &Options,
+    ) -> Result<Option<(String, Vec<PositionRef>)>, DistError> {
+        let deadline = Instant::now() + opts.timeout()?;
+        let Ok(engine) = self.engine_for(Consistency::StaleOk, deadline) else {
+            return Ok(None);
+        };
+        let positions: Vec<PositionRef> = match opts.at.as_deref() {
+            Some(text) => {
+                let Ok(repo) = self.at_repo() else {
+                    return Ok(None);
+                };
+                let Ok(wanted) = PositionRef::parse(&repo, text) else {
+                    return Ok(None);
+                };
+                if engine.roots().len() != 1 || !engine.roots().contains_key(&repo) {
+                    return Ok(None);
+                }
+                vec![wanted]
+            }
+            None => {
+                let mut live = Vec::new();
+                for repo in engine.roots().keys() {
+                    match engine.live_position(repo) {
+                        Ok(p) => live.push(p),
+                        Err(_) => return Ok(None),
+                    }
+                }
+                live
+            }
+        };
+        if positions.is_empty() {
+            return Ok(None);
+        }
+        let Ok(snap) = engine.cache().read() else {
+            return Ok(None);
+        };
+        let Ok(facts) = engine.facts_version(&snap) else {
+            return Ok(None);
+        };
+        let id = katalogr_query::view_id(&positions, &facts, &to_view_query(spec));
+        Ok(Some((id, positions)))
+    }
+
+    /// Stored bytes on a hit, with no query and no wait for the queue: the ID fixes the content
+    /// whatever the index has caught up to. Otherwise computes, and stores when exact.
+    pub fn view(&self, spec: &ViewSpec, opts: &Options) -> Result<Reply<ViewBytes>, DistError> {
+        let store = self.view_store();
+        let pre = self.view_preflight(spec, opts).ok().flatten();
+        if let Some((id, positions)) = &pre
+            && let Some(body) = store.get(id)
+        {
+            return Ok(Reply {
+                outcome: Outcome::Found(ViewBytes {
+                    body,
+                    from_store: true,
+                }),
+                report: Report {
+                    watermark: 0,
+                    pending: 0,
+                    stale: false,
+                    timed_out: false,
+                    queued: 0,
+                    warnings: self.take_notes(),
+                    positions: positions.clone(),
+                    working_set: None,
+                    exact: true,
+                    view_id: Some(id.clone()),
+                    context: None,
+                },
+                diagnostic: None,
+                partial: Vec::new(),
+                folded: Vec::new(),
+            });
+        }
+        self.view_compute(
+            spec,
+            opts,
+            pre.as_ref().map(|(id, _)| id.as_str()),
+            Some(&store),
+        )
+    }
+
+    /// Recomputes, compares with the stored entry and says whether they are equal. Nothing is
+    /// stored.
+    pub fn view_fresh(&self, spec: &ViewSpec, opts: &Options) -> Result<FreshCheck, DistError> {
+        let reply = self.view_compute(spec, opts, None, None)?;
+        match reply.outcome {
+            Outcome::Found(fresh) => {
+                let Some(id) = reply.report.view_id else {
+                    return Ok(FreshCheck::NotStored);
+                };
+                Ok(match self.view_store().get(&id) {
+                    None => FreshCheck::NotStored,
+                    Some(stored) if stored == fresh.body => FreshCheck::Same,
+                    Some(_) => FreshCheck::Different { view_id: id },
+                })
+            }
+            Outcome::NoMatch(m) | Outcome::StaleFile(m) => Err(DistError::usage(m)),
+            Outcome::Ambiguous(c) => Err(DistError::usage(format!(
+                "ambiguous: {} candidates",
+                c.len()
+            ))),
+            Outcome::PositionUnavailable { wanted, .. } => Err(DistError::usage(format!(
+                "no context holds position {wanted}"
+            ))),
+        }
+    }
+
+    /// The read: `view_graph` through the normal path, then the answer's bytes, stored when
+    /// exact and a store is given. `preflight_id` is what step 1 expected.
+    fn view_compute(
+        &self,
+        spec: &ViewSpec,
+        opts: &Options,
+        preflight_id: Option<&str>,
+        store: Option<&ViewStore>,
+    ) -> Result<Reply<ViewBytes>, DistError> {
+        let o = Options {
+            view: Some(to_view_query(spec)),
+            ..opts.clone()
+        };
+        let reply = self.view_graph(spec, &o)?;
+        let Reply {
+            outcome,
+            mut report,
+            diagnostic,
+            partial,
+            folded,
+        } = reply;
+        let outcome = match outcome {
+            Outcome::Found(graph) => {
+                let view_id = report.view_id.clone().filter(|_| report.exact);
+                let exact = view_id.is_some();
+                let answer = ViewAnswer {
+                    schema: katalogr_query::RESULT_SCHEMA_VERSION,
+                    view_format: katalogr_query::VIEW_FORMAT,
+                    view_id: view_id.clone(),
+                    exact,
+                    positions: report.positions.clone(),
+                    query: ViewQueryJson {
+                        op: spec.op.clone(),
+                        args: spec.args.clone(),
+                    },
+                    mermaid: to_mermaid(&graph),
+                    graph: serde_json::to_value(&graph).expect("serialise view graph"),
+                    pele: PELE_VERSION.to_string(),
+                    watermark: (!exact).then_some(report.watermark),
+                    pending: (!exact).then_some(report.pending),
+                    stale: (!exact).then_some(report.stale),
+                };
+                let body = answer_bytes(&answer);
+                if let Some(id) = &view_id {
+                    if preflight_id.is_some_and(|p| p != id) {
+                        report.warnings.push(format!(
+                            "view id {id} differs from the one computed before the read ({}); stored under {id}",
+                            preflight_id.unwrap_or_default()
+                        ));
+                    }
+                    if let Some(store) = store
+                        && let Err(e) = store.put(id, &body)
+                    {
+                        report.warnings.push(format!("view not stored: {e}"));
+                    }
+                }
+                Outcome::Found(ViewBytes {
+                    body,
+                    from_store: false,
+                })
+            }
+            Outcome::Ambiguous(c) => Outcome::Ambiguous(c),
+            Outcome::NoMatch(m) => Outcome::NoMatch(m),
+            Outcome::StaleFile(m) => Outcome::StaleFile(m),
+            Outcome::PositionUnavailable { wanted, available } => {
+                Outcome::PositionUnavailable { wanted, available }
+            }
+        };
+        Ok(Reply {
+            outcome,
+            report,
+            diagnostic,
+            partial,
+            folded,
+        })
     }
 }
