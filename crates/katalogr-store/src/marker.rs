@@ -28,7 +28,10 @@ pub struct Resolved {
     pub kindex: Utf8PathBuf,
     pub project: ProjectName,
     pub repo: Option<String>,
+    /// The root of the checkout the command ran in, linked or main.
     pub repo_root: Option<Utf8PathBuf>,
+    /// True when the marker was found through the main checkout of a linked worktree.
+    pub via_main_checkout: bool,
 }
 
 /// Overrides (flags, then `KATALOGR_KINDEX` / `KATALOGR_PROJECT`) win; else the nearest marker
@@ -54,14 +57,13 @@ pub fn resolve_with_env(
             .map(|s| ProjectName::new(&s))
             .transpose()?,
     };
-    let found = find(start)?;
+    let mut via_main_checkout = false;
+    let found = match find(start)? {
+        Some(f) => Some(f),
+        None => find_via_main(start)?.inspect(|_| via_main_checkout = true),
+    };
     let (repo, repo_root, mk, mp) = match found {
-        Some((dir, m)) => (
-            Some(m.repo),
-            Some(dir.clone()),
-            Some(dir.join(&m.kindex)),
-            Some(m.project),
-        ),
+        Some((dir, kindex, m)) => (Some(m.repo), Some(dir), Some(kindex), Some(m.project)),
         None => (None, None, None, None),
     };
     match (kindex.or(mk), project.or(mp)) {
@@ -70,12 +72,14 @@ pub fn resolve_with_env(
             project,
             repo,
             repo_root,
+            via_main_checkout,
         }),
         _ => Err(StoreError::NotConfigured),
     }
 }
 
-fn find(start: &Utf8Path) -> Result<Option<(Utf8PathBuf, Marker)>, StoreError> {
+/// The nearest marker walking up: (its directory, its kindex resolved against that directory, marker).
+fn find(start: &Utf8Path) -> Result<Option<(Utf8PathBuf, Utf8PathBuf, Marker)>, StoreError> {
     for dir in start.ancestors() {
         let p = dir.join(MARKER_FILE);
         if p.is_file() {
@@ -84,10 +88,85 @@ fn find(start: &Utf8Path) -> Result<Option<(Utf8PathBuf, Marker)>, StoreError> {
                     path: p.to_string(),
                     message: e.to_string(),
                 })?;
-            return Ok(Some((dir.to_owned(), m)));
+            let kindex = dir.join(&m.kindex);
+            return Ok(Some((dir.to_owned(), kindex, m)));
         }
     }
     Ok(None)
+}
+
+/// The marker of the main checkout of the linked worktree containing `start`. The returned
+/// directory is the worktree root; the kindex is resolved against the main root, since the
+/// path is relative to the marker's own directory.
+fn find_via_main(
+    start: &Utf8Path,
+) -> Result<Option<(Utf8PathBuf, Utf8PathBuf, Marker)>, StoreError> {
+    let Some((worktree, main)) = main_checkout_of(start) else {
+        return Ok(None);
+    };
+    Ok(find_in(&main)?.map(|m| {
+        let kindex = main.join(&m.kindex);
+        (worktree, kindex, m)
+    }))
+}
+
+/// The marker file directly in `dir`, if any.
+fn find_in(dir: &Utf8Path) -> Result<Option<Marker>, StoreError> {
+    let p = dir.join(MARKER_FILE);
+    if !p.is_file() {
+        return Ok(None);
+    }
+    serde_yaml_ng::from_str(&read_to_string(&p)?)
+        .map(Some)
+        .map_err(|e| StoreError::Parse {
+            path: p.to_string(),
+            message: e.to_string(),
+        })
+}
+
+/// The main checkout of the linked worktree containing `start`, if `start` is inside one.
+/// Reads the `.git` file and the `commondir` file with std only. Anything malformed gives
+/// `None`, never an error, since a plain directory is valid.
+pub fn main_checkout_of(start: &Utf8Path) -> Option<(Utf8PathBuf, Utf8PathBuf)> {
+    for dir in start.ancestors() {
+        let dot_git = dir.join(".git");
+        if dot_git.is_dir() {
+            // A main checkout (or a plain repository): not a linked worktree.
+            return None;
+        }
+        if !dot_git.is_file() {
+            continue;
+        }
+        let text = std::fs::read_to_string(&dot_git).ok()?;
+        let line = text.lines().find_map(|l| l.strip_prefix("gitdir:"))?.trim();
+        if line.is_empty() {
+            return None;
+        }
+        let gitdir = Utf8Path::new(line);
+        let gitdir = if gitdir.is_absolute() {
+            gitdir.to_owned()
+        } else {
+            dir.join(gitdir)
+        };
+        let common = std::fs::read_to_string(gitdir.join("commondir")).ok()?;
+        let common = Utf8Path::new(common.trim());
+        if common.as_str().is_empty() {
+            return None;
+        }
+        let common = if common.is_absolute() {
+            common.to_owned()
+        } else {
+            gitdir.join(common)
+        };
+        let common = Utf8PathBuf::from_path_buf(std::fs::canonicalize(&common).ok()?).ok()?;
+        if common.file_name() != Some(".git") {
+            return None; // a bare common directory has no main checkout
+        }
+        let main = common.parent()?.to_owned();
+        let worktree = Utf8PathBuf::from_path_buf(std::fs::canonicalize(dir).ok()?).ok()?;
+        return Some((worktree, main));
+    }
+    None
 }
 
 pub fn write(repo_root: &Utf8Path, m: &Marker) -> Result<(), StoreError> {

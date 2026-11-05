@@ -41,6 +41,7 @@ fn run(cli: &Cli) -> Result<ExitCode, DistError> {
             history,
         }) => cmd::index::run(cli, since.as_ref(), range.as_ref(), *full, *history),
         Some(Command::Status) => cmd::status::run(cli),
+        Some(Command::Position { repo }) => cmd::position::run(cli, repo.as_deref()),
         #[cfg(feature = "mcp")]
         Some(Command::Mcp {
             root,
@@ -53,6 +54,7 @@ fn run(cli: &Cli) -> Result<ExitCode, DistError> {
             verbose,
         }) => cmd::doctor::run(cli, *fail_on, *skip_git, *verbose),
         Some(Command::Eval { action }) => cmd::eval::run(cli, action),
+        Some(Command::Context { action }) => cmd::context::run(cli, action),
         Some(Command::Profiles { action }) => cmd::profiles::run(cli, action),
         Some(Command::Dangling { kind }) => cmd::dangling::run(cli, kind),
         Some(Command::Mirrors { kind }) => cmd::mirrors::run(cli, kind),

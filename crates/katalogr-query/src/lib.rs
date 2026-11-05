@@ -15,6 +15,7 @@ mod hints;
 mod map;
 mod mirror;
 mod path;
+pub mod position;
 mod rank;
 mod refs;
 mod resolve;
@@ -37,9 +38,10 @@ pub use explain::explain;
 pub use find::find;
 pub use fold::{FOLD_FROM, FOLD_SHOWN, Folded};
 pub use hints::{HintSource, hints};
-pub use map::{map, map_traced};
+pub use map::{map, map_top, map_top_behind, map_traced};
 pub use mirror::mirror_drift;
 pub use path::path;
+pub use position::{PositionAnswer, PositionError, PositionRef, ViewQuery, view_id};
 pub use rank::{
     link_weight, rank, rank_cached_or_live, rank_cached_or_live_with_source, rank_live,
 };
@@ -51,7 +53,7 @@ pub use result::{
     Partial, PathStep, RationaleLink, RefHit, ReplaceResult, Resolution, SearchHit, ShowResult,
     SymbolHit, TestHit, Truncation, WhyResult, WhySource, WhyUse, cap,
 };
-pub use schema::schemas;
+pub use schema::{position_schema, schemas};
 pub use search::{SearchParams, search, search_traced, search_with, search_with_traced};
 pub use tests::{DEFAULT_TEST_DEPTH, TestsOptions, tests, tests_for};
 pub use why::{Blame, DEFAULT_USE_LIMIT, RATIONALE_KINDS, attach_use, why, why_sources, why_use};

@@ -12,7 +12,7 @@ use katalogr_dist::query::{
     ReplaceResult, Serialize, ShowResult, SymbolHit, Trace, Truncation, WhyResult, budget, cap,
     hints,
 };
-use katalogr_dist::{DistError, Outcome, Reply, Report};
+use katalogr_dist::{DistError, Outcome, PositionRef, Reply, Report};
 
 use crate::exit::ExitCode;
 
@@ -66,6 +66,10 @@ pub(super) fn envelope<T>(
         next,
         diagnostic,
         folded: Vec::new(),
+        positions: report.positions.clone(),
+        exact: report.exact,
+        view_id: report.view_id.clone(),
+        context: report.context.clone(),
     }
 }
 
@@ -93,12 +97,16 @@ pub(super) fn set_packing(trace: &mut Option<Trace>, strings: &[String], budget:
     }
 }
 
-/// The exit code of a reply: ambiguity, no match, a stale file, or a timed-out wait.
+/// The exit code of a reply: ambiguity, no match, a stale file, or a timed-out wait. A timed-out
+/// wait is stale whatever the outcome, since a no-match or ambiguous answer may only reflect
+/// what was not indexed yet; the outcome stays in the output (FEAT-080 R-5).
 pub(super) fn exit_for<T>(reply: &Reply<T>) -> ExitCode {
     match &reply.outcome {
+        Outcome::Ambiguous(_) | Outcome::NoMatch(_) if reply.report.timed_out => ExitCode::Stale,
         Outcome::Ambiguous(_) => ExitCode::Ambiguous,
         Outcome::NoMatch(_) => ExitCode::NoMatch,
         Outcome::StaleFile(_) => ExitCode::Stale,
+        Outcome::PositionUnavailable { .. } => ExitCode::PositionUnavailable,
         Outcome::Found(_) if reply.report.timed_out => ExitCode::Stale,
         Outcome::Found(_) => ExitCode::Ok,
     }
@@ -202,6 +210,27 @@ fn other_outcome<T>(
                 .unwrap_or_default(),
             ..JsonAnswer::new(exit)
         },
+        Outcome::PositionUnavailable { wanted, available } => {
+            // The answer is the error itself, on stdout (FEAT-084).
+            let body = serde_json::json!({
+                "schema": RESULT_SCHEMA_VERSION,
+                "error": "position-unavailable",
+                "wanted": wanted,
+                "available": available,
+            });
+            JsonAnswer {
+                stdout: Some(body.to_string()),
+                message: Some(format!(
+                    "position unavailable: {wanted} (available: {})",
+                    available
+                        .iter()
+                        .map(PositionRef::text)
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )),
+                ..JsonAnswer::new(exit)
+            }
+        }
         Outcome::Found(_) => JsonAnswer::new(exit),
     }
 }
@@ -448,6 +477,24 @@ where
     }
 }
 
+/// A report with no items to trim: the envelope as it is. `fails` makes it exit 1.
+pub fn plain<R: Serialize>(reply: Reply<R>, fails: fn(&R) -> bool) -> JsonAnswer {
+    let exit = exit_for(&reply);
+    match reply.outcome {
+        Outcome::Found(r) => {
+            let failing = fails(&r);
+            let e = envelope(&reply.report, None, reply.partial, r, Vec::new(), None);
+            let exit = if exit == ExitCode::Ok && failing {
+                ExitCode::Error
+            } else {
+                exit
+            };
+            found(exit, &reply.report, line(&e))
+        }
+        other => other_outcome(exit, &reply.report, other, None, None),
+    }
+}
+
 /// `index` and `status`: stdout is `Report::to_json()`; exit Stale when the wait timed out.
 pub fn report(r: &Report) -> JsonAnswer {
     JsonAnswer {
@@ -543,4 +590,46 @@ pub fn profile_listing(l: &katalogr_dist::ProfileListing) -> String {
 /// The `profiles show` JSON line.
 pub fn profile_text(name: &str, text: &str) -> String {
     serde_json::json!({ "name": name, "text": text }).to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn reply(outcome: Outcome<()>, timed_out: bool) -> Reply<()> {
+        Reply {
+            outcome,
+            report: Report {
+                watermark: 1,
+                pending: u64::from(timed_out),
+                stale: timed_out,
+                timed_out,
+                queued: 0,
+                warnings: Vec::new(),
+                positions: Vec::new(),
+                exact: false,
+                view_id: None,
+                context: None,
+            },
+            diagnostic: None,
+            partial: Vec::new(),
+            folded: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn timed_out_no_match_exits_stale() {
+        let r = reply(Outcome::NoMatch("none".into()), true);
+        assert_eq!(exit_for(&r), ExitCode::Stale);
+        let r = reply(Outcome::NoMatch("none".into()), false);
+        assert_eq!(exit_for(&r), ExitCode::NoMatch);
+    }
+
+    #[test]
+    fn timed_out_ambiguous_exits_stale() {
+        let r = reply(Outcome::Ambiguous(Vec::new()), true);
+        assert_eq!(exit_for(&r), ExitCode::Stale);
+        let r = reply(Outcome::Ambiguous(Vec::new()), false);
+        assert_eq!(exit_for(&r), ExitCode::Ambiguous);
+    }
 }

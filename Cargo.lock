@@ -806,6 +806,7 @@ dependencies = [
  "gix-config",
  "gix-date",
  "gix-diff",
+ "gix-dir",
  "gix-discover",
  "gix-error",
  "gix-filter",
@@ -831,6 +832,7 @@ dependencies = [
  "gix-revwalk",
  "gix-sec",
  "gix-shallow",
+ "gix-status",
  "gix-submodule",
  "gix-tempfile",
  "gix-trace",
@@ -990,17 +992,40 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "aa640963fdcbc6b4718e48593c3917f5ae764b59fb5a96313cb5a757246d041d"
 dependencies = [
  "bstr",
+ "gix-attributes",
  "gix-command",
  "gix-error",
  "gix-filter",
  "gix-fs",
  "gix-hash",
  "gix-imara-diff",
+ "gix-index",
  "gix-object",
  "gix-path",
+ "gix-pathspec",
  "gix-tempfile",
  "gix-trace",
  "gix-traverse",
+ "gix-worktree",
+]
+
+[[package]]
+name = "gix-dir"
+version = "0.31.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "84e916ef77f19161b738ae9913662bc36fed1e48256a943f40277b3a585841da"
+dependencies = [
+ "bstr",
+ "gix-discover",
+ "gix-error",
+ "gix-fs",
+ "gix-ignore",
+ "gix-index",
+ "gix-object",
+ "gix-path",
+ "gix-pathspec",
+ "gix-trace",
+ "gix-utils",
  "gix-worktree",
 ]
 
@@ -1428,6 +1453,33 @@ dependencies = [
 ]
 
 [[package]]
+name = "gix-status"
+version = "0.36.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "42d3174a9f3fb991cf25a7a609ab6c50f19baa7d5f8ce05a48c202f7db4ce3ba"
+dependencies = [
+ "bstr",
+ "filetime",
+ "gix-diff",
+ "gix-dir",
+ "gix-error",
+ "gix-filter",
+ "gix-fs",
+ "gix-hash",
+ "gix-index",
+ "gix-object",
+ "gix-parallel",
+ "gix-path",
+ "gix-pathspec",
+ "gix-trace",
+ "gix-utils",
+ "gix-worktree",
+ "hashbrown 0.16.1",
+ "portable-atomic",
+ "windows-sys",
+]
+
+[[package]]
 name = "gix-submodule"
 version = "0.36.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1798,6 +1850,8 @@ dependencies = [
  "katalogr-acceptance",
  "katalogr-bench",
  "katalogr-dist",
+ "katalogr-model",
+ "katalogr-store",
  "rmcp",
  "serde_json",
  "tempfile",
@@ -1911,6 +1965,7 @@ dependencies = [
  "gix",
  "globset",
  "katalogr-model",
+ "katalogr-query",
  "katalogr-store",
  "proptest",
  "rayon",
@@ -2081,6 +2136,7 @@ dependencies = [
  "schemars",
  "serde",
  "serde_json",
+ "sha2",
  "tempfile",
 ]
 

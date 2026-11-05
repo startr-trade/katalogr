@@ -23,6 +23,10 @@ fn fixture_report() -> Report {
         timed_out: false,
         queued: 0,
         warnings: Vec::new(),
+        positions: Vec::new(),
+        exact: false,
+        view_id: None,
+        context: None,
     }
 }
 
@@ -50,6 +54,7 @@ fn project_report(k: &katalogr_dist::Katalogr) -> Result<Report, DistError> {
         timeout: None,
         diagnostic: false,
         expand: false,
+        ..Options::default()
     })
 }
 

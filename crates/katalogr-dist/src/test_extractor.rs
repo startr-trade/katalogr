@@ -17,6 +17,14 @@ use std::collections::BTreeMap;
 
 pub struct TestExtractor;
 
+/// Files this extractor has parsed in this process; read through [`extract_calls`].
+static EXTRACT_CALLS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// How many `.tx` files the test extractor has parsed so far in this process.
+pub fn extract_calls() -> usize {
+    EXTRACT_CALLS.load(std::sync::atomic::Ordering::Relaxed)
+}
+
 impl Extractor for TestExtractor {
     fn id(&self) -> &'static str {
         "test"
@@ -31,6 +39,7 @@ impl Extractor for TestExtractor {
     }
 
     fn extract(&self, input: &ExtractInput) -> Result<Fragment, ExtractError> {
+        EXTRACT_CALLS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let bad = |span: Option<Span>, message: String| ExtractError::Parse { span, message };
         let text =
             std::str::from_utf8(input.content).map_err(|e| bad(None, format!("not utf-8: {e}")))?;

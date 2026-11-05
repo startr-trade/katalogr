@@ -1,0 +1,66 @@
+{
+  "$defs": {
+    "PositionRef": {
+      "description": "One repo's position. Serialises as `{\"repo\",\"commit\",\"dirty\"}`, absent parts as `null`.",
+      "properties": {
+        "commit": {
+          "description": "40 lower-case hex, or `None` for a directory with no commit.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "dirty": {
+          "description": "64 lower-case hex, or `None` when the checkout is clean.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "repo": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "repo"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "What `katalogr position --json` prints (FEAT-084).",
+  "properties": {
+    "exact": {
+      "description": "The index reflects the live position exactly.",
+      "type": "boolean"
+    },
+    "live": {
+      "$ref": "#/$defs/PositionRef",
+      "description": "The checkout's position as it is now."
+    },
+    "reflected": {
+      "description": "What the context's index reflects, per repo; empty when no board is found or nothing is\nrecorded yet.",
+      "items": {
+        "$ref": "#/$defs/PositionRef"
+      },
+      "type": "array"
+    },
+    "schema": {
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "text": {
+      "description": "`live` in text form.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema",
+    "live",
+    "text",
+    "exact"
+  ],
+  "title": "PositionAnswer",
+  "type": "object"
+}

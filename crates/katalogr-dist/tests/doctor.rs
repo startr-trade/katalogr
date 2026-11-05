@@ -52,6 +52,7 @@ mod doctor {
         let missing = Overrides {
             kindex: Some(tmp.path().join("nope").to_str().unwrap().to_string()),
             project: Some("demo".to_string()),
+            ..Default::default()
         };
         let r = doctor(tmp.path(), &missing, &opts()).unwrap();
         assert_eq!(codes(&r), vec!["KD-MRK-002"]);
@@ -59,6 +60,7 @@ mod doctor {
         let other = Overrides {
             kindex: Some(kx.to_str().unwrap().to_string()),
             project: Some("demo".to_string()),
+            ..Default::default()
         };
         let r = doctor(tmp.path(), &other, &opts()).unwrap();
         assert_eq!(codes(&r), vec!["KD-MRK-003"]);

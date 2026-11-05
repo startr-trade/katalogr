@@ -8,7 +8,7 @@ use std::fs::File;
 /// Non-blocking exclusive lock on `<cache_dir>/processor.lock` (the file and directory are
 /// created when missing). `None` when another holder has it. The lock is released when the
 /// returned file is dropped.
-pub(crate) fn try_lock(cache_dir: &Utf8Path) -> Result<Option<File>, EngineError> {
+pub fn try_lock(cache_dir: &Utf8Path) -> Result<Option<File>, EngineError> {
     std::fs::create_dir_all(cache_dir).map_err(|e| EngineError::io(cache_dir, e))?;
     let path = cache_dir.join("processor.lock");
     let file = std::fs::OpenOptions::new()
@@ -21,5 +21,24 @@ pub(crate) fn try_lock(cache_dir: &Utf8Path) -> Result<Option<File>, EngineError
         Ok(()) => Ok(Some(file)),
         Err(fs4::TryLockError::WouldBlock) => Ok(None),
         Err(fs4::TryLockError::Error(e)) => Err(EngineError::io(&path, e)),
+    }
+}
+
+/// As [`try_lock`], retrying with a short backoff until `deadline`. `None` when still held then.
+pub fn lock_until(
+    cache_dir: &Utf8Path,
+    deadline: std::time::Instant,
+) -> Result<Option<File>, EngineError> {
+    let mut wait = std::time::Duration::from_millis(5);
+    loop {
+        if let Some(f) = try_lock(cache_dir)? {
+            return Ok(Some(f));
+        }
+        let now = std::time::Instant::now();
+        if now >= deadline {
+            return Ok(None);
+        }
+        std::thread::sleep(wait.min(deadline - now));
+        wait = (wait * 2).min(std::time::Duration::from_millis(50));
     }
 }

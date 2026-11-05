@@ -2,7 +2,11 @@
 //!
 //! All behaviour of the command-line wrapper lives here; the wrapper parses, calls and renders.
 
+mod at;
+pub use at::position_without_board;
 mod claude;
+pub mod contexts;
+pub use katalogr_query::{PositionAnswer, PositionRef, ViewQuery};
 pub mod doctor;
 mod error;
 pub mod eval;
@@ -12,8 +16,12 @@ mod setup;
 mod span;
 #[cfg(feature = "test-extractor")]
 mod test_extractor;
+/// How many `.tx` files the test extractor has parsed in this process (for benchmarks).
+#[cfg(feature = "test-extractor")]
+pub use test_extractor::extract_calls;
 mod threads;
 
+use crate::contexts::ContextChoice;
 pub use claude::{
     BEGIN_MARKER, DEFAULT_SESSION_BUDGET, END_MARKER, InstallOutcome, SESSION_BUDGET_KEY, SKILL_MD,
     SyncOutcome, claude_block, claude_sync, session_start, skill_install, skill_path,
@@ -41,8 +49,8 @@ use katalogr_analytics::{
 use katalogr_engine::history::{HISTORY_PREFIX, HistoryOptions, blame_commit, history_shas};
 use katalogr_engine::scan::{PathChange, changed_paths};
 use katalogr_engine::{
-    Consistency as EngineConsistency, Engine, EventKind, NewEvent, QueryOptions, Scope,
-    registry::ExtensionRegistry,
+    Consistency as EngineConsistency, Engine, EngineError, EventKind, NewEvent, QueryOptions,
+    Scope, registry::ExtensionRegistry,
 };
 use katalogr_model::{Name, RelPath};
 use katalogr_store::marker::{self, Overrides as StoreOverrides};
@@ -65,6 +73,11 @@ pub fn schemas() -> BTreeMap<&'static str, serde_json::Value> {
     assert!(
         all.insert("doctor", doctor::schema()).is_none(),
         "schema name doctor is registered twice"
+    );
+    assert!(
+        all.insert("position", katalogr_query::position_schema())
+            .is_none(),
+        "schema name position is registered twice"
     );
     all
 }
@@ -141,6 +154,8 @@ impl From<Consistency> for EngineConsistency {
 pub struct Overrides {
     pub kindex: Option<String>,
     pub project: Option<String>,
+    /// `base`, `current` or an id from `context list` (FEAT-043 R-4); `None` is `current`.
+    pub context: Option<String>,
 }
 
 /// Options for reads. `None` means the command's default.
@@ -153,6 +168,11 @@ pub struct Options {
     pub diagnostic: bool,
     /// `refs` and `callers`: list every hit instead of folding (`--expand`, FEAT-077).
     pub expand: bool,
+    /// Answer for this position (`--at`, FEAT-084): `<commit>`, `<commit>+<dirty>` or
+    /// `none+<dirty>`.
+    pub at: Option<String>,
+    /// The question, for the answer's view ID (FEAT-084). `None`: no ID is computed.
+    pub view: Option<katalogr_query::ViewQuery>,
 }
 
 impl Options {
@@ -175,6 +195,14 @@ pub struct Report {
     pub queued: usize,
     /// Non-fatal notices (repos skipped because their root is unknown).
     pub warnings: Vec<String>,
+    /// What the index reflects, one entry per repo sorted by repo (FEAT-084).
+    pub positions: Vec<katalogr_query::PositionRef>,
+    /// Nothing was pending and every checkout's position was unchanged across the read.
+    pub exact: bool,
+    /// The ID of this answer; set only on an exact answer to a question that has one.
+    pub view_id: Option<String>,
+    /// The context the answer was read from, when it names one.
+    pub context: Option<String>,
 }
 
 impl Report {
@@ -202,6 +230,10 @@ pub struct Katalogr {
     repo: Option<String>,
     /// Repo name to root on this machine: `roots.yaml`, overridden by the marker for its repo.
     roots: BTreeMap<String, Utf8PathBuf>,
+    /// Which context a read or write goes through (FEAT-043); `Current` unless set.
+    context: contexts::ContextChoice,
+    /// Warnings raised while choosing a context, handed out with the next report.
+    notes: std::sync::Mutex<Vec<String>>,
 }
 
 /// Profiles embedded in the binary, applied before the project's own: `(file name, text)`.
@@ -301,6 +333,11 @@ pub enum Outcome<T> {
     NoMatch(String),
     /// The file on disk is not the file that was indexed; the message says what to do.
     StaleFile(String),
+    /// `--at` asked for a position no context holds (FEAT-084); these are the ones that are.
+    PositionUnavailable {
+        wanted: String,
+        available: Vec<katalogr_query::PositionRef>,
+    },
 }
 
 /// A query answer with what the read saw.
@@ -401,7 +438,7 @@ impl Katalogr {
     pub fn profile_listing(&self) -> ProfileListing {
         let builtins: Vec<(&str, &str)> = BUILTIN_PROFILES.to_vec();
         let report = katalogr_engine::profiles::ProfileSet::load_full(
-            self.project.root(),
+            self.project.project_root(),
             &builtins,
             &BTreeMap::new(),
             &build_registry().normalisers(),
@@ -462,10 +499,16 @@ impl Katalogr {
         if let (Some(repo), Some(root)) = (&r.repo, &r.repo_root) {
             roots.insert(repo.clone(), root.clone());
         }
+        let context = match overrides.context.as_deref() {
+            Some(c) => contexts::ContextChoice::parse(c)?,
+            None => contexts::ContextChoice::Current,
+        };
         Ok(Katalogr {
             project,
             repo: r.repo,
             roots,
+            context,
+            notes: std::sync::Mutex::new(Vec::new()),
         })
     }
 
@@ -496,12 +539,109 @@ impl Katalogr {
     }
 
     fn engine(&self, deadline: Instant) -> Result<Engine, DistError> {
-        let mut engine = Engine::open(
-            self.project.clone(),
-            build_registry(),
-            self.roots.clone(),
-            deadline,
-        )?;
+        self.engine_on(self.layer_dir(deadline)?, deadline)
+    }
+
+    /// The roots a `dir` reads with, and its manifest when it is a layer. A checkout context
+    /// reads its own checkout, whichever one this command runs in.
+    fn layer_setup(
+        &self,
+        dir: &ProjectDir,
+    ) -> (
+        BTreeMap<String, Utf8PathBuf>,
+        Option<katalogr_store::ContextManifest>,
+    ) {
+        let manifest = dir
+            .is_layer()
+            .then(|| katalogr_store::ContextManifest::read(dir.root()).ok())
+            .flatten();
+        let mut roots = self.roots.clone();
+        if let Some(m) = &manifest
+            && m.kind == katalogr_store::ContextKind::Checkout
+            && let Some(root) = &m.root
+        {
+            roots.insert(m.repo.clone(), root.clone());
+        }
+        (roots, manifest)
+    }
+
+    /// An engine over `dir`: the base, or one of its layers.
+    fn engine_on(&self, dir: ProjectDir, deadline: Instant) -> Result<Engine, DistError> {
+        let (roots, manifest) = self.layer_setup(&dir);
+        let engine = Engine::open(dir, build_registry(), roots, deadline)?;
+        self.configure_layer(engine, manifest)
+    }
+
+    /// `configure`, then a commit context reads git objects at its commit, never the disk.
+    fn configure_layer(
+        &self,
+        mut engine: Engine,
+        manifest: Option<katalogr_store::ContextManifest>,
+    ) -> Result<Engine, DistError> {
+        let manifest_kind = manifest.clone();
+        if let Some(m) = manifest
+            && m.kind == katalogr_store::ContextKind::Commit
+            && let (Some(commit), Some(root)) = (m.commit.clone(), self.roots.get(&m.repo))
+        {
+            engine.set_source(
+                &m.repo,
+                katalogr_engine::FileSource::Commit {
+                    repo_root: root.clone(),
+                    commit,
+                },
+            );
+        }
+        self.pin_positions(&mut engine, manifest_kind.as_ref())?;
+        self.configure(engine)
+    }
+
+    /// FEAT-084. Fix the position of every repo this context does not read from a checkout: a
+    /// commit context's repo at its commit, every other repo of a layer at the commit the base
+    /// reflects (none if unknown), and, for the base itself, every repo with a git checkout.
+    /// A checkout layer's own repo and plain directories are read live.
+    fn pin_positions(
+        &self,
+        engine: &mut Engine,
+        manifest: Option<&katalogr_store::ContextManifest>,
+    ) -> Result<(), DistError> {
+        use katalogr_store::{ContextKind, Reader};
+        // What the base reflects now, not what it reflected when this layer was seeded; a layer
+        // falls back to its own copy when the base cannot be read beside a writer.
+        let base = if manifest.is_some() {
+            katalogr_store::Cache::open_reader(&self.project)?
+        } else {
+            None
+        };
+        let snap = match &base {
+            Some(c) => c.read()?,
+            None => engine.cache().read()?,
+        };
+        let repos: Vec<String> = engine.roots().keys().cloned().collect();
+        let mut pins = Vec::new();
+        for repo in repos {
+            let pin = match manifest {
+                Some(m) if m.repo == repo && m.kind == ContextKind::Checkout => continue,
+                Some(m) if m.repo == repo => m.commit.clone(),
+                None if !engine.roots()[&repo].join(".git").exists() => continue,
+                _ => None,
+            };
+            let commit = match pin {
+                Some(c) => Some(c),
+                None => snap
+                    .meta(&contexts::base_commit_key(&repo))?
+                    .and_then(|b| String::from_utf8(b).ok()),
+            };
+            pins.push((repo, commit));
+        }
+        drop(snap);
+        for (repo, commit) in pins {
+            engine.set_pinned_position(&repo, commit);
+        }
+        Ok(())
+    }
+
+    /// Registry, profiles, parallelism and filters, shared by every open.
+    fn configure(&self, mut engine: Engine) -> Result<Engine, DistError> {
         engine.set_builtin_profiles(builtin_profiles());
         engine.set_parallelism(resolve_parallelism(
             &self.project.config().settings,
@@ -511,6 +651,57 @@ impl Katalogr {
             engine.set_repo_filters(&repo.name, repo.include.clone(), repo.exclude.clone());
         }
         Ok(engine)
+    }
+
+    /// The read-only engine over `dir`, or `None` when the cache cannot be read that way
+    /// (FEAT-080 R-6).
+    fn reader_engine(&self, dir: ProjectDir) -> Result<Option<Engine>, DistError> {
+        let (roots, manifest) = self.layer_setup(&dir);
+        Engine::open_reader(dir, build_registry(), roots)?
+            .map(|e| self.configure_layer(e, manifest))
+            .transpose()
+    }
+
+    /// The engine for a read at `c` (FEAT-080 R-1, R-3, R-6), over the chosen context's own
+    /// cache. `stale-ok` reads through a read-only handle beside any writer. `wait` and
+    /// `wait-all` try the writer open once; a cache held by another process then gets a
+    /// read-only handle to poll on. A handle that cannot be had falls back to the writer open,
+    /// bounded by `deadline`.
+    fn engine_for(
+        &self,
+        c: impl Into<EngineConsistency>,
+        deadline: Instant,
+    ) -> Result<Engine, DistError> {
+        self.engine_for_choice(c, deadline, &self.context)
+    }
+
+    /// [`Katalogr::engine_for`] over the context `choice` names, not this invocation's own.
+    fn engine_for_choice(
+        &self,
+        c: impl Into<EngineConsistency>,
+        deadline: Instant,
+        choice: &ContextChoice,
+    ) -> Result<Engine, DistError> {
+        let dir = self.layer_dir_for(choice, deadline)?;
+        match c.into() {
+            EngineConsistency::StaleOk => match self.reader_engine(dir.clone())? {
+                Some(e) => Ok(e),
+                None => self.engine_on(dir, deadline),
+            },
+            EngineConsistency::Wait | EngineConsistency::WaitAll => {
+                let (roots, manifest) = self.layer_setup(&dir);
+                match Engine::open_try(dir.clone(), build_registry(), roots, deadline) {
+                    Ok(e) => self.configure_layer(e, manifest),
+                    Err(EngineError::Store(StoreError::Busy)) => {
+                        match self.reader_engine(dir.clone())? {
+                            Some(e) => Ok(e),
+                            None => self.engine_on(dir, deadline),
+                        }
+                    }
+                    Err(e) => Err(e.into()),
+                }
+            }
+        }
     }
 
     fn current(&self) -> Result<(&str, &Utf8Path), DistError> {
@@ -536,7 +727,9 @@ impl Katalogr {
             .iter()
             .map(|p| rel_to_root(root, p))
             .collect::<Result<Vec<_>, _>>()?;
-        let inbox = katalogr_engine::queue::Inbox::new(&self.project);
+        let layer =
+            self.layer_dir(Instant::now() + Duration::from_secs_f64(DEFAULT_TIMEOUT_SECS))?;
+        let inbox = katalogr_engine::queue::Inbox::new(&layer);
         for rel in &rels {
             inbox.append(&NewEvent::file(repo, rel, kind))?;
         }
@@ -546,7 +739,7 @@ impl Katalogr {
     /// Read the queue state without ingesting or processing (stale-ok).
     pub fn status(&self, opts: &Options) -> Result<Report, DistError> {
         let timeout = opts.timeout()?;
-        let engine = self.engine(Instant::now() + timeout)?;
+        let engine = self.engine_for(Consistency::StaleOk, Instant::now() + timeout)?;
         self.read(&engine, Consistency::StaleOk, timeout, 0, Vec::new())
     }
 
@@ -625,7 +818,17 @@ impl Katalogr {
             inbox.append(ev)?;
         }
         let consistency = opts.consistency.unwrap_or(Consistency::WaitAll);
-        self.read(&engine, consistency, timeout, events.len(), warnings)
+        let mut report = self.read(&engine, consistency, timeout, events.len(), warnings)?;
+        drop(engine);
+        // The base follows the default branch's commit, not the disk (FEAT-043 R-1).
+        match self.advance_base(opts) {
+            Ok(adv) => {
+                report.queued += adv.queued;
+                report.warnings.extend(adv.warnings);
+            }
+            Err(e) => report.warnings.push(format!("base advance: {e}")),
+        }
+        Ok(report)
     }
 
     /// Run `f` on one snapshot at the requested consistency (default: wait).
@@ -651,7 +854,52 @@ impl Katalogr {
         f: impl FnOnce(&ReadTx, &mut Diagnostic) -> Result<Outcome<T>, StoreError>,
     ) -> Result<Reply<T>, DistError> {
         let timeout = opts.timeout()?;
-        let engine = self.engine(Instant::now() + timeout)?;
+        let consistency = opts.consistency.unwrap_or(Consistency::Wait);
+        let deadline = Instant::now() + timeout;
+        if let Some(at) = opts.at.as_deref() {
+            return match self.resolve_at(at, deadline)? {
+                at::Resolved::Current => {
+                    let engine = self.engine_for(consistency, deadline)?;
+                    self.query_on_traced(&engine, opts, f)
+                }
+                at::Resolved::Context { choice, wanted } => {
+                    // A recorded position is answered as recorded, whatever the checkout is now.
+                    let engine = self.engine_for_choice(Consistency::StaleOk, deadline, &choice)?;
+                    let o = Options {
+                        consistency: Some(Consistency::StaleOk),
+                        ..opts.clone()
+                    };
+                    let mut reply = self.query_on_traced(&engine, &o, f)?;
+                    let r = &mut reply.report;
+                    r.exact = !r.stale && r.positions.iter().any(|p| p == &wanted);
+                    r.context = Some(match &choice {
+                        ContextChoice::Named(id) => id.to_string(),
+                        _ => "base".to_string(),
+                    });
+                    self.finish_report(&engine, &mut reply.report, opts.view.as_ref());
+                    Ok(reply)
+                }
+                at::Resolved::Unavailable { wanted, available } => Ok(Reply {
+                    outcome: Outcome::PositionUnavailable { wanted, available },
+                    report: Report {
+                        watermark: 0,
+                        pending: 0,
+                        stale: false,
+                        timed_out: false,
+                        queued: 0,
+                        warnings: self.take_notes(),
+                        positions: Vec::new(),
+                        exact: false,
+                        view_id: None,
+                        context: None,
+                    },
+                    diagnostic: None,
+                    partial: Vec::new(),
+                    folded: Vec::new(),
+                }),
+            };
+        }
+        let engine = self.engine_for(consistency, deadline)?;
         self.query_on_traced(&engine, opts, f)
     }
 
@@ -704,10 +952,38 @@ impl Katalogr {
                 stale: a.stale,
                 timed_out: a.stale && consistency != Consistency::StaleOk,
                 queued: 0,
-                warnings: Vec::new(),
+                warnings: a.warnings,
+                positions: a.positions,
+                exact: a.exact,
+                view_id: None,
+                context: None,
             },
             diagnostic: diag.finish(),
         })
+        .map(|mut reply| {
+            self.finish_report(engine, &mut reply.report, opts.view.as_ref());
+            reply
+        })
+    }
+
+    /// FEAT-084. Give an exact answer to a question its view ID. A snapshot that cannot be read
+    /// leaves the ID off.
+    pub(crate) fn finish_report(
+        &self,
+        engine: &Engine,
+        report: &mut Report,
+        view: Option<&katalogr_query::ViewQuery>,
+    ) {
+        report.view_id = None;
+        let Some(view) = view else { return };
+        if !report.exact {
+            return;
+        }
+        if let Ok(snap) = engine.cache().read()
+            && let Ok(facts) = engine.facts_version(&snap)
+        {
+            report.view_id = Some(katalogr_query::view_id(&report.positions, &facts, view));
+        }
     }
 
     /// Symbols whose name matches `text`.
@@ -1002,6 +1278,18 @@ impl Katalogr {
         Ok(reply)
     }
 
+    /// How many callers and tests `why` lists: the project setting `why.use_limit`, else
+    /// [`DEFAULT_USE_LIMIT`]. A missing, malformed or zero value keeps the default.
+    pub fn why_use_limit(&self) -> usize {
+        self.project
+            .config()
+            .settings
+            .get("why.use_limit")
+            .and_then(serde_yaml_ng::Value::as_u64)
+            .filter(|n| *n > 0)
+            .map_or(DEFAULT_USE_LIMIT, |n| n as usize)
+    }
+
     /// The insight defaults from the project settings (`insights.*`); a missing or malformed
     /// value keeps its default.
     pub fn insight_settings(&self) -> InsightSettings {
@@ -1124,7 +1412,8 @@ impl Katalogr {
             )));
         }
         let timeout = o.timeout()?;
-        let engine = self.engine(Instant::now() + timeout)?;
+        let consistency = o.consistency.unwrap_or(Consistency::Wait);
+        let engine = self.engine_for(consistency, Instant::now() + timeout)?;
         let profiles = engine.routing_profiles()?;
         let mut unclaimed = BTreeMap::new();
         let mut roots_missing = Vec::new();
@@ -1243,6 +1532,8 @@ impl Katalogr {
             |tx| katalogr_engine::profiles::stored_errors(tx),
         )?;
         warnings.extend(a.value.iter().map(|e| format!("profile refused: {e}")));
+        warnings.extend(a.warnings);
+        warnings.extend(self.take_notes());
         Ok(Report {
             watermark: a.watermark.0,
             pending: a.pending,
@@ -1250,6 +1541,10 @@ impl Katalogr {
             timed_out: a.stale && consistency != Consistency::StaleOk,
             queued,
             warnings,
+            positions: a.positions,
+            exact: a.exact,
+            view_id: None,
+            context: None,
         })
     }
 }

@@ -33,6 +33,8 @@ required-features = ["mcp"]
 # The `.tx` test extractor gives integration tests symbols to query.
 katalogr-dist = { workspace = true, features = ["test-extractor"] }
 tempfile.workspace = true
+katalogr-store.workspace = true
+katalogr-model.workspace = true
 fs4.workspace = true
 toml.workspace = true
 camino.workspace = true
