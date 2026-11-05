@@ -44,6 +44,19 @@ fn open_repo(root: &Utf8PathBuf) -> Result<gix::Repository, ScanError> {
 }
 
 impl FileSource {
+    /// Of `paths`, those this source does not admit: on disk, paths git ignores and does not
+    /// track; a commit's tree and a plain directory admit everything. Also returns warnings
+    /// (unreadable ignore data admits everything).
+    pub fn not_admitted<'a>(
+        &self,
+        paths: impl IntoIterator<Item = &'a RelPath>,
+    ) -> (std::collections::BTreeSet<RelPath>, Vec<String>) {
+        match self {
+            FileSource::Disk(root) => scan::ignored_among(root.as_std_path(), paths),
+            FileSource::Commit { .. } => Default::default(),
+        }
+    }
+
     /// The file's bytes; `None` when it does not exist there.
     pub fn read(&self, path: &RelPath) -> Result<Option<Vec<u8>>, EngineError> {
         match self {

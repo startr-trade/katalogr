@@ -164,6 +164,24 @@ pub fn list_files_warned(
     let include = glob_set(include)?;
     let exclude = glob_set(exclude)?;
     let mut warnings = Vec::new();
+    let out = with_filter(repo_root, &mut warnings, |filter, warnings| {
+        let mut out = Vec::new();
+        walk(
+            repo_root, "", &include, &exclude, filter, warnings, &mut out,
+        )?;
+        out.sort();
+        Ok::<_, ScanError>(out)
+    })?;
+    Ok((out, warnings))
+}
+
+/// Runs `f` with git's ignore filter for `repo_root`: `None` for a root with no `.git` entry, or
+/// when the ignore data cannot be read (a warning is added then).
+fn with_filter<R>(
+    repo_root: &std::path::Path,
+    warnings: &mut Vec<String>,
+    f: impl FnOnce(Option<&mut IgnoreFilter<'_>>, &mut Vec<String>) -> R,
+) -> R {
     // `.git` is a directory, or a file in a linked worktree; without it nothing is ignored.
     let git = if repo_root.join(".git").exists() {
         match gix::open(repo_root) {
@@ -209,18 +227,28 @@ pub fn list_files_warned(
         },
         _ => None,
     };
-    let mut out = Vec::new();
-    walk(
-        repo_root,
-        "",
-        &include,
-        &exclude,
-        filter.as_mut(),
-        &mut warnings,
-        &mut out,
-    )?;
-    out.sort();
-    Ok((out, warnings))
+    f(filter.as_mut(), warnings)
+}
+
+/// Of `paths`, those git ignores and does not track under `repo_root`; none for a root with no
+/// `.git` entry. Unreadable ignore data admits everything and adds a warning.
+pub(crate) fn ignored_among<'a>(
+    repo_root: &std::path::Path,
+    paths: impl IntoIterator<Item = &'a RelPath>,
+) -> (std::collections::BTreeSet<RelPath>, Vec<String>) {
+    let mut warnings = Vec::new();
+    let set = with_filter(repo_root, &mut warnings, |filter, warnings| {
+        let mut out = std::collections::BTreeSet::new();
+        if let Some(f) = filter {
+            for p in paths {
+                if f.skip_file(p.as_str(), warnings) {
+                    out.insert(p.clone());
+                }
+            }
+        }
+        out
+    });
+    (set, warnings)
 }
 
 /// Git's ignore rules for a walk, and the index paths (a tracked file is never dropped).

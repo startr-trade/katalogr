@@ -151,11 +151,7 @@ mod scan {
         assert_eq!(names(r), [".gitignore", "a.txt", "x.log"]);
     }
 
-    // Fails against the approved design: a rescan queues the path of an ignored file that still
-    // has a shard, but planning reads the file from disk, finds it, and re-indexes it. See the
-    // FEAT-099 T2 report; needs a design decision before this can pass.
     #[test]
-    #[ignore = "FEAT-099 design gap: rescan re-indexes an ignored file that still exists"]
     fn rescan_removes_newly_ignored() {
         let tmp = tempfile::tempdir().unwrap();
         let kx = Utf8PathBuf::from_path_buf(tmp.path().join("kx")).unwrap();
@@ -196,6 +192,61 @@ mod scan {
         // The file becomes ignored; the next rescan sees it as gone.
         put(work.as_std_path(), ".gitignore", "gen.tx\n");
         round();
+        assert_eq!(e.cache().read().unwrap().artifacts().unwrap().len(), 1);
+        assert!(
+            !e.dir()
+                .shard_path("r", &RelPath::new("gen.tx").unwrap())
+                .exists()
+        );
+    }
+
+    #[test]
+    fn event_for_ignored_file_not_indexed() {
+        let tmp = tempfile::tempdir().unwrap();
+        let kx = Utf8PathBuf::from_path_buf(tmp.path().join("kx")).unwrap();
+        let work = Utf8PathBuf::from_path_buf(tmp.path().join("work")).unwrap();
+        std::fs::create_dir_all(&work).unwrap();
+        Kindex::init(&kx)
+            .unwrap()
+            .create_project(
+                &ProjectName::new("p").unwrap(),
+                ProjectConfig {
+                    repos: vec![RepoConfig::new("r")],
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        init(work.as_std_path());
+        put(work.as_std_path(), ".gitignore", "gen.tx\n");
+        put(work.as_std_path(), "keep.tx", "sym fn Keep\n");
+        put(work.as_std_path(), "gen.tx", "sym fn Gen\n");
+        let dir = Kindex::open(&kx)
+            .unwrap()
+            .project(&ProjectName::new("p").unwrap())
+            .unwrap();
+        let mut reg = ExtensionRegistry::new();
+        reg.register(Box::new(crate::support::TestExtractor));
+        let roots = BTreeMap::from([("r".to_string(), work.clone())]);
+        let e =
+            katalogr_engine::Engine::open(dir, reg, roots, Instant::now() + Duration::from_secs(5))
+                .unwrap();
+        for path in ["gen.tx", "keep.tx"] {
+            e.inbox()
+                .append(&NewEvent::file(
+                    "r",
+                    &RelPath::new(path).unwrap(),
+                    katalogr_engine::EventKind::Changed,
+                ))
+                .unwrap();
+        }
+        let mut p = Processor::try_acquire(&e).unwrap().unwrap();
+        p.ingest().unwrap();
+        p.process(
+            &Scope::Project,
+            256,
+            Instant::now() + Duration::from_secs(5),
+        )
+        .unwrap();
         assert_eq!(e.cache().read().unwrap().artifacts().unwrap().len(), 1);
         assert!(
             !e.dir()
