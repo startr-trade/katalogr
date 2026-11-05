@@ -25,6 +25,7 @@ pub mod show;
 mod step;
 mod tests;
 mod why;
+pub mod working_set;
 
 pub use callers::{CallersAnswer, callers, callers_folded};
 pub use dangling::{CONTRACT_KIND as DANGLING_CONTRACT, DEFAULT_KINDS as DANGLING_KINDS, dangling};
@@ -55,6 +56,7 @@ pub use schema::schemas;
 pub use search::{SearchParams, search, search_traced, search_with, search_with_traced};
 pub use tests::{DEFAULT_TEST_DEPTH, TestsOptions, tests, tests_for};
 pub use why::{Blame, RATIONALE_KINDS, why};
+pub use working_set::{Tier, Weights, WorkingSet, WorkingSetSummary, boost};
 
 /// Re-exported so wrappers can bound on it without a direct dependency.
 pub use serde::Serialize;
