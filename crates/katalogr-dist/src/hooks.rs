@@ -9,6 +9,7 @@
 //! one old file kept).
 
 use crate::error::DistError;
+use crate::working_set::{DEFAULT_RECENT_MAX, append_edit};
 use crate::{Katalogr, Overrides};
 use katalogr_engine::scan::{PathChange, changed_paths};
 use katalogr_engine::{
@@ -41,12 +42,17 @@ const MARKER: &str = "# katalogr hook";
 const GIT_HOOKS: [&str; 3] = ["post-commit", "post-checkout", "post-merge"];
 
 /// The Claude Code settings entries: `(event, matcher, command)`.
-const SETTINGS_ENTRIES: [(&str, Option<&str>, &str); 3] = [
+const SETTINGS_ENTRIES: [(&str, Option<&str>, &str); 4] = [
     ("PreToolUse", Some("Read"), "katalogr hook pre-read"),
     (
         "PostToolUse",
         Some("Grep|Glob"),
         "katalogr hook post-search",
+    ),
+    (
+        "PostToolUse",
+        Some("Edit|Write|MultiEdit|NotebookEdit"),
+        "katalogr hook post-edit",
     ),
     ("SessionStart", None, "katalogr session-start"),
 ];
@@ -56,6 +62,8 @@ const SETTINGS_ENTRIES: [(&str, Option<&str>, &str); 3] = [
 pub enum HookKind {
     PreRead,
     PostSearch,
+    /// PostToolUse for Edit, Write, MultiEdit and NotebookEdit (FEAT-039).
+    PostEdit,
 }
 
 impl HookKind {
@@ -63,6 +71,7 @@ impl HookKind {
         match self {
             HookKind::PreRead => "pre-read",
             HookKind::PostSearch => "post-search",
+            HookKind::PostEdit => "post-edit",
         }
     }
 }
@@ -70,6 +79,7 @@ impl HookKind {
 struct Config {
     read_block_bytes: u64,
     timeout: Duration,
+    recent_max: usize,
 }
 
 impl Config {
@@ -85,6 +95,8 @@ impl Config {
         Config {
             read_block_bytes: get("hooks.read_block_bytes", DEFAULT_READ_BLOCK_BYTES),
             timeout: Duration::from_millis(get("hooks.timeout_ms", DEFAULT_TIMEOUT_MS)),
+            recent_max: usize::try_from(get("working_set.recent_max", DEFAULT_RECENT_MAX as u64))
+                .unwrap_or(DEFAULT_RECENT_MAX),
         }
     }
 }
@@ -148,6 +160,7 @@ fn run_inner(
         let r = std::panic::catch_unwind(AssertUnwindSafe(|| match kind {
             HookKind::PreRead => pre_read(&k, &v, &cwd, &cfg, deadline),
             HookKind::PostSearch => post_search(&k, &v, &cfg, deadline),
+            HookKind::PostEdit => post_edit(&k, &v, &cwd, &cfg, deadline),
         }));
         let _ = tx.send(r.unwrap_or_else(|_| Err(DistError::usage("hook panicked"))));
     });
@@ -319,6 +332,60 @@ fn pre_read(
             .to_string(),
         ),
         note: format!("deny {rel}"),
+    })
+}
+
+/// PostToolUse for Edit, Write, MultiEdit and NotebookEdit (FEAT-039 R-1). A file inside the
+/// current checkout is logged as a recent edit, queued, and processed within the hook deadline;
+/// if processing does not finish, the event stays queued and the next read completes it. A file
+/// outside the checkout is ignored.
+fn post_edit(
+    k: &Katalogr,
+    v: &Value,
+    cwd: &Path,
+    cfg: &Config,
+    deadline: Instant,
+) -> Result<Decision, DistError> {
+    if !matches!(
+        v.get("tool_name").and_then(Value::as_str),
+        Some("Edit" | "Write" | "MultiEdit" | "NotebookEdit")
+    ) {
+        return allow("not an edit");
+    }
+    let input = v.get("tool_input").unwrap_or(&Value::Null);
+    let Some(file) = ["file_path", "notebook_path"]
+        .iter()
+        .find_map(|f| input.get(f).and_then(Value::as_str))
+    else {
+        return allow("no file_path");
+    };
+    let (repo, _) = k.current()?;
+    let Some((found, rel, _)) = k.locate(&cwd.join(file)) else {
+        return allow(format!("ignore {file}: not in an indexed repo"));
+    };
+    if found != repo {
+        return allow(format!("ignore {rel}: outside the current checkout"));
+    }
+    let cache = k.project.cache_dir().into_std_path_buf();
+    if let Err(e) = append_edit(&cache, &rel, cfg.recent_max) {
+        log(&cache, &format!("post-edit edit log: {e}"));
+    }
+    let inbox = katalogr_engine::queue::Inbox::new(&k.project);
+    inbox.append(&NewEvent::file(repo, &rel, EventKind::Changed))?;
+    let engine = k.engine(deadline)?;
+    let left = deadline.saturating_duration_since(Instant::now());
+    let answer = engine.with_consistency(
+        &QueryOptions {
+            consistency: EngineConsistency::Wait,
+            timeout: left,
+            scope: EngineScope::Paths(BTreeSet::from([(repo.to_string(), rel.clone())])),
+        },
+        |_| (),
+    )?;
+    allow(if answer.pending > 0 {
+        format!("queued {rel}: left pending")
+    } else {
+        format!("queued {rel}: processed")
     })
 }
 

@@ -13,6 +13,7 @@ mod span;
 #[cfg(feature = "test-extractor")]
 mod test_extractor;
 mod threads;
+pub mod working_set;
 
 pub use claude::{
     BEGIN_MARKER, DEFAULT_SESSION_BUDGET, END_MARKER, InstallOutcome, SESSION_BUDGET_KEY, SKILL_MD,

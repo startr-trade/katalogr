@@ -501,4 +501,135 @@ mod hooks {
                 .is_none()
         );
     }
+
+    fn edit_input(e: &Env, tool: &str, file: &str) -> String {
+        json_str(&serde_json::json!({
+            "cwd": e.repo.to_str().unwrap(),
+            "hook_event_name": "PostToolUse",
+            "tool_name": tool,
+            "tool_input": {"file_path": file},
+        }))
+    }
+
+    fn json_str(v: &serde_json::Value) -> String {
+        v.to_string()
+    }
+
+    fn edit_log(e: &Env) -> String {
+        std::fs::read_to_string(e.kx.join("projects/demo/.cache/recent-edits")).unwrap_or_default()
+    }
+
+    fn inbox_len(e: &Env) -> usize {
+        std::fs::read_dir(e.kx.join("projects/demo/.cache/inbox")).map_or(0, |rd| rd.count())
+    }
+
+    #[test]
+    fn post_edit_queues_and_processes() {
+        let e = env();
+        let small = e.repo.join("small.tx");
+        std::fs::write(
+            &small,
+            "sym fn small_one\nsym fn twin\nsym fn freshly_added\n",
+        )
+        .unwrap();
+        let out = hook(
+            &e.repo,
+            &e.home,
+            "post-edit",
+            &edit_input(&e, "Edit", small.to_str().unwrap()),
+        );
+        assert_eq!(out, "");
+        // Queued and processed: nothing is left in the inbox, and the log has the path.
+        assert_eq!(inbox_len(&e), 0);
+        assert_eq!(edit_log(&e), "small.tx\n");
+        let log = std::fs::read_to_string(e.kx.join("projects/demo/.cache/hooks.log")).unwrap();
+        assert!(
+            log.contains("post-edit queued small.tx: processed"),
+            "{log}"
+        );
+        let found = ok(&e.repo, &e.home, &["find", "freshly_added"]);
+        assert!(found.contains("freshly_added"), "{found}");
+    }
+
+    #[test]
+    fn post_edit_outside_checkout_ignored() {
+        let e = env();
+        let other = tempfile::tempdir().unwrap();
+        let file = other.path().join("elsewhere.tx");
+        std::fs::write(&file, "sym fn elsewhere\n").unwrap();
+        let out = hook(
+            &e.repo,
+            &e.home,
+            "post-edit",
+            &edit_input(&e, "Write", file.to_str().unwrap()),
+        );
+        assert_eq!(out, "");
+        assert_eq!(inbox_len(&e), 0);
+        assert_eq!(edit_log(&e), "");
+    }
+
+    #[test]
+    fn post_edit_fails_open() {
+        let e = env();
+        assert_eq!(hook(&e.repo, &e.home, "post-edit", "not json"), "");
+        assert_eq!(hook(&e.repo, &e.home, "post-edit", ""), "");
+        // No file_path, and a tool that is not an edit.
+        let no_path = json_str(&serde_json::json!({
+            "cwd": e.repo.to_str().unwrap(), "tool_name": "Edit", "tool_input": {}
+        }));
+        assert_eq!(hook(&e.repo, &e.home, "post-edit", &no_path), "");
+        let small = e.repo.join("small.tx");
+        let bash = edit_input(&e, "Bash", small.to_str().unwrap());
+        assert_eq!(hook(&e.repo, &e.home, "post-edit", &bash), "");
+        assert_eq!(edit_log(&e), "");
+        // Corrupt cache: still exit 0 and no output.
+        let cache = e.kx.join("projects/demo/.cache/index.redb");
+        std::fs::write(&cache, b"not a database at all, just garbage bytes").unwrap();
+        let input = edit_input(&e, "Edit", small.to_str().unwrap());
+        assert_eq!(hook(&e.repo, &e.home, "post-edit", &input), "");
+        // No project at all.
+        let lone = tempfile::tempdir().unwrap();
+        let lone_in = json_str(&serde_json::json!({
+            "cwd": lone.path().to_str().unwrap(), "tool_name": "Edit",
+            "tool_input": {"file_path": small.to_str().unwrap()}
+        }));
+        assert_eq!(hook(lone.path(), &e.home, "post-edit", &lone_in), "");
+    }
+
+    #[test]
+    fn post_edit_within_deadline() {
+        let e = env();
+        let big = e.repo.join("big.tx");
+        let mut text = std::fs::read_to_string(&big).unwrap();
+        text.push_str("sym fn deadline_probe\n");
+        std::fs::write(&big, text).unwrap();
+        let input = edit_input(&e, "Edit", big.to_str().unwrap());
+        // The hook's own deadline is hooks.timeout_ms (800); the extra second is process start.
+        let started = std::time::Instant::now();
+        assert_eq!(hook(&e.repo, &e.home, "post-edit", &input), "");
+        let took = started.elapsed();
+        assert!(took < std::time::Duration::from_millis(1800), "{took:?}");
+    }
+
+    #[test]
+    fn install_adds_post_edit_once() {
+        let e = env();
+        let project = e.repo.join(".claude/settings.json");
+        git(&e.repo, &["init", "-q", "-b", "main"]);
+        ok(&e.repo, &e.home, &["hooks", "install"]);
+        ok(&e.repo, &e.home, &["hooks", "install"]);
+        let after = json(&std::fs::read_to_string(&project).unwrap());
+        let post = after["hooks"]["PostToolUse"].as_array().unwrap();
+        let edits: Vec<_> = post
+            .iter()
+            .filter(|x| x["matcher"] == "Edit|Write|MultiEdit|NotebookEdit")
+            .collect();
+        assert_eq!(edits.len(), 1, "{after}");
+        assert_eq!(edits[0]["hooks"].as_array().unwrap().len(), 1);
+        assert_eq!(edits[0]["hooks"][0]["command"], "katalogr hook post-edit");
+        // Uninstall removes it again.
+        ok(&e.repo, &e.home, &["hooks", "uninstall"]);
+        let gone = std::fs::read_to_string(&project).unwrap();
+        assert!(!gone.contains("post-edit"), "{gone}");
+    }
 }

@@ -1,4 +1,4 @@
-//! `katalogr hook pre-read|post-search`: Claude Code hook entry points. They read the hook JSON
+//! `katalogr hook pre-read|post-search|post-edit`: Claude Code hook entry points. They read the hook JSON
 //! on stdin, print at most one JSON object, and always exit 0 (fail open).
 
 use std::io::Read;
@@ -14,6 +14,7 @@ pub fn run(cli: &Cli, action: &HookAction) -> Result<ExitCode, DistError> {
     let kind = match action {
         HookAction::PreRead => HookKind::PreRead,
         HookAction::PostSearch => HookKind::PostSearch,
+        HookAction::PostEdit => HookKind::PostEdit,
     };
     let mut input = String::new();
     if std::io::stdin().read_to_string(&mut input).is_err() {

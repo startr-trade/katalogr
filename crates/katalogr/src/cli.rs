@@ -482,6 +482,8 @@ pub enum HookAction {
     PreRead,
     /// PostToolUse for Grep and Glob: add index facts about the names searched for.
     PostSearch,
+    /// PostToolUse for Edit and Write: queue and reindex the edited file.
+    PostEdit,
 }
 
 #[derive(Debug, Subcommand)]
