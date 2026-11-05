@@ -15,6 +15,7 @@ fn schema_text(name: &str) -> Option<&'static str> {
         "cycles" => include_str!("../../../../schema/v1/cycles.schema.json"),
         "dangling" => include_str!("../../../../schema/v1/dangling.schema.json"),
         "dead-code" => include_str!("../../../../schema/v1/dead-code.schema.json"),
+        "docs-affected" => include_str!("../../../../schema/v1/docs-affected.schema.json"),
         "doctor" => include_str!("../../../../schema/v1/doctor.schema.json"),
         "explain" => include_str!("../../../../schema/v1/explain.schema.json"),
         "find" => include_str!("../../../../schema/v1/find.schema.json"),
