@@ -1,8 +1,5 @@
 //! FEAT-085 T2/T3: a linked worktree answers from its own checkout. Needs the `.tx` test
 //! extractor: `cargo test -p katalogr-dist --features test-extractor`.
-//!
-//! Tests marked `#[ignore]` assert per-checkout context isolation, which comes from FEAT-043
-//! (contexts) and is not merged yet; they are the contract to run once it is.
 #![cfg(feature = "test-extractor")]
 
 mod worktree {
@@ -65,15 +62,24 @@ mod worktree {
         }
     }
 
-    fn open(w: &World, dir: &Path) -> Katalogr {
+    fn no_overrides() -> Overrides {
+        Overrides::default()
+    }
+
+    fn open_in(dir: &Path, context: Option<String>) -> Katalogr {
         Katalogr::resolve(
             dir,
             &Overrides {
-                kindex: None,
-                project: None,
+                context,
+                ..Overrides::default()
             },
         )
-        .unwrap_or_else(|e| panic!("resolve {}: {e} (kx {})", dir.display(), w.kx.display()))
+        .unwrap()
+    }
+
+    fn open(w: &World, dir: &Path) -> Katalogr {
+        Katalogr::resolve(dir, &no_overrides())
+            .unwrap_or_else(|e| panic!("resolve {}: {e} (kx {})", dir.display(), w.kx.display()))
     }
 
     fn names(k: &Katalogr, terms: &str) -> Vec<String> {
@@ -100,7 +106,6 @@ mod worktree {
     }
 
     #[test]
-    #[ignore = "blocked: needs FEAT-043 contexts (per-checkout overlay)"]
     fn two_worktrees_do_not_see_each_other() {
         let w = world();
         std::fs::write(w.wt.join("b.tx"), "sym fn wtonlyfn\n").unwrap();
@@ -114,7 +119,6 @@ mod worktree {
     }
 
     #[test]
-    #[ignore = "blocked: needs FEAT-043 contexts (per-checkout overlay)"]
     fn main_checkout_unaffected_by_linked_edit() {
         let w = world();
         let km = open(&w, &w.main);
@@ -127,7 +131,6 @@ mod worktree {
     }
 
     #[test]
-    #[ignore = "blocked: needs FEAT-043 contexts (per-checkout overlay)"]
     fn copied_marker_does_not_write_shared_shards() {
         let w = world();
         let km = open(&w, &w.main);
@@ -135,17 +138,40 @@ mod worktree {
         let shards = || {
             let mut v: Vec<_> = walk(&w.kx)
                 .into_iter()
+                .filter(|p| {
+                    !p.components().any(|c| {
+                        let c = c.as_os_str();
+                        c == "contexts" || c == ".git" || c == ".cache"
+                    })
+                })
                 .map(|p| (p.clone(), std::fs::read(&p).unwrap()))
                 .collect();
             v.sort();
             v
         };
+        let base = || open_in(&w.main, Some("base".into()));
         let before = shards();
+        let mark = base().status(&Options::default()).unwrap().watermark;
         std::fs::copy(w.main.join(".katalogr"), w.wt.join(".katalogr")).unwrap();
         std::fs::write(w.wt.join("b.tx"), "sym fn wtonlyfn\n").unwrap();
         let kw = open(&w, &w.wt);
         kw.index(None, false, None, &Options::default()).unwrap();
-        assert_eq!(before, shards());
+        // The base index (a local cache, rewritten on open) holds the same content: nothing
+        // of the worktree reached it.
+        assert_eq!(
+            base().status(&Options::default()).unwrap().watermark,
+            mark,
+            "the base advanced"
+        );
+        assert!(!has(&base(), "wtonlyfn"));
+        let after = shards();
+        let changed: Vec<_> = before
+            .iter()
+            .map(|(p, _)| p)
+            .chain(after.iter().map(|(p, _)| p))
+            .filter(|p| before.iter().find(|(q, _)| q == *p) != after.iter().find(|(q, _)| q == *p))
+            .collect();
+        assert!(changed.is_empty(), "shared files changed: {changed:?}");
     }
 
     fn walk(dir: &Path) -> Vec<PathBuf> {
@@ -162,7 +188,6 @@ mod worktree {
     }
 
     #[test]
-    #[ignore = "blocked: needs FEAT-043 contexts (per-checkout overlay)"]
     fn notify_routes_to_own_context() {
         let w = world();
         let km = open(&w, &w.main);
@@ -176,7 +201,6 @@ mod worktree {
     }
 
     #[test]
-    #[ignore = "blocked: needs FEAT-043 contexts (per-checkout overlay); the git-hook path runs `notify --from-git` with the worktree as cwd"]
     fn git_hook_routes_to_own_context() {
         let w = world();
         let km = open(&w, &w.main);
@@ -185,14 +209,55 @@ mod worktree {
         git(&w.wt, &["add", "b.tx"]);
         git(&w.wt, &["commit", "-q", "-m", "wt"]);
         let kw = open(&w, &w.wt);
-        kw.index(
-            Some("HEAD~1..HEAD".into()),
-            false,
-            None,
-            &Options::default(),
-        )
-        .unwrap();
+        let n = katalogr_dist::hooks::notify_from_git(&w.wt, &no_overrides(), "post-commit", &[]);
+        assert!(n >= 1, "queued {n}");
+        kw.status(&Options::default()).unwrap();
+        kw.index(None, false, None, &Options::default()).unwrap();
         assert!(has(&kw, "wtonlyfn"));
         assert!(!has(&km, "wtonlyfn"));
+    }
+
+    #[test]
+    fn hook_post_search_reads_own_context() {
+        use katalogr_dist::hooks::{HookKind, run_hook};
+        let w = world();
+        std::fs::write(w.wt.join("b.tx"), "sym fn wtonlyfn\n").unwrap();
+        let kw = open(&w, &w.wt);
+        kw.index(None, false, None, &Options::default()).unwrap();
+        let input = |cwd: &Path| {
+            serde_json::json!({
+                "tool_name": "Grep",
+                "tool_input": {"pattern": "wtonlyfn"},
+                "cwd": cwd.to_str().unwrap(),
+            })
+            .to_string()
+        };
+        let in_wt = run_hook(HookKind::PostSearch, &input(&w.wt), &w.wt, &no_overrides());
+        assert!(
+            in_wt.is_some_and(|o| o.contains("wtonlyfn")),
+            "the worktree's own symbol is briefed"
+        );
+        let in_main = run_hook(
+            HookKind::PostSearch,
+            &input(&w.main),
+            &w.main,
+            &no_overrides(),
+        );
+        assert!(in_main.is_none(), "the main checkout does not know it");
+    }
+
+    #[test]
+    fn context_flag_reads_another_checkout() {
+        let w = world();
+        std::fs::write(w.wt.join("b.tx"), "sym fn wtonlyfn\n").unwrap();
+        let kw = open(&w, &w.wt);
+        kw.index(None, false, None, &Options::default()).unwrap();
+        let id = kw.context_name();
+        assert!(id.starts_with("w-"), "{id}");
+        let km = open_in(&w.main, Some(id));
+        assert!(has(&km, "wtonlyfn"));
+        assert!(!has(&open(&w, &w.main), "wtonlyfn"));
+        // `base` from inside the worktree does not see the worktree's file.
+        assert!(!has(&open_in(&w.wt, Some("base".into())), "wtonlyfn"));
     }
 }
