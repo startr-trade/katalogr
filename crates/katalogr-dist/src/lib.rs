@@ -3,6 +3,7 @@
 //! All behaviour of the command-line wrapper lives here; the wrapper parses, calls and renders.
 
 mod claude;
+pub mod contexts;
 pub mod doctor;
 mod error;
 pub mod eval;
@@ -607,7 +608,17 @@ impl Katalogr {
             inbox.append(ev)?;
         }
         let consistency = opts.consistency.unwrap_or(Consistency::WaitAll);
-        self.read(&engine, consistency, timeout, events.len(), warnings)
+        let mut report = self.read(&engine, consistency, timeout, events.len(), warnings)?;
+        drop(engine);
+        // The base follows the default branch's commit, not the disk (FEAT-043 R-1).
+        match self.advance_base(opts) {
+            Ok(adv) => {
+                report.queued += adv.queued;
+                report.warnings.extend(adv.warnings);
+            }
+            Err(e) => report.warnings.push(format!("base advance: {e}")),
+        }
+        Ok(report)
     }
 
     /// Run `f` on one snapshot at the requested consistency (default: wait).

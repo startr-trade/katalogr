@@ -530,8 +530,35 @@ impl Katalogr {
         for ev in &events {
             inbox.append(ev)?;
         }
-        Ok(events.len())
+        // When the branch that moved is the default branch, the base follows it. A failed
+        // advance never fails the hook; the next one retries from the recorded commit.
+        let mut n = events.len();
+        if on_default_branch(
+            root.as_std_path(),
+            self.base_branch_setting(repo).as_deref(),
+        ) && let Ok(r) = self.advance_base(&crate::Options::default())
+        {
+            n += r.queued;
+        }
+        Ok(n)
     }
+
+    fn base_branch_setting(&self, repo: &str) -> Option<String> {
+        self.project
+            .config()
+            .settings
+            .get(&format!("base.branch.{repo}"))
+            .and_then(|v| v.as_str())
+            .map(str::to_string)
+    }
+}
+
+/// Whether `HEAD` is on the repo's default branch.
+fn on_default_branch(root: &Path, configured: Option<&str>) -> bool {
+    matches!(
+        katalogr_engine::base::default_branch(root, configured),
+        Ok(Some(b)) if katalogr_engine::base::head_is_branch(root, &b)
+    )
 }
 
 /// `notify --from-git`: queue the event's paths, never fail, never block git. Errors go to the
