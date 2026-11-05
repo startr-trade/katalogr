@@ -221,7 +221,12 @@ impl Katalogr {
                 return Ok(Outcome::Found((total, entries, true, true)));
             }
             let entries = katalogr_query::map(tx)?;
-            Ok(Outcome::Found((entries.len() as u64, entries, false, false)))
+            Ok(Outcome::Found((
+                entries.len() as u64,
+                entries,
+                false,
+                false,
+            )))
         })?;
         let Outcome::Found((total, entries, from_top, behind)) = reply.outcome else {
             return Ok(None);

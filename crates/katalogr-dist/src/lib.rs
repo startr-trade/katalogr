@@ -39,9 +39,9 @@ use katalogr_analytics::{
 };
 use katalogr_engine::history::{HISTORY_PREFIX, HistoryOptions, blame_commit, history_shas};
 use katalogr_engine::scan::{PathChange, changed_paths};
-use katalogr_engine::{EngineError,
-    Consistency as EngineConsistency, Engine, EventKind, NewEvent, QueryOptions, Scope,
-    registry::ExtensionRegistry,
+use katalogr_engine::{
+    Consistency as EngineConsistency, Engine, EngineError, EventKind, NewEvent, QueryOptions,
+    Scope, registry::ExtensionRegistry,
 };
 use katalogr_model::{Name, RelPath};
 use katalogr_store::marker::{self, Overrides as StoreOverrides};

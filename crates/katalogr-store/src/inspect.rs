@@ -65,7 +65,9 @@ impl Cache {
         }
         let database = match crate::cache::reader_builder().open_read_only(path.as_std_path()) {
             Ok(d) => d,
-            Err(DatabaseError::DatabaseAlreadyOpen) => return Ok(CacheInspection::InUse),
+            Err(DatabaseError::DatabaseAlreadyOpen) | Err(DatabaseError::RepairAborted) => {
+                return Ok(CacheInspection::InUse);
+            }
             Err(DatabaseError::Storage(StorageError::Corrupted(_))) => {
                 return Ok(CacheInspection::Unreadable("the cache is corrupt".into()));
             }
