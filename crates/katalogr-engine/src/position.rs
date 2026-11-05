@@ -180,7 +180,9 @@ fn state(
 
 /// The CD-2 hash of `(path, blob id or None for deleted)` pairs, 64 lower-case hex, or `None`
 /// for an empty set. The input order does not matter.
-pub fn dirty_hash<'a>(entries: impl IntoIterator<Item = (&'a [u8], Option<&'a str>)>) -> Option<String> {
+pub fn dirty_hash<'a>(
+    entries: impl IntoIterator<Item = (&'a [u8], Option<&'a str>)>,
+) -> Option<String> {
     let mut lines: Vec<Vec<u8>> = entries
         .into_iter()
         .map(|(path, oid)| {

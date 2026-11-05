@@ -23,6 +23,10 @@ fn fixture_report() -> Report {
         timed_out: false,
         queued: 0,
         warnings: Vec::new(),
+        positions: Vec::new(),
+        exact: false,
+        view_id: None,
+        context: None,
     }
 }
 

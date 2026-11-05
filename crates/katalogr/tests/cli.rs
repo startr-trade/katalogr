@@ -1888,11 +1888,120 @@ mod render_json {
     fn cli_json_unchanged() {
         let tmp = tempfile::tempdir().unwrap();
         let (_kx, repo) = query_project(tmp.path());
+        // FEAT-084 added `positions` and `exact` to every envelope; the rest is unchanged.
+        let without_position = |out: &str| {
+            let mut v: serde_json::Value = serde_json::from_str(out).unwrap();
+            let o = v.as_object_mut().unwrap();
+            assert!(
+                o.remove("positions").is_some_and(|p| p.is_array()),
+                "positions"
+            );
+            assert!(o.remove("exact").is_some_and(|e| e.is_boolean()), "exact");
+            v
+        };
+        let golden = |s: &str| serde_json::from_str::<serde_json::Value>(s).unwrap();
         let (code, out, _) = run_raw(&repo, &["--json", "find", "call"]);
         assert_eq!(code, 0);
-        assert_eq!(out, FIND_CALL, "find call");
+        assert_eq!(without_position(&out), golden(FIND_CALL), "find call");
         let (code, out, _) = run_raw(&repo, &["--json", "refs", "dup"]);
         assert_eq!(code, 3);
-        assert_eq!(out, REFS_DUP, "refs dup");
+        assert_eq!(without_position(&out), golden(REFS_DUP), "refs dup");
+    }
+}
+
+mod position {
+    use super::cli::{query_project, run_raw};
+    use serde_json::Value;
+    use std::path::Path;
+    use std::process::Command;
+
+    fn git(root: &Path, args: &[&str]) {
+        let st = Command::new("git")
+            .current_dir(root)
+            .args(args)
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .status()
+            .expect("run git");
+        assert!(st.success(), "git {args:?} failed");
+    }
+
+    /// The `.tx` query project, as a committed git repository.
+    fn committed_project(tmp: &Path) -> std::path::PathBuf {
+        let (_kx, repo) = query_project(tmp);
+        git(&repo, &["init", "-q"]);
+        git(&repo, &["config", "user.name", "Test"]);
+        git(&repo, &["config", "user.email", "test@example.com"]);
+        git(&repo, &["config", "commit.gpgsign", "false"]);
+        git(&repo, &["add", "."]);
+        git(&repo, &["commit", "-q", "-m", "c1"]);
+        repo
+    }
+
+    fn json(repo: &Path, args: &[&str]) -> Value {
+        let (_code, out, _) = run_raw(repo, args);
+        serde_json::from_str(&out).unwrap_or_else(|e| panic!("{args:?}: {e}: {out}"))
+    }
+
+    fn head(repo: &Path) -> String {
+        let out = Command::new("git")
+            .current_dir(repo)
+            .args(["rev-parse", "HEAD"])
+            .output()
+            .unwrap();
+        String::from_utf8(out.stdout).unwrap().trim().to_string()
+    }
+
+    /// R-3. Every read command's envelope names the repo's position and says it is exact.
+    #[test]
+    fn every_answer_has_positions() {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = committed_project(tmp.path());
+        let commit = head(&repo);
+        for args in [
+            vec!["--json", "find", "call"],
+            vec!["--json", "refs", "target"],
+            vec!["--json", "callers", "target"],
+            vec!["--json", "search", "caller"],
+            vec!["--json", "map"],
+        ] {
+            let v = json(&repo, &args);
+            assert_eq!(v["exact"], true, "{args:?}: {v}");
+            let positions = v["positions"].as_array().expect("positions");
+            assert_eq!(positions.len(), 1, "{args:?}");
+            assert_eq!(positions[0]["repo"], "app", "{args:?}");
+            assert_eq!(positions[0]["commit"], commit.as_str(), "{args:?}");
+        }
+        // An edit shows as a dirty hash, and a commit of it as a new commit.
+        std::fs::write(
+            repo.join("lib.tx"),
+            "sym fn target\nexport ns:target target\n",
+        )
+        .unwrap();
+        let v = json(&repo, &["--json", "find", "target"]);
+        assert_eq!(v["exact"], true);
+        assert!(v["positions"][0]["dirty"].is_string(), "{v}");
+        assert_eq!(v["positions"][0]["commit"], commit.as_str());
+    }
+
+    /// R-3. A stale-ok read does not look at the checkout: it reports the recorded position and
+    /// does not claim to be exact.
+    #[test]
+    fn stale_ok_reports_recorded_not_exact() {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = committed_project(tmp.path());
+        let first = json(&repo, &["--json", "find", "call"]);
+        assert_eq!(first["exact"], true);
+        std::fs::write(repo.join("user.tx"), "sym fn changed\n").unwrap();
+        let v = json(
+            &repo,
+            &["--json", "--consistency", "stale-ok", "find", "call"],
+        );
+        assert_eq!(v["exact"], false, "{v}");
+        assert_eq!(v["positions"], first["positions"]);
+        // The next waiting read catches up.
+        let v = json(&repo, &["--json", "find", "changed"]);
+        assert_eq!(v["exact"], true);
+        assert_ne!(v["positions"], first["positions"]);
     }
 }

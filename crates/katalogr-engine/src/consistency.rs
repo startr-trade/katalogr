@@ -3,12 +3,14 @@
 
 use crate::error::EngineError;
 use crate::parallel::Parallelism;
+use crate::position::{WorkingState, read_position};
 use crate::profiles::{self, LoadReport, ProfileSet};
-use crate::queue::{Context, Inbox, Processor, Seq};
+use crate::queue::{Context, EventKind, Inbox, NewEvent, Processor, Seq};
 use crate::registry::ExtensionRegistry;
 use crate::stitch::Stitcher;
 use camino::Utf8PathBuf;
 use katalogr_model::RelPath;
+use katalogr_query::PositionRef;
 use katalogr_store::{Cache, ProjectDir, ReadTx, Reader, RepoConfig};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Mutex, OnceLock};
@@ -63,6 +65,30 @@ pub struct Answer<T> {
     pub pending: u64,
     /// True if and only if `pending > 0` at snapshot time.
     pub stale: bool,
+    /// What the index reflects, one entry per repo, sorted by repo (FEAT-084). On an exact
+    /// answer it is the checkout's position; otherwise the last position reached exactly, and
+    /// a repo that never reached one is absent.
+    pub positions: Vec<PositionRef>,
+    /// Nothing was pending, and every checkout's position was the same before and after the
+    /// read. Always false for `StaleOk`.
+    pub exact: bool,
+    /// Non-fatal notices, such as a checkout whose position could not be read.
+    pub warnings: Vec<String>,
+}
+
+/// Meta key prefix of the last position a repo reached exactly: compact JSON of a `PositionRef`.
+pub const POSITION_META: &str = "position.";
+/// Meta key prefix of the uncommitted paths of that position: JSON of [`ChangedSet`].
+pub const POSITION_CHANGED_META: &str = "position_changed.";
+/// Uncommitted paths remembered per repo; above it a rescan is queued instead.
+pub const CHANGED_CAP: usize = 10_000;
+
+/// The uncommitted paths of a recorded position, capped at [`CHANGED_CAP`].
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ChangedSet {
+    /// True when the set was over the cap and `paths` is empty.
+    pub over: bool,
+    pub paths: Vec<String>,
 }
 
 /// Per-stage times summed over an engine's processing rounds; for benches only.
@@ -294,6 +320,13 @@ impl Engine {
             p.refresh_embed_signature()?;
             p.refresh_profiles()?;
         }
+        let reconcile = o.consistency != Consistency::StaleOk;
+        let mut warnings = Vec::new();
+        let before = if reconcile {
+            self.reconcile(&mut warnings)?
+        } else {
+            BTreeMap::new()
+        };
         loop {
             let snap = self.cache.read()?;
             let pending = self.pending_in(&snap, &scope)?;
@@ -301,11 +334,31 @@ impl Engine {
                 o.consistency == Consistency::StaleOk || pending == 0 || Instant::now() >= deadline;
             if finished {
                 let watermark = Seq(snap.watermark(Context::WORKTREE)?);
+                let recorded = self.recorded_positions(&snap)?;
+                // Exactness needs nothing pending anywhere, not only in the scope.
+                let all_pending = if scope == Scope::Project {
+                    pending
+                } else {
+                    self.pending_in(&snap, &Scope::Project)?
+                };
+                let value = f(&snap);
+                drop(snap);
+                // Read after the value, so an edit made while it was computed is seen.
+                let (positions, exact) = self.settle(
+                    reconcile,
+                    all_pending == 0,
+                    &before,
+                    recorded,
+                    &mut warnings,
+                )?;
                 return Ok(Answer {
-                    value: f(&snap),
+                    value,
                     watermark,
                     pending,
                     stale: pending > 0,
+                    positions,
+                    exact,
+                    warnings,
                 });
             }
             drop(snap);
@@ -324,4 +377,221 @@ impl Engine {
             }
         }
     }
+
+    /// The last position each repo reached exactly, from `snap`, sorted by repo.
+    fn recorded_positions(
+        &self,
+        snap: &ReadTx,
+    ) -> Result<BTreeMap<String, PositionRef>, EngineError> {
+        let mut out = BTreeMap::new();
+        for repo in self.roots.keys() {
+            if let Some(p) = recorded_position(snap, repo)? {
+                out.insert(repo.clone(), p);
+            }
+        }
+        Ok(out)
+    }
+
+    fn state_of(&self, repo: &str) -> Result<WorkingState, crate::scan::ScanError> {
+        let root = &self.roots[repo];
+        let (include, exclude) = self.repo_filters(repo);
+        read_position(repo, root.as_std_path(), &include, &exclude)
+    }
+
+    /// FEAT-084 reconcile, steps 1 and 2. Reads each checkout's position, and where it differs
+    /// from the recorded one, queues events for what differs, so that a change no hook saw is
+    /// still found. Returns the positions read (a repo whose status failed is left out, with a
+    /// warning).
+    fn reconcile(
+        &self,
+        warnings: &mut Vec<String>,
+    ) -> Result<BTreeMap<String, WorkingState>, EngineError> {
+        let snap = self.cache.read()?;
+        let mut before = BTreeMap::new();
+        for repo in self.roots.keys() {
+            let state = match self.state_of(repo) {
+                Ok(s) => s,
+                Err(e) => {
+                    warnings.push(format!("position of {repo} unreadable: {e}"));
+                    continue;
+                }
+            };
+            let recorded = recorded_position(&snap, repo)?;
+            if recorded.as_ref() != Some(&state.position) {
+                let old = recorded_changed(&snap, repo)?;
+                for ev in self.events_for_difference(repo, recorded.as_ref(), &state, old) {
+                    // A rescan already waiting in the inbox covers the same ground.
+                    if ev.kind == EventKind::Rescan && self.rescan_waiting(repo)? {
+                        continue;
+                    }
+                    self.inbox().append(&ev)?;
+                }
+            }
+            before.insert(repo.clone(), state);
+        }
+        Ok(before)
+    }
+
+    /// True when the inbox holds a rescan of `repo` that no processor round has taken yet.
+    fn rescan_waiting(&self, repo: &str) -> Result<bool, EngineError> {
+        let inbox = self.inbox();
+        for file in inbox.list()? {
+            if let Ok(ev) = inbox.read(&file)
+                && ev.kind == EventKind::Rescan
+                && ev.repo == repo
+            {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+
+    /// The events that bring the index from the `recorded` position to `now`: the paths that
+    /// differ between the two commits, plus every path of either uncommitted set. A rescan when
+    /// there is no record, the commits cannot be compared, or a set was over the cap.
+    fn events_for_difference(
+        &self,
+        repo: &str,
+        recorded: Option<&PositionRef>,
+        now: &WorkingState,
+        old: Option<ChangedSet>,
+    ) -> Vec<NewEvent> {
+        let rescan = || vec![NewEvent::rescan(repo)];
+        let Some(recorded) = recorded else {
+            return rescan();
+        };
+        let old = old.unwrap_or_default();
+        if old.over || now.changed.len() > CHANGED_CAP {
+            return rescan();
+        }
+        let mut paths: BTreeSet<String> = old.paths.into_iter().collect();
+        paths.extend(now.changed.iter().map(|(p, _)| p.as_str().to_string()));
+        match (&recorded.commit, &now.position.commit) {
+            (Some(a), Some(b)) if a != b => {
+                let root = self.roots[repo].as_std_path();
+                match crate::scan::changed_paths(root, &format!("{a}..{b}")) {
+                    Ok(changes) => {
+                        use crate::scan::PathChange as C;
+                        for c in changes {
+                            match c {
+                                C::Added(p) | C::Modified(p) | C::Deleted(p) => {
+                                    paths.insert(p.as_str().to_string());
+                                }
+                                C::Renamed { from, to } => {
+                                    paths.insert(from.as_str().to_string());
+                                    paths.insert(to.as_str().to_string());
+                                }
+                            }
+                        }
+                    }
+                    Err(_) => return rescan(),
+                }
+            }
+            (a, b) if a != b => return rescan(),
+            _ => {}
+        }
+        if paths.len() > CHANGED_CAP {
+            return rescan();
+        }
+        let root = self.roots[repo].as_std_path();
+        paths
+            .into_iter()
+            .filter_map(|p| {
+                let rel = RelPath::new(&p).ok()?;
+                let kind = if std::fs::symlink_metadata(root.join(&p)).is_ok() {
+                    EventKind::Changed
+                } else {
+                    EventKind::Deleted
+                };
+                Some(NewEvent::file(repo, &rel, kind))
+            })
+            .collect()
+    }
+
+    /// FEAT-084 reconcile, steps 4 and 5, after the value is computed. An exact answer needs
+    /// nothing pending and each position, read again, equal to the one read before. It then
+    /// records the position (skipped when another process holds the processor lock; the next
+    /// read records it). Otherwise it answers with the recorded positions and `exact: false`.
+    fn settle(
+        &self,
+        reconcile: bool,
+        nothing_pending: bool,
+        before: &BTreeMap<String, WorkingState>,
+        recorded: BTreeMap<String, PositionRef>,
+        warnings: &mut Vec<String>,
+    ) -> Result<(Vec<PositionRef>, bool), EngineError> {
+        let not_exact = |recorded: BTreeMap<String, PositionRef>| {
+            (recorded.into_values().collect::<Vec<_>>(), false)
+        };
+        if !reconcile || !nothing_pending || self.roots.is_empty() {
+            return Ok(not_exact(recorded));
+        }
+        let mut after = BTreeMap::new();
+        for (repo, state) in before {
+            match self.state_of(repo) {
+                Ok(s) if s.position == state.position => {
+                    after.insert(repo.clone(), s);
+                }
+                Ok(_) => return Ok(not_exact(recorded)),
+                Err(e) => {
+                    warnings.push(format!("position of {repo} unreadable: {e}"));
+                    return Ok(not_exact(recorded));
+                }
+            }
+        }
+        if after.len() != self.roots.len() {
+            return Ok(not_exact(recorded));
+        }
+        let changed: Vec<&WorkingState> = after
+            .values()
+            .filter(|s| recorded.get(&s.position.repo) != Some(&s.position))
+            .collect();
+        if !changed.is_empty()
+            && let Some(_lock) = Processor::try_acquire(self)?
+        {
+            let mut tx = self.cache.write()?;
+            for s in changed {
+                let repo = &s.position.repo;
+                let json = serde_json::to_vec(&s.position)
+                    .map_err(|e| EngineError::Queue(e.to_string()))?;
+                tx.set_meta(&format!("{POSITION_META}{repo}"), &json)?;
+                let set = if s.changed.len() > CHANGED_CAP {
+                    ChangedSet {
+                        over: true,
+                        paths: Vec::new(),
+                    }
+                } else {
+                    ChangedSet {
+                        over: false,
+                        paths: s
+                            .changed
+                            .iter()
+                            .map(|(p, _)| p.as_str().to_string())
+                            .collect(),
+                    }
+                };
+                let json =
+                    serde_json::to_vec(&set).map_err(|e| EngineError::Queue(e.to_string()))?;
+                tx.set_meta(&format!("{POSITION_CHANGED_META}{repo}"), &json)?;
+            }
+            tx.commit()?;
+        }
+        Ok((after.into_values().map(|s| s.position).collect(), true))
+    }
+}
+
+/// The position `repo` last reached exactly, if any.
+pub fn recorded_position(
+    snap: &impl Reader,
+    repo: &str,
+) -> Result<Option<PositionRef>, EngineError> {
+    Ok(snap
+        .meta(&format!("{POSITION_META}{repo}"))?
+        .and_then(|b| serde_json::from_slice(&b).ok()))
+}
+
+fn recorded_changed(snap: &impl Reader, repo: &str) -> Result<Option<ChangedSet>, EngineError> {
+    Ok(snap
+        .meta(&format!("{POSITION_CHANGED_META}{repo}"))?
+        .and_then(|b| serde_json::from_slice(&b).ok()))
 }

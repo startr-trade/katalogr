@@ -2,10 +2,10 @@
 //! of FEAT-043). Pure, so wrappers and the API share it.
 
 use schemars::JsonSchema;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 /// One repo's position. Serialises as `{"repo","commit","dirty"}`, absent parts as `null`.
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, JsonSchema)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, JsonSchema)]
 pub struct PositionRef {
     pub repo: String,
     /// 40 lower-case hex, or `None` for a directory with no commit.

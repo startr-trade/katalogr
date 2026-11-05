@@ -174,6 +174,14 @@ pub struct Report {
     pub queued: usize,
     /// Non-fatal notices (repos skipped because their root is unknown).
     pub warnings: Vec<String>,
+    /// What the index reflects, one entry per repo sorted by repo (FEAT-084).
+    pub positions: Vec<katalogr_query::PositionRef>,
+    /// Nothing was pending and every checkout's position was unchanged across the read.
+    pub exact: bool,
+    /// The ID of this answer; set only on an exact answer to a question that has one.
+    pub view_id: Option<String>,
+    /// The context the answer was read from, when it names one.
+    pub context: Option<String>,
 }
 
 impl Report {
@@ -686,7 +694,11 @@ impl Katalogr {
                 stale: a.stale,
                 timed_out: a.stale && consistency != Consistency::StaleOk,
                 queued: 0,
-                warnings: Vec::new(),
+                warnings: a.warnings,
+                positions: a.positions,
+                exact: a.exact,
+                view_id: None,
+                context: None,
             },
             diagnostic: diag.finish(),
         })
@@ -1200,6 +1212,7 @@ impl Katalogr {
             |tx| katalogr_engine::profiles::stored_errors(tx),
         )?;
         warnings.extend(a.value.iter().map(|e| format!("profile refused: {e}")));
+        warnings.extend(a.warnings);
         Ok(Report {
             watermark: a.watermark.0,
             pending: a.pending,
@@ -1207,6 +1220,10 @@ impl Katalogr {
             timed_out: a.stale && consistency != Consistency::StaleOk,
             queued,
             warnings,
+            positions: a.positions,
+            exact: a.exact,
+            view_id: None,
+            context: None,
         })
     }
 }

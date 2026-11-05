@@ -66,6 +66,10 @@ pub(super) fn envelope<T>(
         next,
         diagnostic,
         folded: Vec::new(),
+        positions: report.positions.clone(),
+        exact: report.exact,
+        view_id: report.view_id.clone(),
+        context: report.context.clone(),
     }
 }
 
