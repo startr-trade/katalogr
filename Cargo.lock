@@ -2085,6 +2085,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "katalogr-render"
+version = "0.1.0"
+dependencies = [
+ "schemars",
+ "serde",
+ "sha2",
+]
+
+[[package]]
 name = "katalogr-store"
 version = "0.1.0"
 dependencies = [

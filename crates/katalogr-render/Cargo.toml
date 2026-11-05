@@ -1,0 +1,13 @@
+[package]
+name = "katalogr-render"
+description = "Diagram rendering for graph views: Mermaid, DOT, GraphML, Structurizr and SVG, plus the Markdown and Pele assets that embed them in doc tools."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+serde.workspace = true
+schemars.workspace = true
+sha2.workspace = true

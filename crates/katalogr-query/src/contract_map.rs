@@ -121,10 +121,11 @@ mod fixture {
         end_col: 5,
     };
 
-    /// `(kind, key, [(role, symbol name)])` contracts written in the given order.
-    pub(super) fn build(
-        contracts: &[(&str, &str, &[(&str, &str)])],
-    ) -> (tempfile::TempDir, Cache) {
+    /// `(kind, key, [(role, symbol name)])`.
+    pub(super) type Spec<'a> = (&'a str, &'a str, &'a [(&'a str, &'a str)]);
+
+    /// Contracts written in the given order.
+    pub(super) fn build(contracts: &[Spec]) -> (tempfile::TempDir, Cache) {
         let tmp = tempfile::tempdir().unwrap();
         let root = Utf8PathBuf::from_path_buf(tmp.path().join("kx")).unwrap();
         let dir = Kindex::init(&root)
