@@ -13,6 +13,7 @@ mod span;
 #[cfg(feature = "test-extractor")]
 mod test_extractor;
 mod threads;
+mod views;
 
 pub use claude::{
     BEGIN_MARKER, DEFAULT_SESSION_BUDGET, END_MARKER, InstallOutcome, SESSION_BUDGET_KEY, SKILL_MD,
@@ -28,6 +29,7 @@ use katalogr_query::{
     WhyResult, cap,
 };
 pub use katalogr_query::{ReplaceResult, ShowResult};
+pub use katalogr_render as render;
 pub use setup::{ProjectCreated, kindex_init, project_init};
 pub use threads::{BATCH_BYTES_KEY, THREADS_ENV, THREADS_KEY, resolve_parallelism};
 
