@@ -31,7 +31,7 @@ use std::sync::{Mutex, PoisonError, RwLock};
 use std::time::{Duration, Instant};
 
 /// Stored in `meta`; a different number rebuilds the cache from the shards.
-pub const CACHE_SCHEMA: u32 = 14;
+pub const CACHE_SCHEMA: u32 = 15;
 
 /// `meta` key: the watermark the stored rank reflects.
 const RANK_WATERMARK_META: &str = "rank_watermark";
@@ -575,17 +575,15 @@ pub(crate) fn db<E: Into<redb::Error>>(e: E) -> StoreError {
 pub type RawRows = Vec<(Vec<u8>, Vec<u8>)>;
 /// The SHA-256 and the bytes of an extension context.
 pub type ExtContextRow = ([u8; 32], Vec<u8>);
-/// `(repo, path)` of a shard.
-pub type ShardKey = (String, RelPath);
-/// A stored shard hash with the `(size, mtime)` recorded beside it.
-pub type ShardHashRow = (ShardKey, [u8; 32], Option<ShardStat>);
+/// `(repo, path)` of a file.
+pub type PathKey = (String, RelPath);
 
 /// The cache tables (FEAT-001 section 5, FEAT-003 section 5).
 #[doc(hidden)]
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum TableId {
     Meta,
-    ShardHashes,
+    FileRevisions,
     Artifacts,
     Symbols,
     LinksOut,
@@ -622,7 +620,7 @@ pub enum TableId {
 impl TableId {
     pub const ALL: [TableId; 33] = [
         TableId::Meta,
-        TableId::ShardHashes,
+        TableId::FileRevisions,
         TableId::Artifacts,
         TableId::Symbols,
         TableId::LinksOut,
@@ -678,7 +676,7 @@ impl TableId {
     fn name(self) -> &'static str {
         match self {
             TableId::Meta => "meta",
-            TableId::ShardHashes => "shard_hashes",
+            TableId::FileRevisions => "file_revisions",
             TableId::Artifacts => "artifacts",
             TableId::Symbols => "symbols",
             TableId::LinksOut => "links_out",
@@ -812,35 +810,16 @@ pub trait Reader {
         self.raw_get(TableId::Meta, name.as_bytes())
     }
 
-    fn shard_hash(&self, repo: &str, path: &RelPath) -> Result<Option<[u8; 32]>, StoreError> {
-        match self.raw_get(TableId::ShardHashes, &path_key(repo, path))? {
-            Some(v) => Ok(Some(split_hash_value(&v)?.0)),
+    /// The stored file revision (the SHA-256 of the revision string) of one file.
+    fn file_revision(&self, repo: &str, path: &RelPath) -> Result<Option<[u8; 32]>, StoreError> {
+        match self.raw_get(TableId::FileRevisions, &path_key(repo, path))? {
+            Some(v) => Ok(Some(revision_value(&v)?)),
             None => Ok(None),
         }
-    }
-
-    /// The `(size, mtime)` of the shard file when its hash was last recorded; `None` when no
-    /// hash is stored or it was stored without them.
-    fn shard_stat(&self, repo: &str, path: &RelPath) -> Result<Option<ShardStat>, StoreError> {
-        match self.raw_get(TableId::ShardHashes, &path_key(repo, path))? {
-            Some(v) => Ok(split_hash_value(&v)?.1),
-            None => Ok(None),
-        }
-    }
-
-    /// Every stored shard hash with the `(size, mtime)` recorded beside it, sorted by
-    /// `(repo, path)` key bytes.
-    fn shard_hash_rows(&self) -> Result<Vec<ShardHashRow>, StoreError> {
-        let mut out = Vec::new();
-        for (k, v) in self.raw_scan(TableId::ShardHashes, &[])? {
-            let (hash, stat) = split_hash_value(&v)?;
-            out.push((decode_path_key(&k)?, hash, stat));
-        }
-        Ok(out)
     }
 
     /// Files with at least one index-error row and the number of rows, sorted by key bytes.
-    fn index_error_files(&self) -> Result<Vec<(ShardKey, usize)>, StoreError> {
+    fn index_error_files(&self) -> Result<Vec<(PathKey, usize)>, StoreError> {
         let mut out = Vec::new();
         for (k, v) in self.raw_scan(TableId::IndexErrors, &[])? {
             let rows: Vec<ErrorRow> = de(&v)?;
@@ -851,11 +830,11 @@ pub trait Reader {
         Ok(out)
     }
 
-    /// Every stored shard hash, sorted by `(repo, path)` key bytes.
-    fn shard_hashes(&self) -> Result<Vec<(ShardKey, [u8; 32])>, StoreError> {
+    /// Every stored file revision, sorted by `(repo, path)` key bytes.
+    fn file_revisions(&self) -> Result<Vec<(PathKey, [u8; 32])>, StoreError> {
         let mut out = Vec::new();
-        for (k, v) in self.raw_scan(TableId::ShardHashes, &[])? {
-            out.push((decode_path_key(&k)?, split_hash_value(&v)?.0));
+        for (k, v) in self.raw_scan(TableId::FileRevisions, &[])? {
+            out.push((decode_path_key(&k)?, revision_value(&v)?));
         }
         Ok(out)
     }
@@ -1883,7 +1862,7 @@ pub trait Reader {
     }
 
     /// Every recorded index error, sorted by `(repo, path)` key bytes.
-    fn index_errors_all(&self) -> Result<Vec<(ShardKey, Vec<ErrorRow>)>, StoreError> {
+    fn index_errors_all(&self) -> Result<Vec<(PathKey, Vec<ErrorRow>)>, StoreError> {
         self.raw_scan(TableId::IndexErrors, &[])?
             .into_iter()
             .map(|(k, v)| {
@@ -2487,34 +2466,19 @@ impl WriteTx<'_> {
         self.put(TableId::Meta, name.as_bytes(), value)
     }
 
-    pub fn put_shard_hash(
+    /// Stores the SHA-256 of `revision` as the file's revision.
+    pub fn put_file_revision(
         &mut self,
         repo: &str,
         path: &RelPath,
-        hash: &[u8; 32],
+        revision: &str,
     ) -> Result<(), StoreError> {
-        self.put(TableId::ShardHashes, &path_key(repo, path), hash)
+        let hash: [u8; 32] = Sha256::digest(revision.as_bytes()).into();
+        self.put(TableId::FileRevisions, &path_key(repo, path), &hash)
     }
 
-    /// Like [`WriteTx::put_shard_hash`], also recording the shard file's `(size, mtime)` so a
-    /// later open can skip hashing it while they are unchanged.
-    pub fn put_shard_hash_stat(
-        &mut self,
-        repo: &str,
-        path: &RelPath,
-        hash: &[u8; 32],
-        stat: ShardStat,
-    ) -> Result<(), StoreError> {
-        let mut v = Vec::with_capacity(52);
-        v.extend_from_slice(hash);
-        v.extend_from_slice(&stat.size.to_le_bytes());
-        v.extend_from_slice(&stat.mtime_secs.to_le_bytes());
-        v.extend_from_slice(&stat.mtime_nanos.to_le_bytes());
-        self.put(TableId::ShardHashes, &path_key(repo, path), &v)
-    }
-
-    pub fn remove_shard_hash(&mut self, repo: &str, path: &RelPath) -> Result<(), StoreError> {
-        self.del(TableId::ShardHashes, &path_key(repo, path))
+    pub fn remove_file_revision(&mut self, repo: &str, path: &RelPath) -> Result<(), StoreError> {
+        self.del(TableId::FileRevisions, &path_key(repo, path))
     }
 
     pub fn put_artifact(&mut self, id: Id, row: &ArtifactRow) -> Result<(), StoreError> {
@@ -3009,49 +2973,10 @@ pub trait Restitch {
     fn remove_artifact(&self, tx: &mut WriteTx, a: &ArtifactName) -> Result<(), StoreError>;
 }
 
-/// Size and modification time of a shard file, recorded next to its hash.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct ShardStat {
-    pub size: u64,
-    pub mtime_secs: u64,
-    pub mtime_nanos: u32,
-}
-
-impl ShardStat {
-    pub fn of(meta: &std::fs::Metadata) -> Option<ShardStat> {
-        let d = meta
-            .modified()
-            .ok()?
-            .duration_since(std::time::UNIX_EPOCH)
-            .ok()?;
-        Some(ShardStat {
-            size: meta.len(),
-            mtime_secs: d.as_secs(),
-            mtime_nanos: d.subsec_nanos(),
-        })
-    }
-}
-
-/// A `shard_hashes` value: the 32-byte hash, optionally followed by size (u64), mtime seconds
-/// (u64) and mtime nanoseconds (u32), all little-endian.
-fn split_hash_value(v: &[u8]) -> Result<([u8; 32], Option<ShardStat>), StoreError> {
-    let bad = || StoreError::Row("bad shard hash".into());
-    let hash: [u8; 32] = v.get(..32).ok_or_else(bad)?.try_into().map_err(|_| bad())?;
-    match v.len() {
-        32 => Ok((hash, None)),
-        52 => {
-            let u64_at = |i: usize| u64::from_le_bytes(v[i..i + 8].try_into().expect("8 bytes"));
-            Ok((
-                hash,
-                Some(ShardStat {
-                    size: u64_at(32),
-                    mtime_secs: u64_at(40),
-                    mtime_nanos: u32::from_le_bytes(v[48..52].try_into().expect("4 bytes")),
-                }),
-            ))
-        }
-        _ => Err(bad()),
-    }
+/// A `file_revisions` value: the 32-byte SHA-256 of the revision string.
+fn revision_value(v: &[u8]) -> Result<[u8; 32], StoreError> {
+    v.try_into()
+        .map_err(|_| StoreError::Row("bad file revision".into()))
 }
 
 /// What `open_or_rebuild` did.
@@ -3536,29 +3461,8 @@ impl Cache {
         Ok(())
     }
 
-    /// Compare the shard files with the stored hashes and stats on a read snapshot: true when
-    /// the sets are equal and every file's `(size, mtime)` equals the stored one, so `sync`
-    /// would change nothing. A shard stored without a stat counts as different.
-    fn shards_unchanged(&self, dir: &ProjectDir, on_disk: &[ShardKey]) -> Result<bool, StoreError> {
-        let rows = self.read()?.shard_hash_rows()?;
-        if rows.len() != on_disk.len() {
-            return Ok(false);
-        }
-        let stored: HashMap<&ShardKey, &Option<ShardStat>> =
-            rows.iter().map(|(k, _, st)| (k, st)).collect();
-        for key in on_disk {
-            let Some(Some(stat)) = stored.get(key).copied() else {
-                return Ok(false);
-            };
-            let file = dir.shard_path(&key.0, &key.1);
-            match std::fs::metadata(&file) {
-                Ok(m) if ShardStat::of(&m) == Some(*stat) => {}
-                _ => return Ok(false),
-            }
-        }
-        Ok(true)
-    }
-
+    /// Bring the graph in line with the shard files: a shard whose provenance revision differs
+    /// from the stored file revision is decoded and stitched. Goes with the shards (FEAT-094 T5).
     fn sync(
         &self,
         dir: &ProjectDir,
@@ -3567,12 +3471,9 @@ impl Cache {
     ) -> Result<SyncReport, StoreError> {
         let mut report = SyncReport::default();
         let on_disk = dir.list_shards()?;
-        if self.shards_unchanged(dir, &on_disk)? {
-            return Ok(report);
-        }
         let mut tx = self.write()?;
         let mut stale: BTreeSet<(String, RelPath)> =
-            tx.shard_hashes()?.into_iter().map(|(k, _)| k).collect();
+            tx.file_revisions()?.into_iter().map(|(k, _)| k).collect();
 
         for (repo, path) in &on_disk {
             stale.remove(&(repo.clone(), path.clone()));
@@ -3581,44 +3482,30 @@ impl Cache {
                 break;
             }
             let file = dir.shard_path(repo, path);
-            // The stat is taken before the read, so a write in between is seen at the next open.
-            let stat = match std::fs::metadata(&file) {
-                Ok(m) => ShardStat::of(&m),
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
-                Err(e) => return Err(StoreError::io(&file, e)),
-            };
-            let stored = tx.shard_hash(repo, path)?;
-            if stored.is_some() && stat.is_some() && tx.shard_stat(repo, path)? == stat {
-                continue;
-            }
             let bytes = match std::fs::read(&file) {
                 Ok(b) => b,
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
                 Err(e) => return Err(StoreError::io(&file, e)),
             };
             report.hashed += 1;
-            let hash: [u8; 32] = Sha256::digest(&bytes).into();
-            let record = |tx: &mut WriteTx| match stat {
-                Some(st) => tx.put_shard_hash_stat(repo, path, &hash, st),
-                None => tx.put_shard_hash(repo, path, &hash),
-            };
-            if stored == Some(hash) {
-                if tx.shard_stat(repo, path)? != stat {
-                    record(&mut tx)?;
-                }
-                continue;
-            }
+            let stored = tx.file_revision(repo, path)?;
             match crate::shard::decode(&bytes) {
                 Ok(fragment) => {
+                    let hash: [u8; 32] =
+                        Sha256::digest(fragment.provenance.revision.as_bytes()).into();
+                    if stored == Some(hash) {
+                        continue;
+                    }
+                    let revision = fragment.provenance.revision.clone();
                     stitch.replace_fragment(&mut tx, fragment)?;
-                    record(&mut tx)?;
+                    tx.put_file_revision(repo, path, &revision)?;
                     tx.put_index_errors(repo, path, &[])?;
                     report.replaced += 1;
                 }
                 Err(e) => {
                     quarantine(dir, repo, path)?;
                     // Whatever this shard contributed before is gone with it.
-                    if tx.shard_hash(repo, path)?.is_some() {
+                    if stored.is_some() {
                         stitch.remove_artifact(
                             &mut tx,
                             &ArtifactName {
@@ -3626,7 +3513,7 @@ impl Cache {
                                 path: path.clone(),
                             },
                         )?;
-                        tx.remove_shard_hash(repo, path)?;
+                        tx.remove_file_revision(repo, path)?;
                     }
                     tx.put_index_errors(
                         repo,
@@ -3655,7 +3542,7 @@ impl Cache {
                         path: path.clone(),
                     },
                 )?;
-                tx.remove_shard_hash(&repo, &path)?;
+                tx.remove_file_revision(&repo, &path)?;
                 tx.put_index_errors(&repo, &path, &[])?;
                 report.removed += 1;
             }

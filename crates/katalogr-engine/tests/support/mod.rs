@@ -783,12 +783,12 @@ pub fn cache_dump(e: &Engine) -> CacheDump {
     // The hash of each shard; the `(size, mtime)` recorded beside it is the file's own, which
     // differs from run to run.
     let hashes = r
-        .raw_scan(TableId::ShardHashes, &[])
+        .raw_scan(TableId::FileRevisions, &[])
         .unwrap()
         .into_iter()
         .map(|(k, v)| (k, v[..32].to_vec()))
         .collect();
-    out.push(("shard_hashes".to_string(), hashes));
+    out.push(("file_revisions".to_string(), hashes));
     out
 }
 

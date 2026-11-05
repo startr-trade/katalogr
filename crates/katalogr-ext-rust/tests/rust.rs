@@ -121,7 +121,7 @@ fn index_case(case: &str) -> Graph {
         .with_consistency(&opts, |tx| {
             let graph = katalogr_engine::canonical_graph(tx);
             let mut errors = BTreeMap::new();
-            for ((repo, path), _) in tx.shard_hashes().unwrap() {
+            for ((repo, path), _) in tx.file_revisions().unwrap() {
                 let rows = tx.index_errors(&repo, &path).unwrap();
                 if !rows.is_empty() {
                     errors.insert(path.as_str().to_string(), rows);

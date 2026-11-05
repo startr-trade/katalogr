@@ -216,7 +216,7 @@ mod rank {
     fn snapshot(e: &Engine, kx: &camino::Utf8Path) -> (support::CacheDump, Vec<(String, Vec<u8>)>) {
         let dump = cache_dump(e)
             .into_iter()
-            .filter(|(n, _)| n != "shard_hashes")
+            .filter(|(n, _)| n != "file_revisions")
             .collect();
         (dump, shard_bytes(kx).into_iter().collect())
     }

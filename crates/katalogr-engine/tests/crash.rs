@@ -138,7 +138,7 @@ fn acked(s: &Scenario) -> Vec<String> {
 
 fn check_hashes(e: &Engine) {
     let r = e.cache().read().unwrap();
-    let hashes = r.shard_hashes().unwrap();
+    let hashes = r.file_revisions().unwrap();
     assert_eq!(e.dir().list_shards().unwrap().len(), hashes.len());
     for ((repo, path), hash) in hashes {
         let bytes = std::fs::read(e.dir().shard_path(&repo, &path)).unwrap();
@@ -343,7 +343,14 @@ fn seed_interrupted_leaves_no_layer() {
         assert!(!layer.root().join("context.json").exists(), "{name}");
         assert!(dir.contexts().unwrap().is_empty(), "{name}");
         // The base is intact and the layer can be seeded again.
-        assert!(!e.cache().read().unwrap().shard_hashes().unwrap().is_empty());
+        assert!(
+            !e.cache()
+                .read()
+                .unwrap()
+                .file_revisions()
+                .unwrap()
+                .is_empty()
+        );
         drop(e);
         katalogr_store::seed_layer(&dir, &layer, &seed_manifest(&id), seed_dl()).unwrap();
         assert_eq!(dir.contexts().unwrap().len(), 1, "{name}");

@@ -158,7 +158,7 @@ mod queue {
         }
         cache_dump(&e)
             .into_iter()
-            .filter(|(n, _)| n != "shard_hashes")
+            .filter(|(n, _)| n != "file_revisions")
             .collect()
     }
 

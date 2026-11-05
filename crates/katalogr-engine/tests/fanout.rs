@@ -388,7 +388,7 @@ mod fanout {
         let d2 = cache_dump(&e);
         for ((n1, r1), (_, r2)) in d1.iter().zip(&d2) {
             // The shard-hash stat (size, mtime) is per cache file, not graph content.
-            if n1 != "shard_hashes" {
+            if n1 != "file_revisions" {
                 assert_eq!(r1, r2, "table {n1}");
             }
         }

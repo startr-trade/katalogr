@@ -17,7 +17,6 @@ use katalogr_model::{ArtifactName, ExtractError, ExtractInput, Fragment, Name, R
 use katalogr_store::blob::git_blob_id;
 use katalogr_store::{ErrorRow, PendingKey, ReadTx, Reader, StoreError};
 use rayon::prelude::*;
-use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::File;
 use std::time::Instant;
@@ -374,7 +373,7 @@ pub(super) enum Ready {
     Replace {
         prepared: Box<PreparedFragment>,
         errors: Vec<ErrorRow>,
-        hash: [u8; 32],
+        revision: String,
         encoded_len: u64,
         tmp: String,
         fin: String,
@@ -413,13 +412,13 @@ pub(super) fn prepare_one(engine: &Engine, p: Planned) -> Result<Prepared, Engin
                 }
                 Err(other) => return Err(other.into()),
             };
-            let hash = <[u8; 32]>::from(Sha256::digest(&bytes));
+            let revision = fragment.provenance.revision.clone();
             write_synced(&dir.root().join(&tmp), &bytes)?;
             let prepared = Box::new(Stitcher::prepare(*fragment)?);
             Ready::Replace {
                 prepared,
                 errors,
-                hash,
+                revision,
                 encoded_len: bytes.len() as u64,
                 tmp,
                 fin,

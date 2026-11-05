@@ -8,7 +8,7 @@ use support::{drained_graph, full_index, init_project, open_engine};
 use katalogr_engine::doctor::{DoctorOptions, run};
 use katalogr_engine::registry::ExtensionRegistry;
 use katalogr_model::RelPath;
-use katalogr_store::{Reader, ShardStat};
+use katalogr_store::Reader;
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 
@@ -112,19 +112,21 @@ mod bench {
             let text = format!("{{\"n\":{i}}}");
             body[..text.len()].copy_from_slice(text.as_bytes());
             std::fs::write(&file, &body).unwrap();
-            let stat = ShardStat::of(&std::fs::metadata(&file).unwrap()).unwrap();
-            let hash: [u8; 32] = Sha256::digest(&body).into();
-            rows.push((repo.clone(), key, hash, stat));
+            let revision: String = Sha256::digest(&body)
+                .iter()
+                .map(|b| format!("{b:02x}"))
+                .collect();
+            rows.push((repo.clone(), key, revision));
         }
         {
             // The rows go in with one transaction.
             let mut tx = e.cache().write().unwrap();
-            for (repo, key, hash, stat) in &rows {
-                tx.put_shard_hash_stat(repo, key, hash, *stat).unwrap();
+            for (repo, key, revision) in &rows {
+                tx.put_file_revision(repo, key, revision).unwrap();
             }
             tx.commit().unwrap();
             assert_eq!(
-                e.cache().read().unwrap().shard_hashes().unwrap().len(),
+                e.cache().read().unwrap().file_revisions().unwrap().len(),
                 SHARDS
             );
         }

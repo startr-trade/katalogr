@@ -158,7 +158,7 @@ pub fn seed_layer(
             &serde_json::to_vec(&errored).map_err(|e| StoreError::Row(e.to_string()))?,
         )?;
         for t in [
-            TableId::ShardHashes,
+            TableId::FileRevisions,
             TableId::Pending,
             TableId::Events,
             TableId::Journal,

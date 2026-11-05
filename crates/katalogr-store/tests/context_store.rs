@@ -128,7 +128,7 @@ mod context_store {
             let mut tx = c.write().unwrap();
             tx.set_meta("keep", b"yes").unwrap();
             tx.put_seen("e1", 1).unwrap();
-            tx.put_shard_hash("r", &RelPath::new("a.tx").unwrap(), &[7; 32])
+            tx.put_file_revision("r", &RelPath::new("a.tx").unwrap(), "rev")
                 .unwrap();
             tx.put_event("worktree", 1, b"{}").unwrap();
             tx.put_pending(
@@ -153,7 +153,7 @@ mod context_store {
         assert!(!layer.cache_dir().join("index.redb.tmp").exists());
         let c = Cache::open_or_rebuild(&layer, &Noop, dl()).unwrap();
         let r = c.read().unwrap();
-        assert!(r.shard_hashes().unwrap().is_empty());
+        assert!(r.file_revisions().unwrap().is_empty());
         assert!(r.pending_entries(None).unwrap().is_empty());
         assert!(r.publish_journal().unwrap().is_empty());
         assert_eq!(r.meta("keep").unwrap().as_deref(), Some(&b"yes"[..]));

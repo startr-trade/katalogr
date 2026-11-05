@@ -136,7 +136,7 @@ impl<'a> Processor<'a> {
             }
         }
         if self.engine.dir().is_layer() {
-            // A layer's `shard_hashes` holds only its delta, so every stored artifact counts.
+            // A layer's `file_revisions` holds only its delta, so every stored artifact counts.
             for (_, row) in tx.artifacts()? {
                 let p = &row.provenance;
                 if p.repo == ev.repo && !p.path.as_str().starts_with(crate::history::HISTORY_PREFIX)
@@ -145,7 +145,7 @@ impl<'a> Processor<'a> {
                 }
             }
         }
-        for ((repo, path), _) in tx.shard_hashes()? {
+        for ((repo, path), _) in tx.file_revisions()? {
             if repo == ev.repo {
                 out.insert(path);
             }
@@ -264,21 +264,11 @@ impl<'a> Processor<'a> {
                 Ready::Replace {
                     prepared,
                     errors,
-                    hash,
-                    tmp,
+                    revision,
                     ..
                 } => {
                     engine.stitcher().apply(&mut tx, *prepared)?;
-                    // The shard is renamed after this commit, which keeps its size and mtime:
-                    // recording them now lets the next open skip hashing, and write nothing,
-                    // when no shard changed (FEAT-076 R-7).
-                    let stat = std::fs::metadata(engine.dir().root().join(&tmp))
-                        .ok()
-                        .and_then(|m| katalogr_store::ShardStat::of(&m));
-                    match stat {
-                        Some(st) => tx.put_shard_hash_stat(&key.repo, &key.path, &hash, st)?,
-                        None => tx.put_shard_hash(&key.repo, &key.path, &hash)?,
-                    }
+                    tx.put_file_revision(&key.repo, &key.path, &revision)?;
                     tx.put_index_errors(&key.repo, &key.path, &errors)?;
                 }
                 Ready::Delete { .. } => {
@@ -289,7 +279,7 @@ impl<'a> Processor<'a> {
                             path: key.path.clone(),
                         },
                     )?;
-                    tx.remove_shard_hash(&key.repo, &key.path)?;
+                    tx.remove_file_revision(&key.repo, &key.path)?;
                     tx.put_index_errors(&key.repo, &key.path, &[])?;
                 }
                 Ready::Failed(message) => {

@@ -365,7 +365,7 @@ mod parallel {
                     // Only the pending queue changed; no artifact, symbol or link exists.
                     !["artifacts", "symbols", "links_out"].contains(n) || rows.is_empty()
                 }));
-                assert!(snap.shard_hashes().unwrap().is_empty());
+                assert!(snap.file_revisions().unwrap().is_empty());
             }
             let mut pr = Processor::try_acquire(&e).unwrap().unwrap();
             pr.recover().unwrap();

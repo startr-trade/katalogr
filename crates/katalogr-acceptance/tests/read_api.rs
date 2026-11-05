@@ -212,7 +212,7 @@ mod read_api {
             "lexicon_stats".into(),
             json!({"docs": st.docs, "total_len": st.total_len}),
         );
-        t.insert("shard_hashes".into(), j(&ok(tx.shard_hashes())));
+        t.insert("file_revisions".into(), j(&ok(tx.file_revisions())));
         let rank = ok(tx.cached_rank(RANK_CONTEXT)).map(|m| {
             m.into_iter()
                 .map(|(i, f)| (i.to_hex(), bits(f)))

@@ -84,7 +84,7 @@ mod inspect {
                 let tables = o.tables.unwrap();
                 assert_eq!(tables.journal, vec![("a".to_string(), "b".to_string())]);
                 assert!(tables.pending.is_empty());
-                assert!(tables.shard_hashes.is_empty());
+                assert!(tables.file_revisions.is_empty());
             }
             other => panic!("{other:?}"),
         }

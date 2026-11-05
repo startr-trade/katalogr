@@ -18,12 +18,12 @@ mod postings;
 pub mod rank;
 pub mod shard;
 
-pub use cache::ShardKey;
+pub use cache::PathKey;
 pub use cache::{
     ArtifactRow, BindingRow, CACHE_SCHEMA, Cache, ContractRow, ErrorRow, FanKey, JournalEntry,
     LEXICON_FIELDS, LexiconStats, LinkBrief, LinkEntry, LinkKey, LinkOrigin, LinkRow, PendingKey,
-    Posting, RANK_TOP_ENTRIES, RankTop, ReadTx, Reader, RefId, Restitch, ShardStat, Snapshot,
-    SymbolBrief, SymbolCore, SymbolRow, SyncReport, TableId, WriteTx,
+    Posting, RANK_TOP_ENTRIES, RankTop, ReadTx, Reader, RefId, Restitch, Snapshot, SymbolBrief,
+    SymbolCore, SymbolRow, SyncReport, TableId, WriteTx,
 };
 pub use compact::{CompactMode, CompactOutcome, CompactPolicy, CompactReport, REWRITE_FILE};
 pub use context::{ContextId, ContextKind, ContextManifest, META_BASE_ERRORS, seed_layer};

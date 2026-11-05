@@ -4,9 +4,7 @@
 //! rebuilds anything or quarantines a shard. It opens redb's read-only handle, reads one
 //! snapshot and closes it.
 
-use crate::cache::{
-    CACHE_SCHEMA, Cache, JournalEntry, PendingKey, ReadTx, Reader, ShardHashRow, ShardKey,
-};
+use crate::cache::{CACHE_SCHEMA, Cache, JournalEntry, PathKey, PendingKey, ReadTx, Reader};
 use crate::error::StoreError;
 use crate::kindex::ProjectDir;
 use redb::{DatabaseError, ReadableDatabase, StorageError};
@@ -44,10 +42,10 @@ pub struct InspectedTables {
     pub pending: Vec<(PendingKey, u64)>,
     /// `Reader::publish_journal`.
     pub journal: Vec<JournalEntry>,
-    /// Every stored shard hash with its recorded `(size, mtime)`, sorted by key.
-    pub shard_hashes: Vec<ShardHashRow>,
+    /// Every stored file revision, sorted by key.
+    pub file_revisions: Vec<(PathKey, [u8; 32])>,
     /// Files with at least one index-error row, and the row count.
-    pub error_files: Vec<(ShardKey, usize)>,
+    pub error_files: Vec<(PathKey, usize)>,
     /// `meta` key `profiles_errors`, as stored.
     pub profile_errors_json: Option<Vec<u8>>,
 }
@@ -121,7 +119,7 @@ fn read_tables(tx: &ReadTx) -> Result<InspectedTables, StoreError> {
         watermark: tx.watermark(crate::rank::RANK_CONTEXT)?,
         pending: tx.pending_entries(None)?,
         journal: tx.publish_journal()?,
-        shard_hashes: tx.shard_hash_rows()?,
+        file_revisions: tx.file_revisions()?,
         error_files: tx.index_error_files()?,
         profile_errors_json: tx.meta("profiles_errors")?,
     })

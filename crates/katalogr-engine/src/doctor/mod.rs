@@ -17,7 +17,7 @@ use crate::error::EngineError;
 use crate::registry::ExtensionRegistry;
 use camino::Utf8PathBuf;
 use checks::{CheckResult, Ran};
-use katalogr_store::{CACHE_SCHEMA, Cache, CacheInspection, InspectedTables, ProjectDir, ShardKey};
+use katalogr_store::{CACHE_SCHEMA, Cache, CacheInspection, InspectedTables, PathKey, ProjectDir};
 use std::collections::BTreeMap;
 use std::fs::File;
 
@@ -164,8 +164,7 @@ pub fn run(
         other => r.record("cache", other),
     }
 
-    let files: Result<Vec<ShardKey>, String> =
-        dir.list_shards().map_err(|e| checks::store_kind(&e));
+    let files: Result<Vec<PathKey>, String> = dir.list_shards().map_err(|e| checks::store_kind(&e));
     let tref = tables.as_ref();
 
     r.record("journal", checks::journal(dir, tref, held, opts));

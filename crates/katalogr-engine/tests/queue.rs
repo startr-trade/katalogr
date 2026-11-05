@@ -314,7 +314,7 @@ mod queue {
         assert!(r.publish_journal().unwrap().is_empty());
         assert!(r.pending_entries(None).unwrap().is_empty());
         let on_disk = e.dir().list_shards().unwrap();
-        let hashes = r.shard_hashes().unwrap();
+        let hashes = r.file_revisions().unwrap();
         assert_eq!(on_disk.len(), hashes.len());
         for ((repo, path), hash) in hashes {
             let bytes = std::fs::read(e.dir().shard_path(&repo, &path)).unwrap();

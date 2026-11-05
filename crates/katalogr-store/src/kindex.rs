@@ -1,6 +1,6 @@
 //! The kindex repository and its projects.
 
-use crate::cache::ShardKey;
+use crate::cache::PathKey;
 use crate::context::{ContextId, ContextManifest};
 use crate::error::StoreError;
 use crate::shard;
@@ -295,11 +295,11 @@ pub enum GitState {
         /// HEAD commit id, lower-case hex.
         head: String,
         /// Shard files whose bytes differ from the blob in HEAD.
-        modified: Vec<ShardKey>,
+        modified: Vec<PathKey>,
         /// Shard files with no entry in HEAD.
-        added: Vec<ShardKey>,
+        added: Vec<PathKey>,
         /// Entries in HEAD with no shard file.
-        deleted: Vec<ShardKey>,
+        deleted: Vec<PathKey>,
     },
 }
 
@@ -436,7 +436,7 @@ impl ProjectDir {
         let project = self.root.file_name().unwrap_or_default();
         let tree = commit.tree().map_err(|e| git(&e))?;
         let base = format!("projects/{project}/shards");
-        let mut in_head: BTreeMap<ShardKey, String> = BTreeMap::new();
+        let mut in_head: BTreeMap<PathKey, String> = BTreeMap::new();
         if let Some(entry) = tree
             .lookup_entry_by_path(&base)
             .map_err(|e| git(&e))?
@@ -460,7 +460,7 @@ impl ProjectDir {
             }
         }
         // What is left in the map has no file.
-        let deleted: Vec<ShardKey> = in_head.into_keys().collect();
+        let deleted: Vec<PathKey> = in_head.into_keys().collect();
         Ok(GitState::Repo {
             head: commit.id().to_string(),
             modified,
@@ -496,7 +496,7 @@ fn collect_tree(
     repo: &gix::Repository,
     tree: &gix::Tree<'_>,
     prefix: &str,
-    out: &mut BTreeMap<ShardKey, String>,
+    out: &mut BTreeMap<PathKey, String>,
 ) -> Result<(), StoreError> {
     let git = |e: &dyn std::fmt::Display| StoreError::Git(e.to_string());
     for entry in tree.iter() {

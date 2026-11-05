@@ -5,9 +5,7 @@ use crate::profiles::ProfileError;
 use crate::queue::{Inbox, find_orphan_temps};
 use crate::registry::ExtensionRegistry;
 use camino::{Utf8Path, Utf8PathBuf};
-use katalogr_store::{
-    GitState, InspectedTables, ProjectDir, SHARD_FORMAT, ShardKey, ShardStat, StoreError,
-};
+use katalogr_store::{GitState, InspectedTables, PathKey, ProjectDir, SHARD_FORMAT, StoreError};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -39,7 +37,7 @@ fn done(v: Vec<Finding>) -> CheckResult {
     Ok(Ran::Done(v))
 }
 
-fn key_str(k: &ShardKey) -> String {
+fn key_str(k: &PathKey) -> String {
     format!("{}:{}", k.0, k.1.as_str())
 }
 
@@ -240,7 +238,7 @@ fn quarantined(dir: &ProjectDir) -> Result<Vec<String>, String> {
 /// KD-SHD-001 to 003. `tables` is None when the cache could not be read: only quarantine runs.
 pub(crate) fn shards(
     dir: &ProjectDir,
-    files: &[ShardKey],
+    files: &[PathKey],
     tables: Option<&InspectedTables>,
     held: bool,
     o: &DoctorOptions,
@@ -253,30 +251,28 @@ pub(crate) fn shards(
         Severity::Warning
     };
     if let Some(t) = tables {
-        let rows: BTreeMap<&ShardKey, (&[u8; 32], &Option<ShardStat>)> =
-            t.shard_hashes.iter().map(|(k, h, s)| (k, (h, s))).collect();
-        let mut on_disk: BTreeSet<&ShardKey> = BTreeSet::new();
-        let (mut new, mut changed): (Vec<&ShardKey>, Vec<&ShardKey>) = (Vec::new(), Vec::new());
+        let rows: BTreeMap<&PathKey, &[u8; 32]> =
+            t.file_revisions.iter().map(|(k, h)| (k, h)).collect();
+        let mut on_disk: BTreeSet<&PathKey> = BTreeSet::new();
+        let (mut new, mut changed): (Vec<&PathKey>, Vec<&PathKey>) = (Vec::new(), Vec::new());
         for key in files {
             on_disk.insert(key);
-            let Some((hash, stat)) = rows.get(key) else {
+            let Some(hash) = rows.get(key) else {
                 new.push(key);
                 continue;
             };
-            let file = dir.shard_path(&key.0, &key.1);
-            let meta = std::fs::metadata(&file).map_err(|e| e.kind().to_string())?;
-            let now = ShardStat::of(&meta);
-            // An unchanged size and mtime are trusted, as the cache's own sync does.
-            if stat.is_some() && **stat == now {
-                continue;
-            }
-            let bytes = std::fs::read(&file).map_err(|e| e.kind().to_string())?;
-            let digest: [u8; 32] = Sha256::digest(&bytes).into();
+            // Until the shards go (FEAT-094 T7), a shard differs when the SHA-256 of its
+            // provenance revision is not the stored file revision.
+            let fragment = dir
+                .read_shard(&key.0, &key.1)
+                .map_err(|e| e.to_string())?
+                .ok_or_else(|| "shard vanished".to_string())?;
+            let digest: [u8; 32] = Sha256::digest(fragment.provenance.revision.as_bytes()).into();
             if &digest != *hash {
                 changed.push(key);
             }
         }
-        let gone: Vec<&ShardKey> = rows
+        let gone: Vec<&PathKey> = rows
             .keys()
             .filter(|k| !on_disk.contains(*k))
             .copied()
@@ -399,7 +395,7 @@ pub(crate) fn queue(dir: &ProjectDir, tables: &InspectedTables, o: &DoctorOption
 /// KD-PRS-001/002.
 pub(crate) fn parse(
     registry: &ExtensionRegistry,
-    files: &[ShardKey],
+    files: &[PathKey],
     tables: &InspectedTables,
     o: &DoctorOptions,
 ) -> CheckResult {
@@ -409,7 +405,7 @@ pub(crate) fn parse(
             *total.entry(e.id()).or_default() += 1;
         }
     }
-    let mut bad: BTreeMap<&'static str, Vec<&ShardKey>> = BTreeMap::new();
+    let mut bad: BTreeMap<&'static str, Vec<&PathKey>> = BTreeMap::new();
     for (key, _) in &tables.error_files {
         if let Some(e) = registry.for_path(&key.1) {
             bad.entry(e.id()).or_default().push(key);
