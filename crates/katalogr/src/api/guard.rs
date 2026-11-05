@@ -15,6 +15,7 @@ pub struct Denied {
     pub message: String,
 }
 
+#[allow(dead_code)]
 impl Denied {
     pub fn unauthorized(message: impl Into<String>) -> Denied {
         Denied {

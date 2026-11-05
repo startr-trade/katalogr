@@ -52,6 +52,21 @@ fn run(cli: &Cli) -> Result<ExitCode, DistError> {
         Some(Command::Status) => cmd::status::run(cli),
         Some(Command::Contract) => cmd::contract::run(cli),
         Some(Command::Position { repo }) => cmd::position::run(cli, repo.as_deref()),
+        #[cfg(feature = "api")]
+        Some(Command::Api {
+            listen,
+            workers,
+            queue,
+            no_process,
+            cors_origin,
+        }) => cmd::api::run(
+            cli,
+            *listen,
+            *workers,
+            *queue,
+            *no_process,
+            cors_origin.clone(),
+        ),
         #[cfg(feature = "mcp")]
         Some(Command::Mcp {
             root,

@@ -1,10 +1,12 @@
 //! Subcommand implementations. Each command is a thin wrapper over katalogr-dist.
 
+#[cfg(feature = "api")]
+pub mod api;
 pub mod callers;
 pub mod claude;
 pub mod communities;
-pub mod contract;
 pub mod context;
+pub mod contract;
 pub mod coverage;
 pub mod cycles;
 pub mod dangling;

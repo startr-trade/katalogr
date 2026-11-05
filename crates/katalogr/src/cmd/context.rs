@@ -10,7 +10,7 @@ use crate::exit::ExitCode;
 use crate::render;
 use katalogr_dist::analytics::context_diff::{ContextConflicts, ContextDiff};
 
-fn to_json(i: &ContextInfo) -> serde_json::Value {
+pub(crate) fn to_json(i: &ContextInfo) -> serde_json::Value {
     json!({
         "id": i.id,
         "kind": i.kind,

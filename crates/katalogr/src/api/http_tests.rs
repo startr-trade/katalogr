@@ -14,6 +14,7 @@ fn status_table() {
     assert_eq!(status_of(ExitCode::Ok), 200);
     assert_eq!(status_of(ExitCode::Stale), 200);
     assert_eq!(status_of(ExitCode::Ambiguous), 409);
+    assert_eq!(status_of(ExitCode::PositionUnavailable), 409);
     assert_eq!(status_of(ExitCode::NoMatch), 404);
     assert_eq!(status_of(ExitCode::Usage), 400);
     assert_eq!(status_of(ExitCode::Error), 500);

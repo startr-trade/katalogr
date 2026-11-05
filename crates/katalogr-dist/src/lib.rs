@@ -5,8 +5,8 @@
 mod at;
 pub use at::position_without_board;
 mod claude;
-pub mod contract;
 pub mod contexts;
+pub mod contract;
 pub use katalogr_query::{PositionAnswer, PositionRef, ViewQuery};
 pub mod doctor;
 mod error;

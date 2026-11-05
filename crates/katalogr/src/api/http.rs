@@ -22,7 +22,9 @@ pub const COMMON_PARAMS: &[&str] = &[
     "expand",
 ];
 
-/// What authorisation and logging see of a request: method, path, query and headers.
+/// What authorisation sees of a request: method, path, query and headers. The fields are the
+/// interface of a permission provider; the default `Localhost` reads none of them.
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy)]
 pub struct RequestHead<'a> {
     pub method: &'a str,
@@ -185,15 +187,12 @@ pub fn capped_timeout(value: &str) -> Result<f64, HttpError> {
 }
 
 /// The HTTP status for a CLI exit code (the table of FEAT-049's Design).
-///
-/// Exit 6, position unavailable, answers 409 as well; it is added with that exit code
-/// (FEAT-084).
 pub fn status_of(code: ExitCode) -> u16 {
     match code {
         ExitCode::Ok => 200,
         // A timed-out wait still answers, with `stale: true` in the body (ADR-0008).
         ExitCode::Stale => 200,
-        ExitCode::Ambiguous => 409,
+        ExitCode::Ambiguous | ExitCode::PositionUnavailable => 409,
         ExitCode::NoMatch => 404,
         ExitCode::Usage => 400,
         ExitCode::Error => 500,

@@ -2,7 +2,9 @@
 //! `api_guard::<test>`.
 
 use crate::api::guard::*;
+use crate::api::test_support::{TEST_OPS, get, quick_config, start};
 use std::net::SocketAddr;
+use std::sync::Arc;
 
 fn addr(s: &str) -> SocketAddr {
     s.parse().unwrap()
@@ -34,6 +36,12 @@ fn non_loopback_refused() {
         }
     }
     assert!(check_listen(addr("0.0.0.0:7878"), &Provider).is_ok());
+    // `run` itself refuses before it binds.
+    let mut cfg = quick_config(1, 1);
+    cfg.listen = addr("0.0.0.0:0");
+    let stop = std::sync::atomic::AtomicBool::new(false);
+    let e = crate::api::run(cfg, Arc::new(Localhost), &stop).unwrap_err();
+    assert!(matches!(e, katalogr_dist::DistError::Usage(_)), "{e}");
 }
 
 /// R-7.
@@ -60,6 +68,25 @@ fn bad_host_403() {
     assert_eq!(check_host(l, None).unwrap_err().status, 403);
     // Off loopback the authorizer decides, not the Host header.
     assert!(check_host(addr("10.0.0.1:7878"), Some("anything")).is_ok());
+    // On a running server.
+    let server = start(quick_config(1, 4), Arc::new(Localhost), TEST_OPS);
+    let port = server.addr.port();
+    assert_eq!(get(server.addr, "/api/v1/ping", &[]).status, 200);
+    for host in [
+        "evil.example".to_string(),
+        format!("evil.example:{port}"),
+        format!("localhost.evil.example:{port}"),
+    ] {
+        let r = get(server.addr, "/api/v1/ping", &[("Host", &host)]);
+        assert_eq!(r.status, 403, "{host}: {r:?}");
+        assert!(r.body.contains("\"error\""), "{}", r.body);
+    }
+    let ok = get(
+        server.addr,
+        "/api/v1/ping",
+        &[("Host", &format!("localhost:{port}"))],
+    );
+    assert_eq!(ok.status, 200);
 }
 
 /// R-7.
@@ -87,6 +114,21 @@ fn provider_can_deny() {
     assert!(NeedsToken.check(&head(&good)).is_ok());
     assert!(!NeedsToken.loopback_only());
     assert!(Localhost.check(&head(&none)).is_ok());
+    // On a running server.
+    let server = start(quick_config(1, 4), Arc::new(NeedsToken), TEST_OPS);
+    assert_eq!(get(server.addr, "/api/v1/ping", &[]).status, 401);
+    let r = get(
+        server.addr,
+        "/api/v1/ping",
+        &[("Authorization", "Bearer bad")],
+    );
+    assert_eq!(r.status, 403);
+    let r = get(
+        server.addr,
+        "/api/v1/ping",
+        &[("Authorization", "Bearer good")],
+    );
+    assert_eq!(r.status, 200);
 }
 
 /// R-7.
@@ -96,6 +138,20 @@ fn no_cors_by_default() {
     assert_eq!(cors_allow_origin(None, None), None);
     // Configured, but the request names no origin.
     assert_eq!(cors_allow_origin(Some("https://a.example"), None), None);
+    // On a running server, an Origin earns no CORS header.
+    let server = start(quick_config(1, 4), Arc::new(Localhost), TEST_OPS);
+    let r = get(
+        server.addr,
+        "/api/v1/ping",
+        &[("Origin", "https://a.example")],
+    );
+    assert_eq!(r.status, 200);
+    assert!(
+        !r.headers
+            .iter()
+            .any(|(k, _)| k.to_ascii_lowercase().starts_with("access-control")),
+        "{r:?}"
+    );
 }
 
 /// R-7.
@@ -112,5 +168,22 @@ fn cors_origin_exact() {
         "*",
     ] {
         assert_eq!(cors_allow_origin(c, Some(other)), None, "{other}");
+    }
+    // On a running server.
+    let mut cfg = quick_config(1, 4);
+    cfg.cors_origin = Some("https://a.example".to_string());
+    let server = start(cfg, Arc::new(Localhost), TEST_OPS);
+    let r = get(
+        server.addr,
+        "/api/v1/ping",
+        &[("Origin", "https://a.example")],
+    );
+    assert_eq!(
+        r.header("access-control-allow-origin"),
+        Some("https://a.example")
+    );
+    for other in ["https://a.example:8443", "https://b.example", "null"] {
+        let r = get(server.addr, "/api/v1/ping", &[("Origin", other)]);
+        assert_eq!(r.header("access-control-allow-origin"), None, "{other}");
     }
 }
