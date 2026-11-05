@@ -240,3 +240,71 @@ mod queue {
         assert!(e.cache().read().unwrap().seen_seq(&id).unwrap().is_some());
     }
 }
+
+const SEED_CHILD_ENV: &str = "KATALOGR_SEED_CHILD";
+
+fn seed_dl() -> std::time::Instant {
+    std::time::Instant::now() + std::time::Duration::from_secs(10)
+}
+
+fn seed_manifest(id: &katalogr_store::ContextId) -> katalogr_store::ContextManifest {
+    katalogr_store::ContextManifest {
+        format: 1,
+        id: id.clone(),
+        kind: katalogr_store::ContextKind::Checkout,
+        repo: "r".into(),
+        root: None,
+        seed_commit: None,
+    }
+}
+
+/// The child half of `seed_interrupted_leaves_no_layer`.
+#[test]
+fn seed_child() {
+    let Ok(spec) = std::env::var(SEED_CHILD_ENV) else {
+        return;
+    };
+    let (kx, work) = spec.split_once('|').unwrap();
+    let e = open_engine(Utf8Path::new(kx), Utf8Path::new(work));
+    let id = katalogr_store::ContextId::new("w-crash").unwrap();
+    let dir = e.dir().clone();
+    drop(e);
+    katalogr_store::seed_layer(&dir, &dir.layer(&id), &seed_manifest(&id), seed_dl()).unwrap();
+}
+
+/// R-11: a seed that dies leaves no usable layer, and the next seed completes.
+#[test]
+fn seed_interrupted_leaves_no_layer() {
+    for name in ["seed_after_copy", "seed_before_rename"] {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = Utf8PathBuf::from_path_buf(tmp.path().to_path_buf()).unwrap();
+        let (kx, work) = (root.join("kx"), root.join("work"));
+        std::fs::create_dir_all(&work).unwrap();
+        std::fs::write(work.join("a.tx"), "sym fn A\nexport k:a A\n").unwrap();
+        init_project(&kx);
+        {
+            let e = open_engine(&kx, &work);
+            full_index(&e);
+        }
+        let status = Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "seed_child", "--nocapture", "--test-threads=1"])
+            .env(SEED_CHILD_ENV, format!("{kx}|{work}"))
+            .env("KATALOGR_FAILPOINT", name)
+            .status()
+            .unwrap();
+        assert!(!status.success(), "child survived {name}");
+
+        let e = open_engine(&kx, &work);
+        let id = katalogr_store::ContextId::new("w-crash").unwrap();
+        let dir = e.dir().clone();
+        let layer = dir.layer(&id);
+        assert!(!layer.root().join("context.json").exists(), "{name}");
+        assert!(dir.contexts().unwrap().is_empty(), "{name}");
+        // The base is intact and the layer can be seeded again.
+        assert!(!e.cache().read().unwrap().shard_hashes().unwrap().is_empty());
+        drop(e);
+        katalogr_store::seed_layer(&dir, &layer, &seed_manifest(&id), seed_dl()).unwrap();
+        assert_eq!(dir.contexts().unwrap().len(), 1, "{name}");
+        assert!(!layer.cache_dir().join("index.redb.tmp").exists(), "{name}");
+    }
+}

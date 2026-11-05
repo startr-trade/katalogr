@@ -24,7 +24,7 @@ use std::ops::Bound;
 use std::time::{Duration, Instant};
 
 /// Stored in `meta`; a different number rebuilds the cache from the shards.
-pub const CACHE_SCHEMA: u32 = 11;
+pub const CACHE_SCHEMA: u32 = 12;
 
 /// `meta` key: the watermark the stored rank reflects.
 const RANK_WATERMARK_META: &str = "rank_watermark";
@@ -1760,6 +1760,13 @@ impl WriteTx<'_> {
         Ok(())
     }
 
+    /// Remove every row of one table (FEAT-043: a seeded layer drops the base's queue state).
+    pub fn clear_table(&mut self, t: TableId) -> Result<(), StoreError> {
+        self.txn.delete_table(t.def()).map_err(db)?;
+        self.txn.open_table(t.def()).map_err(db)?;
+        Ok(())
+    }
+
     pub fn set_meta(&mut self, name: &str, value: &[u8]) -> Result<(), StoreError> {
         self.put(TableId::Meta, name.as_bytes(), value)
     }
@@ -2264,6 +2271,15 @@ impl Cache {
         cache.replay_journal(dir)?;
         cache.report = cache.sync(dir, stitch, deadline)?;
         Ok(cache)
+    }
+
+    /// Open an existing database file as it is: no schema check, no journal replay and no
+    /// shard sync. Only `seed_layer` uses it, on a copy it is about to clear.
+    pub(crate) fn open_file(path: &Utf8PathBuf, deadline: Instant) -> Result<Cache, StoreError> {
+        Ok(Cache {
+            db: open_db(path, deadline)?,
+            report: SyncReport::default(),
+        })
     }
 
     pub fn read(&self) -> Result<ReadTx<'_>, StoreError> {

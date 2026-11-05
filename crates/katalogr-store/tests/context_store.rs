@@ -1,9 +1,21 @@
 mod context_store {
     use camino::Utf8PathBuf;
+    use katalogr_model::{ArtifactName, Fragment, RelPath};
     use katalogr_store::{
-        ContextId, ContextKind, ContextManifest, Kindex, ProjectConfig, ProjectName, RepoConfig,
-        StoreError,
+        Cache, ContextId, ContextKind, ContextManifest, Kindex, PendingKey, ProjectConfig,
+        ProjectName, Reader, RepoConfig, Restitch, StoreError, WriteTx, seed_layer,
     };
+
+    struct Noop;
+
+    impl Restitch for Noop {
+        fn replace_fragment(&self, _: &mut WriteTx, _: Fragment) -> Result<(), StoreError> {
+            Ok(())
+        }
+        fn remove_artifact(&self, _: &mut WriteTx, _: &ArtifactName) -> Result<(), StoreError> {
+            Ok(())
+        }
+    }
 
     fn project(t: &tempfile::TempDir) -> katalogr_store::ProjectDir {
         let root = Utf8PathBuf::from_path_buf(t.path().join("kx")).unwrap();
@@ -102,5 +114,63 @@ mod context_store {
         let l = p.layer(&ContextId::new("w-aaaa").unwrap());
         assert!(l.project_root().join("profiles").join("x.yaml").is_file());
         assert!(!l.root().join("profiles").exists());
+    }
+
+    #[test]
+    fn seed_clears_base_rows() {
+        use std::time::{Duration, Instant};
+        let dl = || Instant::now() + Duration::from_secs(5);
+        let t = tempfile::tempdir().unwrap();
+        let p = project(&t);
+        {
+            let c = Cache::open_or_rebuild(&p, &Noop, dl()).unwrap();
+            let mut tx = c.write().unwrap();
+            tx.set_meta("keep", b"yes").unwrap();
+            tx.put_seen("e1", 1).unwrap();
+            tx.put_shard_hash("r", &RelPath::new("a.tx").unwrap(), &[7; 32])
+                .unwrap();
+            tx.put_event("worktree", 1, b"{}").unwrap();
+            tx.put_pending(
+                &PendingKey {
+                    context: "worktree".into(),
+                    repo: "r".into(),
+                    path: RelPath::new("a.tx").unwrap(),
+                },
+                1,
+            )
+            .unwrap();
+            tx.set_publish_journal(&[("a".into(), "b".into())]).unwrap();
+            tx.commit().unwrap();
+        }
+        let base_before = std::fs::read(p.cache_dir().join("index.redb")).unwrap();
+        let id = ContextId::new("w-aaaa").unwrap();
+        let layer = p.layer(&id);
+        let mut m = manifest(id);
+        m.seed_commit = Some("c0ffee".into());
+        seed_layer(&p, &layer, &m, dl()).unwrap();
+        assert_eq!(ContextManifest::read(layer.root()).unwrap(), m);
+        assert!(!layer.cache_dir().join("index.redb.tmp").exists());
+        let c = Cache::open_or_rebuild(&layer, &Noop, dl()).unwrap();
+        let r = c.read().unwrap();
+        assert!(r.shard_hashes().unwrap().is_empty());
+        assert!(r.pending_entries(None).unwrap().is_empty());
+        assert!(r.publish_journal().unwrap().is_empty());
+        assert_eq!(r.meta("keep").unwrap().as_deref(), Some(&b"yes"[..]));
+        assert_eq!(
+            r.meta("layer_seed_commit").unwrap().as_deref(),
+            Some(&b"c0ffee"[..])
+        );
+        assert_eq!(r.seen_seq("e1").unwrap(), Some(1));
+        drop(r);
+        drop(c);
+        // The base is untouched.
+        assert!(base_before == std::fs::read(p.cache_dir().join("index.redb")).unwrap());
+        // Seeding again is a no-op; a directory without a manifest is removed and seeded anew.
+        seed_layer(&p, &layer, &m, dl()).unwrap();
+        std::fs::remove_file(layer.root().join("context.json")).unwrap();
+        std::fs::write(layer.root().join("junk"), "x").unwrap();
+        seed_layer(&p, &layer, &m, dl()).unwrap();
+        assert!(!layer.root().join("junk").exists());
+        assert!(layer.root().join("context.json").is_file());
     }
 }

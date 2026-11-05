@@ -1,11 +1,14 @@
 //! Contexts: a base plus per-checkout or per-commit layers (FEAT-043).
 
+use crate::cache::{Cache, TableId};
 use crate::error::StoreError;
+use crate::kindex::ProjectDir;
 use crate::kindex::{read_to_string, write_atomic};
 use crate::shard::to_sorted_json;
 use camino::{Utf8Path, Utf8PathBuf};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use std::time::Instant;
 
 /// `base`, `w-<16 hex>` or `c-<16 hex>`. Valid text is `[a-z0-9-]{1,40}`.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -100,4 +103,58 @@ impl ContextManifest {
             message: e.to_string(),
         })
     }
+}
+
+/// Copy the base cache into `layer`, clear what belongs to the base, then rename into place.
+/// The caller holds the base's processor lock. An interrupted seed leaves only a temp file, and
+/// a layer directory without `context.json` is removed on sight. A layer that already has its
+/// manifest is left as it is.
+pub fn seed_layer(
+    base: &ProjectDir,
+    layer: &ProjectDir,
+    m: &ContextManifest,
+    deadline: Instant,
+) -> Result<(), StoreError> {
+    let root = layer.root();
+    if root.join(ContextManifest::FILE).is_file() {
+        return Ok(());
+    }
+    if root.exists() {
+        std::fs::remove_dir_all(root).map_err(|e| StoreError::io(root, e))?;
+    }
+    let cache_dir = layer.cache_dir();
+    std::fs::create_dir_all(&cache_dir).map_err(|e| StoreError::io(&cache_dir, e))?;
+    let tmp = cache_dir.join("index.redb.tmp");
+    let fin = cache_dir.join("index.redb");
+    let from = base.cache_dir().join("index.redb");
+    if from.is_file() {
+        std::fs::copy(&from, &tmp).map_err(|e| StoreError::io(&from, e))?;
+    }
+    #[cfg(feature = "failpoints")]
+    crate::failpoint::hit("seed_after_copy");
+    if tmp.is_file() {
+        let cache = Cache::open_file(&tmp, deadline)?;
+        let mut tx = cache.write()?;
+        for t in [
+            TableId::ShardHashes,
+            TableId::Pending,
+            TableId::Events,
+            TableId::Journal,
+        ] {
+            tx.clear_table(t)?;
+        }
+        tx.set_meta(
+            "layer_seed_commit",
+            m.seed_commit.as_deref().unwrap_or("").as_bytes(),
+        )?;
+        tx.commit()?;
+        drop(cache);
+        std::fs::File::open(&tmp)
+            .and_then(|f| f.sync_all())
+            .map_err(|e| StoreError::io(&tmp, e))?;
+        #[cfg(feature = "failpoints")]
+        crate::failpoint::hit("seed_before_rename");
+        std::fs::rename(&tmp, &fin).map_err(|e| StoreError::io(&fin, e))?;
+    }
+    m.write(root)
 }
