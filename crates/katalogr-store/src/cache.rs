@@ -21,7 +21,7 @@ use katalogr_model::{
 };
 use redb::{
     ConcurrencyMode, Database, DatabaseError, ReadOnlyDatabase, ReadTransaction, ReadableDatabase,
-    ReadableTable, StorageError, TableDefinition, WriteTransaction,
+    ReadableTable, ReadableTableMetadata, StorageError, TableDefinition, WriteTransaction,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -792,6 +792,12 @@ pub trait Reader {
     ) -> Result<Vec<Option<Vec<u8>>>, StoreError> {
         keys.iter().map(|k| self.raw_get(t, k)).collect()
     }
+    /// Whether a table has no row. The default reads every key; the transactions answer from
+    /// the table's length.
+    #[doc(hidden)]
+    fn raw_is_empty(&self, t: TableId) -> Result<bool, StoreError> {
+        Ok(self.raw_scan_keys(t, &[])?.is_empty())
+    }
     /// [`Reader::raw_scan_keys`] for many prefixes, opening the table once.
     #[doc(hidden)]
     fn raw_scan_keys_many(
@@ -1500,12 +1506,16 @@ pub trait Reader {
         }
         let stored = self.raw_get_many(TableId::LinksOut, &raw)?;
         // The fan keys of each distinct (from, kind) among the keys.
-        let pairs: Vec<(Id, LinkKind)> = keys
-            .iter()
-            .map(|k| (k.from, k.kind.clone()))
-            .collect::<BTreeSet<_>>()
-            .into_iter()
-            .collect();
+        // Most projects have no fan row: then no key needs a look at the fan tables.
+        let pairs: Vec<(Id, LinkKind)> = if self.raw_is_empty(TableId::FanOut)? {
+            Vec::new()
+        } else {
+            keys.iter()
+                .map(|k| (k.from, k.kind.clone()))
+                .collect::<BTreeSet<_>>()
+                .into_iter()
+                .collect()
+        };
         let prefixes: Vec<Vec<u8>> = pairs
             .iter()
             .map(|(f, k)| fan::fan_out_prefix(*f, Some(k)))
@@ -2101,6 +2111,22 @@ fn dec_link<R: Reader + ?Sized>(tx: &R, v: &[u8]) -> Result<LinkRow, StoreError>
     codec::link_from_wire(codec::dec(v)?, &dict::TxRes(tx))
 }
 
+/// Row decoders for the decode-speed benchmark (FEAT-075 R-12a). Not part of the API.
+#[doc(hidden)]
+pub mod bench_hooks {
+    use super::*;
+
+    /// Decode a stored `links_out` value to its brief; the number of entries.
+    pub fn link_brief(raw: &[u8]) -> Result<usize, StoreError> {
+        Ok(codec::link_brief(raw)?.len())
+    }
+
+    /// Decode a stored `symbols` value to the logical row.
+    pub fn symbol_row<R: Reader + ?Sized>(tx: &R, raw: &[u8]) -> Result<SymbolRow, StoreError> {
+        dec_symbol(tx, raw)
+    }
+}
+
 /// One stored link row, briefly: `(from, kind index, to, weight, strong)`.
 #[doc(hidden)]
 pub type StoredBrief = (Id, u32, Id, f64, bool);
@@ -2302,6 +2328,14 @@ impl Reader for ReadTx<'_> {
 
     fn raw_scan_keys(&self, t: TableId, prefix: &[u8]) -> Result<Vec<Vec<u8>>, StoreError> {
         scan_keys_in(&self.txn.open_table(t.def()).map_err(db)?, prefix)
+    }
+
+    fn raw_is_empty(&self, t: TableId) -> Result<bool, StoreError> {
+        self.txn
+            .open_table(t.def())
+            .map_err(db)?
+            .is_empty()
+            .map_err(db)
     }
 
     fn raw_get_many(
