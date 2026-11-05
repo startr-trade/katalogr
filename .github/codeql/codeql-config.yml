@@ -1,0 +1,9 @@
+# CodeQL configuration for .github/workflows/codeql.yml.
+#
+# The scope is the code that ships. Tests and fixtures never do: what CodeQL flags in them
+# (synthetic paths, throwaway credentials in a scratch repository) is noise rather than exposure.
+# Build output is not source.
+paths-ignore:
+  - "**/tests/**"
+  - fixtures/**
+  - target/**

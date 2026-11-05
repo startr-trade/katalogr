@@ -312,10 +312,17 @@ mod bench {
                 let mut cmd = k.cmd(args);
                 cmd.env("KATALOGR_THREADS", "4");
                 let run = run_with_timeout(&mut cmd, Duration::from_secs(600)).expect("run");
-                assert_eq!(
+                // `find` of a name nothing has answers "no match" (exit 4), and `cycles` exits 1
+                // when it finds some: both are correct answers.
+                let expected: &[Option<i32>] = match *command {
+                    "find" => &[Some(0), Some(4)],
+                    "cycles" => &[Some(0), Some(1)],
+                    _ => &[Some(0)],
+                };
+                assert!(
+                    expected.contains(&run.status),
+                    "{command}: status {:?}: {}",
                     run.status,
-                    Some(0),
-                    "{command}: {}",
                     String::from_utf8_lossy(&run.stderr)
                 );
                 walls.push(run.wall.as_secs_f64() * 1000.0);

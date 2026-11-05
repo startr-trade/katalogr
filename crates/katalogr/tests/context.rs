@@ -166,6 +166,28 @@ mod context {
         assert_eq!(layers(&p).len(), 1);
     }
 
+    /// FEAT-075 with contexts: a layer is a copy of the base file, so the dictionaries it
+    /// carries keep their rows and a seeded layer answers `find` and `search` as its base does.
+    #[test]
+    fn seeded_layer_reads_dictionaries() {
+        let p = based();
+        let search = |c: ContextChoice, terms: &str| {
+            let r = katalogr(&p.repo, c)
+                .search(terms, 20, &Options::default())
+                .unwrap();
+            format!("{:?}", r.outcome)
+        };
+        let base_find = find(&p.repo, ContextChoice::Base, "Alpha");
+        let base_search = search(ContextChoice::Base, "Alpha");
+        assert!(base_find.starts_with("Found"), "{base_find}");
+        assert!(base_search.contains("Alpha"), "{base_search}");
+        // The first read of the current context seeds the layer.
+        assert!(layers(&p).is_empty());
+        assert_eq!(find(&p.repo, ContextChoice::Current, "Alpha"), base_find);
+        assert_eq!(layers(&p).len(), 1);
+        assert_eq!(search(ContextChoice::Current, "Alpha"), base_search);
+    }
+
     #[test]
     fn overlay_holds_only_delta() {
         let p = based();

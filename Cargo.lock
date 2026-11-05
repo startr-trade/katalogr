@@ -1992,6 +1992,7 @@ dependencies = [
  "katalogr-store",
  "proptest",
  "rayon",
+ "redb",
  "regex",
  "schemars",
  "serde",

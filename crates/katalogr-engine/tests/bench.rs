@@ -520,4 +520,285 @@ mod bench {
         assert!(time_pct <= 10.0, "stitch +{time_pct:.1}%");
         assert!(size_pct <= 12.0, "cache +{size_pct:.1}%");
     }
+
+    // ------------------------------------------------ cache format (FEAT-075 T9)
+
+    use katalogr_model::{
+        ArtifactName, Confidence, Fact, Id, Provenance, Segment, Span, SymbolName,
+    };
+    use katalogr_store::{Cache, LinkEntry, LinkKey, LinkOrigin, LinkRow, SymbolRow};
+
+    fn temp_cache(tmp: &tempfile::TempDir) -> Cache {
+        let root = Utf8PathBuf::from_path_buf(tmp.path().join("kx")).unwrap();
+        let dir = katalogr_store::Kindex::init(&root)
+            .unwrap()
+            .create_project(
+                &katalogr_store::ProjectName::new("p").unwrap(),
+                katalogr_store::ProjectConfig::default(),
+            )
+            .unwrap();
+        Cache::open_or_rebuild(
+            &dir,
+            &katalogr_engine::Stitcher::new(),
+            Instant::now() + Duration::from_secs(30),
+        )
+        .unwrap()
+    }
+
+    fn id_of(n: u32) -> Id {
+        let mut b = [0u8; 16];
+        b[..4].copy_from_slice(&n.to_be_bytes());
+        b[4] = 0xa5;
+        Id(b)
+    }
+
+    /// R-12a. Decoding a link row to its brief costs at most a quarter of the JSON brief decode of
+    /// schema 9, and a symbol row at most three quarters of its JSON decode. 20,000 synthetic
+    /// rows each; the stored side is measured through the public batch reads, so it includes the
+    /// table lookups the JSON side does not pay.
+    #[test]
+    #[ignore = "benchmark: run in release with --ignored"]
+    fn row_decode_speed() {
+        use serde::Deserialize;
+        const N: u32 = 20_000;
+        #[derive(Deserialize)]
+        struct JsonEntry {
+            #[allow(dead_code)]
+            origin: LinkOrigin,
+            confidence: Confidence,
+            fanout: Option<u32>,
+        }
+        #[derive(Deserialize)]
+        struct JsonRow {
+            entries: Vec<JsonEntry>,
+        }
+
+        let tmp = tempfile::tempdir().unwrap();
+        let cache = temp_cache(&tmp);
+        let artifact = ArtifactName::new("r", "src/lib.rs").unwrap();
+        let prov = Provenance {
+            repo: "r".into(),
+            path: katalogr_model::RelPath::new("src/lib.rs").unwrap(),
+            revision: "ce013625030ba8dba906f756967f9e9ca394464a".into(),
+        };
+        let mut keys = Vec::new();
+        let mut json_links = Vec::new();
+        let mut json_symbols = Vec::new();
+        let mut sym_ids = Vec::new();
+        {
+            let mut tx = cache.write().unwrap();
+            for i in 0..N {
+                let row = SymbolRow {
+                    name: SymbolName {
+                        ordinal: 1,
+                        artifact: artifact.clone(),
+                        segments: vec![Segment {
+                            kind: "fn".into(),
+                            name: format!("function_number_{i}"),
+                        }],
+                    },
+                    artifact: id_of(1_000_000),
+                    kind: "fn".into(),
+                    span: Span {
+                        start_line: i + 1,
+                        start_col: 1,
+                        end_line: i + 3,
+                        end_col: 2,
+                    },
+                    facts: [("visibility".to_string(), Fact::Str("pub".into()))].into(),
+                };
+                tx.put_symbol(id_of(i), &row).unwrap();
+                json_symbols.push(serde_json::to_vec(&row).unwrap());
+                sym_ids.push(id_of(i));
+                let link = LinkRow {
+                    entries: vec![LinkEntry {
+                        origin: LinkOrigin::Ref(i % 7),
+                        confidence: Confidence::Inferred,
+                        span: Some(Span {
+                            start_line: i + 1,
+                            start_col: 5,
+                            end_line: i + 1,
+                            end_col: 17,
+                        }),
+                        provenance: prov.clone(),
+                        fanout: Some(1 + i % 3),
+                        produced_by: None,
+                    }],
+                };
+                let key = LinkKey {
+                    from: id_of(i),
+                    kind: katalogr_model::LinkKind("calls".into()),
+                    to: id_of((i + 1) % N),
+                };
+                tx.put_link(&key, &link).unwrap();
+                json_links.push(serde_json::to_vec(&link).unwrap());
+                keys.push(key);
+            }
+            tx.commit().unwrap();
+        }
+        let rx = cache.read().unwrap();
+        let median = |mut f: Box<dyn FnMut() -> Duration>| {
+            let mut t: Vec<Duration> = (0..7).map(|_| f()).collect();
+            t.sort();
+            t[3]
+        };
+        let json_link = median(Box::new(|| {
+            let t = Instant::now();
+            let mut n = 0usize;
+            for v in &json_links {
+                n += serde_json::from_slice::<JsonRow>(v)
+                    .unwrap()
+                    .entries
+                    .iter()
+                    .filter(|e| e.confidence == Confidence::Inferred && e.fanout.is_some())
+                    .count();
+            }
+            std::hint::black_box(n);
+            t.elapsed()
+        }));
+        let wire_link = median(Box::new(|| {
+            let t = Instant::now();
+            std::hint::black_box(rx.link_briefs_many(&keys).unwrap());
+            t.elapsed()
+        }));
+        let json_sym = median(Box::new(|| {
+            let t = Instant::now();
+            for v in &json_symbols {
+                std::hint::black_box(serde_json::from_slice::<SymbolRow>(v).unwrap());
+            }
+            t.elapsed()
+        }));
+        let wire_sym = median(Box::new(|| {
+            let t = Instant::now();
+            std::hint::black_box(rx.symbols_many(&sym_ids).unwrap());
+            t.elapsed()
+        }));
+        let per = |d: Duration| d.as_nanos() as f64 / f64::from(N);
+        println!(
+            "row_decode_speed: link brief json {:.0} ns, stored {:.0} ns ({:.2}x); symbol json {:.0} ns, stored {:.0} ns ({:.2}x); load {}",
+            per(json_link),
+            per(wire_link),
+            per(wire_link) / per(json_link),
+            per(json_sym),
+            per(wire_sym),
+            per(wire_sym) / per(json_sym),
+            load_average()
+        );
+        assert!(per(wire_link) <= 0.25 * per(json_link));
+        assert!(per(wire_sym) <= 0.75 * per(json_sym));
+    }
+
+    /// R-13a. Re-indexing every artifact once, one write transaction each, costs at most half of
+    /// the schema-9 layout (one row per posting), emulated here in a plain redb table. 2,000
+    /// symbols with 8 terms each from a Zipf-like vocabulary.
+    #[test]
+    #[ignore = "benchmark: run in release with --ignored"]
+    fn postings_incremental_cost() {
+        use redb::{Database, ReadableTable, TableDefinition};
+        const SYMBOLS: u32 = 2_000;
+        const TERMS: u32 = 8;
+        const VOCAB: u32 = 400;
+        let terms_of = |i: u32| -> Vec<(String, u8, u32)> {
+            let mut seed = u64::from(i) * 2_654_435_761 + 12_345;
+            let mut out: Vec<(String, u8, u32)> = Vec::new();
+            while out.len() < TERMS as usize {
+                seed = seed
+                    .wrapping_mul(6_364_136_223_846_793_005)
+                    .wrapping_add(1_442_695_040_888_963_407);
+                // Zipf-like: the square of a uniform draw favours the small term numbers.
+                let u = ((seed >> 33) % 10_000) as f64 / 10_000.0;
+                let term = (u * u * f64::from(VOCAB)) as u32;
+                let t = format!("term{term}");
+                if !out.iter().any(|(x, _, _)| *x == t) {
+                    out.push((t, (seed >> 20) as u8 % 4, 1 + (seed >> 40) as u32 % 3));
+                }
+            }
+            out
+        };
+        // Schema 9: one row per posting plus one length row per symbol.
+        let old_table: TableDefinition<&[u8], &[u8]> = TableDefinition::new("postings9");
+        let len_table: TableDefinition<&[u8], &[u8]> = TableDefinition::new("doc_len9");
+        let key9 = |t: &str, f: u8, id: Id| {
+            let mut k = t.as_bytes().to_vec();
+            k.push(0);
+            k.push(f);
+            k.extend_from_slice(&id.0);
+            k
+        };
+        let tmp = tempfile::tempdir().unwrap();
+        let old = Database::create(tmp.path().join("old.redb")).unwrap();
+        for i in 0..SYMBOLS {
+            let tx = old.begin_write().unwrap();
+            {
+                let mut t = tx.open_table(old_table).unwrap();
+                let mut l = tx.open_table(len_table).unwrap();
+                for (term, f, tf) in terms_of(i) {
+                    t.insert(
+                        key9(&term, f, id_of(i)).as_slice(),
+                        tf.to_le_bytes().as_slice(),
+                    )
+                    .unwrap();
+                }
+                l.insert(id_of(i).0.as_slice(), [0u8; 16].as_slice())
+                    .unwrap();
+            }
+            tx.commit().unwrap();
+        }
+        let started = Instant::now();
+        for i in 0..SYMBOLS {
+            let tx = old.begin_write().unwrap();
+            {
+                let mut t = tx.open_table(old_table).unwrap();
+                let mut l = tx.open_table(len_table).unwrap();
+                let lens = l
+                    .get(id_of(i).0.as_slice())
+                    .unwrap()
+                    .map(|g| g.value().to_vec());
+                assert!(lens.is_some());
+                for (term, f, _) in terms_of(i) {
+                    t.remove(key9(&term, f, id_of(i)).as_slice()).unwrap();
+                }
+                l.remove(id_of(i).0.as_slice()).unwrap();
+                for (term, f, tf) in terms_of(i) {
+                    t.insert(
+                        key9(&term, f, id_of(i)).as_slice(),
+                        tf.to_le_bytes().as_slice(),
+                    )
+                    .unwrap();
+                }
+                l.insert(id_of(i).0.as_slice(), [0u8; 16].as_slice())
+                    .unwrap();
+            }
+            tx.commit().unwrap();
+        }
+        let schema9 = started.elapsed();
+
+        // Schema 13: packed postings through the cache.
+        let cache = temp_cache(&tmp);
+        for i in 0..SYMBOLS {
+            let mut tx = cache.write().unwrap();
+            tx.put_doc_postings(id_of(i), [1, 0, 0, 0], &terms_of(i))
+                .unwrap();
+            tx.commit().unwrap();
+        }
+        let started = Instant::now();
+        for i in 0..SYMBOLS {
+            let mut tx = cache.write().unwrap();
+            let terms = terms_of(i);
+            let removal: Vec<(String, u8)> =
+                terms.iter().map(|(t, f, _)| (t.clone(), *f)).collect();
+            tx.remove_doc_postings(id_of(i), &removal).unwrap();
+            tx.put_doc_postings(id_of(i), [1, 0, 0, 0], &terms).unwrap();
+            tx.commit().unwrap();
+        }
+        let packed = started.elapsed();
+        println!(
+            "postings_incremental_cost: schema 9 layout {:.2} ms per artifact, packed {:.2} ms ({:.2}x); load {}",
+            schema9.as_secs_f64() * 1000.0 / f64::from(SYMBOLS),
+            packed.as_secs_f64() * 1000.0 / f64::from(SYMBOLS),
+            packed.as_secs_f64() / schema9.as_secs_f64(),
+            load_average()
+        );
+        assert!(packed.as_secs_f64() <= 0.5 * schema9.as_secs_f64());
+    }
 }

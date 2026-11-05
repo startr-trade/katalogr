@@ -14,8 +14,8 @@ use std::collections::BTreeMap;
 use std::num::NonZeroUsize;
 use std::time::{Duration, Instant};
 use support::{
-    CacheDump, TestExtractor, TestProbe, cache_dump, drained_graph, full_index, init_project,
-    open_engine_par, open_engine_threads, shard_bytes, test_slow,
+    CacheDump, TestExtractor, TestProbe, cache_dump, dictionary_dump, drained_graph, full_index,
+    init_project, open_engine_par, open_engine_threads, shard_bytes, test_slow,
 };
 
 struct Project {
@@ -73,7 +73,9 @@ fn index_at(files: &[(String, String)], threads: usize) -> Snapshot {
     }
     let e = open_engine_threads(&p.kx, &p.work, threads);
     let graph = full_index(&e);
-    (shard_bytes(&p.kx), graph, cache_dump(&e))
+    let mut dump = cache_dump(&e);
+    dump.extend(dictionary_dump(&e));
+    (shard_bytes(&p.kx), graph, dump)
 }
 
 fn rich_files(n: usize) -> Vec<(String, String)> {

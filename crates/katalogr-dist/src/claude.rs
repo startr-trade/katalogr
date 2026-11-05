@@ -220,6 +220,11 @@ impl Katalogr {
             if draining && let Some((total, entries)) = katalogr_query::map_top_behind(tx)? {
                 return Ok(Outcome::Found((total, entries, true, true)));
             }
+            if draining {
+                // A first index: no head is stored yet, and a live compute beside the writer
+                // can take seconds. No map until indexing finishes (FEAT-080 R-7).
+                return Ok(Outcome::Found((0, Vec::new(), false, true)));
+            }
             let entries = katalogr_query::map(tx)?;
             Ok(Outcome::Found((
                 entries.len() as u64,
@@ -231,6 +236,13 @@ impl Katalogr {
         let Outcome::Found((total, entries, from_top, behind)) = reply.outcome else {
             return Ok(None);
         };
+        if entries.is_empty() && behind {
+            let name = self.project.root().file_name().unwrap_or("");
+            return Ok(Some(format!(
+                "katalogr: project {name}; the index is still building ({} pending, stale). The symbol map appears when indexing finishes.\n",
+                reply.report.pending
+            )));
+        }
         if entries.is_empty() {
             return Ok(None);
         }

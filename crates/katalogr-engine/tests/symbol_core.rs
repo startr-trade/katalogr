@@ -252,6 +252,9 @@ struct Spy<'a, R: Reader> {
 }
 
 impl<R: Reader> Reader for Spy<'_, R> {
+    fn memo(&self) -> &katalogr_store::Memo {
+        self.inner.memo()
+    }
     fn raw_get(&self, t: TableId, key: &[u8]) -> Result<Option<Vec<u8>>, StoreError> {
         self.inner.raw_get(t, key)
     }
@@ -375,9 +378,10 @@ mod symbol_core {
             table(&e.cache, TableId::SymbolCore),
             table(&rebuilt, TableId::SymbolCore)
         );
+        // The symbol rows hold kind ids that depend on the history, so compare the rows.
         assert_eq!(
-            table(&e.cache, TableId::Symbols),
-            table(&rebuilt, TableId::Symbols)
+            e.cache.read().unwrap().symbols().unwrap(),
+            rebuilt.read().unwrap().symbols().unwrap()
         );
         let _ = &e.dir;
     }

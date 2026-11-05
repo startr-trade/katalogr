@@ -36,7 +36,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/home/dev/.claude/skills/kanbanr/hooks/session-start.sh",
+            "command": "$HOME/.claude/skills/kanbanr/hooks/session-start.sh",
             "statusMessage": "Recovering kanbanr board"
           }
         ]
@@ -45,7 +45,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/home/dev/.claude/skills/kanbanr/hooks/session-summary.sh",
+            "command": "$HOME/.claude/skills/kanbanr/hooks/session-summary.sh",
             "timeout": 60
           }
         ]
@@ -56,7 +56,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/home/dev/.claude/skills/kanbanr/hooks/stop-check.sh"
+            "command": "$HOME/.claude/skills/kanbanr/hooks/stop-check.sh"
           }
         ]
       }
@@ -66,7 +66,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/home/dev/.claude/skills/kanbanr/hooks/session-summary.sh",
+            "command": "$HOME/.claude/skills/kanbanr/hooks/session-summary.sh",
             "timeout": 60
           }
         ]
@@ -77,7 +77,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/home/dev/.claude/skills/kanbanr/hooks/session-summary.sh",
+            "command": "$HOME/.claude/skills/kanbanr/hooks/session-summary.sh",
             "timeout": 60
           }
         ]

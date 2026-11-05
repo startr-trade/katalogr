@@ -547,13 +547,13 @@ mod kindex {
 
     #[test]
     fn needle_matches_whole_path_only() {
-        let n = needles_from(["/home/dev", "/tmp"]);
-        assert_eq!(n, vec!["/home/dev".to_string(), "/tmp".to_string()]);
+        let n = needles_from(["/home/synthuser", "/tmp"]);
+        assert_eq!(n, vec!["/home/synthuser".to_string(), "/tmp".to_string()]);
         for fine in [
             "tmpDir",
             "/api/tmpl",
-            "see /home/developer/x",
-            "x/home/dev",
+            "see /home/synthusereloper/x",
+            "x/home/synthuser",
             "/tmp-x",
         ] {
             assert!(
@@ -562,9 +562,9 @@ mod kindex {
             );
         }
         for bad in [
-            "cat /home/dev/x",
-            "file:///home/dev",
-            "run /home/dev",
+            "cat /home/synthuser/x",
+            "file:///home/synthuser",
+            "run /home/synthuser",
             "a /tmp",
         ] {
             assert!(

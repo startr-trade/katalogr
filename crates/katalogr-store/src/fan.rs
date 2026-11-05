@@ -129,7 +129,7 @@ pub(crate) struct Expansion {
 impl Expansion {
     pub(crate) fn add_stored(&mut self, key: LinkKey, row: LinkRow) {
         self.rows
-            .insert(crate::cache::link_out_key(&key), (key, row));
+            .insert(crate::cache::link_order_key(&key), (key, row));
     }
 
     /// One virtual row per target; entries of a link that is also stored (or fan out of
@@ -142,7 +142,7 @@ impl Expansion {
                 to: *to,
             };
             let entries = expanded_entries(row, targets.len());
-            match self.rows.entry(crate::cache::link_out_key(&key)) {
+            match self.rows.entry(crate::cache::link_order_key(&key)) {
                 std::collections::btree_map::Entry::Vacant(v) => {
                     v.insert((key, LinkRow { entries }));
                 }
