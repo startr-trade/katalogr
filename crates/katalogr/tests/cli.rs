@@ -1552,7 +1552,9 @@ mod retrieval {
             full.extend_from_slice(args);
             let (_, j, _) = run_raw(&repo, &full);
             let v: Value = serde_json::from_str(&j).unwrap();
-            assert_eq!(v["next"].as_array().unwrap().len(), n, "{args:?}");
+            // `why` may add a `kanbanr why` hint after katalogr's own (at most three).
+            let all = hint.trim_start_matches("next: ").split("; ").count();
+            assert_eq!(v["next"].as_array().unwrap().len(), all, "{args:?}");
         }
         // The hints come after the budget notice, and every hint is a runnable command.
         let (_, out, _) = run_raw(&repo, &["map", "--budget", "20"]);
