@@ -7,7 +7,6 @@
 
 use crate::consistency::Engine;
 use crate::error::EngineError;
-use crate::scan;
 use katalogr_model::{Extractor, RelPath};
 use sha2::{Digest, Sha256};
 
@@ -39,20 +38,17 @@ pub(crate) fn build(
     repo: &str,
     ext: &dyn Extractor,
 ) -> Result<Option<Vec<u8>>, EngineError> {
-    let Some(root) = engine.roots().get(repo) else {
+    let Some(source) = engine.source(repo) else {
         return Ok(None);
     };
     let (include, exclude) = engine.repo_filters(repo);
     let mut files = Vec::new();
-    for p in scan::list_files(root.as_std_path(), &include, &exclude)? {
+    for p in source.list(&include, &exclude)? {
         if !is_context_file(ext, &p) {
             continue;
         }
-        let file = root.join(p.as_str());
-        match std::fs::read(&file) {
-            Ok(bytes) => files.push((p, bytes)),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-            Err(e) => return Err(EngineError::io(&file, e)),
+        if let Some(bytes) = source.read(&p)? {
+            files.push((p, bytes));
         }
     }
     Ok(ext.build_context(&files).ok())

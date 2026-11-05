@@ -11,7 +11,6 @@ use crate::embed;
 use crate::error::EngineError;
 use crate::failpoint::fail;
 use crate::profiles::{self, ProfileSet};
-use crate::scan;
 use camino::{Utf8Path, Utf8PathBuf};
 use katalogr_model::{ArtifactName, RelPath};
 use katalogr_store::{ErrorRow, JournalEntry, PendingKey, RANK_CONTEXT, Reader, WriteTx, pagerank};
@@ -123,11 +122,11 @@ impl<'a> Processor<'a> {
         ev: &ChangeEvent,
     ) -> Result<BTreeSet<RelPath>, EngineError> {
         let mut out = BTreeSet::new();
-        if let Some(root) = self.engine.roots().get(&ev.repo) {
+        if let Some(source) = self.engine.source(&ev.repo) {
             let (include, exclude) = self.engine.repo_filters(&ev.repo);
             let none = ProfileSet::empty();
             let profiles = self.profiles.as_ref().unwrap_or(&none);
-            for p in scan::list_files(root.as_std_path(), &include, &exclude)? {
+            for p in source.list(&include, &exclude)? {
                 if extractor_for(self.engine.registry(), profiles, &p).is_some() {
                     out.insert(p);
                 }

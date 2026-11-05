@@ -14,10 +14,12 @@ pub mod profiles;
 pub mod queue;
 pub mod registry;
 pub mod scan;
+pub mod source;
 pub mod stitch;
 
 pub use consistency::{Answer, Consistency, Engine, IndexStats, QueryOptions, Scope};
 pub use error::EngineError;
 pub use export::canonical_graph;
 pub use queue::{ChangeEvent, Context, EventKind, NewEvent, Seq};
+pub use source::FileSource;
 pub use stitch::{FAN_ROWS_FROM, StitchDelta, Stitcher};

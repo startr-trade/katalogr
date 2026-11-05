@@ -6,6 +6,7 @@ use crate::parallel::Parallelism;
 use crate::profiles::{self, LoadReport, ProfileSet};
 use crate::queue::{Context, Inbox, Processor, Seq};
 use crate::registry::ExtensionRegistry;
+use crate::source::FileSource;
 use crate::stitch::Stitcher;
 use camino::Utf8PathBuf;
 use katalogr_model::RelPath;
@@ -87,6 +88,8 @@ pub struct Engine {
     registry: ExtensionRegistry,
     stitcher: Stitcher,
     roots: BTreeMap<String, Utf8PathBuf>,
+    /// How each repo's files are read; `Disk` of the root unless replaced.
+    sources: BTreeMap<String, FileSource>,
     /// Per repo `(include, exclude)` globs; a repo not listed uses the defaults.
     filters: BTreeMap<String, (Vec<String>, Vec<String>)>,
     /// Embedded profiles: `(file name, text)`, applied before the project's own.
@@ -109,12 +112,17 @@ impl Engine {
     ) -> Result<Engine, EngineError> {
         let stitcher = Stitcher::new();
         let cache = Cache::open_or_rebuild(&dir, &stitcher, deadline)?;
+        let sources = roots
+            .iter()
+            .map(|(r, p)| (r.clone(), FileSource::Disk(p.clone())))
+            .collect();
         Ok(Engine {
             dir,
             cache,
             registry,
             stitcher,
             roots,
+            sources,
             filters: BTreeMap::new(),
             builtin_profiles: Vec::new(),
             parallelism: Parallelism::from_cores(),
@@ -239,6 +247,16 @@ impl Engine {
     #[doc(hidden)]
     pub fn set_fan_rows_from(&self, n: u32) {
         self.stitcher.set_fan_rows_from(n);
+    }
+
+    /// Replace how a repo is read. The default is `Disk` of the repo's root.
+    pub fn set_source(&mut self, repo: &str, s: FileSource) {
+        self.sources.insert(repo.to_string(), s);
+    }
+
+    /// How a repo's files are read; `None` for a repo with no root here.
+    pub fn source(&self, repo: &str) -> Option<&FileSource> {
+        self.sources.get(repo)
     }
 
     pub fn roots(&self) -> &BTreeMap<String, Utf8PathBuf> {

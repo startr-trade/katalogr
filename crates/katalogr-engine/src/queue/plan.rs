@@ -103,7 +103,6 @@ pub(super) fn plan_one(env: &PlanEnv, key: &PendingKey, seq: u64) -> Result<Acti
     let Some(root) = engine.roots().get(&key.repo) else {
         return Ok(Action::Skip);
     };
-    let file = root.join(key.path.as_str());
     let fin = relative_shard(dir.root(), &dir.shard_path(&key.repo, &key.path));
     if let Some(sha) = key
         .path
@@ -112,11 +111,10 @@ pub(super) fn plan_one(env: &PlanEnv, key: &PendingKey, seq: u64) -> Result<Acti
     {
         return plan_history(engine, key, seq, root, sha, fin);
     }
-    let content = match std::fs::read(&file) {
-        Ok(c) => Some(c),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
-        Err(e) => return Err(EngineError::io(&file, e)),
+    let Some(source) = engine.source(&key.repo) else {
+        return Ok(Action::Skip);
     };
+    let content = source.read(&key.path)?;
     let existing = dir.read_shard(&key.repo, &key.path).unwrap_or_default();
     let Some(content) = content else {
         let has_shard = dir.shard_path(&key.repo, &key.path).exists();
