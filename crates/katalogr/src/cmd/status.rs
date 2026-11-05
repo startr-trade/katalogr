@@ -12,11 +12,7 @@ pub fn run(cli: &Cli) -> Result<ExitCode, DistError> {
     let r = k.status(&options(cli))?;
     let context = k.context_name();
     if cli.json {
-        let mut a = json::report(&r);
-        let mut v = r.to_json();
-        v["context"] = serde_json::Value::String(context);
-        a.stdout = Some(v.to_string());
-        return Ok(emit(&a));
+        return Ok(emit(&json::status(&r, context)));
     }
     for w in &r.warnings {
         eprintln!("katalogr: warning: {w}");

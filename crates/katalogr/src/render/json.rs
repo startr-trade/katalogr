@@ -468,6 +468,15 @@ pub fn plain<R: Serialize>(reply: Reply<R>, fails: fn(&R) -> bool) -> JsonAnswer
     }
 }
 
+/// `status`, with the context it read: one shape for the CLI, MCP and the API.
+pub fn status(r: &Report, context: String) -> JsonAnswer {
+    let mut a = report(r);
+    let mut v = r.to_json();
+    v["context"] = serde_json::Value::String(context);
+    a.stdout = Some(v.to_string());
+    a
+}
+
 /// `index` and `status`: stdout is `Report::to_json()`; exit Stale when the wait timed out.
 pub fn report(r: &Report) -> JsonAnswer {
     JsonAnswer {
