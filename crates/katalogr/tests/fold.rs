@@ -134,7 +134,15 @@ mod fold {
         let plain = ok(&repo, &["refs", "impl_0"]);
         assert_eq!(plain, ok(&repo, &["refs", "impl_0", "--expand"]));
         let j = ok(&repo, &["--json", "refs", "impl_0"]);
-        assert_eq!(j, ok(&repo, &["--json", "refs", "impl_0", "--expand"]));
+        // The view ID names the question, `--expand` included (FEAT-084); the rest is equal.
+        let unnamed = |s: String| match s.find(",\"view_id\"") {
+            Some(i) => format!("{}}}\n", &s[..i]),
+            None => s,
+        };
+        assert_eq!(
+            unnamed(j.clone()),
+            unnamed(ok(&repo, &["--json", "refs", "impl_0", "--expand"]))
+        );
         assert!(!j.contains("\"folded\""));
     }
 

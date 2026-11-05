@@ -410,7 +410,15 @@ mod kanbanr {
         let code = code_and_board(tmp.path());
 
         // One history artifact per commit that carries a trailer, none for the third.
-        let shards = tmp.path().join("kx/projects/demo/shards/code/@history");
+        // The checkout is a git repository, so the shards are in its own context.
+        let ctxs = tmp.path().join("kx/projects/demo/.cache/contexts");
+        let layer = std::fs::read_dir(&ctxs)
+            .unwrap()
+            .flatten()
+            .next()
+            .unwrap()
+            .path();
+        let shards = layer.join("shards/code/@history");
         let mut found: Vec<String> = std::fs::read_dir(&shards)
             .unwrap()
             .flatten()

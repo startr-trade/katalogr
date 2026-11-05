@@ -386,18 +386,16 @@ mod doctor {
         assert_eq!(status(&r, "lock"), CheckStatus::Findings);
         drop(lock);
         assert!(find(&doctor_with(&p, &skip_git()), "KD-LCK-001").is_none());
-        // A real processor holds the cache too, so the cache-based checks are skipped.
+        // A real processor holds the cache too; doctor reads beside it (FEAT-080 R-8), so the
+        // cache-based checks run.
         let e = open_engine(&p.kx, &p.work);
         let _proc = katalogr_engine::queue::Processor::try_acquire(&e)
             .unwrap()
             .unwrap();
         let r = doctor_with(&p, &skip_git());
-        assert!(
-            codes(&r).contains(&"KD-LCK-001") && codes(&r).contains(&"KD-CCH-004"),
-            "{:?}",
-            codes(&r)
-        );
-        assert_eq!(status(&r, "queue"), CheckStatus::Skipped);
+        assert!(codes(&r).contains(&"KD-LCK-001"), "{:?}", codes(&r));
+        assert!(!codes(&r).contains(&"KD-CCH-004"), "{:?}", codes(&r));
+        assert_ne!(status(&r, "queue"), CheckStatus::Skipped);
     }
 
     #[test]

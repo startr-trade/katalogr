@@ -254,7 +254,7 @@ fn pre_read(
     }
     let bytes = std::fs::read(&abs).map_err(|e| DistError::io(abs.display(), e))?;
     let blob = git_blob_id(&bytes);
-    let engine = k.engine(deadline)?;
+    let engine = k.engine_for(EngineConsistency::StaleOk, deadline)?;
     let artifact = ArtifactName {
         repo: repo.clone(),
         path: rel.clone(),
@@ -481,7 +481,7 @@ fn post_search(
     if idents.is_empty() {
         return allow("search: no identifiers");
     }
-    let engine = k.engine(deadline)?;
+    let engine = k.engine_for(EngineConsistency::StaleOk, deadline)?;
     let answer = engine.with_consistency(
         &QueryOptions {
             consistency: EngineConsistency::StaleOk,
@@ -489,12 +489,13 @@ fn post_search(
             scope: EngineScope::Project,
         },
         |tx| -> Result<(Vec<String>, Vec<String>), StoreError> {
-            let symbols = tx.symbols()?;
             let (mut briefs, mut ambiguous) = (Vec::new(), Vec::new());
             for ident in &idents {
-                let mut found: Vec<&SymbolRow> = symbols
-                    .iter()
-                    .map(|(_, r)| r)
+                let ids = tx.symbol_ids_by_plain_ci(&ident.to_lowercase())?;
+                let mut found: Vec<SymbolRow> = tx
+                    .symbols_many(&ids)?
+                    .into_iter()
+                    .flatten()
                     .filter(|r| plain_name(r) == ident)
                     .collect();
                 found.sort_by_key(|r| r.name.canonical());
@@ -502,7 +503,7 @@ fn post_search(
                     0 => {}
                     1 => {
                         if briefs.len() < MAX_BRIEFS {
-                            let e = katalogr_query::explain(tx, &symbol_hit(found[0]), 5)?;
+                            let e = katalogr_query::explain(tx, &symbol_hit(&found[0]), 5)?;
                             briefs.push(brief(&e));
                         }
                     }
@@ -593,12 +594,40 @@ impl Katalogr {
                 }
             }
         }
-        let inbox = katalogr_engine::queue::Inbox::new(&self.project);
+        let layer = self.layer_dir(Instant::now() + Duration::from_secs(30))?;
+        let inbox = katalogr_engine::queue::Inbox::new(&layer);
         for ev in &events {
             inbox.append(ev)?;
         }
-        Ok(events.len())
+        // When the branch that moved is the default branch, the base follows it. A failed
+        // advance never fails the hook; the next one retries from the recorded commit.
+        let mut n = events.len();
+        if on_default_branch(
+            root.as_std_path(),
+            self.base_branch_setting(repo).as_deref(),
+        ) && let Ok(r) = self.advance_base(&crate::Options::default())
+        {
+            n += r.queued;
+        }
+        Ok(n)
     }
+
+    fn base_branch_setting(&self, repo: &str) -> Option<String> {
+        self.project
+            .config()
+            .settings
+            .get(&format!("base.branch.{repo}"))
+            .and_then(|v| v.as_str())
+            .map(str::to_string)
+    }
+}
+
+/// Whether `HEAD` is on the repo's default branch.
+fn on_default_branch(root: &Path, configured: Option<&str>) -> bool {
+    matches!(
+        katalogr_engine::base::default_branch(root, configured),
+        Ok(Some(b)) if katalogr_engine::base::head_is_branch(root, &b)
+    )
 }
 
 /// `notify --from-git`: queue the event's paths, never fail, never block git. Errors go to the

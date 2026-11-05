@@ -17,6 +17,8 @@ pub enum ExitCode {
     NoMatch = 4,
     /// The index was still stale when `--timeout` elapsed.
     Stale = 5,
+    /// `--at` named a position no context holds.
+    PositionUnavailable = 6,
 }
 
 impl ExitCode {

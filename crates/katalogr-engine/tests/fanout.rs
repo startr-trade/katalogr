@@ -96,6 +96,10 @@ fn sym(path: &str, name: &str) -> Id {
         .id()
 }
 
+fn sym_artifact(path: &str) -> Id {
+    katalogr_model::ArtifactName::new("r", path).unwrap().id()
+}
+
 fn k(key: &str) -> ExportKey {
     ExportKey {
         namespace: "ns".into(),
@@ -154,6 +158,97 @@ mod fanout {
         let rx = e.cache.read().unwrap();
         assert_eq!(rx.links_out(z, None).unwrap().len(), 3);
         assert_eq!(rx.fans_all().unwrap(), before);
+    }
+
+    #[test]
+    fn stable_key_skips_unbound_refs() {
+        let e = env();
+        three(&e);
+        let z = sym("z.tx", "Z");
+        let before = e.cache.read().unwrap().fans_all().unwrap();
+        let d = e.put("v.tx", "sym fn V\nexport ns:k V\n");
+        let zref = d
+            .refs_resolved
+            .iter()
+            .find(|r| r.artifact == sym_artifact("z.tx"));
+        assert!(
+            zref.is_none(),
+            "z.tx's reference was not re-resolved: {d:?}"
+        );
+        assert!(d.fans_added.is_empty() && d.fans_removed.is_empty());
+        let rx = e.cache.read().unwrap();
+        assert_eq!(rx.fans_all().unwrap(), before);
+        assert_eq!(rx.links_out(z, None).unwrap().len(), 4);
+        drop(rx);
+        // The full rule resolves it again and writes the same rows.
+        let full = env();
+        full.stitcher.set_resolve_all(true);
+        three(&full);
+        let d = full.put("v.tx", "sym fn V\nexport ns:k V\n");
+        assert!(
+            d.refs_resolved
+                .iter()
+                .any(|r| r.artifact == sym_artifact("z.tx"))
+        );
+        assert_eq!(full.graph(), e.graph());
+    }
+
+    #[test]
+    fn transitions_still_re_resolve() {
+        let zr = |d: &katalogr_engine::StitchDelta| {
+            d.refs_resolved
+                .iter()
+                .any(|r| r.artifact == sym_artifact("z.tx"))
+        };
+        let e = env();
+        e.put("z.tx", "sym fn Z\nref Z calls ns:k\n");
+        // 0 -> 1, 1 -> 2
+        assert!(zr(&e.put("x.tx", "sym fn X\nexport ns:k X\n")));
+        assert!(zr(&e.put("y.tx", "sym fn Y\nexport ns:k Y\n")));
+        assert_eq!(e.fans().len(), 1);
+        // 2 -> 3 skips; 3 -> 2 skips; 2 -> 1 and 1 -> 0 re-resolve.
+        assert!(!zr(&e.put("w.tx", "sym fn W\nexport ns:k W\n")));
+        assert!(!zr(&e.remove("w.tx")));
+        assert!(zr(&e.remove("y.tx")));
+        assert!(e.fans().is_empty());
+        assert!(zr(&e.remove("x.tx")));
+        // A raised threshold: 3 -> 4 skips, 2 -> 3 re-resolves.
+        let h = env();
+        h.stitcher.set_fan_rows_from(5);
+        h.put("z.tx", "sym fn Z\nref Z calls ns:k\n");
+        for (i, p) in ["a.tx", "b.tx", "c.tx", "d.tx"].iter().enumerate() {
+            let d = h.put(p, "sym fn S\nexport ns:k S\n");
+            assert!(zr(&d), "count {} -> {}", i, i + 1);
+        }
+        assert!(
+            h.fans().is_empty(),
+            "four targets are below the threshold of 5"
+        );
+        let d = h.put("e.tx", "sym fn S\nexport ns:k S\n");
+        assert!(zr(&d));
+        assert_eq!(h.fans().len(), 1);
+        let d = h.put("f.tx", "sym fn S\nexport ns:k S\n");
+        assert!(!zr(&d));
+    }
+
+    #[test]
+    fn bound_ref_tracks_stable_key() {
+        let e = env();
+        for (p, n) in [("x.tx", "X"), ("y.tx", "Y"), ("w.tx", "W")] {
+            e.put(p, &format!("sym fn {n}\nexport ns:k {n}\n"));
+        }
+        e.put("z.tx", "sym fn Z\nboundref Z consumes chan:c ns:k\n");
+        let contract = katalogr_model::ContractName {
+            kind: "chan".into(),
+            key: "c".into(),
+        }
+        .id();
+        let into = |e: &Env| e.cache.read().unwrap().links_in(contract).unwrap().len();
+        assert_eq!(into(&e), 3);
+        e.put("v.tx", "sym fn V\nexport ns:k V\n");
+        assert_eq!(into(&e), 4, "the new target holds the contract link");
+        e.remove("v.tx");
+        assert_eq!(into(&e), 3);
     }
 
     #[test]

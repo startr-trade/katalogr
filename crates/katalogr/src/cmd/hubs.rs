@@ -4,7 +4,7 @@ use katalogr_dist::DistError;
 use katalogr_dist::analytics::HubOptions;
 
 use crate::cli::{Cli, LevelArg};
-use crate::cmd::{graph_options, options, resolve};
+use crate::cmd::{graph_options, options_for, resolve};
 use crate::exit::ExitCode;
 use crate::render;
 
@@ -22,6 +22,9 @@ pub fn run(
         min_degree: min_degree.unwrap_or(settings.hub_min_degree),
         limit,
     };
-    let reply = k.hubs(&opts, &options(cli))?;
+    let reply = k.hubs(
+        &opts,
+        &options_for(cli, "hubs", &[("options", format!("{opts:?}"))]),
+    )?;
     Ok(render::insight(cli, reply, "hubs", &render::HUBS))
 }

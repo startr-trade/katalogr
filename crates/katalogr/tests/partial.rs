@@ -258,7 +258,11 @@ mod partial {
                 continue;
             }
             // `doctor` is its own report type, not an envelope.
-            if file.file_name().is_some_and(|n| n == "doctor.schema.json") {
+            // `position` is its own answer, not an envelope either (FEAT-084).
+            if file
+                .file_name()
+                .is_some_and(|n| n == "doctor.schema.json" || n == "position.schema.json")
+            {
                 continue;
             }
             let v: Value = serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();

@@ -1,5 +1,6 @@
 //! JSON Schemas of the insight envelopes, one per command.
 
+use crate::context_diff::{ContextConflicts, ContextDiff};
 use crate::coverage::CoverageReport;
 use crate::eval::{EvalReport, SweepReport};
 use crate::result::{CommunityReport, CycleReport, DeadCodeReport, HubReport, RationaleReport};
@@ -18,6 +19,11 @@ pub fn schemas() -> BTreeMap<&'static str, Value> {
             "communities",
             to_value(schema_for!(Envelope<CommunityReport>)),
         ),
+        (
+            "context-conflicts",
+            to_value(schema_for!(Envelope<ContextConflicts>)),
+        ),
+        ("context-diff", to_value(schema_for!(Envelope<ContextDiff>))),
         ("coverage", to_value(schema_for!(Envelope<CoverageReport>))),
         ("cycles", to_value(schema_for!(Envelope<CycleReport>))),
         ("dead-code", to_value(schema_for!(Envelope<DeadCodeReport>))),
