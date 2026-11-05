@@ -64,6 +64,14 @@ pub fn schemas() -> BTreeMap<&'static str, serde_json::Value> {
         );
     }
     assert!(
+        all.insert(
+            "render",
+            schemars::schema_for!(katalogr_query::Envelope<katalogr_render::ViewGraph>).to_value()
+        )
+        .is_none(),
+        "schema name render is registered twice"
+    );
+    assert!(
         all.insert("doctor", doctor::schema()).is_none(),
         "schema name doctor is registered twice"
     );

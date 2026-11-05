@@ -130,6 +130,11 @@ fn run(cli: &Cli) -> Result<ExitCode, DistError> {
         }) => cmd::search::run(cli, terms, *limit, *diagnostic),
         Some(Command::Show { symbol, signature }) => cmd::show::run(cli, symbol, *signature),
         Some(Command::Path { from, to, max_len }) => cmd::path::run(cli, from, to, *max_len),
+        Some(Command::Render {
+            action,
+            format,
+            words,
+        }) => cmd::render::run(cli, action.as_ref(), *format, words),
         Some(Command::Explain { symbol, per_side }) => cmd::explain::run(cli, symbol, *per_side),
         Some(Command::Replace { symbol, file }) => cmd::replace::run(cli, symbol, file),
         None => {
@@ -141,7 +146,7 @@ fn run(cli: &Cli) -> Result<ExitCode, DistError> {
 }
 
 fn main() {
-    let cli = Cli::parse();
+    let cli = Cli::parse_from(cmd::render::hoist_globals(std::env::args_os().collect()));
     let code = run(&cli).unwrap_or_else(|e| ExitCode::from_error(&e));
     std::process::exit(code.code());
 }

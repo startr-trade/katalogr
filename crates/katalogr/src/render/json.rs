@@ -447,6 +447,22 @@ where
     }
 }
 
+/// A view: the graph in the envelope, whatever `--format` says. Ambiguity and no match answer
+/// as for `callers`.
+pub fn view(
+    reply: Reply<katalogr_dist::render::ViewGraph>,
+    budget_tokens: Option<u64>,
+) -> JsonAnswer {
+    let exit = exit_for(&reply);
+    match reply.outcome {
+        Outcome::Found(g) => {
+            let e = envelope(&reply.report, None, reply.partial, g, Vec::new(), None);
+            found(exit, &reply.report, line(&e))
+        }
+        other => other_outcome(exit, &reply.report, other, budget_tokens, None),
+    }
+}
+
 /// `index` and `status`: stdout is `Report::to_json()`; exit Stale when the wait timed out.
 pub fn report(r: &Report) -> JsonAnswer {
     JsonAnswer {

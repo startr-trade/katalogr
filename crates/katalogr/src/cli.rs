@@ -31,6 +31,39 @@ pub enum LevelArg {
     Package,
 }
 
+/// Output format of `render`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+#[value(rename_all = "kebab-case")]
+pub enum RenderFormat {
+    Mermaid,
+    Dot,
+    Graphml,
+    Structurizr,
+    Svg,
+}
+
+/// Doc-tool modes of `render`.
+#[derive(Debug, Subcommand)]
+pub enum RenderAction {
+    /// mdBook preprocessor: replaces `katalogr-query` blocks in a book read from stdin.
+    /// `katalogr render mdbook supports <renderer>` exits 0 for `html` and 1 for any other.
+    Mdbook {
+        /// `supports <renderer>`, or nothing to preprocess.
+        #[arg(allow_hyphen_values = true)]
+        args: Vec<String>,
+    },
+    /// Markdown filter: replaces `katalogr-query` blocks in Markdown read from stdin.
+    Filter {
+        /// Where the Pele script and theme go: `inline` puts them in the output, a directory
+        /// holds them as files the output links to.
+        #[arg(long, default_value = "inline", value_name = "inline|DIR")]
+        assets: String,
+        /// Exit with the first failed block's code after writing the output.
+        #[arg(long)]
+        strict: bool,
+    },
+}
+
 /// How sure a dead-code candidate is.
 #[derive(Debug, Clone, Copy, ValueEnum)]
 #[value(rename_all = "kebab-case")]
@@ -193,6 +226,21 @@ pub enum Command {
         /// Longest chain to look for.
         #[arg(long, default_value_t = 6, value_name = "N")]
         max_len: u32,
+    },
+    /// Draw a view of the index as Mermaid, DOT, GraphML, Structurizr or SVG. The view is an op
+    /// (`structure`, `contracts`, `callers <symbol>`, `path <from> <to>`, `cycles`) with its
+    /// flags, as in a `katalogr-query` block. `render mdbook` and `render filter` embed views
+    /// in docs.
+    #[command(args_conflicts_with_subcommands = true)]
+    Render {
+        #[command(subcommand)]
+        action: Option<RenderAction>,
+        /// Output format.
+        #[arg(long, value_enum, default_value_t = RenderFormat::Mermaid)]
+        format: RenderFormat,
+        /// The view: an op, then its arguments and flags.
+        #[arg(allow_hyphen_values = true, value_name = "OP [ARGS]")]
+        words: Vec<String>,
     },
     /// Describe a symbol: signature, doc, links and rationale.
     Explain {
