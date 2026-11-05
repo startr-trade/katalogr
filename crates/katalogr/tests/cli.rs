@@ -922,6 +922,7 @@ mod retrieval {
             timeout: None,
             diagnostic: false,
             expand: false,
+            ..Options::default()
         };
         for q in ["apply rate code", "rate", "apply"] {
             let plain = k.search(q, 10, &o).unwrap();
@@ -1521,7 +1522,7 @@ mod retrieval {
 }
 
 mod diagnostic_cli {
-    use super::cli::{query_project, run_raw};
+    use super::cli::{ok, query_project, run_raw};
     use serde_json::Value;
     use std::path::Path;
 
@@ -1931,7 +1932,7 @@ mod render_json {
 }
 
 mod position {
-    use super::cli::{query_project, run_raw};
+    use super::cli::{ok, query_project, run_raw};
     use serde_json::Value;
     use std::path::Path;
     use std::process::Command;
@@ -2024,5 +2025,175 @@ mod position {
         let v = json(&repo, &["--json", "find", "changed"]);
         assert_eq!(v["exact"], true);
         assert_ne!(v["positions"], first["positions"]);
+    }
+
+    fn commit_all(repo: &Path, msg: &str) -> String {
+        git(repo, &["add", "-A"]);
+        git(repo, &["commit", "-q", "-m", msg]);
+        head(repo)
+    }
+
+    fn position_text(p: &Value) -> String {
+        match (p["commit"].as_str(), p["dirty"].as_str()) {
+            (Some(c), None) => c.to_string(),
+            (Some(c), Some(d)) => format!("{c}+{d}"),
+            (None, Some(d)) => format!("none+{d}"),
+            (None, None) => "none".to_string(),
+        }
+    }
+
+    /// R-4. The checkout's own live position, given to `--at`, is read as usual.
+    #[test]
+    fn at_current_answers() {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = committed_project(tmp.path());
+        let live = json(&repo, &["--json", "find", "call"]);
+        let text = position_text(&live["positions"][0]);
+        let at = json(&repo, &["--json", "--at", &text, "find", "call"]);
+        assert_eq!(at["result"], live["result"]);
+        assert_eq!(at["positions"], live["positions"]);
+        assert_eq!(at["exact"], true);
+        assert!(at.get("context").is_none(), "{at}");
+    }
+
+    /// R-1. A bad position text is a usage error.
+    #[test]
+    fn at_bad_text_exit_2() {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = committed_project(tmp.path());
+        for bad in ["nonsense", "abc+def", "none"] {
+            let (code, _out, err) = run_raw(&repo, &["--at", bad, "find", "call"]);
+            assert_eq!(code, 2, "{bad}: {err}");
+        }
+    }
+
+    /// R-4. A clean base commit is answered from the base.
+    #[test]
+    fn at_base_commit_reads_base() {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = committed_project(tmp.path());
+        // `index` advances the base to the default branch tip.
+        let (code, _, err) = run_raw(&repo, &["index"]);
+        assert_eq!(code, 0, "{err}");
+        let commit = head(&repo);
+        // The checkout has moved on, so the base is the only holder of this position.
+        std::fs::write(repo.join("user.tx"), "sym fn changed\n").unwrap();
+        let v = json(&repo, &["--json", "--at", &commit, "find", "caller"]);
+        assert_eq!(v["exact"], true, "{v}");
+        assert_eq!(v["context"], "base");
+        assert_eq!(v["positions"][0]["commit"], commit.as_str());
+        assert!(v["positions"][0]["dirty"].is_null());
+        assert!(!v["result"].as_array().unwrap().is_empty(), "{v}");
+        // The live read no longer finds them.
+        let (code, _, _) = run_raw(&repo, &["find", "caller"]);
+        assert_eq!(code, 4);
+    }
+
+    /// R-4. Another context that holds the position answers for it.
+    #[test]
+    fn at_other_context_reads_it() {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = committed_project(tmp.path());
+        let c1 = head(&repo);
+        std::fs::write(repo.join("user.tx"), "sym fn changed\n").unwrap();
+        commit_all(&repo, "c2");
+        let (code, _, err) = run_raw(&repo, &["context", "add", "--commit", &c1]);
+        assert_eq!(code, 0, "{err}");
+        let v = json(&repo, &["--json", "--at", &c1, "find", "caller"]);
+        assert_eq!(v["exact"], true, "{v}");
+        assert!(v["context"].as_str().unwrap().starts_with("c-"), "{v}");
+        assert!(!v["result"].as_array().unwrap().is_empty(), "{v}");
+        let (code, _, _) = run_raw(&repo, &["find", "caller"]);
+        assert_eq!(code, 4, "the current context has moved on");
+    }
+
+    /// R-5. A position no context holds is refused with exit 6, listing the ones held.
+    #[test]
+    fn at_unknown_exit_6_lists_available() {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = committed_project(tmp.path());
+        let nowhere = "0".repeat(40);
+        let (code, out, _err) = run_raw(&repo, &["--json", "--at", &nowhere, "find", "call"]);
+        assert_eq!(code, 6, "{out}");
+        let v: Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(v["schema"], 1);
+        assert_eq!(v["error"], "position-unavailable");
+        assert_eq!(v["wanted"], nowhere.as_str());
+        let available = v["available"].as_array().unwrap();
+        assert!(!available.is_empty());
+        assert_eq!(available[0]["repo"], "app");
+        assert!(
+            available
+                .iter()
+                .all(|p| p.get("commit").is_some() && p.get("dirty").is_some())
+        );
+        // Text mode: a message on stderr, nothing on stdout.
+        let (code, out, err) = run_raw(&repo, &["--at", &nowhere, "find", "call"]);
+        assert_eq!(code, 6);
+        assert_eq!(out, "");
+        assert!(err.contains("position unavailable"), "{err}");
+    }
+
+    /// R-3. A repo that is not this context's checkout reports the commit the base reflects and
+    /// no uncommitted part; a repo with no base commit reports null.
+    #[test]
+    fn other_repo_reports_base_commit() {
+        let tmp = tempfile::tempdir().unwrap();
+        let t = tmp.path();
+        let kx = t.join("kx");
+        let (app, other, plain) = (t.join("app"), t.join("other"), t.join("plain"));
+        for d in [&app, &other, &plain] {
+            std::fs::create_dir_all(d).unwrap();
+        }
+        std::fs::write(app.join("a.tx"), "sym fn Alpha\n").unwrap();
+        std::fs::write(other.join("b.tx"), "sym fn Beta\n").unwrap();
+        std::fs::write(plain.join("c.tx"), "sym fn Gamma\n").unwrap();
+        for d in [&app, &other] {
+            git(d, &["init", "-q"]);
+            git(d, &["config", "user.name", "Test"]);
+            git(d, &["config", "user.email", "test@example.com"]);
+            git(d, &["config", "commit.gpgsign", "false"]);
+            git(d, &["add", "."]);
+            git(d, &["commit", "-q", "-m", "c1"]);
+        }
+        ok(t, &["kindex", "init", kx.to_str().unwrap()]);
+        let specs: Vec<String> = [("app", &app), ("other", &other), ("plain", &plain)]
+            .iter()
+            .map(|(n, p)| format!("{n}={}", p.display()))
+            .collect();
+        let mut args = vec!["--kindex", kx.to_str().unwrap(), "project", "init", "demo"];
+        for s in &specs {
+            args.extend(["--repo", s]);
+        }
+        args.push("--mark");
+        ok(&app, &args);
+        ok(&app, &["index"]);
+        let other_head = head(&other);
+
+        // An uncommitted edit in the other repo is not this context's business.
+        std::fs::write(other.join("b.tx"), "sym fn BetaEdited\n").unwrap();
+        let v = json(&app, &["--json", "find", "Alpha"]);
+        assert_eq!(v["exact"], true, "{v}");
+        let by_repo = |name: &str| {
+            v["positions"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|p| p["repo"] == name)
+                .unwrap_or_else(|| panic!("no position for {name}: {v}"))
+                .clone()
+        };
+        assert_eq!(by_repo("app")["commit"], head(&app).as_str());
+        assert_eq!(by_repo("other")["commit"], other_head.as_str());
+        assert!(by_repo("other")["dirty"].is_null());
+        assert!(by_repo("plain")["commit"].is_null());
+        assert!(by_repo("plain")["dirty"].is_null());
+        let repos: Vec<&str> = v["positions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|p| p["repo"].as_str().unwrap())
+            .collect();
+        assert_eq!(repos, ["app", "other", "plain"], "sorted by repo");
     }
 }

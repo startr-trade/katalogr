@@ -54,6 +54,7 @@ fn project_report(k: &katalogr_dist::Katalogr) -> Result<Report, DistError> {
         timeout: None,
         diagnostic: false,
         expand: false,
+        ..Options::default()
     })
 }
 

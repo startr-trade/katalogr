@@ -41,7 +41,7 @@ pub use hints::{HintSource, hints};
 pub use map::{map, map_top, map_top_behind, map_traced};
 pub use mirror::mirror_drift;
 pub use path::path;
-pub use position::{PositionError, PositionRef};
+pub use position::{PositionError, PositionRef, ViewQuery};
 pub use rank::{
     link_weight, rank, rank_cached_or_live, rank_cached_or_live_with_source, rank_live,
 };

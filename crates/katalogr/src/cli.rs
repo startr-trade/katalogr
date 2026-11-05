@@ -65,6 +65,11 @@ pub struct Cli {
     #[arg(long, global = true, value_name = "NAME")]
     pub context: Option<String>,
 
+    /// Answer for this position: `<commit>`, `<commit>+<dirty>` or `none+<dirty>` (see
+    /// `katalogr position`). Exit 6 when no context holds it.
+    #[arg(long, global = true, value_name = "POSITION")]
+    pub at: Option<String>,
+
     /// Emit machine-readable JSON.
     #[arg(long, global = true)]
     pub json: bool,

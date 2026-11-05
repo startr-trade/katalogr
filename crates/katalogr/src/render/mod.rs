@@ -746,6 +746,12 @@ fn other_outcomes<T>(cli: &Cli, report: &Report, outcome: Outcome<T>, trace: Opt
             eprintln!("katalogr: {msg}");
             print_trace(trace.as_ref());
         }
+        Outcome::PositionUnavailable { wanted, available } => {
+            eprintln!("katalogr: position unavailable: {wanted}");
+            for p in available {
+                eprintln!("katalogr:   available: {}", p.text());
+            }
+        }
         Outcome::Found(_) => {}
     }
 }

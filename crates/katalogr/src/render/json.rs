@@ -12,7 +12,7 @@ use katalogr_dist::query::{
     ReplaceResult, Serialize, ShowResult, SymbolHit, Trace, Truncation, WhyResult, budget, cap,
     hints,
 };
-use katalogr_dist::{DistError, Outcome, Reply, Report};
+use katalogr_dist::{DistError, Outcome, PositionRef, Reply, Report};
 
 use crate::exit::ExitCode;
 
@@ -106,6 +106,7 @@ pub(super) fn exit_for<T>(reply: &Reply<T>) -> ExitCode {
         Outcome::Ambiguous(_) => ExitCode::Ambiguous,
         Outcome::NoMatch(_) => ExitCode::NoMatch,
         Outcome::StaleFile(_) => ExitCode::Stale,
+        Outcome::PositionUnavailable { .. } => ExitCode::PositionUnavailable,
         Outcome::Found(_) if reply.report.timed_out => ExitCode::Stale,
         Outcome::Found(_) => ExitCode::Ok,
     }
@@ -209,6 +210,27 @@ fn other_outcome<T>(
                 .unwrap_or_default(),
             ..JsonAnswer::new(exit)
         },
+        Outcome::PositionUnavailable { wanted, available } => {
+            // The answer is the error itself, on stdout (FEAT-084).
+            let body = serde_json::json!({
+                "schema": RESULT_SCHEMA_VERSION,
+                "error": "position-unavailable",
+                "wanted": wanted,
+                "available": available,
+            });
+            JsonAnswer {
+                stdout: Some(body.to_string()),
+                message: Some(format!(
+                    "position unavailable: {wanted} (available: {})",
+                    available
+                        .iter()
+                        .map(PositionRef::text)
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )),
+                ..JsonAnswer::new(exit)
+            }
+        }
         Outcome::Found(_) => JsonAnswer::new(exit),
     }
 }

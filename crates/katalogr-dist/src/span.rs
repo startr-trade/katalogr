@@ -116,6 +116,9 @@ impl Katalogr {
             Outcome::Ambiguous(c) => Outcome::Ambiguous(c),
             Outcome::NoMatch(m) => Outcome::NoMatch(m),
             Outcome::StaleFile(m) => Outcome::StaleFile(m),
+            Outcome::PositionUnavailable { wanted, available } => {
+                Outcome::PositionUnavailable { wanted, available }
+            }
         };
         Ok(Reply {
             outcome,
@@ -188,6 +191,9 @@ impl Katalogr {
             Outcome::Ambiguous(c) => Outcome::Ambiguous(c),
             Outcome::NoMatch(m) => Outcome::NoMatch(m),
             Outcome::StaleFile(m) => Outcome::StaleFile(m),
+            Outcome::PositionUnavailable { wanted, available } => {
+                Outcome::PositionUnavailable { wanted, available }
+            }
         };
         Ok(Reply {
             outcome,

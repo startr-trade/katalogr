@@ -71,3 +71,11 @@ impl PositionRef {
         })
     }
 }
+
+/// A question, for its ID. `args` holds only what changes the answer: not `--json`, `--timeout`
+/// or `--consistency`.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ViewQuery {
+    pub op: String,
+    pub args: std::collections::BTreeMap<String, String>,
+}

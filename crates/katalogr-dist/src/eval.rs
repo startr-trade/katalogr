@@ -106,6 +106,7 @@ fn index_set(
             timeout: Some(timeout),
             diagnostic: false,
             expand: false,
+            ..Options::default()
         },
     )?;
     if report.timed_out {
@@ -201,7 +202,9 @@ fn route_of<T>(o: &Outcome<T>) -> Route {
     match o {
         Outcome::Found(_) => Route::Found,
         Outcome::Ambiguous(_) => Route::Ambiguous,
-        Outcome::NoMatch(_) | Outcome::StaleFile(_) => Route::NoMatch,
+        Outcome::NoMatch(_) | Outcome::StaleFile(_) | Outcome::PositionUnavailable { .. } => {
+            Route::NoMatch
+        }
     }
 }
 
@@ -403,6 +406,7 @@ fn fixture_options(req: &EvalRequest) -> Options {
         timeout: Some(req.index_timeout),
         diagnostic: false,
         expand: false,
+        ..Options::default()
     }
 }
 
@@ -557,6 +561,7 @@ impl Katalogr {
             timeout: o.timeout,
             diagnostic: false,
             expand: false,
+            ..Options::default()
         }
     }
 

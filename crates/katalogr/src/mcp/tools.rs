@@ -507,7 +507,10 @@ pub fn call(cfg: &ServeConfig, name: &str, args: &Value) -> Result<JsonAnswer, U
 /// findings and a stale answer are answers, not failures.
 fn is_error(a: &JsonAnswer) -> bool {
     match a.exit {
-        ExitCode::Ambiguous | ExitCode::NoMatch | ExitCode::Usage => true,
+        ExitCode::Ambiguous
+        | ExitCode::NoMatch
+        | ExitCode::Usage
+        | ExitCode::PositionUnavailable => true,
         ExitCode::Error | ExitCode::Stale => a.stdout.is_none(),
         ExitCode::Ok => false,
     }

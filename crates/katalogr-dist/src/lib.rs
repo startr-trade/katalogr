@@ -2,8 +2,10 @@
 //!
 //! All behaviour of the command-line wrapper lives here; the wrapper parses, calls and renders.
 
+mod at;
 mod claude;
 pub mod contexts;
+pub use katalogr_query::{PositionRef, ViewQuery};
 pub mod doctor;
 mod error;
 pub mod eval;
@@ -15,6 +17,7 @@ mod span;
 mod test_extractor;
 mod threads;
 
+use crate::contexts::ContextChoice;
 pub use claude::{
     BEGIN_MARKER, DEFAULT_SESSION_BUDGET, END_MARKER, InstallOutcome, SESSION_BUDGET_KEY, SKILL_MD,
     SyncOutcome, claude_block, claude_sync, session_start, skill_install, skill_path,
@@ -155,6 +158,11 @@ pub struct Options {
     pub diagnostic: bool,
     /// `refs` and `callers`: list every hit instead of folding (`--expand`, FEAT-077).
     pub expand: bool,
+    /// Answer for this position (`--at`, FEAT-084): `<commit>`, `<commit>+<dirty>` or
+    /// `none+<dirty>`.
+    pub at: Option<String>,
+    /// The question, for the answer's view ID (FEAT-084). `None`: no ID is computed.
+    pub view: Option<katalogr_query::ViewQuery>,
 }
 
 impl Options {
@@ -315,6 +323,11 @@ pub enum Outcome<T> {
     NoMatch(String),
     /// The file on disk is not the file that was indexed; the message says what to do.
     StaleFile(String),
+    /// `--at` asked for a position no context holds (FEAT-084); these are the ones that are.
+    PositionUnavailable {
+        wanted: String,
+        available: Vec<katalogr_query::PositionRef>,
+    },
 }
 
 /// A query answer with what the read saw.
@@ -565,7 +578,17 @@ impl Katalogr {
         manifest: Option<&katalogr_store::ContextManifest>,
     ) -> Result<(), DistError> {
         use katalogr_store::{ContextKind, Reader};
-        let snap = engine.cache().read()?;
+        // What the base reflects now, not what it reflected when this layer was seeded; a layer
+        // falls back to its own copy when the base cannot be read beside a writer.
+        let base = if manifest.is_some() {
+            katalogr_store::Cache::open_reader(&self.project)?
+        } else {
+            None
+        };
+        let snap = match &base {
+            Some(c) => c.read()?,
+            None => engine.cache().read()?,
+        };
         let repos: Vec<String> = engine.roots().keys().cloned().collect();
         let mut pins = Vec::new();
         for repo in repos {
@@ -622,7 +645,17 @@ impl Katalogr {
         c: impl Into<EngineConsistency>,
         deadline: Instant,
     ) -> Result<Engine, DistError> {
-        let dir = self.layer_dir(deadline)?;
+        self.engine_for_choice(c, deadline, &self.context)
+    }
+
+    /// [`Katalogr::engine_for`] over the context `choice` names, not this invocation's own.
+    fn engine_for_choice(
+        &self,
+        c: impl Into<EngineConsistency>,
+        deadline: Instant,
+        choice: &ContextChoice,
+    ) -> Result<Engine, DistError> {
+        let dir = self.layer_dir_for(choice, deadline)?;
         match c.into() {
             EngineConsistency::StaleOk => match self.reader_engine(dir.clone())? {
                 Some(e) => Ok(e),
@@ -795,7 +828,50 @@ impl Katalogr {
     ) -> Result<Reply<T>, DistError> {
         let timeout = opts.timeout()?;
         let consistency = opts.consistency.unwrap_or(Consistency::Wait);
-        let engine = self.engine_for(consistency, Instant::now() + timeout)?;
+        let deadline = Instant::now() + timeout;
+        if let Some(at) = opts.at.as_deref() {
+            return match self.resolve_at(at, deadline)? {
+                at::Resolved::Current => {
+                    let engine = self.engine_for(consistency, deadline)?;
+                    self.query_on_traced(&engine, opts, f)
+                }
+                at::Resolved::Context { choice, wanted } => {
+                    // A recorded position is answered as recorded, whatever the checkout is now.
+                    let engine = self.engine_for_choice(Consistency::StaleOk, deadline, &choice)?;
+                    let o = Options {
+                        consistency: Some(Consistency::StaleOk),
+                        ..opts.clone()
+                    };
+                    let mut reply = self.query_on_traced(&engine, &o, f)?;
+                    let r = &mut reply.report;
+                    r.exact = !r.stale && r.positions.iter().any(|p| p == &wanted);
+                    r.context = Some(match &choice {
+                        ContextChoice::Named(id) => id.to_string(),
+                        _ => "base".to_string(),
+                    });
+                    Ok(reply)
+                }
+                at::Resolved::Unavailable { wanted, available } => Ok(Reply {
+                    outcome: Outcome::PositionUnavailable { wanted, available },
+                    report: Report {
+                        watermark: 0,
+                        pending: 0,
+                        stale: false,
+                        timed_out: false,
+                        queued: 0,
+                        warnings: self.take_notes(),
+                        positions: Vec::new(),
+                        exact: false,
+                        view_id: None,
+                        context: None,
+                    },
+                    diagnostic: None,
+                    partial: Vec::new(),
+                    folded: Vec::new(),
+                }),
+            };
+        }
+        let engine = self.engine_for(consistency, deadline)?;
         self.query_on_traced(&engine, opts, f)
     }
 
