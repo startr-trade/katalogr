@@ -472,12 +472,21 @@ mod cli {
     fn why_traces_line() {
         let tmp = tempfile::tempdir().unwrap();
         let (_kx, repo) = query_project(tmp.path());
-        let (code, out, _) = run(&repo, &["why", "user.tx:1"]);
+        let (code, out, _) = run(&repo, &["why", "user.tx:1", "--no-use"]);
         assert_eq!(code, 0, "{out}");
         let lines: Vec<&str> = out.lines().collect();
         assert_eq!(lines[0], "fn  app:user.tx#fn:caller_a  user.tx:1");
         assert_eq!(lines[1], "  refs-item  story  app:user.tx#item:story");
         assert_eq!(lines.len(), 2, "{out}");
+        // Without `--no-use` the caller of `caller_a` is listed after the symbol.
+        let (code, out, _) = run(&repo, &["why", "user.tx:1"]);
+        assert_eq!(code, 0, "{out}");
+        let lines: Vec<&str> = out.lines().collect();
+        assert!(
+            lines[1].starts_with("  caller  fn  app:user.tx#fn:caller_b"),
+            "{out}"
+        );
+        assert_eq!(lines[2], "  refs-item  story  app:user.tx#item:story");
         let (code, out, _) = run(&repo, &["why", "user.tx:3"]);
         assert_eq!((code, out.lines().count()), (0, 1), "{out}");
         let (code, _, err) = run(&repo, &["why", "user.tx:99"]);

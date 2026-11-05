@@ -475,9 +475,15 @@ pub fn call(cfg: &ServeConfig, name: &str, args: &Value) -> Result<JsonAnswer, U
                 render_json::dangling(r, budget)
             })
         }
-        "why" => answer(Katalogr::why(&k, p.need("location"), opts), |r| {
-            render_json::why(r, budget)
-        }),
+        "why" => answer(
+            Katalogr::why(
+                &k,
+                p.need("location"),
+                Some(katalogr_dist::query::DEFAULT_USE_LIMIT),
+                opts,
+            ),
+            |r| render_json::why(r, budget),
+        ),
         "index" => {
             let since = owned(p.text("since"));
             let range = owned(p.text("range"));

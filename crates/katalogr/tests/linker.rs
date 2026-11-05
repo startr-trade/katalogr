@@ -596,7 +596,7 @@ mod kanbanr {
         let code = code_and_board(tmp.path());
         let (c, out, err) = katalogr(&code, &["why", "src/a.tx:2"]);
         assert_eq!(c, 0, "{err}");
-        // symbol, then items/requirements, then goals, then the commit.
+        // symbol, then the commit, then items/requirements, then goals (the ownership table's order).
         let lines: Vec<&str> = out.lines().collect();
         assert_eq!(lines[0], "fn  code:src/a.tx#fn:beta  src/a.tx:2", "{out}");
         let at = |needle: &str| {
@@ -609,7 +609,7 @@ mod kanbanr {
         let goal1 = at("serves  G-1  board:projects/demo/charter.yaml#goal:G-1");
         let goal2 = at("serves  G-2  board:projects/demo/charter.yaml#goal:G-2");
         let commit = at("commit  ");
-        assert!(item < goal1 && goal1 < commit && goal2 < commit, "{out}");
+        assert!(commit < item && item < goal1 && commit < goal2, "{out}");
 
         // The line added by the second commit reaches no goal: its item is not on the board.
         let (c, out, _) = katalogr(&code, &["why", "src/a.tx:3"]);

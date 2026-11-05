@@ -350,6 +350,23 @@ pub(crate) fn on_target<T>(
     })
 }
 
+/// Follow-up commands for a `why` answer that name another tool's view: when a `rationale`
+/// entry reached an item (kind `refs-item` or `changed-by`), the board owner's own `why` for
+/// the same position. Text only: nothing is run.
+pub fn why_next(w: &WhyResult) -> Vec<String> {
+    if w.rationale
+        .iter()
+        .any(|r| r.kind == "refs-item" || r.kind == "changed-by")
+    {
+        vec![format!(
+            "kanbanr why {}:{}",
+            w.symbol.path, w.symbol.span.start_line
+        )]
+    } else {
+        Vec::new()
+    }
+}
+
 fn from_resolution<T>(r: Resolution<T>, what: &str) -> Outcome<T> {
     match r {
         Resolution::One(v) => Outcome::Found(v),
@@ -792,8 +809,14 @@ impl Katalogr {
     }
 
     /// The symbol at `file:line` of the current repo (`file` relative to the repo root) and its
-    /// rationale links.
-    pub fn why(&self, spec: &str, opts: &Options) -> Result<Reply<WhyResult>, DistError> {
+    /// rationale links. With `use_limit` `Some(n)`, also who uses the symbol (at most `n`
+    /// callers and tests), read in the same snapshot; `None` leaves `used_by` out.
+    pub fn why(
+        &self,
+        spec: &str,
+        use_limit: Option<usize>,
+        opts: &Options,
+    ) -> Result<Reply<WhyResult>, DistError> {
         if matches!(
             katalogr_model::parse_name(spec),
             Ok(katalogr_model::AnyName::Contract(_))
@@ -817,12 +840,31 @@ impl Katalogr {
         } else {
             Blame::NotRequested
         };
-        self.query(opts, |tx| {
-            Ok(from_resolution(
-                katalogr_query::why(tx, repo, &path, line, &blame)?,
-                spec,
-            ))
-        })
+        let mut partial = Vec::new();
+        let mut reply = self.query(opts, |tx| {
+            let mut out =
+                from_resolution(katalogr_query::why(tx, repo, &path, line, &blame)?, spec);
+            if let (Some(limit), Outcome::Found(w)) = (use_limit, &mut out) {
+                let used = katalogr_query::why_use(tx, &w.symbol, limit)?;
+                for (shown, total) in [
+                    (used.callers.len(), used.callers_total),
+                    (used.tests.len(), used.tests_total),
+                ] {
+                    if total > shown as u64 {
+                        partial.push(Partial::new(
+                            cap::LIMIT,
+                            limit as u64,
+                            shown as u64,
+                            Some(total),
+                        ));
+                    }
+                }
+                katalogr_query::attach_use(w, used);
+            }
+            Ok(out)
+        })?;
+        reply.partial = partial;
+        Ok(reply)
     }
 
     /// Unresolved references of the given kinds (default: Markdown links, annotations and

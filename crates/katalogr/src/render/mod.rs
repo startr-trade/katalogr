@@ -584,12 +584,22 @@ pub fn why(cli: &Cli, reply: Reply<WhyResult>) -> ExitCode {
         Outcome::Found(w) => {
             note_stale(&reply.report);
             let mut partial = reply.partial;
+            // The order of the ownership table: symbol, used by, notes, commits, then the
+            // items and goals the board owns.
             let mut lines = vec![symbol_line(&w.symbol)];
+            if let Some(u) = &w.used_by {
+                lines.extend(
+                    u.callers
+                        .iter()
+                        .map(|c| format!("  caller  {}", caller_line(c))),
+                );
+                lines.extend(u.tests.iter().map(|t| format!("  test  {}", test_line(t))));
+                lines.extend(u.contracts.iter().map(|c| format!("  contract  {c}")));
+            }
             lines.extend(
-                w.rationale
+                w.notes
                     .iter()
-                    .chain(w.goals.iter())
-                    .map(|r| format!("  {}  {}  {}", r.kind, r.label, r.target)),
+                    .map(|n| format!("  {}  line {}  {}", n.marker, n.line, n.text)),
             );
             lines.extend(
                 w.commits
@@ -597,16 +607,19 @@ pub fn why(cli: &Cli, reply: Reply<WhyResult>) -> ExitCode {
                     .map(|c| format!("  commit  {}  {}", &c.sha[..c.sha.len().min(12)], c.summary)),
             );
             lines.extend(
-                w.notes
+                w.rationale
                     .iter()
-                    .map(|n| format!("  {}  line {}  {}", n.marker, n.line, n.text)),
+                    .chain(w.goals.iter())
+                    .map(|r| format!("  {}  {}  {}", r.kind, r.label, r.target)),
             );
             if let Some(n) = &w.note {
                 lines.push(format!("  note  {n}"));
             }
             print_lines(cli, lines, &mut partial);
             print_partial(&partial);
-            print_next(&hints("why", &w));
+            let mut next = hints("why", &w);
+            next.extend(katalogr_dist::why_next(&w));
+            print_next(&next);
         }
         other => other_outcomes(cli, &reply.report, other, None),
     }
