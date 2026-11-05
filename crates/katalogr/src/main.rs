@@ -1,5 +1,6 @@
 //! The katalogr CLI: a thin wrapper over katalogr-dist (ADR-0010).
 
+mod answer_build;
 #[cfg(feature = "api")]
 mod api;
 mod cli;
