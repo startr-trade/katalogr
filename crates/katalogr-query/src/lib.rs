@@ -6,6 +6,7 @@
 
 pub mod budget;
 mod callers;
+mod contract_map;
 mod dangling;
 pub mod diagnostic;
 mod explain;
@@ -27,6 +28,7 @@ mod tests;
 mod why;
 
 pub use callers::{CallersAnswer, callers, callers_folded};
+pub use contract_map::{ContractEnds, ContractMap, contract_map};
 pub use dangling::{CONTRACT_KIND as DANGLING_CONTRACT, DEFAULT_KINDS as DANGLING_KINDS, dangling};
 pub use diagnostic::{
     DIAG_PACK, DIAG_REFS, DIAG_TERMS, DIAG_TOP, DIAG_WEIGHTS, Diagnostic, ExpandedTerm, FoldTrace,
