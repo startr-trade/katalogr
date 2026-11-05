@@ -265,4 +265,41 @@ mod context {
         assert!(has(&p.repo, ContextChoice::Current, "Uncommitted"));
         assert_eq!(git(&p.kx, &["status", "--porcelain"]), "");
     }
+
+    #[test]
+    fn branch_switch_touches_only_diff() {
+        let p = based();
+        find(&p.repo, ContextChoice::Current, "Alpha");
+        git(&p.repo, &["checkout", "-q", "-b", "side"]);
+        std::fs::write(p.repo.join("c.tx"), "sym fn GammaSide\n").unwrap();
+        git(&p.repo, &["commit", "-qam", "side"]);
+        let side = git(&p.repo, &["rev-parse", "HEAD"]);
+        git(&p.repo, &["checkout", "-q", "main"]);
+        let main = git(&p.repo, &["rev-parse", "HEAD"]);
+        // The checkout moves from `side` to `main`: only the file that differs is queued.
+        ok(
+            &p.repo,
+            &["notify", "--from-git", "post-checkout", &side, &main, "1"],
+        );
+        let layer = layers(&p).remove(0);
+        let mut queued = Vec::new();
+        for f in std::fs::read_dir(layer.join(".cache/inbox"))
+            .unwrap()
+            .flatten()
+        {
+            let v: serde_json::Value =
+                serde_json::from_str(&std::fs::read_to_string(f.path()).unwrap()).unwrap();
+            queued.push((
+                v["path"].as_str().unwrap().to_string(),
+                v["kind"].to_string(),
+            ));
+        }
+        assert_eq!(
+            queued,
+            vec![("c.tx".to_string(), "\"changed\"".to_string())]
+        );
+        // The base was not asked to do anything for a branch that is not the default.
+        assert!(has(&p.repo, ContextChoice::Current, "Gamma"));
+        assert!(!has(&p.repo, ContextChoice::Current, "GammaSide"));
+    }
 }
