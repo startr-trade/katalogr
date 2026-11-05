@@ -30,6 +30,10 @@ impl Extractor for TestExtractor {
         "test"
     }
 
+    fn revision_salt(&self) -> &'static str {
+        "test-1"
+    }
+
     fn handles(&self, path: &RelPath) -> bool {
         path.as_str().ends_with(".tx")
     }

@@ -137,6 +137,10 @@ impl Extractor for TestExtractor {
         "test"
     }
 
+    fn revision_salt(&self) -> &'static str {
+        "test-1"
+    }
+
     fn handles(&self, path: &RelPath) -> bool {
         path.as_str().ends_with(".tx")
     }
@@ -170,6 +174,10 @@ impl Extractor for CountedExtractor {
     fn id(&self) -> &'static str {
         "test"
     }
+
+    fn revision_salt(&self) -> &'static str {
+        "test-1"
+    }
     fn handles(&self, path: &RelPath) -> bool {
         TestExtractor.handles(path)
     }
@@ -192,6 +200,10 @@ pub struct TestGuest(pub &'static str);
 impl Extractor for TestGuest {
     fn id(&self) -> &'static str {
         "tguest"
+    }
+
+    fn revision_salt(&self) -> &'static str {
+        "test-1"
     }
     fn handles(&self, _: &RelPath) -> bool {
         false
@@ -589,6 +601,10 @@ impl Extractor for TestAltExtractor {
         "test-alt"
     }
 
+    fn revision_salt(&self) -> &'static str {
+        "test-1"
+    }
+
     fn handles(&self, _: &RelPath) -> bool {
         false
     }
@@ -831,6 +847,10 @@ pub struct TestProbe {
 impl Extractor for TestProbe {
     fn id(&self) -> &'static str {
         self.id
+    }
+
+    fn revision_salt(&self) -> &'static str {
+        "test-1"
     }
 
     fn handles(&self, path: &RelPath) -> bool {

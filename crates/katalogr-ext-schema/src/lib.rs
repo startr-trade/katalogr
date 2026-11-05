@@ -28,6 +28,10 @@ impl Extractor for XsdExtractor {
         "xsd"
     }
 
+    fn revision_salt(&self) -> &'static str {
+        "xsd-extract-1"
+    }
+
     fn handles(&self, path: &RelPath) -> bool {
         ends_with_ci(path, &[".xsd"])
     }
@@ -65,6 +69,10 @@ pub struct JsonSchemaExtractor;
 impl Extractor for JsonSchemaExtractor {
     fn id(&self) -> &'static str {
         "json-schema"
+    }
+
+    fn revision_salt(&self) -> &'static str {
+        "json-schema-extract-1"
     }
 
     fn handles(&self, path: &RelPath) -> bool {

@@ -45,6 +45,10 @@ impl Extractor for SqlExtractor {
         "sql"
     }
 
+    fn revision_salt(&self) -> &'static str {
+        "sql-extract-1"
+    }
+
     fn handles(&self, p: &RelPath) -> bool {
         let s = p.as_str().to_ascii_lowercase();
         s.ends_with(".sql") || s.ends_with(".pgsql") || s.ends_with(".psql")

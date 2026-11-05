@@ -20,6 +20,10 @@ impl Extractor for CtxExtractor {
         "ctx-test"
     }
 
+    fn revision_salt(&self) -> &'static str {
+        "test-1"
+    }
+
     fn handles(&self, path: &RelPath) -> bool {
         TestExtractor.handles(path)
     }

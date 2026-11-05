@@ -424,6 +424,10 @@ mod doctor {
         fn id(&self) -> &'static str {
             self.0
         }
+
+        fn revision_salt(&self) -> &'static str {
+            "test-1"
+        }
         fn handles(&self, path: &RelPath) -> bool {
             path.as_str().ends_with(self.1)
         }

@@ -1,0 +1,42 @@
+{
+  "data": {
+    "digest": "97d5aa1372573c3c1c303d48cba4d146b3d5218b7e6e05cfb4686ea56014faf8",
+    "salt": "data-extract-1"
+  },
+  "json-schema": {
+    "digest": "c8cf712c3cec708c4253d87d8a615f5148086f35018ad2570a07ffb2c3c9d269",
+    "salt": "json-schema-extract-1"
+  },
+  "kanbanr": {
+    "digest": "a9b68034eafa868fa73ad605bc4c04bf462bd5058f5447c79a60907f274bcf43",
+    "salt": "kanbanr-extract-1"
+  },
+  "md": {
+    "digest": "2c04d01726baf2626e4b9b30245314f3b69cef90153b0a8fbbca1ff660a89535",
+    "salt": "md-extract-1"
+  },
+  "openapi": {
+    "digest": "a0692d6a7449cb44138d0707325b913716c9496330ff1f9eb3e20b81d6328f42",
+    "salt": "openapi-extract-1"
+  },
+  "rust": {
+    "digest": "2d2931388ac23b86b8102182faede9ac001a0628e6308057803e5be7ccc33975",
+    "salt": "rust-extract-3;tests-1;rest-1;rest-2;rest-3"
+  },
+  "sql": {
+    "digest": "0b2ae8635c26c86e60cba2a6a5ade2e1bbeb67fd6a8813d0101ea104f4cd6005",
+    "salt": "sql-extract-1"
+  },
+  "text": {
+    "digest": "90775c5be414d60120ec35df66ecd6725f823a27f5691814e0669070f813e631",
+    "salt": "text-extract-1"
+  },
+  "ts": {
+    "digest": "08764bf081e186854f157f51a15be0e0a1fa818e0213d8855420d88e779ea9c6",
+    "salt": "ts-extract-3;tests-1;rest-1;rest-2;rest-3"
+  },
+  "xsd": {
+    "digest": "5436b22d8bfd48487b1931be45306546e161608fb52dd45510e107aad815d05b",
+    "salt": "xsd-extract-1"
+  }
+}

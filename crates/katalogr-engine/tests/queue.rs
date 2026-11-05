@@ -21,6 +21,10 @@ impl Extractor for Counting {
     fn id(&self) -> &'static str {
         "test"
     }
+
+    fn revision_salt(&self) -> &'static str {
+        "test-1"
+    }
     fn handles(&self, path: &RelPath) -> bool {
         TestExtractor.handles(path)
     }
