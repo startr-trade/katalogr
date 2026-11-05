@@ -49,11 +49,11 @@ mod inspect {
         ));
         assert!(!file.exists());
 
-        // InUse: a writer holds the database.
+        // A writer holds the database: it is read beside it (FEAT-080 R-8).
         let cache = open(&dir);
         assert!(matches!(
             Cache::inspect(&dir).unwrap(),
-            CacheInspection::InUse
+            CacheInspection::Open(_)
         ));
 
         // A schema other than the current one is reported without reading the tables.
@@ -96,6 +96,34 @@ mod inspect {
             CacheInspection::Unreadable(m) => {
                 assert!(!m.contains(t.path().to_str().unwrap()), "{m}");
             }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    /// R-8: the inspection reads the last committed state while a writer holds the cache open
+    /// with a write transaction in flight.
+    #[test]
+    fn reads_beside_writer() {
+        let t = tempfile::tempdir().unwrap();
+        let dir = project(&t);
+        let cache = open(&dir);
+        let mut tx = cache.write().unwrap();
+        tx.set_publish_journal(&[("a".to_string(), "b".to_string())])
+            .unwrap();
+        tx.commit().unwrap();
+        // An uncommitted write is not seen.
+        let mut open_tx = cache.write().unwrap();
+        open_tx.set_publish_journal(&[]).unwrap();
+        match Cache::inspect(&dir).unwrap() {
+            CacheInspection::Open(o) => {
+                let tables = o.tables.unwrap();
+                assert_eq!(tables.journal, vec![("a".to_string(), "b".to_string())]);
+            }
+            other => panic!("{other:?}"),
+        }
+        open_tx.commit().unwrap();
+        match Cache::inspect(&dir).unwrap() {
+            CacheInspection::Open(o) => assert!(o.tables.unwrap().journal.is_empty()),
             other => panic!("{other:?}"),
         }
     }

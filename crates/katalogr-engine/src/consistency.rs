@@ -109,7 +109,51 @@ impl Engine {
     ) -> Result<Engine, EngineError> {
         let stitcher = Stitcher::new();
         let cache = Cache::open_or_rebuild(&dir, &stitcher, deadline)?;
-        Ok(Engine {
+        Ok(Engine::with_cache(dir, cache, stitcher, registry, roots))
+    }
+
+    /// FEAT-080 R-3. As [`Engine::open`], but a cache held by another writer fails at once with
+    /// `StoreError::Busy` instead of waiting; a free cache is opened and synced against `deadline`.
+    pub fn open_try(
+        dir: ProjectDir,
+        registry: ExtensionRegistry,
+        roots: BTreeMap<String, Utf8PathBuf>,
+        deadline: Instant,
+    ) -> Result<Engine, EngineError> {
+        let stitcher = Stitcher::new();
+        let cache = Cache::open_or_rebuild_busy(&dir, &stitcher, Instant::now(), deadline)?;
+        Ok(Engine::with_cache(dir, cache, stitcher, registry, roots))
+    }
+
+    /// FEAT-080 R-1. As [`Engine::open`] on a read-only handle: never writes, syncs or replays,
+    /// and takes no lock. `Ok(None)` when the cache cannot be read that way (no file, other
+    /// schema, tables not yet created, repair needed or running, a corrupt header, or a target
+    /// without byte-range locks); the caller then uses [`Engine::open`].
+    pub fn open_reader(
+        dir: ProjectDir,
+        registry: ExtensionRegistry,
+        roots: BTreeMap<String, Utf8PathBuf>,
+    ) -> Result<Option<Engine>, EngineError> {
+        let Some(cache) = Cache::open_reader(&dir)? else {
+            return Ok(None);
+        };
+        Ok(Some(Engine::with_cache(
+            dir,
+            cache,
+            Stitcher::new(),
+            registry,
+            roots,
+        )))
+    }
+
+    fn with_cache(
+        dir: ProjectDir,
+        cache: Cache,
+        stitcher: Stitcher,
+        registry: ExtensionRegistry,
+        roots: BTreeMap<String, Utf8PathBuf>,
+    ) -> Engine {
+        Engine {
             dir,
             cache,
             registry,
@@ -120,7 +164,7 @@ impl Engine {
             parallelism: Parallelism::from_cores(),
             pool: OnceLock::new(),
             stats: Mutex::new(IndexStats::default()),
-        })
+        }
     }
 
     /// Set before the first `process`; later calls replace the setting and drop a built pool.
@@ -291,6 +335,7 @@ impl Engine {
         };
         let mut backoff = POLL_START;
         if o.consistency != Consistency::StaleOk
+            && !self.cache.is_reader()
             && let Some(mut p) = Processor::try_acquire(self)?
         {
             // A changed profile queues the files it can affect before pending is counted.
@@ -312,7 +357,25 @@ impl Engine {
                 });
             }
             drop(snap);
-            match Processor::try_acquire(self)? {
+            let mut held = Processor::try_acquire(self)?;
+            if self.cache.is_reader() {
+                // FEAT-080 R-4. Another process holds the writer; take over only when it is gone.
+                held = match held {
+                    Some(p)
+                        if self
+                            .cache
+                            .try_upgrade(&self.dir, &self.stitcher, deadline)? =>
+                    {
+                        let mut p = p;
+                        // What a reader skipped at the start.
+                        p.refresh_embed_signature()?;
+                        p.refresh_profiles()?;
+                        Some(p)
+                    }
+                    _ => None,
+                };
+            }
+            match held {
                 Some(mut p) => {
                     p.recover()?;
                     p.ingest()?;

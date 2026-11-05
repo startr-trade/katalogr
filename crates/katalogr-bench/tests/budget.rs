@@ -21,10 +21,27 @@
 //!   cargo test -p katalogr-bench --release --test budget corpus_query_budget -- --ignored --nocapture
 //! ```
 //!
+//! FEAT-080 R-12: `session-start` has a fixed line of 100 ms (`SESSION_START_MS`) on top of the
+//! environment's `session_ms`; the smaller applies.
+//!
 //! `<command>_ms` (`hubs_ms`, `communities_ms`, `cycles_ms`, `dead-code_ms`, `coverage_ms`,
 //! `map_ms`) overrides `insight_ms` for one command. `KATALOGR_QUERY_KINDEX` and
 //! `KATALOGR_QUERY_PROJECT` name an index that is already built and is only read.
 //! `KATALOGR_QUERY_REPS` (default 5) is the number of runs per command.
+//!
+//! FEAT-080 R-10 and R-11: `concurrent_query_budget` indexes the corpus twice, once alone and
+//! once with `KATALOGR_CONCURRENT_WORKERS` (default 4) `stale-ok` query loops started after the
+//! first round has published. It fails on any query error, on a p95 over its line, on a slowdown
+//! over the limit, or on shards that differ:
+//!
+//! ```text
+//! KATALOGR_BIN=<release binary> \
+//! KATALOGR_BUDGET_REPOS=name=/path/to/clone[,name2=/path2] \
+//! KATALOGR_QUERY_TARGET=<canonical name of a symbol that has references> \
+//! KATALOGR_QUERY_TERM=<a word the corpus contains> \
+//! KATALOGR_CONCURRENT_BUDGET=find_ms=500,search_ms=1000,session_ms=1000,slowdown_pct=115 \
+//!   cargo test -p katalogr-bench --release --test budget concurrent_query_budget -- --ignored --nocapture
+//! ```
 
 mod bench {
     use camino::{Utf8Path, Utf8PathBuf};
@@ -37,6 +54,8 @@ mod bench {
     use std::time::Duration;
 
     const PROJECT: &str = "budget";
+    /// FEAT-080 R-12: the line for `session-start` on a full cache.
+    const SESSION_START_MS: f64 = 100.0;
     const MIB: f64 = 1024.0 * 1024.0;
 
     fn env(name: &str) -> String {
@@ -283,7 +302,10 @@ mod bench {
         ];
         let mut failures = Vec::new();
         for (group, command, args) in &plan {
-            let (ms_limit, mib_limit) = limits(&spec, group, command);
+            let (mut ms_limit, mib_limit) = limits(&spec, group, command);
+            if *command == "session-start" {
+                ms_limit = ms_limit.min(SESSION_START_MS);
+            }
             let (mut walls, mut peak) = (Vec::new(), 0.0f64);
             let load = load_average();
             for _ in 0..reps {
@@ -314,6 +336,201 @@ mod bench {
                     "{command}: peak RSS {peak:.0} MiB over {mib_limit}"
                 ));
             }
+        }
+        assert!(failures.is_empty(), "{}", failures.join("; "));
+    }
+
+    /// A fresh kindex with the project over `repos`.
+    fn new_project(bin: &Utf8Path, root: &Utf8Path, name: &str, repos: &str) -> Katalogr {
+        let kindex = root.join(name);
+        let mut init = Command::new(bin);
+        init.args([
+            "--kindex",
+            kindex.as_str(),
+            "kindex",
+            "init",
+            kindex.as_str(),
+        ]);
+        ok(init, "kindex init");
+        let mut project = Command::new(bin);
+        project.args(["--kindex", kindex.as_str(), "project", "init", PROJECT]);
+        for r in repos.split(',') {
+            project.args(["--repo", r]);
+        }
+        project.arg("--mark");
+        ok(project, "project init");
+        Katalogr {
+            bin: bin.to_owned(),
+            kindex,
+            project: PROJECT.into(),
+        }
+    }
+
+    /// FEAT-080 R-10 and R-11.
+    #[test]
+    #[ignore = "benchmark: needs a corpus; see the module comment"]
+    fn concurrent_query_budget() {
+        use katalogr_bench::proc::spawn_with;
+        use katalogr_bench::sizes::{shard_digest, shard_stats};
+        use std::sync::Mutex;
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        let bin = Utf8PathBuf::from(env("KATALOGR_BIN"));
+        let repos = env("KATALOGR_BUDGET_REPOS");
+        let target = env("KATALOGR_QUERY_TARGET");
+        let term = env("KATALOGR_QUERY_TERM");
+        let spec: BTreeMap<String, u64> = env("KATALOGR_CONCURRENT_BUDGET")
+            .split(',')
+            .map(|kv| {
+                let (k, v) = kv
+                    .split_once('=')
+                    .unwrap_or_else(|| panic!("KATALOGR_CONCURRENT_BUDGET: bad entry `{kv}`"));
+                (
+                    k.trim().to_string(),
+                    v.trim().parse().unwrap_or_else(|_| {
+                        panic!("KATALOGR_CONCURRENT_BUDGET: `{kv}` is not a number")
+                    }),
+                )
+            })
+            .collect();
+        for k in ["find_ms", "search_ms", "session_ms", "slowdown_pct"] {
+            assert!(
+                spec.contains_key(k),
+                "KATALOGR_CONCURRENT_BUDGET lacks `{k}`"
+            );
+        }
+        let workers: usize = std::env::var("KATALOGR_CONCURRENT_WORKERS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(4);
+        let tmp = tempfile::tempdir().expect("temporary kindex");
+        let root = Utf8Path::from_path(tmp.path()).expect("UTF-8 temporary directory");
+
+        // Alone first: the wall and the shards to compare with.
+        let cold = new_project(&bin, root, "cold", &repos);
+        let mut index = cold.cmd(&["index", "--full"]);
+        index.env("KATALOGR_THREADS", "4");
+        let load_cold = load_average();
+        let alone = run_with_timeout(&mut index, Duration::from_secs(7200)).expect("cold index");
+        assert_eq!(
+            alone.status,
+            Some(0),
+            "{}",
+            String::from_utf8_lossy(&alone.stderr)
+        );
+        let cold_digest = shard_digest(&cold.kindex.join("projects").join(PROJECT)).unwrap();
+
+        // Then with workers, started once the first round has published.
+        let busy = new_project(&bin, root, "busy", &repos);
+        let busy_dir = busy.kindex.join("projects").join(PROJECT);
+        let stop = AtomicBool::new(false);
+        let seen: Mutex<BTreeMap<&'static str, (Vec<f64>, u32)>> = Mutex::new(BTreeMap::new());
+        let errors: Mutex<Vec<String>> = Mutex::new(Vec::new());
+        let ops: Vec<(&'static str, Vec<String>)> = vec![
+            ("find", vec!["find".into(), target.clone()]),
+            ("find", vec!["refs".into(), target.clone()]),
+            ("find", vec!["callers".into(), target.clone()]),
+            ("find", vec!["explain".into(), target.clone()]),
+            ("search", vec!["search".into(), term.clone()]),
+            ("session", vec!["session-start".into()]),
+        ];
+        let load_busy = load_average();
+        let mut index = busy.cmd(&["index", "--full"]);
+        index.env("KATALOGR_THREADS", "4");
+        let together = std::thread::scope(|scope| {
+            let running = spawn_with(&mut index, Some(Duration::from_secs(7200))).expect("spawn");
+            let start = std::time::Instant::now();
+            while start.elapsed() < Duration::from_secs(600) {
+                let cache = busy_dir.join(".cache").join("index.redb").exists();
+                if cache && shard_stats(&busy_dir).map_or(0, |s| s.files) > 0 {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(100));
+            }
+            let handles: Vec<_> = (0..workers)
+                .map(|id| {
+                    let (busy, ops, stop, seen, errors) = (&busy, &ops, &stop, &seen, &errors);
+                    scope.spawn(move || {
+                        let mut i = id;
+                        while !stop.load(Ordering::Relaxed) {
+                            let (group, args) = &ops[i % ops.len()];
+                            i += 1;
+                            let mut full: Vec<&str> = vec!["--consistency", "stale-ok"];
+                            full.extend(args.iter().map(String::as_str));
+                            let mut cmd = busy.cmd(&full);
+                            let r = run_with_timeout(&mut cmd, Duration::from_secs(120));
+                            match r {
+                                // Exit 4: before its file is indexed an op can match nothing.
+                                Ok(r) if matches!(r.status, Some(0) | Some(4)) => {
+                                    let mut g = seen.lock().unwrap();
+                                    let e = g.entry(group).or_default();
+                                    e.0.push(r.wall.as_secs_f64() * 1000.0);
+                                    e.1 += 1;
+                                }
+                                Ok(r) => errors.lock().unwrap().push(format!(
+                                    "{}: exit {:?}: {}",
+                                    args[0],
+                                    r.status,
+                                    String::from_utf8_lossy(&r.stderr)
+                                        .lines()
+                                        .next()
+                                        .unwrap_or("")
+                                )),
+                                Err(e) => errors.lock().unwrap().push(format!("{}: {e}", args[0])),
+                            }
+                        }
+                    })
+                })
+                .collect();
+            let done = running.finish().expect("concurrent index");
+            stop.store(true, Ordering::Relaxed);
+            for h in handles {
+                let _ = h.join();
+            }
+            done
+        });
+        assert_eq!(
+            together.status,
+            Some(0),
+            "{}",
+            String::from_utf8_lossy(&together.stderr)
+        );
+        let busy_digest = shard_digest(&busy_dir).unwrap();
+
+        let slowdown = together.wall.as_secs_f64() / alone.wall.as_secs_f64();
+        println!(
+            "load {load_cold} (alone) / {load_busy} (with workers) to {}: index alone {:.1} s, with {workers} workers {:.1} s = {slowdown:.2}x (limit {:.2}x)",
+            load_average(),
+            alone.wall.as_secs_f64(),
+            together.wall.as_secs_f64(),
+            spec["slowdown_pct"] as f64 / 100.0,
+        );
+        let mut failures = Vec::new();
+        let errors = errors.into_inner().unwrap();
+        if !errors.is_empty() {
+            failures.push(format!(
+                "{} query errors, first: {}",
+                errors.len(),
+                errors[0]
+            ));
+        }
+        for (group, (mut ms, n)) in seen.into_inner().unwrap() {
+            ms.sort_by(|a, b| a.total_cmp(b));
+            let p95 = nearest_rank(&ms, 95.0);
+            let limit = spec[&format!("{group}_ms")] as f64;
+            println!(
+                "{group}: {n} queries, p50 {:.0} ms, p95 {p95:.0} ms (limit {limit})",
+                ms[ms.len() / 2]
+            );
+            if p95 > limit {
+                failures.push(format!("{group}: p95 {p95:.0} ms over {limit}"));
+            }
+        }
+        if slowdown * 100.0 > spec["slowdown_pct"] as f64 {
+            failures.push(format!("index slowdown {slowdown:.2}x"));
+        }
+        if busy_digest != cold_digest {
+            failures.push("shards differ from the index run alone".into());
         }
         assert!(failures.is_empty(), "{}", failures.join("; "));
     }

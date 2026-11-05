@@ -37,7 +37,7 @@ pub use explain::explain;
 pub use find::find;
 pub use fold::{FOLD_FROM, FOLD_SHOWN, Folded};
 pub use hints::{HintSource, hints};
-pub use map::{map, map_top, map_traced};
+pub use map::{map, map_top, map_top_behind, map_traced};
 pub use mirror::mirror_drift;
 pub use path::path;
 pub use rank::{

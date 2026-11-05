@@ -40,8 +40,8 @@ use katalogr_analytics::{
 use katalogr_engine::history::{HISTORY_PREFIX, HistoryOptions, blame_commit, history_shas};
 use katalogr_engine::scan::{PathChange, changed_paths};
 use katalogr_engine::{
-    Consistency as EngineConsistency, Engine, EventKind, NewEvent, QueryOptions, Scope,
-    registry::ExtensionRegistry,
+    Consistency as EngineConsistency, Engine, EngineError, EventKind, NewEvent, QueryOptions,
+    Scope, registry::ExtensionRegistry,
 };
 use katalogr_model::{Name, RelPath};
 use katalogr_store::marker::{self, Overrides as StoreOverrides};
@@ -478,12 +478,17 @@ impl Katalogr {
     }
 
     fn engine(&self, deadline: Instant) -> Result<Engine, DistError> {
-        let mut engine = Engine::open(
+        let engine = Engine::open(
             self.project.clone(),
             build_registry(),
             self.roots.clone(),
             deadline,
         )?;
+        self.configure(engine)
+    }
+
+    /// Registry, profiles, parallelism and filters, shared by every open.
+    fn configure(&self, mut engine: Engine) -> Result<Engine, DistError> {
         engine.set_builtin_profiles(builtin_profiles());
         engine.set_parallelism(resolve_parallelism(
             &self.project.config().settings,
@@ -493,6 +498,45 @@ impl Katalogr {
             engine.set_repo_filters(&repo.name, repo.include.clone(), repo.exclude.clone());
         }
         Ok(engine)
+    }
+
+    /// The read-only engine, or `None` when the cache cannot be read that way (FEAT-080 R-6).
+    fn reader_engine(&self) -> Result<Option<Engine>, DistError> {
+        Engine::open_reader(self.project.clone(), build_registry(), self.roots.clone())?
+            .map(|e| self.configure(e))
+            .transpose()
+    }
+
+    /// The engine for a read at `c` (FEAT-080 R-1, R-3, R-6). `stale-ok` reads through a
+    /// read-only handle beside any writer. `wait` and `wait-all` try the writer open once; a
+    /// cache held by another process then gets a read-only handle to poll on. A handle that
+    /// cannot be had falls back to the writer open, bounded by `deadline`.
+    fn engine_for(
+        &self,
+        c: impl Into<EngineConsistency>,
+        deadline: Instant,
+    ) -> Result<Engine, DistError> {
+        match c.into() {
+            EngineConsistency::StaleOk => match self.reader_engine()? {
+                Some(e) => Ok(e),
+                None => self.engine(deadline),
+            },
+            EngineConsistency::Wait | EngineConsistency::WaitAll => {
+                match Engine::open_try(
+                    self.project.clone(),
+                    build_registry(),
+                    self.roots.clone(),
+                    deadline,
+                ) {
+                    Ok(e) => self.configure(e),
+                    Err(EngineError::Store(StoreError::Busy)) => match self.reader_engine()? {
+                        Some(e) => Ok(e),
+                        None => self.engine(deadline),
+                    },
+                    Err(e) => Err(e.into()),
+                }
+            }
+        }
     }
 
     fn current(&self) -> Result<(&str, &Utf8Path), DistError> {
@@ -528,7 +572,7 @@ impl Katalogr {
     /// Read the queue state without ingesting or processing (stale-ok).
     pub fn status(&self, opts: &Options) -> Result<Report, DistError> {
         let timeout = opts.timeout()?;
-        let engine = self.engine(Instant::now() + timeout)?;
+        let engine = self.engine_for(Consistency::StaleOk, Instant::now() + timeout)?;
         self.read(&engine, Consistency::StaleOk, timeout, 0, Vec::new())
     }
 
@@ -633,7 +677,8 @@ impl Katalogr {
         f: impl FnOnce(&ReadTx, &mut Diagnostic) -> Result<Outcome<T>, StoreError>,
     ) -> Result<Reply<T>, DistError> {
         let timeout = opts.timeout()?;
-        let engine = self.engine(Instant::now() + timeout)?;
+        let consistency = opts.consistency.unwrap_or(Consistency::Wait);
+        let engine = self.engine_for(consistency, Instant::now() + timeout)?;
         self.query_on_traced(&engine, opts, f)
     }
 
@@ -1081,7 +1126,8 @@ impl Katalogr {
             )));
         }
         let timeout = o.timeout()?;
-        let engine = self.engine(Instant::now() + timeout)?;
+        let consistency = o.consistency.unwrap_or(Consistency::Wait);
+        let engine = self.engine_for(consistency, Instant::now() + timeout)?;
         let profiles = engine.routing_profiles()?;
         let mut unclaimed = BTreeMap::new();
         let mut roots_missing = Vec::new();

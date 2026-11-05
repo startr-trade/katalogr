@@ -13,14 +13,14 @@ use katalogr_model::{
     LinkKind, Name, OutRef, Provenance, RelPath, Span, SymbolName,
 };
 use redb::{
-    Database, DatabaseError, ReadTransaction, ReadableDatabase, ReadableTable, StorageError,
-    TableDefinition, WriteTransaction,
+    ConcurrencyMode, Database, DatabaseError, ReadOnlyDatabase, ReadTransaction, ReadableDatabase,
+    ReadableTable, StorageError, TableDefinition, WriteTransaction,
 };
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::marker::PhantomData;
-use std::ops::Bound;
+use std::sync::{PoisonError, RwLock};
 use std::time::{Duration, Instant};
 
 /// Stored in `meta`; a different number rebuilds the cache from the shards.
@@ -722,17 +722,12 @@ fn scan_in<T: ReadableTable<&'static [u8], &'static [u8]>>(
     t: &T,
     prefix: &[u8],
 ) -> Result<RawRows, StoreError> {
-    let hi = match prefix_end(prefix) {
-        Some(e) => Bound::Excluded(e),
-        None => Bound::Unbounded,
-    };
-    let hi_ref = match &hi {
-        Bound::Excluded(e) => Bound::Excluded(e.as_slice()),
-        _ => Bound::Unbounded,
-    };
-    let it = t
-        .range::<&[u8]>((Bound::Included(prefix), hi_ref))
-        .map_err(db)?;
+    let hi = prefix_end(prefix);
+    let it = match &hi {
+        Some(e) => t.range(prefix..e.as_slice()),
+        None => t.range(prefix..),
+    }
+    .map_err(db)?;
     let mut out = Vec::new();
     for r in it {
         let (k, v) = r.map_err(db)?;
@@ -747,13 +742,11 @@ fn scan_keys_in<T: ReadableTable<&'static [u8], &'static [u8]>>(
     prefix: &[u8],
 ) -> Result<Vec<Vec<u8>>, StoreError> {
     let hi = prefix_end(prefix);
-    let hi_ref = match &hi {
-        Some(e) => Bound::Excluded(e.as_slice()),
-        None => Bound::Unbounded,
-    };
-    let it = t
-        .range::<&[u8]>((Bound::Included(prefix), hi_ref))
-        .map_err(db)?;
+    let it = match &hi {
+        Some(e) => t.range(prefix..e.as_slice()),
+        None => t.range(prefix..),
+    }
+    .map_err(db)?;
     let mut out = Vec::new();
     for r in it {
         let (k, _) = r.map_err(db)?;
@@ -2546,28 +2539,73 @@ pub struct SyncReport {
     pub deadline_hit: bool,
 }
 
+/// The redb handle behind a [`Cache`]: the single writer, or a read-only handle beside one
+/// (FEAT-080).
+enum Handle {
+    Writer(Database),
+    Reader(ReadOnlyDatabase),
+}
+
 pub struct Cache {
-    db: Database,
+    db: RwLock<Handle>,
     report: SyncReport,
 }
 
 const BACKOFF_START: Duration = Duration::from_millis(5);
 const BACKOFF_MAX: Duration = Duration::from_millis(50);
 
-fn open_db(path: &Utf8PathBuf, deadline: Instant) -> Result<Database, StoreError> {
+/// How processes share the cache file (FEAT-080). One writer process and any number of read-only
+/// handles where byte-range locks exist; the whole-file lock elsewhere, where `open_reader`
+/// always answers `None`, which keeps readers waiting for the writer as before.
+#[cfg(any(target_os = "linux", target_vendor = "apple", windows))]
+const CONCURRENCY: ConcurrencyMode = ConcurrencyMode::SingleWriter;
+#[cfg(not(any(target_os = "linux", target_vendor = "apple", windows)))]
+const CONCURRENCY: ConcurrencyMode = ConcurrencyMode::ExclusiveWriter;
+
+/// The builder of every writer open. A repair that runs past `deadline` is aborted, which
+/// `open_db` reports as [`StoreError::Busy`]; the next caller with a longer deadline finishes it.
+pub(crate) fn writer_builder(deadline: Instant) -> redb::Builder {
+    let mut b = redb::Builder::new();
+    b.set_concurrency_mode(CONCURRENCY);
+    b.set_repair_callback(move |session| {
+        if Instant::now() >= deadline {
+            session.abort();
+        }
+    });
+    b
+}
+
+/// The builder of every read-only open.
+pub(crate) fn reader_builder() -> redb::Builder {
+    let mut b = redb::Builder::new();
+    b.set_concurrency_mode(CONCURRENCY);
+    b
+}
+
+/// True when this build's mode lets a read-only handle share the file with a writer.
+pub(crate) fn shares_with_writer() -> bool {
+    CONCURRENCY != ConcurrencyMode::ExclusiveWriter
+}
+
+fn open_db(
+    path: &Utf8PathBuf,
+    busy_until: Instant,
+    deadline: Instant,
+) -> Result<Database, StoreError> {
     let mut wait = BACKOFF_START;
     let mut recreated = false;
     loop {
-        match Database::create(path.as_std_path()) {
+        match writer_builder(deadline).create(path.as_std_path()) {
             Ok(d) => return Ok(d),
             Err(DatabaseError::DatabaseAlreadyOpen) => {
                 let now = Instant::now();
-                if now >= deadline {
+                if now >= busy_until {
                     return Err(StoreError::Busy);
                 }
-                std::thread::sleep(wait.min(deadline - now));
+                std::thread::sleep(wait.min(busy_until - now));
                 wait = (wait * 2).min(BACKOFF_MAX);
             }
+            Err(DatabaseError::RepairAborted) => return Err(StoreError::Busy),
             // A corrupt cache is deleted and rebuilt (FEAT-003 section 8).
             Err(DatabaseError::Storage(StorageError::Corrupted(_)))
             | Err(DatabaseError::UpgradeRequired(_))
@@ -2579,6 +2617,22 @@ fn open_db(path: &Utf8PathBuf, deadline: Instant) -> Result<Database, StoreError
             Err(e) => return Err(db(e)),
         }
     }
+}
+
+/// The writer open: creates the file, and recreates it when its schema differs.
+fn open_writer(
+    path: &Utf8PathBuf,
+    busy_until: Instant,
+    deadline: Instant,
+) -> Result<Database, StoreError> {
+    let mut database = open_db(path, busy_until, deadline)?;
+    if !schema_current(&database)? {
+        drop(database);
+        std::fs::remove_file(path).map_err(|e| StoreError::io(path, e))?;
+        database = open_db(path, busy_until, deadline)?;
+        schema_current(&database)?;
+    }
+    Ok(database)
 }
 
 impl Cache {
@@ -2594,37 +2648,144 @@ impl Cache {
         stitch: &dyn Restitch,
         deadline: Instant,
     ) -> Result<Cache, StoreError> {
+        Cache::open_or_rebuild_busy(dir, stitch, deadline, deadline)
+    }
+
+    /// As [`Cache::open_or_rebuild`], but a database held by another writer is retried only until
+    /// `busy_until` (FEAT-080: `busy_until` already passed means one try); the repair bound and
+    /// the sync use `deadline`.
+    pub fn open_or_rebuild_busy(
+        dir: &ProjectDir,
+        stitch: &dyn Restitch,
+        busy_until: Instant,
+        deadline: Instant,
+    ) -> Result<Cache, StoreError> {
         let cache_dir = dir.cache_dir();
         std::fs::create_dir_all(&cache_dir).map_err(|e| StoreError::io(&cache_dir, e))?;
         let path = cache_dir.join("index.redb");
-
-        let mut database = open_db(&path, deadline)?;
-        if !schema_current(&database)? {
-            drop(database);
-            std::fs::remove_file(&path).map_err(|e| StoreError::io(&path, e))?;
-            database = open_db(&path, deadline)?;
-            schema_current(&database)?;
-        }
+        let database = open_writer(&path, busy_until, deadline)?;
         let mut cache = Cache {
-            db: database,
+            db: RwLock::new(Handle::Writer(database)),
             report: SyncReport::default(),
         };
-        // An interrupted publish is finished before the shards are compared with the hashes.
-        cache.replay_journal(dir)?;
-        cache.report = cache.sync(dir, stitch, deadline)?;
+        cache.report = cache.after_open(dir, stitch, deadline)?;
         Ok(cache)
     }
 
+    /// What follows every writer open. An interrupted publish is finished before the shards are
+    /// compared with the hashes.
+    fn after_open(
+        &self,
+        dir: &ProjectDir,
+        stitch: &dyn Restitch,
+        deadline: Instant,
+    ) -> Result<SyncReport, StoreError> {
+        self.replay_journal(dir)?;
+        self.sync(dir, stitch, deadline)
+    }
+
+    /// FEAT-080 R-1, R-6. A read-only handle beside any writer. Never writes, syncs or replays.
+    /// `Ok(None)` when the handle cannot serve: no file, another schema, tables not yet created,
+    /// repair needed or running, or a corrupt header. Other errors are [`StoreError`].
+    pub fn open_reader(dir: &ProjectDir) -> Result<Option<Cache>, StoreError> {
+        if !shares_with_writer() {
+            return Ok(None);
+        }
+        let path = dir.cache_dir().join("index.redb");
+        let database = match reader_builder().open_read_only(path.as_std_path()) {
+            Ok(d) => d,
+            Err(DatabaseError::DatabaseAlreadyOpen)
+            | Err(DatabaseError::RepairAborted)
+            | Err(DatabaseError::UpgradeRequired(_))
+            | Err(DatabaseError::Storage(StorageError::Corrupted(_))) => return Ok(None),
+            Err(DatabaseError::Storage(StorageError::Io(e)))
+                if e.kind() == std::io::ErrorKind::NotFound =>
+            {
+                return Ok(None);
+            }
+            // A writer has created the file but not initialised it yet.
+            Err(_)
+                if std::fs::metadata(path.as_std_path())
+                    .map(|m| m.len() == 0)
+                    .unwrap_or(false) =>
+            {
+                return Ok(None);
+            }
+            Err(e) => return Err(db(e)),
+        };
+        let txn = database.begin_read().map_err(db)?;
+        if !TableId::ALL.iter().all(|t| txn.open_table(t.def()).is_ok()) {
+            return Ok(None);
+        }
+        let rx = ReadTx {
+            txn,
+            _cache: PhantomData,
+        };
+        match rx.meta("cache_schema")? {
+            Some(v) if v == CACHE_SCHEMA.to_le_bytes() => {}
+            _ => return Ok(None),
+        }
+        drop(rx);
+        Ok(Some(Cache {
+            db: RwLock::new(Handle::Reader(database)),
+            report: SyncReport::default(),
+        }))
+    }
+
+    /// True for a handle from [`Cache::open_reader`] that has not been upgraded.
+    pub fn is_reader(&self) -> bool {
+        matches!(
+            *self.db.read().unwrap_or_else(PoisonError::into_inner),
+            Handle::Reader(_)
+        )
+    }
+
+    /// FEAT-080 R-4. Replace a read-only handle with the writer, then run what
+    /// `open_or_rebuild` runs after its open. `Ok(false)` when another process holds the writer
+    /// (the reader is kept). No [`ReadTx`] may be alive.
+    pub fn try_upgrade(
+        &self,
+        dir: &ProjectDir,
+        stitch: &dyn Restitch,
+        deadline: Instant,
+    ) -> Result<bool, StoreError> {
+        if !self.is_reader() {
+            return Ok(true);
+        }
+        let path = dir.cache_dir().join("index.redb");
+        let database = match writer_builder(deadline).create(path.as_std_path()) {
+            Ok(d) => d,
+            Err(DatabaseError::DatabaseAlreadyOpen) => return Ok(false),
+            Err(DatabaseError::RepairAborted) => return Err(StoreError::Busy),
+            Err(e) => return Err(db(e)),
+        };
+        if !schema_current(&database)? {
+            return Err(StoreError::Db("the cache schema changed".into()));
+        }
+        *self.db.write().unwrap_or_else(PoisonError::into_inner) = Handle::Writer(database);
+        self.after_open(dir, stitch, deadline)?;
+        Ok(true)
+    }
+
     pub fn read(&self) -> Result<ReadTx<'_>, StoreError> {
+        let txn = match &*self.db.read().unwrap_or_else(PoisonError::into_inner) {
+            Handle::Writer(d) => d.begin_read(),
+            Handle::Reader(d) => d.begin_read(),
+        }
+        .map_err(db)?;
         Ok(ReadTx {
-            txn: self.db.begin_read().map_err(db)?,
+            txn,
             _cache: PhantomData,
         })
     }
 
     pub fn write(&self) -> Result<WriteTx<'_>, StoreError> {
+        let txn = match &*self.db.read().unwrap_or_else(PoisonError::into_inner) {
+            Handle::Writer(d) => d.begin_write().map_err(db)?,
+            Handle::Reader(_) => return Err(StoreError::Busy),
+        };
         Ok(WriteTx {
-            txn: self.db.begin_write().map_err(db)?,
+            txn,
             _cache: PhantomData,
             touched: RankTouched::default(),
         })
