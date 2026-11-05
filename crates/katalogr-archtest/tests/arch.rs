@@ -1224,4 +1224,42 @@ mod archtest {
             }
         }
     }
+
+    /// FEAT-035 R-6. Nothing in `katalogr-dist` or `katalogr` writes to a board: no source
+    /// builds a process command named for the board tool, and none holds the board's
+    /// document-adding words. The process rule overlaps `no_kanbanr_process` (FEAT-087 R-5),
+    /// which covers every crate outside test items; this one also covers test items of these
+    /// two crates.
+    #[test]
+    fn no_board_writes() {
+        let root = workspace_root();
+        let mut failures = Vec::new();
+        for krate in ["katalogr-dist", "katalogr"] {
+            let mut files = Vec::new();
+            rs_files(&root.join("crates").join(krate).join("src"), &mut files);
+            files.sort();
+            for f in files {
+                let text = std::fs::read_to_string(&f).expect("read source");
+                for (n, line) in text.lines().enumerate() {
+                    if line.contains("doc add") {
+                        failures.push(format!(
+                            "{}:{}: holds the words `doc add`",
+                            f.display(),
+                            n + 1
+                        ));
+                    }
+                    if let Some(at) = line.find("Command::new(")
+                        && line[at..].contains("kanbanr")
+                    {
+                        failures.push(format!("{}:{}: runs a kanbanr process", f.display(), n + 1));
+                    }
+                }
+            }
+        }
+        assert!(
+            failures.is_empty(),
+            "katalogr must not write to a board:\n{}",
+            failures.join("\n")
+        );
+    }
 }
