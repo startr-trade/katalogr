@@ -1,0 +1,3 @@
+mode: subset
+symbols:
+  - "app:src/charlie.rs#fn:handle_request_charlie"
