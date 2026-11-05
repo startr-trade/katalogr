@@ -422,8 +422,10 @@ impl Engine {
             let recorded = recorded_position(&snap, repo)?;
             // With no record, a rescan is the only way to know what the index reflects. Queued
             // changes mean a producer is already feeding the index, so none is added then.
-            let unknown_but_fed =
-                recorded.is_none() && self.pending_in(&snap, &Scope::Project)? > 0;
+            // A rescan already waiting will establish the position, so that case is not unknown.
+            let unknown_but_fed = recorded.is_none()
+                && self.pending_in(&snap, &Scope::Project)? > 0
+                && !self.rescan_waiting(repo)?;
             if unknown_but_fed {
                 // Nothing says what the index reflects, so the answer cannot be exact yet.
                 unrecorded.insert(repo.clone());
