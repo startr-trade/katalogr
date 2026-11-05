@@ -318,6 +318,16 @@ mod readers {
         drop(w);
     }
 
+    /// R-6: a file a writer has just created, not yet initialised, is not an error for a reader.
+    #[test]
+    fn empty_file_uses_writer_open() {
+        let f = fixture();
+        let path = f.dir().cache_dir().join("index.redb");
+        std::fs::create_dir_all(f.dir().cache_dir()).unwrap();
+        std::fs::write(&path, b"").unwrap();
+        assert!(f.reader().is_none());
+    }
+
     /// R-6: a cache of another schema is left for the writer open to recreate.
     #[test]
     fn other_schema_uses_writer_open() {
