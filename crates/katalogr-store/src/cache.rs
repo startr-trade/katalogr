@@ -13,6 +13,7 @@ use crate::dict;
 use crate::error::StoreError;
 use crate::fan;
 use crate::kindex::ProjectDir;
+use crate::postings::{self, PostingBuf};
 use camino::{Utf8Path, Utf8PathBuf};
 use katalogr_model::{
     ArtifactName, Confidence, ContractName, ContractRole, Export, ExportKey, Fact, Fragment, Id,
@@ -26,7 +27,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::marker::PhantomData;
-use std::sync::{PoisonError, RwLock};
+use std::sync::{Mutex, PoisonError, RwLock};
 use std::time::{Duration, Instant};
 
 /// Stored in `meta`; a different number rebuilds the cache from the shards.
@@ -244,12 +245,14 @@ pub struct ErrorRow {
 /// Number of searchable fields per document (see `katalogr_model::Field`).
 pub const LEXICON_FIELDS: usize = 4;
 
-/// One posting: a term occurs `tf` times in `field` of `symbol`.
+/// One posting: a term occurs `tf` times in `field` of `symbol`, whose per-field token counts
+/// are `doc_len`.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct Posting {
     pub field: u8,
     pub symbol: Id,
     pub tf: u32,
+    pub doc_len: [u32; LEXICON_FIELDS],
 }
 
 /// Document count and per-field total lengths, for BM25.
@@ -377,20 +380,6 @@ fn ext_context_key(repo: &str, extension: &str) -> Vec<u8> {
     let mut k = Vec::new();
     lp(&mut k, repo);
     k.extend_from_slice(extension.as_bytes());
-    k
-}
-
-/// Terms are alphanumeric, so a NUL ends the term; `term NUL` is an exact-term prefix.
-fn posting_prefix(term: &str) -> Vec<u8> {
-    let mut k = term.as_bytes().to_vec();
-    k.push(0);
-    k
-}
-
-fn posting_key(term: &str, field: u8, symbol: Id) -> Vec<u8> {
-    let mut k = posting_prefix(term);
-    k.push(field);
-    k.extend_from_slice(&symbol.0);
     k
 }
 
@@ -613,7 +602,8 @@ pub enum TableId {
     Journal,
     ExtContext,
     Postings,
-    DocLen,
+    DocOrd,
+    DocByOrd,
     LexiconStats,
     Rank,
     Contracts,
@@ -630,7 +620,7 @@ pub enum TableId {
 }
 
 impl TableId {
-    pub const ALL: [TableId; 32] = [
+    pub const ALL: [TableId; 33] = [
         TableId::Meta,
         TableId::ShardHashes,
         TableId::Artifacts,
@@ -649,7 +639,8 @@ impl TableId {
         TableId::Journal,
         TableId::ExtContext,
         TableId::Postings,
-        TableId::DocLen,
+        TableId::DocOrd,
+        TableId::DocByOrd,
         TableId::LexiconStats,
         TableId::Rank,
         TableId::Contracts,
@@ -704,7 +695,8 @@ impl TableId {
             TableId::Journal => "journal",
             TableId::ExtContext => "ext_context",
             TableId::Postings => "postings",
-            TableId::DocLen => "doc_len",
+            TableId::DocOrd => "doc_ord",
+            TableId::DocByOrd => "doc_by_ord",
             TableId::LexiconStats => "lexicon_stats",
             TableId::Rank => "rank",
             TableId::Contracts => "contracts",
@@ -1624,22 +1616,18 @@ pub trait Reader {
 
     /// The postings of one exact term, sorted by `(field, symbol)`.
     fn postings(&self, term: &str) -> Result<Vec<Posting>, StoreError> {
-        let prefix = posting_prefix(term);
-        self.raw_scan(TableId::Postings, &prefix)?
-            .into_iter()
-            .map(|(k, v)| {
-                let bad = || StoreError::Row("malformed posting".into());
-                let rest = &k[prefix.len()..];
-                if rest.len() != 17 {
-                    return Err(bad());
-                }
-                Ok(Posting {
-                    field: rest[0],
-                    symbol: Id(rest[1..].try_into().map_err(|_| bad())?),
-                    tf: u32::from_le_bytes(v.as_slice().try_into().map_err(|_| bad())?),
-                })
-            })
-            .collect()
+        let prefix = postings::prefix(term);
+        let mut entries: Vec<postings::Entry> = Vec::new();
+        for (k, v) in self.raw_scan(TableId::Postings, &prefix)? {
+            if k.len() != prefix.len() + 4 {
+                return Err(StoreError::Row("malformed posting".into()));
+            }
+            let base = postings::block_of_key(&k)? * postings::POSTING_BLOCK;
+            entries.extend(postings::decode_block(base, &v)?);
+        }
+        let mut out = resolve_postings(self, &entries)?;
+        out.sort_by_key(|p| (p.field, p.symbol));
+        Ok(out)
     }
 
     /// The postings of the indexed terms that `prefix` strictly prefixes (the exact term
@@ -1652,37 +1640,53 @@ pub trait Reader {
         limit: usize,
     ) -> Result<Vec<(String, Vec<Posting>)>, StoreError> {
         let bad = || StoreError::Row("malformed posting".into());
-        let mut by_term: BTreeMap<String, (u64, Vec<Posting>)> = BTreeMap::new();
+        let mut by_term: BTreeMap<String, (u64, Vec<postings::Entry>)> = BTreeMap::new();
         for (k, v) in self.raw_scan(TableId::Postings, prefix.as_bytes())? {
             let nul = k.iter().position(|b| *b == 0).ok_or_else(bad)?;
-            let rest = &k[nul + 1..];
-            if rest.len() != 17 {
+            if k.len() != nul + 5 {
                 return Err(bad());
             }
             if nul == prefix.len() {
                 continue;
             }
             let term = String::from_utf8(k[..nul].to_vec()).map_err(|_| bad())?;
-            let tf = u32::from_le_bytes(v.as_slice().try_into().map_err(|_| bad())?);
+            let base = postings::block_of_key(&k)? * postings::POSTING_BLOCK;
             let entry = by_term.entry(term).or_default();
-            entry.0 += u64::from(tf);
-            entry.1.push(Posting {
-                field: rest[0],
-                symbol: Id(rest[1..].try_into().map_err(|_| bad())?),
-                tf,
-            });
+            for e in postings::decode_block(base, &v)? {
+                entry.0 += u64::from(e.2);
+                entry.1.push(e);
+            }
         }
-        let mut terms: Vec<(String, (u64, Vec<Posting>))> = by_term.into_iter().collect();
+        let mut terms: Vec<(String, (u64, Vec<postings::Entry>))> = by_term.into_iter().collect();
         terms.sort_by(|a, b| b.1.0.cmp(&a.1.0).then_with(|| a.0.cmp(&b.0)));
         terms.truncate(limit);
-        Ok(terms.into_iter().map(|(t, (_, p))| (t, p)).collect())
+        // One lookup of the documents of every selected term.
+        let all: Vec<postings::Entry> = terms
+            .iter()
+            .flat_map(|(_, (_, e))| e.iter().copied())
+            .collect();
+        let resolved = resolve_postings(self, &all)?;
+        let mut at = 0;
+        let mut out = Vec::with_capacity(terms.len());
+        for (term, (_, entries)) in terms {
+            let mut ps = resolved[at..at + entries.len()].to_vec();
+            at += entries.len();
+            ps.sort_by_key(|p| (p.field, p.symbol));
+            out.push((term, ps));
+        }
+        Ok(out)
     }
 
     /// Per-field token counts of one indexed symbol.
     fn doc_len(&self, id: Id) -> Result<Option<[u32; LEXICON_FIELDS]>, StoreError> {
-        self.raw_get(TableId::DocLen, &id.0)?
-            .map(|v| decode_doc_len(&v))
-            .transpose()
+        let Some(ord) = self.raw_get(TableId::DocOrd, &id.0)? else {
+            return Ok(None);
+        };
+        let ord = postings::decode_ord(&ord)?;
+        let row = self
+            .raw_get(TableId::DocByOrd, &ord.to_be_bytes())?
+            .ok_or_else(|| StoreError::Row("doc_ord without doc_by_ord".into()))?;
+        Ok(Some(postings::decode_doc(&row)?.1))
     }
 
     fn lexicon_stats(&self) -> Result<LexiconStats, StoreError> {
@@ -2112,19 +2116,34 @@ fn kind_ranks(kinds: &[String]) -> Vec<u32> {
     rank
 }
 
-fn encode_doc_len(l: &[u32; LEXICON_FIELDS]) -> Vec<u8> {
-    l.iter().flat_map(|n| n.to_le_bytes()).collect()
-}
-
-fn decode_doc_len(v: &[u8]) -> Result<[u32; LEXICON_FIELDS], StoreError> {
-    if v.len() != 4 * LEXICON_FIELDS {
-        return Err(StoreError::Row("bad doc_len row".into()));
+/// The postings of `entries` (in the order given), with their symbols and lengths filled in from
+/// `doc_by_ord`; one lookup per distinct ordinal.
+fn resolve_postings<R: Reader + ?Sized>(
+    tx: &R,
+    entries: &[postings::Entry],
+) -> Result<Vec<Posting>, StoreError> {
+    let mut ords: Vec<u32> = entries.iter().map(|e| e.0).collect();
+    ords.sort_unstable();
+    ords.dedup();
+    let keys: Vec<Vec<u8>> = ords.iter().map(|o| o.to_be_bytes().to_vec()).collect();
+    let rows = tx.raw_get_many(TableId::DocByOrd, &keys)?;
+    let mut docs: HashMap<u32, (Id, [u32; LEXICON_FIELDS])> = HashMap::with_capacity(ords.len());
+    for (ord, row) in ords.iter().zip(rows) {
+        let row = row.ok_or_else(|| StoreError::Row("posting without document".into()))?;
+        docs.insert(*ord, postings::decode_doc(&row)?);
     }
-    let mut out = [0u32; LEXICON_FIELDS];
-    for (i, o) in out.iter_mut().enumerate() {
-        *o = u32::from_le_bytes(v[i * 4..i * 4 + 4].try_into().expect("4 bytes"));
-    }
-    Ok(out)
+    Ok(entries
+        .iter()
+        .map(|(ord, field, tf)| {
+            let (symbol, doc_len) = docs[ord];
+            Posting {
+                field: *field,
+                symbol,
+                tf: *tf,
+                doc_len,
+            }
+        })
+        .collect())
 }
 
 /// Whether one link entry is strong: not inferred, and its fan-out at most one.
@@ -2315,6 +2334,10 @@ pub struct WriteTx<'a> {
     memo: dict::Memo,
     /// Provenance reference counts to apply at commit.
     prov_delta: BTreeMap<Pid, i64>,
+    /// Posting writes not yet applied; flushed before a postings read and at commit.
+    postings: Mutex<PostingBuf>,
+    /// Ordinals given up by `remove_doc_postings` in this transaction, until commit or reuse.
+    released: BTreeMap<Id, u32>,
 }
 
 /// What a write transaction touched of the rank's inputs (FEAT-057): each link with its rank
@@ -2334,15 +2357,40 @@ impl Reader for WriteTx<'_> {
     }
 
     fn raw_get(&self, t: TableId, key: &[u8]) -> Result<Option<Vec<u8>>, StoreError> {
+        if t == TableId::Postings {
+            self.flush_postings()?;
+        }
         get_in(&self.txn.open_table(t.def()).map_err(db)?, key)
     }
 
     fn raw_scan(&self, t: TableId, prefix: &[u8]) -> Result<RawRows, StoreError> {
+        if t == TableId::Postings {
+            self.flush_postings()?;
+        }
         scan_in(&self.txn.open_table(t.def()).map_err(db)?, prefix)
     }
 
     fn raw_scan_keys(&self, t: TableId, prefix: &[u8]) -> Result<Vec<Vec<u8>>, StoreError> {
+        if t == TableId::Postings {
+            self.flush_postings()?;
+        }
         scan_keys_in(&self.txn.open_table(t.def()).map_err(db)?, prefix)
+    }
+
+    /// A symbol whose postings were removed in this transaction is not indexed, though its
+    /// ordinal rows stay until commit.
+    fn doc_len(&self, id: Id) -> Result<Option<[u32; LEXICON_FIELDS]>, StoreError> {
+        if self.released.contains_key(&id) {
+            return Ok(None);
+        }
+        let Some(ord) = self.raw_get(TableId::DocOrd, &id.0)? else {
+            return Ok(None);
+        };
+        let ord = postings::decode_ord(&ord)?;
+        let row = self
+            .raw_get(TableId::DocByOrd, &ord.to_be_bytes())?
+            .ok_or_else(|| StoreError::Row("doc_ord without doc_by_ord".into()))?;
+        Ok(Some(postings::decode_doc(&row)?.1))
     }
 }
 
@@ -2354,7 +2402,15 @@ impl WriteTx<'_> {
             touched: RankTouched::default(),
             memo: dict::Memo::default(),
             prov_delta: BTreeMap::new(),
+            postings: Mutex::new(PostingBuf::default()),
+            released: BTreeMap::new(),
         }
+    }
+
+    /// Applies the buffered posting writes.
+    fn flush_postings(&self) -> Result<(), StoreError> {
+        let mut buf = self.postings.lock().unwrap_or_else(PoisonError::into_inner);
+        postings::flush(&mut buf, &self.txn)
     }
 
     /// The interner of this transaction: assigns vocabulary and provenance ids, and counts the
@@ -2697,21 +2753,47 @@ impl WriteTx<'_> {
 
     /// Index one symbol: its postings `(term, field, tf)` and per-field lengths. Adds the
     /// lengths to the lexicon statistics. Call [`WriteTx::remove_doc_postings`] first when the
-    /// symbol is already indexed.
+    /// symbol is already indexed. The symbol keeps the ordinal it has (or had earlier in this
+    /// transaction); a new one is the next unused number.
     pub fn put_doc_postings(
         &mut self,
         id: Id,
         lens: [u32; LEXICON_FIELDS],
         terms: &[(String, u8, u32)],
     ) -> Result<(), StoreError> {
-        for (term, field, tf) in terms {
-            self.put(
-                TableId::Postings,
-                &posting_key(term, *field, id),
-                &tf.to_le_bytes(),
-            )?;
+        let ord = match self.released.remove(&id) {
+            Some(ord) => ord,
+            None => match self.raw_get(TableId::DocOrd, &id.0)? {
+                Some(v) => postings::decode_ord(&v)?,
+                None => {
+                    let next = match self.meta(postings::DOC_NEXT_ORD_META)? {
+                        Some(v) => u32::from_le_bytes(
+                            v.as_slice()
+                                .try_into()
+                                .map_err(|_| StoreError::Row("bad doc_next_ord".into()))?,
+                        ),
+                        None => 0,
+                    };
+                    let after = next
+                        .checked_add(1)
+                        .ok_or_else(|| StoreError::Row("posting ordinals exhausted".into()))?;
+                    self.set_meta(postings::DOC_NEXT_ORD_META, &after.to_le_bytes())?;
+                    next
+                }
+            },
+        };
+        self.put(TableId::DocOrd, &id.0, &postings::encode_ord(ord))?;
+        self.put(
+            TableId::DocByOrd,
+            &ord.to_be_bytes(),
+            &postings::encode_doc(id, &lens),
+        )?;
+        {
+            let mut buf = self.postings.lock().unwrap_or_else(PoisonError::into_inner);
+            for (term, field, tf) in terms {
+                buf.add(term, ord, *field, *tf);
+            }
         }
-        self.put(TableId::DocLen, &id.0, &encode_doc_len(&lens))?;
         let mut stats = self.lexicon_stats()?;
         stats.docs += 1;
         for (t, l) in stats.total_len.iter_mut().zip(lens) {
@@ -2721,7 +2803,8 @@ impl WriteTx<'_> {
     }
 
     /// Remove the postings `(term, field)` of one symbol and its length row, subtracting the
-    /// lengths from the lexicon statistics. A symbol that is not indexed changes nothing.
+    /// lengths from the lexicon statistics. A symbol that is not indexed changes nothing. The
+    /// ordinal is given back at commit unless the symbol is indexed again first.
     pub fn remove_doc_postings(
         &mut self,
         id: Id,
@@ -2730,16 +2813,34 @@ impl WriteTx<'_> {
         let Some(lens) = self.doc_len(id)? else {
             return Ok(());
         };
-        for (term, field) in terms {
-            self.del(TableId::Postings, &posting_key(term, *field, id))?;
+        let ord = postings::decode_ord(
+            &self
+                .raw_get(TableId::DocOrd, &id.0)?
+                .ok_or_else(|| StoreError::Row("doc_len without doc_ord".into()))?,
+        )?;
+        {
+            let mut buf = self.postings.lock().unwrap_or_else(PoisonError::into_inner);
+            for (term, _) in terms {
+                buf.remove(term, ord);
+            }
         }
-        self.del(TableId::DocLen, &id.0)?;
+        self.released.insert(id, ord);
         let mut stats = self.lexicon_stats()?;
         stats.docs = stats.docs.saturating_sub(1);
         for (t, l) in stats.total_len.iter_mut().zip(lens) {
             *t = t.saturating_sub(u64::from(l));
         }
         self.put(TableId::LexiconStats, STATS_KEY, &encode_stats(&stats))
+    }
+
+    /// Applies the buffered postings and gives back the ordinals nobody claimed again.
+    fn finish_postings(&mut self) -> Result<(), StoreError> {
+        self.flush_postings()?;
+        for (id, ord) in std::mem::take(&mut self.released) {
+            self.del(TableId::DocOrd, &id.0)?;
+            self.del(TableId::DocByOrd, &ord.to_be_bytes())?;
+        }
+        Ok(())
     }
 
     /// Remember the state a symbol had when this transaction first touched it.
@@ -2837,6 +2938,7 @@ impl WriteTx<'_> {
     /// Commits. A transaction that changed the rank's inputs also drops the stored rank's
     /// watermark, so no reader can take a rank that does not match the graph it reads.
     pub fn commit(mut self) -> Result<(), StoreError> {
+        self.finish_postings()?;
         dict::apply_prov_deltas(&self.txn, &self.prov_delta)?;
         if self.rank_inputs_changed()? {
             self.del(TableId::Meta, RANK_WATERMARK_META.as_bytes())?;
@@ -4184,5 +4286,150 @@ mod tests {
         let rx = c.read().unwrap();
         assert_eq!(count(&rx, TableId::Vocab), 0);
         assert_eq!(commits_on_this_thread(), commits + 1);
+    }
+
+    // ------------------------------------------------ packed postings (FEAT-075 T7)
+
+    fn terms(list: &[(&str, u8, u32)]) -> Vec<(String, u8, u32)> {
+        list.iter()
+            .map(|(t, f, n)| (t.to_string(), *f, *n))
+            .collect()
+    }
+
+    fn ord_of(tx: &impl Reader, id: Id) -> u32 {
+        let raw = tx.raw_get(TableId::DocOrd, &id.0).unwrap().unwrap();
+        crate::postings::decode_ord(&raw).unwrap()
+    }
+
+    #[test]
+    fn ordinal_kept_across_reindex() {
+        let t = tempfile::tempdir().unwrap();
+        let c = cache(&t);
+        let mut tx = c.write().unwrap();
+        tx.put_doc_postings(nid(1), [1, 0, 0, 0], &terms(&[("alpha", 0, 1)]))
+            .unwrap();
+        tx.put_doc_postings(nid(2), [2, 0, 0, 0], &terms(&[("alpha", 0, 2)]))
+            .unwrap();
+        tx.commit().unwrap();
+        let rx = c.read().unwrap();
+        let (o1, o2) = (ord_of(&rx, nid(1)), ord_of(&rx, nid(2)));
+        assert_ne!(o1, o2);
+        drop(rx);
+
+        // Remove and index again in one transaction: the ordinal stays.
+        let mut tx = c.write().unwrap();
+        tx.remove_doc_postings(nid(1), &[("alpha".into(), 0)])
+            .unwrap();
+        assert_eq!(
+            tx.doc_len(nid(1)).unwrap(),
+            None,
+            "removed inside the transaction"
+        );
+        tx.put_doc_postings(nid(1), [5, 0, 0, 0], &terms(&[("beta", 1, 3)]))
+            .unwrap();
+        tx.commit().unwrap();
+        let rx = c.read().unwrap();
+        assert_eq!(ord_of(&rx, nid(1)), o1);
+        assert_eq!(ord_of(&rx, nid(2)), o2);
+        assert_eq!(rx.doc_len(nid(1)).unwrap(), Some([5, 0, 0, 0]));
+        assert_eq!(
+            rx.postings("alpha").unwrap().len(),
+            1,
+            "only symbol 2 is left on alpha"
+        );
+        assert_eq!(rx.postings("beta").unwrap()[0].symbol, nid(1));
+        assert_eq!(rx.lexicon_stats().unwrap().docs, 2);
+        drop(rx);
+
+        // Removed in one transaction, indexed in a later one: a new ordinal; none is reused.
+        let mut tx = c.write().unwrap();
+        tx.remove_doc_postings(nid(1), &[("beta".into(), 1)])
+            .unwrap();
+        tx.commit().unwrap();
+        assert!(
+            c.read()
+                .unwrap()
+                .raw_get(TableId::DocOrd, &nid(1).0)
+                .unwrap()
+                .is_none()
+        );
+        let mut tx = c.write().unwrap();
+        tx.put_doc_postings(nid(1), [1, 0, 0, 0], &terms(&[("beta", 1, 1)]))
+            .unwrap();
+        tx.commit().unwrap();
+        let rx = c.read().unwrap();
+        let o1b = ord_of(&rx, nid(1));
+        assert!(o1b > o1 && o1b > o2);
+    }
+
+    #[test]
+    fn buffer_flushed_before_read() {
+        let t = tempfile::tempdir().unwrap();
+        let c = cache(&t);
+        let mut tx = c.write().unwrap();
+        tx.put_doc_postings(
+            nid(1),
+            [1, 0, 0, 0],
+            &terms(&[("alpha", 0, 4), ("alphabet", 2, 1)]),
+        )
+        .unwrap();
+        // Nothing is committed, yet the transaction reads its own postings.
+        let ps = tx.postings("alpha").unwrap();
+        assert_eq!(
+            ps,
+            vec![Posting {
+                field: 0,
+                symbol: nid(1),
+                tf: 4,
+                doc_len: [1, 0, 0, 0]
+            }]
+        );
+        let pre = tx.postings_prefix("alpha", 8).unwrap();
+        assert_eq!(pre.len(), 1, "the exact term is excluded");
+        assert_eq!(pre[0].0, "alphabet");
+        tx.remove_doc_postings(nid(1), &[("alpha".into(), 0), ("alphabet".into(), 2)])
+            .unwrap();
+        assert!(tx.postings("alpha").unwrap().is_empty());
+        assert!(tx.raw_scan(TableId::Postings, &[]).unwrap().is_empty());
+        tx.commit().unwrap();
+        let rx = c.read().unwrap();
+        assert!(rx.postings("alpha").unwrap().is_empty());
+        assert_eq!(count(&rx, TableId::DocOrd), 0);
+        assert_eq!(count(&rx, TableId::DocByOrd), 0);
+    }
+
+    #[test]
+    fn postings_span_blocks_and_rank_terms() {
+        let t = tempfile::tempdir().unwrap();
+        let c = cache(&t);
+        let mut tx = c.write().unwrap();
+        for i in 0..2100u32 {
+            let mut b = [0u8; 16];
+            b[..4].copy_from_slice(&i.to_be_bytes());
+            let tf = if i % 2 == 0 { 2 } else { 1 };
+            tx.put_doc_postings(
+                Id(b),
+                [i, 0, 0, 0],
+                &terms(&[("common", (i % 4) as u8, tf), ("commonly", 1, 1)]),
+            )
+            .unwrap();
+        }
+        tx.commit().unwrap();
+        let rx = c.read().unwrap();
+        // 2,100 ordinals: three blocks for each of the two terms.
+        assert_eq!(count(&rx, TableId::Postings), 6);
+        let ps = rx.postings("common").unwrap();
+        assert_eq!(ps.len(), 2100);
+        assert!(
+            ps.windows(2)
+                .all(|w| (w[0].field, w[0].symbol) < (w[1].field, w[1].symbol))
+        );
+        assert!(
+            ps.iter()
+                .all(|p| p.doc_len[0] == u32::from_be_bytes(p.symbol.0[..4].try_into().unwrap()))
+        );
+        let pre = rx.postings_prefix("common", 8).unwrap();
+        assert_eq!(pre.len(), 1);
+        assert_eq!(pre[0].1.len(), 2100);
     }
 }

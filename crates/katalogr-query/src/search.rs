@@ -135,7 +135,6 @@ pub fn search_with_traced(
             *a = total as f64 / docs;
         }
     }
-    let mut lens: BTreeMap<Id, [u32; LEXICON_FIELDS]> = BTreeMap::new();
     let mut acc: BTreeMap<Id, Acc> = BTreeMap::new();
     // Recorded only when tracing: per query token, the term that gave each document its best value.
     let mut sources: Vec<Best> = Vec::new();
@@ -159,14 +158,7 @@ pub fn search_with_traced(
                 let Some(field) = Field::from_index(post.field as usize) else {
                     continue;
                 };
-                let dl = match lens.get(&post.symbol) {
-                    Some(l) => l[field.index()],
-                    None => {
-                        let l = tx.doc_len(post.symbol)?.unwrap_or([0; LEXICON_FIELDS]);
-                        lens.insert(post.symbol, l);
-                        l[field.index()]
-                    }
-                };
+                let dl = post.doc_len[field.index()];
                 let norm = 1.0 - p.b + p.b * f64::from(dl) / avg[field.index()];
                 *weighted.entry(post.symbol).or_default() +=
                     p.weights[field.index()] * f64::from(post.tf) / norm;

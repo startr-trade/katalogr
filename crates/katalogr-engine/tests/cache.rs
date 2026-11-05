@@ -723,6 +723,36 @@ mod cache {
     }
 
     #[test]
+    fn ordinals_released_with_symbol() {
+        use katalogr_store::cache::TableId;
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = project(&tmp);
+        dir.write_shard(&extract("a.tx", "sym fn Alpha\nsym fn Beta\n"))
+            .unwrap();
+        dir.write_shard(&extract("b.tx", "sym fn Gamma\n")).unwrap();
+        let cache = Cache::open_or_rebuild(&dir, &Stitcher::new(), soon()).unwrap();
+        let n = |rx: &dyn Fn(TableId) -> usize| (rx(TableId::DocOrd), rx(TableId::DocByOrd));
+        {
+            let rx = cache.read().unwrap();
+            let count = |t| rx.raw_scan(t, &[]).unwrap().len();
+            assert_eq!(n(&count), (3, 3));
+        }
+        drop(cache);
+        std::fs::remove_file(dir.shard_path("r", &RelPath::new("a.tx").unwrap())).unwrap();
+        let cache = Cache::open_or_rebuild(&dir, &Stitcher::new(), soon()).unwrap();
+        let rx = cache.read().unwrap();
+        let count = |t| rx.raw_scan(t, &[]).unwrap().len();
+        assert_eq!(
+            n(&count),
+            (1, 1),
+            "the removed symbols leave no ordinal rows"
+        );
+        assert_eq!(rx.lexicon_stats().unwrap().docs, 1);
+        assert!(rx.postings("alpha").unwrap().is_empty());
+        assert_eq!(rx.postings("gamma").unwrap().len(), 1);
+    }
+
+    #[test]
     fn index_errors_all_sorted() {
         use katalogr_store::ErrorRow;
         let tmp = tempfile::tempdir().unwrap();

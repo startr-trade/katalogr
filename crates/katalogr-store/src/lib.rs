@@ -13,6 +13,7 @@ pub mod guard;
 pub mod inspect;
 pub mod kindex;
 pub mod marker;
+mod postings;
 pub mod rank;
 pub mod shard;
 

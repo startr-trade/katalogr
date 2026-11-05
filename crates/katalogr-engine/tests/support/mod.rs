@@ -728,7 +728,8 @@ pub fn cache_dump(e: &Engine) -> CacheDump {
         .collect();
     for (name, t) in [
         ("postings", TableId::Postings),
-        ("doc_len", TableId::DocLen),
+        ("doc_ord", TableId::DocOrd),
+        ("doc_by_ord", TableId::DocByOrd),
         ("lexicon_stats", TableId::LexiconStats),
         ("shard_hashes", TableId::ShardHashes),
         ("rank", TableId::Rank),
