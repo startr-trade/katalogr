@@ -13,9 +13,11 @@ name = "katalogr"
 path = "src/main.rs"
 
 [features]
-default = ["mcp"]
+default = ["mcp", "api"]
 # The optional MCP wrapper for non-Claude hosts (ADR-0023). Off -> no tokio, no rmcp.
 mcp = ["dep:rmcp", "dep:tokio"]
+# The stateless HTTP/JSON API server (FEAT-049, ADR-0010). Off -> no tiny_http, no `api` command.
+api = ["dep:tiny_http"]
 
 [dependencies]
 katalogr-dist.workspace = true
@@ -24,6 +26,7 @@ clap.workspace = true
 serde_json.workspace = true
 rmcp = { workspace = true, optional = true }
 tokio = { workspace = true, optional = true }
+tiny_http = { workspace = true, optional = true }
 
 [[test]]
 name = "mcp"

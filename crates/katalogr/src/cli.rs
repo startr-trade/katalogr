@@ -252,6 +252,8 @@ pub enum Command {
     },
     /// Show the index watermark, pending changes and staleness.
     Status,
+    /// Show the contract this binary serves: versions and capabilities.
+    Contract,
     /// Serve katalogr's queries over MCP (stdio) for non-Claude agent hosts.
     #[cfg(feature = "mcp")]
     Mcp {

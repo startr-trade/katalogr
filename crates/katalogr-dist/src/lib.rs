@@ -3,6 +3,7 @@
 //! All behaviour of the command-line wrapper lives here; the wrapper parses, calls and renders.
 
 mod claude;
+pub mod contract;
 pub mod doctor;
 mod error;
 pub mod eval;
@@ -64,6 +65,10 @@ pub fn schemas() -> BTreeMap<&'static str, serde_json::Value> {
     assert!(
         all.insert("doctor", doctor::schema()).is_none(),
         "schema name doctor is registered twice"
+    );
+    assert!(
+        all.insert("contract", contract::schema()).is_none(),
+        "schema name contract is registered twice"
     );
     all
 }

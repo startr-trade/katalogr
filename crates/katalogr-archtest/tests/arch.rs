@@ -266,9 +266,12 @@ mod archtest {
             .iter()
             .map(|s| s.to_string())
             .collect();
-        // The MCP wrapper's dependencies, which must stay optional (FEAT-067, ADR-0023).
-        let optional_allowed: BTreeSet<String> =
-            ["rmcp", "tokio"].iter().map(|s| s.to_string()).collect();
+        // The MCP and API wrappers' dependencies, which must stay optional (FEAT-067, ADR-0023,
+        // FEAT-049).
+        let optional_allowed: BTreeSet<String> = ["rmcp", "tokio", "tiny_http"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
         let extra: Vec<_> = normal_deps(p)
             .into_iter()
             .filter(|d| !allowed.contains(d) && !optional_allowed.contains(d))
