@@ -2189,6 +2189,41 @@ mod position {
         assert_eq!(code, 2);
     }
 
+    /// R-11. Two contexts at the same position give byte-identical answers to the same question.
+    #[test]
+    fn same_position_same_bytes() {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = committed_project(tmp.path());
+        ok(&repo, &["index"]);
+        for args in [
+            vec!["find", "call"],
+            vec!["refs", "target"],
+            vec!["callers", "target"],
+            vec!["search", "caller"],
+            vec!["map"],
+        ] {
+            let mut cur = vec!["--json"];
+            cur.extend(&args);
+            let mut base = vec!["--json", "--context", "base"];
+            base.extend(&args);
+            let (c1, a, _) = run_raw(&repo, &cur);
+            let (c2, b, _) = run_raw(&repo, &base);
+            assert_eq!(c1, c2, "{args:?}");
+            // The watermark counts a context's own queue and cannot agree across contexts; every
+            // other byte, the view ID included, does.
+            let unmarked = |s: &str| {
+                let at = s.find("\"watermark\":").expect("watermark");
+                let end = at + s[at..].find(',').expect("comma") + 1;
+                format!("{}{}", &s[..at], &s[end..])
+            };
+            assert_eq!(
+                unmarked(&a),
+                unmarked(&b),
+                "{args:?}: the checkout's context and the base differ"
+            );
+        }
+    }
+
     /// R-3. A repo that is not this context's checkout reports the commit the base reflects and
     /// no uncommitted part; a repo with no base commit reports null.
     #[test]
