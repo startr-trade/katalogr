@@ -60,6 +60,11 @@ pub struct Cli {
     #[arg(long, global = true, value_name = "NAME")]
     pub project: Option<String>,
 
+    /// Context to read: `current` (this checkout's own), `base`, or an id from `context list`.
+    /// Default: the `KATALOGR_CONTEXT` environment variable, else `current`.
+    #[arg(long, global = true, value_name = "NAME")]
+    pub context: Option<String>,
+
     /// Emit machine-readable JSON.
     #[arg(long, global = true)]
     pub json: bool,

@@ -10,6 +10,7 @@ pub fn run(cli: &Cli) -> Result<ExitCode, DistError> {
     let overrides = Overrides {
         kindex: cli.kindex.clone(),
         project: cli.project.clone(),
+        context: super::context_choice(cli),
     };
     print!(
         "{}",

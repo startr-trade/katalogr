@@ -6,6 +6,7 @@ use katalogr_engine::base::{branch_tip, default_branch, plan_base_advance};
 use katalogr_engine::queue::Inbox;
 use katalogr_engine::queue::lock::lock_until;
 use katalogr_engine::{FileSource, NewEvent, scan::ScanError};
+use katalogr_store::{CACHE_SCHEMA, Cache, CacheInspection};
 use katalogr_store::{ContextId, ContextKind, ContextManifest, ProjectDir, Reader, seed_layer};
 use std::time::Instant;
 
@@ -22,6 +23,17 @@ pub enum ContextChoice {
 /// `meta` key holding the commit the base reflects for `repo`, as hex.
 pub fn base_commit_key(repo: &str) -> String {
     format!("base_commit.{repo}")
+}
+
+impl ContextChoice {
+    /// `current`, `base`, or the id of a context. Other text is a usage error.
+    pub fn parse(text: &str) -> Result<ContextChoice, DistError> {
+        Ok(match text {
+            "current" => ContextChoice::Current,
+            "base" => ContextChoice::Base,
+            id => ContextChoice::Named(ContextId::new(id)?),
+        })
+    }
 }
 
 impl Katalogr {
@@ -41,9 +53,6 @@ impl Katalogr {
     /// and does not exist yet. A busy base never hangs a read: when its lock cannot be taken
     /// by `deadline` the answer comes from the base, with a warning naming the context.
     pub(crate) fn layer_dir(&self, deadline: Instant) -> Result<ProjectDir, DistError> {
-        let touch = |layer: &ProjectDir| {
-            let _ = std::fs::File::create(layer.root().join(".used"));
-        };
         let id = match &self.context {
             ContextChoice::Base => return Ok(self.project.clone()),
             ContextChoice::Named(id) => {
@@ -56,8 +65,7 @@ impl Katalogr {
                         "unknown context {id}: see `katalogr context list`"
                     )));
                 }
-                touch(&layer);
-                return Ok(layer);
+                return self.current_layer(layer, deadline);
             }
             ContextChoice::Current => {
                 let Some((repo, root)) = self
@@ -79,10 +87,28 @@ impl Katalogr {
         let (id, repo, canon) = id;
         let layer = self.project.layer(&id);
         if layer.root().join(ContextManifest::FILE).is_file() {
-            touch(&layer);
-            return Ok(layer);
+            return self.current_layer(layer, deadline);
         }
         self.seed(&layer, &id, repo, &canon, deadline)
+    }
+
+    /// An existing layer, made usable: one whose cache has another `CACHE_SCHEMA`, or cannot be
+    /// read, is deleted and seeded again. `open_or_rebuild` is never let loose on a layer,
+    /// because rebuilding from delta shards alone would give an empty graph.
+    fn current_layer(&self, layer: ProjectDir, deadline: Instant) -> Result<ProjectDir, DistError> {
+        let usable = match Cache::inspect(&layer)? {
+            CacheInspection::Missing | CacheInspection::InUse => true,
+            CacheInspection::Open(o) => o.stored_schema == Some(CACHE_SCHEMA),
+            CacheInspection::Unreadable(_) => false,
+        };
+        if usable {
+            let _ = std::fs::File::create(layer.root().join(".used"));
+            return Ok(layer);
+        }
+        let m = ContextManifest::read(layer.root())?;
+        // The manifest of a commit context names no root; keep what it says.
+        std::fs::remove_dir_all(layer.root()).map_err(|e| DistError::io(layer.root(), e))?;
+        self.seed_from(&layer, &m, deadline)
     }
 
     fn seed(
@@ -93,6 +119,24 @@ impl Katalogr {
         root: &Utf8Path,
         deadline: Instant,
     ) -> Result<ProjectDir, DistError> {
+        let m = ContextManifest {
+            format: ContextManifest::FORMAT,
+            id: id.clone(),
+            kind: ContextKind::Checkout,
+            repo: repo.to_string(),
+            root: Some(root.to_owned()),
+            seed_commit: None,
+        };
+        self.seed_from(layer, &m, deadline)
+    }
+
+    fn seed_from(
+        &self,
+        layer: &ProjectDir,
+        m: &ContextManifest,
+        deadline: Instant,
+    ) -> Result<ProjectDir, DistError> {
+        let (id, repo) = (&m.id, m.repo.as_str());
         let Some(lock) = lock_until(&self.project.cache_dir(), deadline)? else {
             self.note(format!(
                 "context {id} not seeded: the base is busy; answered from the base"
@@ -101,14 +145,8 @@ impl Katalogr {
         };
         // Another process may have seeded it while this one waited.
         if !layer.root().join(ContextManifest::FILE).is_file() {
-            let m = ContextManifest {
-                format: ContextManifest::FORMAT,
-                id: id.clone(),
-                kind: ContextKind::Checkout,
-                repo: repo.to_string(),
-                root: Some(root.to_owned()),
-                seed_commit: None,
-            };
+            let mut m = m.clone();
+            m.seed_commit = None;
             seed_layer(&self.project, layer, &m, deadline)?;
             drop(lock);
             // The checkout may differ from the seed in ways only a listing shows; unchanged

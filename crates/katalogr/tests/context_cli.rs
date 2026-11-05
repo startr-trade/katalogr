@@ -98,4 +98,44 @@ mod cli {
             Some(head.as_str())
         );
     }
+
+    #[test]
+    fn context_flag_selects_base() {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = project(tmp.path(), &[("a.tx", "sym fn Committed\n")]);
+        std::fs::write(repo.join("a.tx"), "sym fn Dirty\n").unwrap();
+        ok(&repo, &["index"]);
+        // The default is the checkout's own context.
+        assert!(ok(&repo, &["find", "Dirty"]).contains("Dirty"));
+        assert!(ok(&repo, &["--context", "current", "find", "Dirty"]).contains("Dirty"));
+        // The base holds the commit.
+        let (code, out, _) = run(&repo, &["--context", "base", "find", "Dirty"]);
+        assert_eq!(code, 4, "{out}");
+        assert!(ok(&repo, &["--context", "base", "find", "Committed"]).contains("Committed"));
+        // The environment variable does the same, and the flag wins over it.
+        let by_env = Command::new(env!("CARGO_BIN_EXE_katalogr"))
+            .current_dir(&repo)
+            .env("KATALOGR_CONTEXT", "base")
+            .args(["find", "Dirty"])
+            .output()
+            .unwrap();
+        assert_eq!(by_env.status.code(), Some(4));
+        let flag_wins = Command::new(env!("CARGO_BIN_EXE_katalogr"))
+            .current_dir(&repo)
+            .env("KATALOGR_CONTEXT", "base")
+            .args(["--context", "current", "find", "Dirty"])
+            .output()
+            .unwrap();
+        assert_eq!(flag_wins.status.code(), Some(0));
+    }
+
+    #[test]
+    fn unknown_context_exit_2() {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = project(tmp.path(), &[("a.tx", "sym fn A\n")]);
+        for bad in ["w-0123456789abcdef", "Not Valid", "a/b"] {
+            let (code, out, err) = run(&repo, &["--context", bad, "find", "A"]);
+            assert_eq!(code, 2, "{bad}: {out}{err}");
+        }
+    }
 }

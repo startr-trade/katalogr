@@ -52,14 +52,25 @@ pub fn resolve(cli: &Cli) -> Result<Katalogr, DistError> {
         &Overrides {
             kindex: cli.kindex.clone(),
             project: cli.project.clone(),
+            context: context_choice(cli),
         },
     )
+}
+
+/// `--context`, else `KATALOGR_CONTEXT`.
+pub fn context_choice(cli: &Cli) -> Option<String> {
+    cli.context.clone().or_else(|| {
+        std::env::var("KATALOGR_CONTEXT")
+            .ok()
+            .filter(|v| !v.is_empty())
+    })
 }
 
 pub fn overrides(cli: &Cli) -> Overrides {
     Overrides {
         kindex: cli.kindex.clone(),
         project: cli.project.clone(),
+        context: context_choice(cli),
     }
 }
 

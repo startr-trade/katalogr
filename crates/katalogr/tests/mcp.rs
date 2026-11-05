@@ -288,6 +288,46 @@ mod mcp {
         assert!(c.finish().success());
     }
 
+    /// FEAT-043 R-4. The `context` argument of a read tool selects the base or the checkout's
+    /// own context; an unknown id is a usage error.
+    #[test]
+    fn context_argument_selects() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (_kx, repo) = setup(tmp.path());
+        let git = |args: &[&str]| {
+            let st = Command::new("git")
+                .current_dir(&repo)
+                .args(args)
+                .status()
+                .unwrap();
+            assert!(st.success(), "git {args:?}");
+        };
+        git(&["init", "-q", "-b", "main"]);
+        git(&["config", "user.name", "Test"]);
+        git(&["config", "user.email", "test@example.com"]);
+        git(&["config", "commit.gpgsign", "false"]);
+        std::fs::write(repo.join("a.tx"), "sym fn Committed\n").unwrap();
+        git(&["add", "-A"]);
+        git(&["commit", "-q", "-m", "c1"]);
+        std::fs::write(repo.join("a.tx"), "sym fn Dirty\n").unwrap();
+        ok(&repo, &["index"]);
+        let mut c = Client::spawn(&repo, &[], &[]);
+        c.initialize("2025-06-18");
+        let mine = c.call(1, "find", json!({"text": "Dirty"}));
+        assert_eq!(mine["result"]["isError"], false, "{mine}");
+        let mine = c.call(2, "find", json!({"text": "Dirty", "context": "current"}));
+        assert_eq!(mine["result"]["isError"], false, "{mine}");
+        let base = c.call(3, "find", json!({"text": "Dirty", "context": "base"}));
+        assert_eq!(exit_meta(&base), 4, "{base}");
+        let base = c.call(4, "find", json!({"text": "Committed", "context": "base"}));
+        assert_eq!(base["result"]["isError"], false, "{base}");
+        let bad = c.call(5, "find", json!({"text": "Dirty", "context": "w-nosuch"}));
+        assert_eq!(exit_meta(&bad), 2, "{bad}");
+        let bad = c.call(6, "find", json!({"text": "Dirty", "context": "Not Valid"}));
+        assert_eq!(exit_meta(&bad), 2, "{bad}");
+        assert!(c.finish().success());
+    }
+
     /// R-1. A known version is echoed; an unknown one gets the server's latest.
     #[test]
     fn negotiates_protocol_version() {

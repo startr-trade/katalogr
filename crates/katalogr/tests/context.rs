@@ -302,4 +302,54 @@ mod context {
         assert!(has(&p.repo, ContextChoice::Current, "Gamma"));
         assert!(!has(&p.repo, ContextChoice::Current, "GammaSide"));
     }
+
+    #[test]
+    fn schema_mismatch_reseeds() {
+        use katalogr_store::{CACHE_SCHEMA, Cache, Restitch, WriteTx};
+        struct Noop;
+        impl Restitch for Noop {
+            fn replace_fragment(
+                &self,
+                _: &mut WriteTx,
+                _: katalogr_model::Fragment,
+            ) -> Result<(), katalogr_store::StoreError> {
+                Ok(())
+            }
+            fn remove_artifact(
+                &self,
+                _: &mut WriteTx,
+                _: &katalogr_model::ArtifactName,
+            ) -> Result<(), katalogr_store::StoreError> {
+                Ok(())
+            }
+        }
+        let p = based();
+        assert!(has(&p.repo, ContextChoice::Current, "Alpha"));
+        let layer = layers(&p).remove(0);
+        // A cache of another schema and a leftover delta shard: the layer is rebuilt from the
+        // base, so the leftover is gone and the answer is the base's.
+        {
+            let dir = Katalogr::resolve(&p.repo, &Overrides::default())
+                .unwrap()
+                .project()
+                .clone();
+            let id = katalogr_store::ContextId::new(layer.file_name().unwrap().to_str().unwrap())
+                .unwrap();
+            let c = Cache::open_or_rebuild(
+                &dir.layer(&id),
+                &Noop,
+                std::time::Instant::now() + std::time::Duration::from_secs(5),
+            )
+            .unwrap();
+            let mut tx = c.write().unwrap();
+            tx.set_meta("cache_schema", &(CACHE_SCHEMA + 1).to_le_bytes())
+                .unwrap();
+            tx.commit().unwrap();
+        }
+        std::fs::create_dir_all(layer.join("shards/app")).unwrap();
+        std::fs::write(layer.join("shards/app/junk.kshard.json"), "x").unwrap();
+        assert!(has(&p.repo, ContextChoice::Current, "Alpha"));
+        assert!(!layer.join("shards/app/junk.kshard.json").exists());
+        assert_eq!(layers(&p).len(), 1);
+    }
 }

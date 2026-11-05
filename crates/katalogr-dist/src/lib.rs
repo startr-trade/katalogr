@@ -141,6 +141,8 @@ impl From<Consistency> for EngineConsistency {
 pub struct Overrides {
     pub kindex: Option<String>,
     pub project: Option<String>,
+    /// `base`, `current` or an id from `context list` (FEAT-043 R-4); `None` is `current`.
+    pub context: Option<String>,
 }
 
 /// Options for reads. `None` means the command's default.
@@ -449,11 +451,15 @@ impl Katalogr {
         if let (Some(repo), Some(root)) = (&r.repo, &r.repo_root) {
             roots.insert(repo.clone(), root.clone());
         }
+        let context = match overrides.context.as_deref() {
+            Some(c) => contexts::ContextChoice::parse(c)?,
+            None => contexts::ContextChoice::Current,
+        };
         Ok(Katalogr {
             project,
             repo: r.repo,
             roots,
-            context: contexts::ContextChoice::Current,
+            context,
             notes: std::sync::Mutex::new(Vec::new()),
         })
     }
