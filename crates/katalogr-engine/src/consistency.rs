@@ -9,7 +9,7 @@ use crate::registry::ExtensionRegistry;
 use crate::stitch::Stitcher;
 use camino::Utf8PathBuf;
 use katalogr_model::RelPath;
-use katalogr_store::{Cache, ProjectDir, ReadTx, Reader, RepoConfig};
+use katalogr_store::{Cache, CompactMode, CompactReport, ProjectDir, ReadTx, Reader, RepoConfig};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
@@ -165,6 +165,45 @@ impl Engine {
             pool: OnceLock::new(),
             stats: Mutex::new(IndexStats::default()),
         }
+    }
+
+    /// Compact this engine's cache (consumes and returns the engine; see `Cache::compact`).
+    /// An error before the file swap comes back as a `Skipped` report with the engine intact; an
+    /// error after it (`Busy`: another process took the new file first) loses the engine, and
+    /// the data is safe in the new file.
+    pub fn compact_cache(
+        self,
+        mode: CompactMode,
+        deadline: Instant,
+    ) -> Result<(Engine, CompactReport), EngineError> {
+        let Engine {
+            dir,
+            cache,
+            registry,
+            stitcher,
+            roots,
+            filters,
+            builtin_profiles,
+            parallelism,
+            pool,
+            stats,
+        } = self;
+        let (cache, report) = cache.compact(&dir, mode, deadline)?;
+        Ok((
+            Engine {
+                dir,
+                cache,
+                registry,
+                stitcher,
+                roots,
+                filters,
+                builtin_profiles,
+                parallelism,
+                pool,
+                stats,
+            },
+            report,
+        ))
     }
 
     /// Set before the first `process`; later calls replace the setting and drop a built pool.

@@ -726,10 +726,39 @@ pub fn cache_dump(e: &Engine) -> CacheDump {
         .into_iter()
         .map(|(n, rows)| (n.to_string(), rows))
         .collect();
+    // Postings and document lengths in their logical form: the stored rows number documents by
+    // the order they were first indexed, which depends on the history.
+    let mut terms: Vec<Vec<u8>> = r
+        .raw_scan_keys(TableId::Postings, &[])
+        .unwrap()
+        .into_iter()
+        .map(|k| k[..k.len() - 5].to_vec())
+        .collect();
+    terms.dedup();
+    let mut postings = Vec::new();
+    for term in terms {
+        let term = String::from_utf8(term).unwrap();
+        for p in r.postings(&term).unwrap() {
+            let mut key = term.as_bytes().to_vec();
+            key.push(p.field);
+            key.extend_from_slice(&p.symbol.0);
+            let mut val = p.tf.to_le_bytes().to_vec();
+            for l in p.doc_len {
+                val.extend_from_slice(&l.to_le_bytes());
+            }
+            postings.push((key, val));
+        }
+    }
+    out.push(("postings".to_string(), postings));
+    let mut docs = Vec::new();
+    for (id, _) in r.raw_scan(TableId::DocOrd, &[]).unwrap() {
+        let lens = r
+            .doc_len(katalogr_model::Id(id.clone().try_into().unwrap()))
+            .unwrap();
+        docs.push((id, format!("{lens:?}").into_bytes()));
+    }
+    out.push(("doc_len".to_string(), docs));
     for (name, t) in [
-        ("postings", TableId::Postings),
-        ("doc_ord", TableId::DocOrd),
-        ("doc_by_ord", TableId::DocByOrd),
         ("lexicon_stats", TableId::LexiconStats),
         ("shard_hashes", TableId::ShardHashes),
         ("rank", TableId::Rank),
@@ -739,7 +768,7 @@ pub fn cache_dump(e: &Engine) -> CacheDump {
     out
 }
 
-/// The raw dictionary tables. Their ids follow the order rows were written, so two caches built
+/// The raw dictionary and posting tables. Their ids and ordinals follow the order rows were written, so two caches built
 /// by different histories number them differently; runs of the same input at different thread
 /// counts must agree on them byte for byte.
 pub fn dictionary_dump(e: &Engine) -> CacheDump {
@@ -751,6 +780,9 @@ pub fn dictionary_dump(e: &Engine) -> CacheDump {
         ("vocab_ix", TableId::VocabIx),
         ("prov", TableId::Prov),
         ("prov_ix", TableId::ProvIx),
+        ("postings", TableId::Postings),
+        ("doc_ord", TableId::DocOrd),
+        ("doc_by_ord", TableId::DocByOrd),
     ]
     .into_iter()
     .map(|(n, t)| (n.to_string(), r.raw_scan(t, &[]).unwrap()))

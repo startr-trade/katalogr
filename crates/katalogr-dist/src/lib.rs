@@ -45,7 +45,9 @@ use katalogr_engine::{
 };
 use katalogr_model::{Name, RelPath};
 use katalogr_store::marker::{self, Overrides as StoreOverrides};
-use katalogr_store::{Kindex, ProjectDir, ProjectName, ReadTx, StoreError};
+use katalogr_store::{
+    CompactMode, CompactOutcome, CompactPolicy, Kindex, ProjectDir, ProjectName, ReadTx, StoreError,
+};
 use std::collections::BTreeMap;
 use std::path::Path;
 use std::time::{Duration, Instant};
@@ -651,7 +653,31 @@ impl Katalogr {
             inbox.append(ev)?;
         }
         let consistency = opts.consistency.unwrap_or(Consistency::WaitAll);
-        self.read(&engine, consistency, timeout, events.len(), warnings)
+        let queued = events.len();
+        let mut report = self.read(&engine, consistency, timeout, queued, warnings)?;
+        // FEAT-075 R-6: a full run that drained everything rewrites the cache sorted; any other
+        // run does when the file has grown past the policy. Query processes never compact.
+        let drained_full = full && queued > 0 && report.pending == 0 && !report.stale;
+        let due = drained_full
+            || engine
+                .cache()
+                .compaction_due(&CompactPolicy::default())
+                .unwrap_or(false);
+        if due {
+            match engine.compact_cache(CompactMode::preferred(), Instant::now() + timeout) {
+                Ok((_, c)) => {
+                    if let CompactOutcome::Skipped(why) = c.outcome {
+                        report
+                            .warnings
+                            .push(format!("cache compaction skipped: {why}"));
+                    }
+                }
+                Err(e) => report
+                    .warnings
+                    .push(format!("cache compaction skipped: {e}")),
+            }
+        }
+        Ok(report)
     }
 
     /// Run `f` on one snapshot at the requested consistency (default: wait).

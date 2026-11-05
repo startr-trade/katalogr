@@ -119,7 +119,7 @@ pub(crate) fn decode_doc(b: &[u8]) -> Result<(Id, [u32; LEXICON_FIELDS]), StoreE
 }
 
 /// Encodes the entries of the block that starts at `base`. Sorts them by `(ordinal, field)`.
-pub(crate) fn encode_block(base: u32, entries: &mut Vec<Entry>) -> Vec<u8> {
+pub(crate) fn encode_block(base: u32, entries: &mut [Entry]) -> Vec<u8> {
     entries.sort_unstable_by_key(|e| (e.0, e.1));
     let mut out = Vec::with_capacity(entries.len() * 3 + 2);
     put_varint(&mut out, entries.len() as u64);

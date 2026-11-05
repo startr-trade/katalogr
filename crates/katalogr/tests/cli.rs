@@ -324,6 +324,35 @@ mod cli {
         assert_eq!(shards_at("1"), shards_at("8"));
     }
 
+    /// FEAT-075 R-6. A full index leaves a compacted cache: `meta.compacted_bytes` is set and
+    /// matches the size of the file, to within the allocation step redb trims on close.
+    #[test]
+    fn index_full_compacts_cache() {
+        use katalogr_store::{Cache, Kindex, ProjectName};
+        let tmp = tempfile::tempdir().unwrap();
+        let (kx, repo) = query_project(tmp.path());
+        ok(&repo, &["index", "--full"]);
+        let kx = camino::Utf8PathBuf::from_path_buf(kx).unwrap();
+        let dir = Kindex::open(&kx)
+            .unwrap()
+            .project(&ProjectName::new("demo").unwrap())
+            .unwrap();
+        let file = dir.cache_dir().join("index.redb");
+        let size = std::fs::metadata(&file).unwrap().len();
+        assert!(!dir.cache_dir().join(katalogr_store::REWRITE_FILE).exists());
+        let Some(cache) = Cache::open_reader(&dir).unwrap() else {
+            return;
+        };
+        let compacted = cache
+            .compacted_bytes()
+            .unwrap()
+            .expect("compacted_bytes is set");
+        assert!(
+            compacted.abs_diff(size) <= 64 * 1024,
+            "{compacted} against {size}"
+        );
+    }
+
     /// R-3. One thread indexes sequentially and succeeds.
     #[test]
     fn index_threads_one_sequential() {

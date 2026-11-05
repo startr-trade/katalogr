@@ -36,6 +36,7 @@ tempfile.workspace = true
 fs4.workspace = true
 toml.workspace = true
 camino.workspace = true
+katalogr-store.workspace = true
 # Reads an index's canonical graph, with the artifact facts (URLs) the CLI does not print.
 katalogr-acceptance = { path = "../katalogr-acceptance" }
 # The load-test harness is exercised end to end against a synthetic corpus (FEAT-068). It is
