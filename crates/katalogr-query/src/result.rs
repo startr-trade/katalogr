@@ -119,7 +119,7 @@ pub struct Note {
     pub text: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]
 pub struct WhyResult {
     pub symbol: SymbolHit,
     pub rationale: Vec<RationaleLink>,
@@ -132,6 +132,39 @@ pub struct WhyResult {
     /// The comment markers recorded on the symbol, in line order.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub notes: Vec<Note>,
+    /// Who uses the symbol: callers, tests and contract bindings (FEAT-087). Omitted when empty
+    /// or when not asked for.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub used_by: Option<WhyUse>,
+    /// Which tool owns each section of the answer, and where this answer took it from.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sources: Vec<WhySource>,
+}
+
+/// Who uses a symbol: depth-1 callers, tests and the contracts it is bound to.
+#[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]
+pub struct WhyUse {
+    /// At most the limit, sorted as `callers` sorts.
+    pub callers: Vec<CallerHit>,
+    /// All callers, before the limit.
+    pub callers_total: u64,
+    /// At most the limit, sorted as `tests` sorts.
+    pub tests: Vec<TestHit>,
+    /// All tests, before the limit.
+    pub tests_total: u64,
+    /// `contract:<kind>:<key>`, sorted.
+    pub contracts: Vec<String>,
+}
+
+/// The owner of one section of a `why` answer and where this answer took it from.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
+pub struct WhySource {
+    /// `symbol`, `used_by`, `notes`, `commits`, `rationale` or `goals`.
+    pub section: String,
+    /// `index`, `board`, or `both` for commits.
+    pub owner: String,
+    /// Where this answer read it: `index`.
+    pub source: String,
 }
 
 /// A reference that names something no artifact exports.

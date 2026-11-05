@@ -49,12 +49,12 @@ pub use result::{
     CallerHit, CommitHit, ContractEnd, ContractInfo, DanglingRef, Direction, Envelope, Explain,
     FieldDiff, FieldShape, Fold, LinkBrief, MapEntry, Matched, MirrorDrift, Note, PARTIAL_NOTE,
     Partial, PathStep, RationaleLink, RefHit, ReplaceResult, Resolution, SearchHit, ShowResult,
-    SymbolHit, TestHit, Truncation, WhyResult, cap,
+    SymbolHit, TestHit, Truncation, WhyResult, WhySource, WhyUse, cap,
 };
 pub use schema::schemas;
 pub use search::{SearchParams, search, search_traced, search_with, search_with_traced};
 pub use tests::{DEFAULT_TEST_DEPTH, TestsOptions, tests, tests_for};
-pub use why::{Blame, RATIONALE_KINDS, why};
+pub use why::{Blame, DEFAULT_USE_LIMIT, RATIONALE_KINDS, attach_use, why, why_sources, why_use};
 
 /// Re-exported so wrappers can bound on it without a direct dependency.
 pub use serde::Serialize;
