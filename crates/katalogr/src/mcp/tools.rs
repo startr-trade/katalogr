@@ -496,7 +496,9 @@ pub fn call(cfg: &ServeConfig, name: &str, args: &Value) -> Result<JsonAnswer, U
                 |r| render_json::report(&r),
             )
         }
-        "status" => answer(Katalogr::status(&k, opts), |r| render_json::report(&r)),
+        "status" => answer(Katalogr::status(&k, opts), |r| {
+            render_json::status(&r, k.context_name())
+        }),
         _ => return Err(UnknownTool),
     };
     Ok(out)
