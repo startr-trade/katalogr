@@ -1,0 +1,71 @@
+/* katalogr: Pele takes every colour from CSS variables. Inside mdBook output they follow
+   mdBook's own variables, so its five themes and theme switching apply with no re-render. */
+:root {
+  --pele-bg: var(--bg);
+  --pele-fg: var(--fg);
+  --pele-muted: var(--icons);
+  --pele-line: var(--fg);
+  --pele-surface: var(--quote-bg);
+  --pele-surface-alt: var(--table-alternate-bg);
+  --pele-border: var(--table-border-color);
+  --pele-accent: var(--links);
+  --pele-font: var(--main-font, inherit);
+}
+
+/* katalogr's own pages define their palette here instead of mdBook's variables. */
+.katalogr-app {
+  --pele-bg: #ffffff;
+  --pele-fg: #1f2328;
+  --pele-muted: #656d76;
+  --pele-line: #57606a;
+  --pele-surface: #f6f8fa;
+  --pele-surface-alt: #eaeef2;
+  --pele-border: #d0d7de;
+  --pele-accent: #0969da;
+  --pele-font: inherit;
+}
+
+.katalogr-app.dark {
+  --pele-bg: #0d1117;
+  --pele-fg: #e6edf3;
+  --pele-muted: #8b949e;
+  --pele-line: #8b949e;
+  --pele-surface: #161b22;
+  --pele-surface-alt: #21262d;
+  --pele-border: #30363d;
+  --pele-accent: #58a6ff;
+}
+
+@media (prefers-color-scheme: dark) {
+  .katalogr-app:not(.light) {
+    --pele-bg: #0d1117;
+    --pele-fg: #e6edf3;
+    --pele-muted: #8b949e;
+    --pele-line: #8b949e;
+    --pele-surface: #161b22;
+    --pele-surface-alt: #21262d;
+    --pele-border: #30363d;
+    --pele-accent: #58a6ff;
+  }
+}
+
+.diagram {
+  overflow-x: auto;
+  margin: 1em 0;
+}
+
+.diagram svg {
+  max-width: 100%;
+  height: auto;
+}
+
+pre.katalogr-error {
+  white-space: pre-wrap;
+  border: 1px solid var(--pele-border, currentColor);
+  border-left: 4px solid #cf222e;
+  padding: 0.75em 1em;
+}
+
+pre.katalogr-error .katalogr-error-message {
+  font-weight: bold;
+}
