@@ -1911,6 +1911,7 @@ dependencies = [
  "gix",
  "globset",
  "katalogr-model",
+ "katalogr-query",
  "katalogr-store",
  "proptest",
  "rayon",

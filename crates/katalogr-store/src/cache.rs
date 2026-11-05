@@ -7,7 +7,7 @@
 use crate::error::StoreError;
 use crate::fan;
 use crate::kindex::ProjectDir;
-use camino::Utf8PathBuf;
+use camino::{Utf8Path, Utf8PathBuf};
 use katalogr_model::{
     ArtifactName, Confidence, ContractName, ContractRole, Export, ExportKey, Fact, Fragment, Id,
     LinkKind, OutRef, Provenance, RelPath, Span, SymbolName,
@@ -24,7 +24,7 @@ use std::ops::Bound;
 use std::time::{Duration, Instant};
 
 /// Stored in `meta`; a different number rebuilds the cache from the shards.
-pub const CACHE_SCHEMA: u32 = 10;
+pub const CACHE_SCHEMA: u32 = 11;
 
 /// `meta` key: the watermark the stored rank reflects.
 const RANK_WATERMARK_META: &str = "rank_watermark";
@@ -279,6 +279,14 @@ fn export_key(k: &ExportKey) -> Vec<u8> {
     out
 }
 
+/// The distinct parent directories of the journal's final paths under `root`.
+fn journal_parents(root: &Utf8Path, entries: &[JournalEntry]) -> BTreeSet<Utf8PathBuf> {
+    entries
+        .iter()
+        .filter_map(|(_, fin)| root.join(fin).parent().map(Utf8Path::to_path_buf))
+        .collect()
+}
+
 /// Scan prefix of the `refs_by_key` rows of one export key: `lp(namespace) || lp(key)`. The
 /// length prefixes keep `fn:a` from matching `fn:ab`.
 fn ref_by_key_prefix(k: &ExportKey) -> Vec<u8> {
@@ -398,7 +406,7 @@ fn u64_value(v: Vec<u8>) -> Result<u64, StoreError> {
     })?))
 }
 
-fn link_prefix(from: Id, kind: &LinkKind) -> Vec<u8> {
+pub(crate) fn link_prefix(from: Id, kind: &LinkKind) -> Vec<u8> {
     let mut k = from.0.to_vec();
     lp(&mut k, &kind.0);
     k
@@ -435,7 +443,7 @@ fn merge_links_in(stored: Vec<LinkKey>, to: Id, fans: Vec<FanKey>) -> Vec<LinkKe
     all.into_iter().map(|(_, k)| k).collect()
 }
 
-fn decode_link_key(b: &[u8]) -> Result<LinkKey, StoreError> {
+pub(crate) fn decode_link_key(b: &[u8]) -> Result<LinkKey, StoreError> {
     let bad = || StoreError::Row("malformed key".into());
     let from: [u8; 16] = b.get(..16).ok_or_else(bad)?.try_into().unwrap();
     let (kind, rest) = split_lp(&b[16..])?;
@@ -480,7 +488,7 @@ fn ser<T: Serialize>(v: &T) -> Result<Vec<u8>, StoreError> {
     serde_json::to_vec(v).map_err(|e| StoreError::Row(e.to_string()))
 }
 
-fn de<T: DeserializeOwned>(b: &[u8]) -> Result<T, StoreError> {
+pub(crate) fn de<T: DeserializeOwned>(b: &[u8]) -> Result<T, StoreError> {
     serde_json::from_slice(b).map_err(|e| StoreError::Row(e.to_string()))
 }
 
@@ -532,10 +540,11 @@ pub enum TableId {
     FanOut,
     FanIn,
     ExportsByTarget,
+    BoundRefsByKey,
 }
 
 impl TableId {
-    const ALL: [TableId; 26] = [
+    const ALL: [TableId; 27] = [
         TableId::Meta,
         TableId::ShardHashes,
         TableId::Artifacts,
@@ -562,10 +571,11 @@ impl TableId {
         TableId::FanOut,
         TableId::FanIn,
         TableId::ExportsByTarget,
+        TableId::BoundRefsByKey,
     ];
 
     /// The graph tables, in the order `dump_graph` reports them.
-    const GRAPH: [TableId; 13] = [
+    const GRAPH: [TableId; 14] = [
         TableId::Artifacts,
         TableId::Symbols,
         TableId::LinksOut,
@@ -579,6 +589,7 @@ impl TableId {
         TableId::FanOut,
         TableId::FanIn,
         TableId::ExportsByTarget,
+        TableId::BoundRefsByKey,
     ];
 
     fn name(self) -> &'static str {
@@ -609,6 +620,7 @@ impl TableId {
             TableId::FanOut => "fan_out",
             TableId::FanIn => "fan_in",
             TableId::ExportsByTarget => "exports_by_target",
+            TableId::BoundRefsByKey => "bound_refs_by_key",
         }
     }
 
@@ -1467,6 +1479,21 @@ pub trait Reader {
             .collect()
     }
 
+    /// The references with a contract binding that name `key`, in key order.
+    fn bound_refs_by_key(&self, key: &ExportKey) -> Result<Vec<RefId>, StoreError> {
+        let prefix = ref_by_key_prefix(key);
+        self.raw_scan_keys(TableId::BoundRefsByKey, &prefix)?
+            .iter()
+            .map(|k| {
+                let tail = k.len().checked_sub(20).filter(|&n| n >= prefix.len());
+                match tail {
+                    Some(n) => decode_ref_key(&k[n..]),
+                    None => Err(StoreError::Row("malformed key".into())),
+                }
+            })
+            .collect()
+    }
+
     fn unresolved(&self, r: RefId) -> Result<Option<OutRef>, StoreError> {
         self.raw_get(TableId::RefsUnresolved, &ref_key(r))?
             .map(|v| de(&v))
@@ -1845,10 +1872,16 @@ impl WriteTx<'_> {
         let no_rows: &[Id] = &[];
         let old_rows = if old.len() >= 2 { &old[..] } else { no_rows };
         let new_rows = if targets.len() >= 2 { targets } else { no_rows };
-        for t in old_rows.iter().filter(|t| !new_rows.contains(t)) {
+        for t in old_rows
+            .iter()
+            .filter(|t| new_rows.binary_search(t).is_err())
+        {
             self.del(TableId::ExportsByTarget, &fan::by_target_key(*t, key))?;
         }
-        for t in new_rows.iter().filter(|t| !old_rows.contains(t)) {
+        for t in new_rows
+            .iter()
+            .filter(|t| old_rows.binary_search(t).is_err())
+        {
             self.put(TableId::ExportsByTarget, &fan::by_target_key(*t, key), &[])?;
         }
         if targets.is_empty() {
@@ -1861,6 +1894,16 @@ impl WriteTx<'_> {
     /// Insert the row `(key, r)`; idempotent.
     pub fn add_ref_by_key(&mut self, key: &ExportKey, r: RefId) -> Result<(), StoreError> {
         self.put(TableId::RefsByKey, &ref_by_key_key(key, r), &[])
+    }
+
+    /// Insert the bound-reference row `(key, r)`; idempotent.
+    pub fn add_bound_ref_by_key(&mut self, key: &ExportKey, r: RefId) -> Result<(), StoreError> {
+        self.put(TableId::BoundRefsByKey, &ref_by_key_key(key, r), &[])
+    }
+
+    /// Delete the bound-reference row `(key, r)`; absent is fine.
+    pub fn remove_bound_ref_by_key(&mut self, key: &ExportKey, r: RefId) -> Result<(), StoreError> {
+        self.del(TableId::BoundRefsByKey, &ref_by_key_key(key, r))
     }
 
     /// Delete the row `(key, r)`; absent is fine.
@@ -2257,23 +2300,23 @@ impl Cache {
                 }
             } else {
                 let from = dir.root().join(tmp);
+                // The temp file was synced before the publish commit that wrote this entry.
                 if from.exists() {
-                    std::fs::File::open(&from)
-                        .and_then(|f| f.sync_all())
-                        .map_err(|e| StoreError::io(&from, e))?;
                     std::fs::rename(&from, &to).map_err(|e| StoreError::io(&from, e))?;
                 }
-            }
-            if let Some(parent) = to.parent()
-                && parent.is_dir()
-            {
-                std::fs::File::open(parent)
-                    .and_then(|f| f.sync_all())
-                    .map_err(|e| StoreError::io(parent, e))?;
             }
             #[cfg(feature = "failpoints")]
             if i == 0 {
                 crate::failpoint::hit("mid_renames");
+            }
+        }
+        // One sync per distinct directory, after the last rename and before the journal is
+        // cleared (ADR-0033). Entries already renamed by an interrupted replay count too.
+        for parent in journal_parents(dir.root(), &entries) {
+            if parent.is_dir() {
+                std::fs::File::open(&parent)
+                    .and_then(|f| f.sync_all())
+                    .map_err(|e| StoreError::io(&parent, e))?;
             }
         }
         #[cfg(feature = "failpoints")]
@@ -2470,6 +2513,25 @@ mod tests {
             artifact: Id([a; 16]),
             index,
         }
+    }
+
+    #[test]
+    fn journal_parents_distinct() {
+        let root = Utf8Path::new("/kx/projects/p");
+        let entries: Vec<JournalEntry> = vec![
+            ("shards/r/.tmp-1".into(), "shards/r/a.json".into()),
+            ("shards/r/.tmp-2".into(), "shards/r/b.json".into()),
+            ("shards/r/sub/.tmp-3".into(), "shards/r/sub/c.json".into()),
+            (String::new(), "shards/r/sub/gone.json".into()),
+        ];
+        let parents = journal_parents(root, &entries);
+        let want: BTreeSet<Utf8PathBuf> =
+            ["/kx/projects/p/shards/r", "/kx/projects/p/shards/r/sub"]
+                .into_iter()
+                .map(Utf8PathBuf::from)
+                .collect();
+        assert_eq!(parents, want);
+        assert!(journal_parents(root, &[]).is_empty());
     }
 
     #[test]

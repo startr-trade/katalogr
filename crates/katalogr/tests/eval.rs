@@ -249,6 +249,22 @@ mod eval {
         assert_eq!(code, 0, "{out} {err}");
     }
 
+    /// FEAT-093 R-9. The command CI's retrieval gate runs passes against the committed baseline.
+    #[test]
+    fn gate_passes_on_committed_baseline() {
+        let (code, out, err) = run(&[
+            "eval",
+            "run",
+            "--sets",
+            "fixtures/eval",
+            "--baseline",
+            "fixtures/eval/baseline.json",
+            "--gate",
+        ]);
+        assert_eq!(code, 0, "{out} {err}");
+        assert!(out.contains("gate passed"), "{out}");
+    }
+
     /// FEAT-072 R-2. The same gate against the same baseline at one thread.
     #[test]
     fn fixture_suite_meets_baseline_one_thread() {

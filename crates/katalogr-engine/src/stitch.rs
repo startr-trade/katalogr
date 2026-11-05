@@ -13,7 +13,7 @@ use katalogr_store::{
 };
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Mutex;
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
 /// A reference resolving to at least this many targets (and at least 2) is stored as one fan
 /// row (FEAT-077, ADR-0028). Chosen by measurement.
@@ -72,6 +72,8 @@ pub struct Stitcher {
     recorded: Mutex<StitchDelta>,
     /// Storage threshold of fan rows; 0 (unset) and values below 2 mean `FAN_ROWS_FROM`.
     fan_from: AtomicU32,
+    /// Tests only: re-resolve every reference naming a changed key, as before FEAT-093.
+    resolve_all: AtomicBool,
 }
 
 impl Stitcher {
@@ -92,9 +94,17 @@ impl Stitcher {
         self.fan_from.store(n, Ordering::Relaxed);
     }
 
+    /// Tests and benches only. When true, every reference naming a changed key is re-resolved,
+    /// as before FEAT-093 (ADR-0033), so a test can compare the two rules. Default false.
+    #[doc(hidden)]
+    pub fn set_resolve_all(&self, on: bool) {
+        self.resolve_all.store(on, Ordering::Relaxed);
+    }
+
     fn cx(&self) -> Cx {
         Cx {
             fan_from: self.fan_rows_from(),
+            resolve_all: self.resolve_all.load(Ordering::Relaxed),
             ..Cx::default()
         }
     }
@@ -290,10 +300,7 @@ impl Stitcher {
             .chain(row.symbols.iter().copied())
             .collect();
 
-        let mut changed: BTreeSet<ExportKey> = BTreeSet::new();
-        for (k, _) in old_pairs.symmetric_difference(&new_pairs) {
-            changed.insert(k.clone());
-        }
+        let changes = net_changes(&old_pairs, &new_pairs);
         cx.rows.insert(aid, row.clone());
 
         let mut affected: BTreeSet<RefId> = (0..row.refs.len() as u32)
@@ -302,9 +309,7 @@ impl Stitcher {
                 index,
             })
             .collect();
-        for k in &changed {
-            affected.extend(tx.refs_by_key(k)?);
-        }
+        affected.extend(refs_to_re_resolve(tx, &cx, &changes)?);
         for r in affected {
             resolve(tx, &mut cx, r)?;
         }
@@ -324,10 +329,8 @@ impl Stitcher {
         };
         lexicon::unindex_artifact(tx, &old)?;
         purge(tx, &mut cx, aid, &old)?;
-        let mut affected: BTreeSet<RefId> = BTreeSet::new();
-        for (k, _) in export_pairs(&old) {
-            affected.extend(tx.refs_by_key(&k)?);
-        }
+        let changes = net_changes(&export_pairs(&old), &BTreeSet::new());
+        let affected = refs_to_re_resolve(tx, &cx, &changes)?;
         for r in affected {
             resolve(tx, &mut cx, r)?;
         }
@@ -366,6 +369,8 @@ struct Cx {
     fans_removed: BTreeSet<FanKey>,
     /// The fan-row threshold of this call (0: unset, same as 2).
     fan_from: u32,
+    /// Re-resolve every reference naming a changed key (tests only).
+    resolve_all: bool,
     resolved: BTreeSet<RefId>,
     rows: BTreeMap<Id, ArtifactRow>,
     /// References of the artifact `apply` just purged and re-registered that `resolve` has not
@@ -379,6 +384,12 @@ struct Cx {
 thread_local! {
     /// Resolutions that skipped their origin scan (R-10).
     static FRESH_SKIPS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Target lists `resolve` decoded for a winning candidate (R-3).
+    static TARGET_LIST_READS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 impl Cx {
@@ -417,6 +428,45 @@ fn export_pairs(row: &ArtifactRow) -> BTreeSet<(ExportKey, Id)> {
         .iter()
         .map(|e| (e.key.clone(), e.target))
         .collect()
+}
+
+/// Net target change per key from the old and new export pairs (+1 per pair only in `new`, -1
+/// per pair only in `old`). A key whose net is 0 still appears: its target set changed.
+fn net_changes(
+    old: &BTreeSet<(ExportKey, Id)>,
+    new: &BTreeSet<(ExportKey, Id)>,
+) -> BTreeMap<ExportKey, i64> {
+    let mut out: BTreeMap<ExportKey, i64> = BTreeMap::new();
+    for (k, _) in new.difference(old) {
+        *out.entry(k.clone()).or_default() += 1;
+    }
+    for (k, _) in old.difference(new) {
+        *out.entry(k.clone()).or_default() -= 1;
+    }
+    out
+}
+
+/// The references to re-resolve for `changes`, read after the exports are written. A key whose
+/// target count is at or above the fan-row threshold both before and after the change keeps
+/// every unbound reference's outcome (its fan row is read at query time), so only the bound
+/// references, which hold one link per target, follow (ADR-0033).
+fn refs_to_re_resolve(
+    tx: &WriteTx,
+    cx: &Cx,
+    changes: &BTreeMap<ExportKey, i64>,
+) -> Result<BTreeSet<RefId>, EngineError> {
+    let from = i64::from(cx.fan_from.max(FAN_ROWS_FROM));
+    let mut out = BTreeSet::new();
+    for (k, net) in changes {
+        let after = i64::try_from(tx.export_count(k)?).unwrap_or(i64::MAX);
+        let before = after - net;
+        if !cx.resolve_all && before >= from && after >= from {
+            out.extend(tx.bound_refs_by_key(k)?);
+        } else {
+            out.extend(tx.refs_by_key(k)?);
+        }
+    }
+    Ok(out)
 }
 
 fn distinct_candidates(row: &ArtifactRow, index: usize) -> BTreeSet<&ExportKey> {
@@ -472,6 +522,15 @@ fn purge(tx: &mut WriteTx, cx: &mut Cx, aid: Id, old: &ArtifactRow) -> Result<()
                     index: index as u32,
                 },
             )?;
+            if old.refs[index].binds.is_some() {
+                tx.remove_bound_ref_by_key(
+                    key,
+                    RefId {
+                        artifact: aid,
+                        index: index as u32,
+                    },
+                )?;
+            }
         }
     }
     for e in &old.exports {
@@ -593,6 +652,9 @@ fn register_refs(tx: &mut WriteTx, aid: Id, row: &ArtifactRow) -> Result<(), Eng
         };
         for key in distinct_candidates(row, index) {
             tx.add_ref_by_key(key, me)?;
+            if row.refs[index].binds.is_some() {
+                tx.add_bound_ref_by_key(key, me)?;
+            }
         }
     }
     Ok(())
@@ -717,17 +779,26 @@ fn resolve(tx: &mut WriteTx, cx: &mut Cx, rid: RefId) -> Result<(), EngineError>
         return resolve_bound(tx, cx, rid, &r, b, provenance, fresh);
     }
     // The winning key: the first candidate with exports.
+    // A fan winner needs only its count: its targets are read at query time (R-3).
+    let fan_from = cx.fan_from.max(FAN_ROWS_FROM);
     let mut targets = Vec::new();
     let mut winner = None;
+    let mut n = 0usize;
     for cand in &r.candidates {
-        targets = tx.exports(cand)?;
-        if !targets.is_empty() {
-            winner = Some(cand.clone());
-            break;
+        let c = tx.export_count(cand)?;
+        if c == 0 {
+            continue;
         }
+        winner = Some(cand.clone());
+        n = c;
+        if c < fan_from as usize {
+            #[cfg(test)]
+            TARGET_LIST_READS.with(|t| t.set(t.get() + 1));
+            targets = tx.exports(cand)?;
+            n = targets.len();
+        }
+        break;
     }
-    let n = targets.len();
-    let fan_from = cx.fan_from.max(FAN_ROWS_FROM);
     let fan_key = match &winner {
         Some(k) if n >= 2 && n as u64 >= u64::from(fan_from) => Some(FanKey {
             from: r.from,
@@ -1057,5 +1128,79 @@ mod tests {
                 c2.read().unwrap().dump_graph().unwrap()
             );
         }
+    }
+
+    /// `frag`'s reference `index` made a bound reference.
+    fn bind_ref(mut f: Fragment, index: usize) -> Fragment {
+        f.refs[index].binds = Some(RefBinding {
+            contract: ContractName {
+                kind: "chan".into(),
+                key: "c".into(),
+            },
+            role: ContractRole::Consumes,
+        });
+        f
+    }
+
+    #[test]
+    fn bound_refs_index_follows_register_and_purge() {
+        let t = tempfile::tempdir().unwrap();
+        let (c, s) = cache(&t);
+        let put = |f: Fragment| {
+            let mut tx = c.write().unwrap();
+            s.replace_fragment(&mut tx, f).unwrap();
+            tx.commit().unwrap();
+        };
+        let rid = |a: &str, index: u32| RefId {
+            artifact: ArtifactName::new("r", a).unwrap().id(),
+            index,
+        };
+        let bound = |k: &str| c.read().unwrap().bound_refs_by_key(&key("ns", k)).unwrap();
+        let all = |k: &str| c.read().unwrap().refs_by_key(&key("ns", k)).unwrap();
+        put(frag("a.tx", &["A"], &[("k", 0)], &[]));
+        put(bind_ref(
+            frag("b.tx", &["B"], &[], &[(0, "k"), (0, "m")]),
+            0,
+        ));
+        assert_eq!(bound("k"), vec![rid("b.tx", 0)]);
+        assert!(bound("m").is_empty());
+        assert_eq!(all("m"), vec![rid("b.tx", 1)]);
+        put(frag("c.tx", &["C"], &[], &[(0, "k")]));
+        assert_eq!(bound("k"), vec![rid("b.tx", 0)], "unbound refs are absent");
+        assert_eq!(all("k").len(), 2);
+        // Replace: the bound reference becomes unbound, and the other one becomes bound.
+        put(bind_ref(
+            frag("b.tx", &["B"], &[], &[(0, "k"), (0, "m")]),
+            1,
+        ));
+        assert!(bound("k").is_empty());
+        assert_eq!(bound("m"), vec![rid("b.tx", 1)]);
+        // Remove.
+        let mut tx = c.write().unwrap();
+        s.remove_artifact(&mut tx, &ArtifactName::new("r", "b.tx").unwrap())
+            .unwrap();
+        tx.commit().unwrap();
+        assert!(bound("m").is_empty() && bound("k").is_empty());
+    }
+
+    #[test]
+    fn fan_winner_targets_not_decoded() {
+        let t = tempfile::tempdir().unwrap();
+        let (c, s) = cache(&t);
+        let put = |f: Fragment| {
+            TARGET_LIST_READS.with(|n| n.set(0));
+            let mut tx = c.write().unwrap();
+            s.replace_fragment(&mut tx, f).unwrap();
+            tx.commit().unwrap();
+            TARGET_LIST_READS.with(|n| n.get())
+        };
+        put(frag("a.tx", &["A"], &[("k", 0)], &[]));
+        // One target: the list is read once for the reference being written.
+        assert_eq!(put(frag("z.tx", &["Z"], &[], &[(0, "k")])), 1);
+        put(frag("b.tx", &["B"], &[("k", 0)], &[]));
+        // Two targets make a fan winner: no list is read.
+        assert_eq!(put(frag("z.tx", &["Z"], &[], &[(0, "k")])), 0);
+        // A fan key that changes again re-resolves nothing and reads nothing.
+        assert_eq!(put(frag("d.tx", &["D"], &[("k", 0)], &[])), 0);
     }
 }

@@ -2,6 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::error::Result;
 use crate::katalogr::Katalogr;
 use crate::workspace::Workspace;
 
@@ -76,7 +77,13 @@ fn fs_type(mounts: &str, path: &str) -> String {
 }
 
 impl MachineProfile {
-    pub fn detect(ws: &Workspace, k: &Katalogr) -> MachineProfile {
+    /// Fails when the binary's version cannot be read, so a report never records an unknown
+    /// build (FEAT-093 R-7).
+    pub fn detect(ws: &Workspace, k: &Katalogr) -> Result<MachineProfile> {
+        Ok(Self::with_version(ws, k.version()?))
+    }
+
+    fn with_version(ws: &Workspace, katalogr_version: String) -> MachineProfile {
         let read = |p: &str| std::fs::read_to_string(p).unwrap_or_default();
         MachineProfile {
             os: std::env::consts::OS.into(),
@@ -88,7 +95,7 @@ impl MachineProfile {
                 .unwrap_or(1),
             mem_gib: mem_gib(&read("/proc/meminfo")),
             fs: fs_type(&read("/proc/mounts"), ws.root().as_str()),
-            katalogr_version: k.version().unwrap_or_else(|_| "unknown".into()),
+            katalogr_version,
             harness_version: env!("CARGO_PKG_VERSION").into(),
             load_source: if std::path::Path::new("/proc/loadavg").exists() {
                 "proc"
@@ -105,12 +112,7 @@ impl MachineProfile {
 fn profile_is_anonymous() {
     let tmp = tempfile::tempdir().unwrap();
     let ws = Workspace::open(Some(camino::Utf8Path::from_path(tmp.path()).unwrap())).unwrap();
-    let k = Katalogr {
-        bin: "/nonexistent/katalogr".into(),
-        kindex: ws.kindex(),
-        project: "x".into(),
-    };
-    let p = MachineProfile::detect(&ws, &k);
+    let p = MachineProfile::with_version(&ws, "katalogr 0.1.0 (abc)".into());
     let json = serde_json::to_string(&p).unwrap();
     let host = std::fs::read_to_string("/proc/sys/kernel/hostname").unwrap_or_default();
     let host = host.trim();
@@ -150,4 +152,21 @@ fn profile_is_anonymous() {
         ),
         "ext4"
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn detect_refuses_unreadable_version() {
+        let tmp = tempfile::tempdir().unwrap();
+        let ws = Workspace::open(Some(camino::Utf8Path::from_path(tmp.path()).unwrap())).unwrap();
+        let k = Katalogr {
+            bin: "/nonexistent/katalogr".into(),
+            kindex: ws.kindex(),
+            project: "x".into(),
+        };
+        assert!(MachineProfile::detect(&ws, &k).is_err());
+    }
 }
