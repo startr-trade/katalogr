@@ -39,7 +39,7 @@ pub use explain::explain;
 pub use find::find;
 pub use fold::{FOLD_FROM, FOLD_SHOWN, Folded};
 pub use hints::{HintSource, hints};
-pub use map::{map, map_top, map_top_behind, map_traced};
+pub use map::{map, map_boosted_traced, map_top, map_top_behind, map_traced};
 pub use mirror::mirror_drift;
 pub use path::path;
 pub use position::{PositionAnswer, PositionError, PositionRef, ViewQuery, view_id};
@@ -55,10 +55,12 @@ pub use result::{
     SymbolHit, TestHit, Truncation, WhyResult, cap,
 };
 pub use schema::{position_schema, schemas};
-pub use search::{SearchParams, search, search_traced, search_with, search_with_traced};
+pub use search::{
+    SearchParams, search, search_boosted_traced, search_traced, search_with, search_with_traced,
+};
 pub use tests::{DEFAULT_TEST_DEPTH, TestsOptions, tests, tests_for};
 pub use why::{Blame, RATIONALE_KINDS, why};
-pub use working_set::{Tier, Weights, WorkingSet, WorkingSetSummary, boost};
+pub use working_set::{Boost, Tier, Weights, WorkingSet, WorkingSetSummary, boost};
 
 /// Re-exported so wrappers can bound on it without a direct dependency.
 pub use serde::Serialize;

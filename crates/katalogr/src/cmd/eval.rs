@@ -27,6 +27,7 @@ fn fixture_report() -> Report {
         exact: false,
         view_id: None,
         context: None,
+        working_set: None,
     }
 }
 

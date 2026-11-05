@@ -36,6 +36,7 @@ pub mod skill;
 pub mod status;
 pub mod tests;
 pub mod version;
+pub mod watch;
 pub mod why;
 
 use std::path::Path;
@@ -96,6 +97,15 @@ pub fn graph_options(
     g
 }
 
+/// The ranking of `search` and `map`: the working set boost unless `--neutral` (FEAT-039).
+pub fn ranking(neutral: bool) -> katalogr_dist::Ranking {
+    if neutral {
+        katalogr_dist::Ranking::Neutral
+    } else {
+        katalogr_dist::Ranking::Default
+    }
+}
+
 pub fn options(cli: &Cli) -> Options {
     options_with(cli, false)
 }
@@ -113,6 +123,7 @@ pub fn options_with(cli: &Cli, diagnostic: bool) -> Options {
         expand: false,
         at: cli.at.clone(),
         view: None,
+        ranking: katalogr_dist::Ranking::Neutral,
     }
 }
 

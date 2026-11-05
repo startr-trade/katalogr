@@ -28,6 +28,7 @@ katalogr-model.workspace = true
 katalogr-store.workspace = true
 camino.workspace = true
 serde_json.workspace = true
+regex.workspace = true
 serde_yaml_ng.workspace = true
 tempfile.workspace = true
 thiserror.workspace = true

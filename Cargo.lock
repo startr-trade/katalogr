@@ -1950,6 +1950,7 @@ dependencies = [
  "katalogr-model",
  "katalogr-query",
  "katalogr-store",
+ "regex",
  "serde_json",
  "serde_yaml_ng",
  "tempfile",

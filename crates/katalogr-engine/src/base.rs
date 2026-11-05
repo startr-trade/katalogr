@@ -116,3 +116,27 @@ pub fn resolve_commit(repo_root: &Path, rev: &str) -> Result<String, ScanError> 
         .map_err(|e| bad(&e))?;
     Ok(commit.id().to_hex().to_string())
 }
+
+/// The short name of the branch `HEAD` is on, or `None` when `HEAD` is detached or unborn, or
+/// the directory is no repository.
+pub fn head_branch(repo_root: &Path) -> Option<String> {
+    let r = open(repo_root).ok()?;
+    let name = r.head_name().ok().flatten()?;
+    Some(name.shorten().to_string())
+}
+
+/// The best common ancestor of two commits (full hex ids), as lower-case hex; `None` when they
+/// share none.
+pub fn merge_base(repo_root: &Path, a: &str, b: &str) -> Result<Option<String>, ScanError> {
+    let repo = open(repo_root)?;
+    let bad = |rev: &str, e: &dyn std::fmt::Display| ScanError::BadRevision {
+        rev: rev.to_string(),
+        message: e.to_string(),
+    };
+    let id = |rev: &str| gix::ObjectId::from_hex(rev.as_bytes()).map_err(|e| bad(rev, &e));
+    Ok(repo
+        .merge_base(id(a)?, id(b)?)
+        .ok()
+        .flatten()
+        .map(|i| i.to_hex().to_string()))
+}

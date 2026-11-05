@@ -2,7 +2,7 @@
 //! favours them in ranking. Pure and neutral: this module names no language, format or protocol,
 //! and never reads git, the clock or the graph. The caller gathers the inputs.
 
-use katalogr_model::RelPath;
+use katalogr_model::{ArtifactName, Id, Name, RelPath};
 use schemars::JsonSchema;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
@@ -126,15 +126,57 @@ impl WorkingSet {
     }
 }
 
+fn boosted(value: f64, tier: Tier, w: &Weights) -> f64 {
+    let v = value * (1.0 + w.of(tier));
+    (v * 1e6).round() / 1e6
+}
+
 /// `value * (1 + weight of the path's tier)`, rounded to 6 decimals. A path outside the set
 /// (so any path, for an empty set) keeps `value` exactly, byte for byte. Ties keep the caller's
 /// existing tie-break, so the order stays total.
 pub fn boost(value: f64, repo: &str, path: &RelPath, ws: &WorkingSet, w: &Weights) -> f64 {
     match ws.tier(repo, path) {
         None => value,
-        Some(t) => {
-            let v = value * (1.0 + w.of(t));
-            (v * 1e6).round() / 1e6
+        Some(t) => boosted(value, t, w),
+    }
+}
+
+/// A working set prepared for ranking: tiers by artifact id, so a ranking that knows a symbol's
+/// artifact needs no path lookup.
+#[derive(Clone, Debug)]
+pub struct Boost {
+    tiers: BTreeMap<Id, Tier>,
+    weights: Weights,
+}
+
+impl Boost {
+    /// `None` for an empty set: ranking then runs exactly as it does without one.
+    pub fn new(ws: &WorkingSet, weights: Weights) -> Option<Boost> {
+        if ws.is_empty() {
+            return None;
+        }
+        let tiers = ws
+            .paths
+            .iter()
+            .map(|((repo, path), t)| {
+                (
+                    ArtifactName {
+                        repo: repo.clone(),
+                        path: path.clone(),
+                    }
+                    .id(),
+                    *t,
+                )
+            })
+            .collect();
+        Some(Boost { tiers, weights })
+    }
+
+    /// [`boost`] for a value belonging to the artifact `artifact`.
+    pub fn apply(&self, value: f64, artifact: Id) -> f64 {
+        match self.tiers.get(&artifact) {
+            None => value,
+            Some(t) => boosted(value, *t, &self.weights),
         }
     }
 }

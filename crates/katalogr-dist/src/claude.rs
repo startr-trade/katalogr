@@ -269,12 +269,35 @@ impl Katalogr {
             .iter()
             .map(|r| r.name.as_str())
             .collect();
+        // What the index reflects, in short form: `repo commit8[+dirty8]` (FEAT-039 R-9).
+        let short = |s: &str| s.chars().take(8).collect::<String>();
+        let reflected: Vec<String> = report
+            .positions
+            .iter()
+            .map(|p| {
+                format!(
+                    "{} {}{}",
+                    p.repo,
+                    p.commit.as_deref().map_or("none".to_string(), short),
+                    p.dirty
+                        .as_deref()
+                        .map_or(String::new(), |d| format!("+{}", short(d)))
+                )
+            })
+            .collect();
         let header = format!(
-            "katalogr: project {name} (repos: {}); index watermark {}, {} pending{}. Top symbols by PageRank:",
+            "katalogr: project {name} (repos: {}); index watermark {}, {} pending{}. Top symbols by PageRank:\nfreshness: context {}; index at {}; {} pending.",
             repos.join(", "),
             report.watermark,
             report.pending,
             if report.stale { ", stale" } else { "" },
+            report.context.as_deref().unwrap_or("current"),
+            if reflected.is_empty() {
+                "nothing recorded".to_string()
+            } else {
+                reflected.join(", ")
+            },
+            report.pending,
         );
         let footer = "Ask the graph before reading files: use the katalogr skill (find, search, explain, show, refs, why).";
         let symbol_lines: Vec<String> = entries

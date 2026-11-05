@@ -1,0 +1,19 @@
+format: 1
+set: working-set
+version: 1
+description: Three modules with equal lexical hits; the target is the one a working set favours. Neutral ranking cannot tell them apart, so it orders them by name.
+repos:
+  - {name: app, path: repos/app}
+queries:
+  - id: w01
+    op: search
+    input: handle request
+    tags: [working-set]
+    evidence:
+      - {name: "app:src/charlie.rs#fn:handle_request_charlie", grade: 3}
+  - id: w02
+    op: search
+    input: request queue
+    tags: [working-set]
+    evidence:
+      - {name: "app:src/charlie.rs#fn:handle_request_charlie", grade: 3}

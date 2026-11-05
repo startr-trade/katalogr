@@ -26,7 +26,7 @@ mod working_set {
     fn empty_set_changes_nothing() {
         let ws = WorkingSet::default();
         let w = Weights::default();
-        for v in [0.0, 1.0 / 3.0, 12345.678_901_234_5, f64::MIN_POSITIVE] {
+        for v in [0.0, 1.0 / 3.0, 12_345.678_901_234_5, f64::MIN_POSITIVE] {
             let out = boost(v, "r", &rel("a"), &ws, &w);
             assert_eq!(out.to_bits(), v.to_bits());
         }

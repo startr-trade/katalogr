@@ -811,6 +811,45 @@
         "weight"
       ],
       "type": "object"
+    },
+    "WorkingSetSummary": {
+      "description": "What the answer says about the working set, so a reader can see why the order differs.",
+      "properties": {
+        "branch": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "dirty": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "item": {
+          "description": "The active item, when there is one. Filled by the caller; [`WorkingSet::counts`] leaves\nit empty.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "item_paths": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "recent": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "dirty",
+        "recent",
+        "branch",
+        "item_paths"
+      ],
+      "type": "object"
     }
   },
   "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -904,6 +943,17 @@
       "format": "uint64",
       "minimum": 0,
       "type": "integer"
+    },
+    "working_set": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/WorkingSetSummary"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "`search` and `map` only (FEAT-039): the working set that reordered this answer. Absent\nwhen ranking was neutral or the set was empty."
     }
   },
   "required": [
