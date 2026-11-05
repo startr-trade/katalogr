@@ -3,7 +3,7 @@
 
 use crate::error::EngineError;
 use crate::parallel::Parallelism;
-use crate::position::{WorkingState, read_position};
+use crate::position::{WorkingState, read_position_cached, stat_cache_path};
 use crate::profiles::{self, LoadReport, ProfileSet};
 use crate::queue::{Context, EventKind, Inbox, NewEvent, Processor, Seq};
 use crate::registry::ExtensionRegistry;
@@ -322,8 +322,9 @@ impl Engine {
         }
         let reconcile = o.consistency != Consistency::StaleOk;
         let mut warnings = Vec::new();
+        let mut unrecorded = BTreeSet::new();
         let before = if reconcile {
-            self.reconcile(&mut warnings)?
+            self.reconcile(&mut warnings, &mut unrecorded)?
         } else {
             BTreeMap::new()
         };
@@ -345,7 +346,7 @@ impl Engine {
                 drop(snap);
                 // Read after the value, so an edit made while it was computed is seen.
                 let (positions, exact) = self.settle(
-                    reconcile,
+                    reconcile && unrecorded.is_empty(),
                     all_pending == 0,
                     &before,
                     recorded,
@@ -395,7 +396,8 @@ impl Engine {
     fn state_of(&self, repo: &str) -> Result<WorkingState, crate::scan::ScanError> {
         let root = &self.roots[repo];
         let (include, exclude) = self.repo_filters(repo);
-        read_position(repo, root.as_std_path(), &include, &exclude)
+        let cache = stat_cache_path(self.dir.cache_dir().as_std_path(), repo);
+        read_position_cached(repo, root.as_std_path(), &include, &exclude, Some(&cache))
     }
 
     /// FEAT-084 reconcile, steps 1 and 2. Reads each checkout's position, and where it differs
@@ -405,6 +407,7 @@ impl Engine {
     fn reconcile(
         &self,
         warnings: &mut Vec<String>,
+        unrecorded: &mut BTreeSet<String>,
     ) -> Result<BTreeMap<String, WorkingState>, EngineError> {
         let snap = self.cache.read()?;
         let mut before = BTreeMap::new();
@@ -421,6 +424,10 @@ impl Engine {
             // changes mean a producer is already feeding the index, so none is added then.
             let unknown_but_fed =
                 recorded.is_none() && self.pending_in(&snap, &Scope::Project)? > 0;
+            if unknown_but_fed {
+                // Nothing says what the index reflects, so the answer cannot be exact yet.
+                unrecorded.insert(repo.clone());
+            }
             if recorded.as_ref() != Some(&state.position) && !unknown_but_fed {
                 let old = recorded_changed(&snap, repo)?;
                 for ev in self.events_for_difference(repo, recorded.as_ref(), &state, old) {

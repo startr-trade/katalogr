@@ -1,7 +1,10 @@
 //! FEAT-084 T1 and T10: reading a checkout's position, and the shared contract file.
 
 mod position {
-    use katalogr_engine::position::{dirty_hash, read_position};
+    use katalogr_engine::position::{
+        dirty_hash, load_stat_cache, read_position, read_position_cached, reference_position,
+        stat_of,
+    };
     use serde_json::Value;
     use std::collections::BTreeMap;
     use std::path::Path;
@@ -198,6 +201,213 @@ mod position {
         assert!(p.dirty.is_some());
     }
 
+    // ---- the stat cache (FEAT-084 revision) ----
+
+    fn age(root: &Path) {
+        let old = std::time::SystemTime::now() - std::time::Duration::from_secs(3600);
+        fn walk(dir: &Path, old: std::time::SystemTime) {
+            for e in std::fs::read_dir(dir).unwrap() {
+                let e = e.unwrap();
+                if e.file_name() == ".git" {
+                    continue;
+                }
+                let p = e.path();
+                if p.is_dir() {
+                    walk(&p, old);
+                }
+                std::fs::File::open(&p).unwrap().set_modified(old).unwrap();
+            }
+        }
+        walk(root, old);
+        std::fs::File::open(root)
+            .unwrap()
+            .set_modified(old)
+            .unwrap();
+    }
+
+    fn inc() -> Vec<String> {
+        vec!["**".to_string()]
+    }
+
+    fn cached(root: &Path, cache: &Path) -> katalogr_query::PositionRef {
+        read_position_cached("r", root, &inc(), &[], Some(cache))
+            .unwrap()
+            .position
+    }
+
+    fn reference(root: &Path) -> katalogr_query::PositionRef {
+        reference_position("r", root, &inc(), &[]).unwrap().position
+    }
+
+    #[test]
+    fn cache_equals_full_hash() {
+        let d = repo();
+        let r = d.path();
+        let cdir = tempfile::tempdir().unwrap();
+        let cache = cdir.path().join("p/r.stat");
+        let mut seed = 0x9e37_79b9_7f4a_7c15u64;
+        let mut next = move |n: u64| {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            seed % n
+        };
+        let names = [
+            "a.txt",
+            "src/b.txt",
+            "c/d.txt",
+            "e.txt",
+            "src/deep/f.txt",
+            "x.log",
+            "g.dat",
+        ];
+        for step in 0..60 {
+            let name = names[next(names.len() as u64) as usize];
+            let what = match next(9) {
+                0 | 1 => {
+                    put(r, name, &format!("content {step}\n"));
+                    "write"
+                }
+                2 => {
+                    let _ = std::fs::remove_file(r.join(name));
+                    "delete"
+                }
+                3 => {
+                    put(r, name, "same size\n");
+                    "write fixed"
+                }
+                4 => {
+                    // A tracked file with line endings changed.
+                    put(r, "a.txt", "one\r\n");
+                    "crlf"
+                }
+                5 => {
+                    let rule = ["*.dat\n", "*.log\n", "e.*\n"][next(3) as usize];
+                    put(r, ".gitignore", rule);
+                    "ignore rule"
+                }
+                6 => {
+                    put(r, "src/.gitignore", "*.txt\n");
+                    "nested ignore"
+                }
+                7 => {
+                    git(r, &["add", "-A"]);
+                    "stage"
+                }
+                _ => {
+                    git(r, &["add", "-A"]);
+                    git(r, &["commit", "-q", "--allow-empty", "-m", "step"]);
+                    "commit"
+                }
+            };
+            if next(3) == 0 {
+                age(r);
+            }
+            let want = reference(r);
+            let got = cached(r, &cache);
+            assert_eq!(got, want, "step {step} ({what} {name})");
+            // A second read, from the cache just written, agrees as well.
+            assert_eq!(cached(r, &cache), want, "step {step} again ({what} {name})");
+            assert_eq!(pos(r), want, "step {step} uncached ({what} {name})");
+        }
+    }
+
+    #[test]
+    fn racy_same_size_edit_seen() {
+        let d = repo();
+        let r = d.path();
+        age(r);
+        let cdir = tempfile::tempdir().unwrap();
+        let cache = cdir.path().join("r.stat");
+        assert_eq!(cached(r, &cache).dirty, None);
+        // A same-size edit. The cache is made to hold the file's new stat with the old verdict,
+        // as if the edit had kept size, mtime, ctime and inode.
+        put(r, "a.txt", "uno\n");
+        let cur = stat_of(&r.join("a.txt")).unwrap();
+        let canon = std::fs::canonicalize(r).unwrap().display().to_string();
+        let mut c = load_stat_cache(&cache, &canon).expect("cache written");
+        c.tracked.get_mut("a.txt").unwrap().stat = Some(cur);
+        // Written within 2 s of the file's mtime: racy, so the file is read again.
+        c.written_ns = cur.mtime_ns + 1_000_000_000;
+        std::fs::write(&cache, serde_json::to_vec(&c).unwrap()).unwrap();
+        assert!(cached(r, &cache).dirty.is_some(), "racy edit missed");
+        // Control: written long after the mtime, the same stat is trusted (git's own trust).
+        let mut c = load_stat_cache(&cache, &canon).unwrap();
+        c.tracked.get_mut("a.txt").unwrap().stat = Some(cur);
+        c.tracked.get_mut("a.txt").unwrap().raw = katalogr_engine::position::Raw::Same;
+        c.written_ns = cur.mtime_ns + 10_000_000_000;
+        std::fs::write(&cache, serde_json::to_vec(&c).unwrap()).unwrap();
+        assert_eq!(
+            cached(r, &cache).dirty,
+            None,
+            "an unchanged stat is trusted"
+        );
+    }
+
+    #[test]
+    fn corrupt_cache_rebuilds() {
+        let d = repo();
+        let r = d.path();
+        put(r, "a.txt", "changed\n");
+        let cdir = tempfile::tempdir().unwrap();
+        let cache = cdir.path().join("r.stat");
+        let want = reference(r);
+        for junk in [&b"not json"[..], b"", b"{\"version\":99}", b"\xff\xfe"] {
+            std::fs::write(&cache, junk).unwrap();
+            assert_eq!(cached(r, &cache), want);
+            let canon = std::fs::canonicalize(r).unwrap().display().to_string();
+            assert!(load_stat_cache(&cache, &canon).is_some(), "rebuilt");
+        }
+        // An unwritable cache location only costs the savings.
+        let blocked = cdir.path().join("file");
+        std::fs::write(&blocked, "x").unwrap();
+        assert_eq!(cached(r, &blocked.join("sub/r.stat")), want);
+    }
+
+    #[test]
+    fn new_ignore_rule_rewalks() {
+        let d = repo();
+        let r = d.path();
+        put(r, "sub/k.dat", "k\n");
+        age(r);
+        let cdir = tempfile::tempdir().unwrap();
+        let cache = cdir.path().join("r.stat");
+        let before = cached(r, &cache);
+        assert!(before.dirty.is_some());
+        // `sub` itself is not touched, so only the ignore inputs say the rule is new.
+        let mut ig = std::fs::read_to_string(r.join(".gitignore")).unwrap();
+        ig.push_str("*.dat\n");
+        std::fs::write(r.join(".gitignore"), &ig).unwrap();
+        let st = read_position_cached("r", r, &inc(), &[], Some(&cache)).unwrap();
+        assert_eq!(st.position, reference(r));
+        assert!(st.changed.iter().all(|(p, _)| p.as_str() != "sub/k.dat"));
+        // Likewise a rule in `.git/info/exclude`.
+        put(r, "sub/m.cfg", "m\n");
+        age(r);
+        let _ = cached(r, &cache);
+        std::fs::write(r.join(".git/info/exclude"), "*.cfg\n").unwrap();
+        let st = read_position_cached("r", r, &inc(), &[], Some(&cache)).unwrap();
+        assert_eq!(st.position, reference(r));
+        assert!(st.changed.iter().all(|(p, _)| p.as_str() != "sub/m.cfg"));
+    }
+
+    #[test]
+    fn new_untracked_in_cached_dir_seen() {
+        let d = repo();
+        let r = d.path();
+        age(r);
+        let cdir = tempfile::tempdir().unwrap();
+        let cache = cdir.path().join("r.stat");
+        assert_eq!(cached(r, &cache).dirty, None);
+        put(r, "src/new.txt", "new\n");
+        let st = read_position_cached("r", r, &inc(), &[], Some(&cache)).unwrap();
+        assert!(st.changed.iter().any(|(p, _)| p.as_str() == "src/new.txt"));
+        assert_eq!(st.position, reference(r));
+        // Removing it again returns to clean.
+        std::fs::remove_file(r.join("src/new.txt")).unwrap();
+        assert_eq!(cached(r, &cache).dirty, None);
+    }
+
     // ---- T10: the shared contract file (R-14) ----
 
     fn contract() -> Value {
@@ -328,10 +538,26 @@ mod position {
                     ],
                 );
             }
-            let got = pos(r).text();
             let expected = c["expected"].as_str().unwrap();
-            if got != expected {
-                failures.push(format!("{case}: got {got}, expected {expected}"));
+            // Cold (no cache), then with a cache that is empty, then with it warm.
+            let cache_dir = tempfile::tempdir().unwrap();
+            let cache = cache_dir.path().join("r.stat");
+            let inc = vec!["**".to_string()];
+            let cached = || {
+                read_position_cached("r", r, &inc, &[], Some(&cache))
+                    .unwrap()
+                    .position
+                    .text()
+            };
+            for (how, got) in [
+                ("cold", pos(r).text()),
+                ("cache empty", cached()),
+                ("cache warm", cached()),
+                ("cache warm again", cached()),
+            ] {
+                if got != expected {
+                    failures.push(format!("{case} ({how}): got {got}, expected {expected}"));
+                }
             }
         }
         assert!(failures.is_empty(), "{}", failures.join("\n"));

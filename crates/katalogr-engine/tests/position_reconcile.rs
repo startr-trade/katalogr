@@ -174,4 +174,31 @@ mod position {
         assert!(!a.exact);
         assert_eq!(a.positions, first.positions);
     }
+
+    #[test]
+    fn unrecorded_position_not_exact() {
+        // An index fed by events alone, with no position ever recorded.
+        let s = setup();
+        // A fresh cache: the same project opened without the recorded position.
+        let mut tx = s.engine.cache().write().unwrap();
+        tx.set_meta("position.r", b"null").unwrap();
+        tx.commit().unwrap();
+        write(&s.work, "a.tx", "sym fn A\nsym fn A3\nexport k:a A3\n");
+        s.engine
+            .inbox()
+            .append(&katalogr_engine::NewEvent::file(
+                "r",
+                &katalogr_model::RelPath::new("a.tx").unwrap(),
+                katalogr_engine::EventKind::Changed,
+            ))
+            .unwrap();
+        let first = read(&s.engine);
+        assert!(first.value.contains("A3"));
+        assert!(!first.exact, "no recorded position, so not exact");
+        assert!(first.positions.is_empty());
+        // The next read finds nothing queued, rescans, and then knows its position.
+        let second = read(&s.engine);
+        assert!(second.exact);
+        assert_eq!(second.positions.len(), 1);
+    }
 }
