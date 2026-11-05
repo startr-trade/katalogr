@@ -18,6 +18,11 @@ pub enum DistError {
     Scan(#[from] ScanError),
     #[error("{path}: {message}")]
     Io { path: String, message: String },
+    /// A snapshot was refused and nothing was written (FEAT-035 R-4). `exit` is the status the
+    /// same failure has as a view command: 3 ambiguous, 4 no match, 5 not exact or stale,
+    /// 6 position unavailable.
+    #[error("{message}")]
+    Refused { exit: i32, message: String },
 }
 
 impl DistError {
@@ -36,6 +41,14 @@ impl DistError {
                     | StoreError::NotAKindex(_)
             ),
             _ => false,
+        }
+    }
+
+    /// The exit status a refusal carries, if this error is one.
+    pub fn refused_exit(&self) -> Option<i32> {
+        match self {
+            DistError::Refused { exit, .. } => Some(*exit),
+            _ => None,
         }
     }
 

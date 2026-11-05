@@ -5,13 +5,30 @@
 use katalogr_dist::render::ViewSpec;
 use katalogr_dist::{DistError, FreshCheck};
 
-use crate::cli::Cli;
+use crate::cli::{Cli, ViewAction};
 use crate::cmd::render::line_of;
+use crate::cmd::view_doc;
 use crate::cmd::{options, resolve};
 use crate::exit::ExitCode;
 use crate::render;
 
-pub fn run(cli: &Cli, fresh: bool, words: &[String]) -> Result<ExitCode, DistError> {
+pub fn run(
+    cli: &Cli,
+    action: Option<&ViewAction>,
+    fresh: bool,
+    words: &[String],
+) -> Result<ExitCode, DistError> {
+    match action {
+        Some(ViewAction::Check { path }) => return view_doc::check(cli, path),
+        Some(ViewAction::Snapshot { docs, out }) => return view_doc::snapshot(cli, docs, out),
+        None => {}
+    }
+    if words.is_empty() {
+        return Err(DistError::Usage(
+            "view wants an op (structure, contracts, callers, path, cycles), `check` or `snapshot`"
+                .to_string(),
+        ));
+    }
     // `--fresh` may come after the op, with the view's own flags.
     let fresh = fresh || words.iter().any(|w| w == "--fresh");
     let words: Vec<String> = words.iter().filter(|w| *w != "--fresh").cloned().collect();

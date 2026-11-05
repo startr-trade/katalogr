@@ -559,10 +559,14 @@ pub fn report(r: &Report) -> JsonAnswer {
 pub fn error(e: &DistError) -> JsonAnswer {
     JsonAnswer {
         message: Some(e.to_string()),
-        ..JsonAnswer::new(if e.is_usage() {
-            ExitCode::Usage
-        } else {
-            ExitCode::Error
+        ..JsonAnswer::new(match e.refused_exit() {
+            Some(3) => ExitCode::Ambiguous,
+            Some(4) => ExitCode::NoMatch,
+            Some(5) => ExitCode::Stale,
+            Some(6) => ExitCode::PositionUnavailable,
+            Some(_) => ExitCode::Error,
+            None if e.is_usage() => ExitCode::Usage,
+            None => ExitCode::Error,
         })
     }
 }
