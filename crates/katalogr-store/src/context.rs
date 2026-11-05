@@ -1,6 +1,6 @@
 //! Contexts: a base plus per-checkout or per-commit layers (FEAT-043).
 
-use crate::cache::{Cache, TableId};
+use crate::cache::{Cache, Reader, TableId};
 use crate::error::StoreError;
 use crate::kindex::ProjectDir;
 use crate::kindex::{read_to_string, write_atomic};
@@ -105,16 +105,21 @@ impl ContextManifest {
     }
 }
 
+/// `meta` key: `[[repo, path], …]` the base had index errors for when the layer was seeded.
+pub const META_BASE_ERRORS: &str = "layer_base_errors";
+
 /// Copy the base cache into `layer`, clear what belongs to the base, then rename into place.
 /// The caller holds the base's processor lock. An interrupted seed leaves only a temp file, and
 /// a layer directory without `context.json` is removed on sight. A layer that already has its
-/// manifest is left as it is.
+/// manifest is left as it is. The written manifest has `seed_commit` filled from the base's
+/// `base_commit.<repo>` when the caller left it empty.
 pub fn seed_layer(
     base: &ProjectDir,
     layer: &ProjectDir,
     m: &ContextManifest,
     deadline: Instant,
 ) -> Result<(), StoreError> {
+    let mut m = m.clone();
     let root = layer.root();
     if root.join(ContextManifest::FILE).is_file() {
         return Ok(());
@@ -134,7 +139,21 @@ pub fn seed_layer(
     crate::failpoint::hit("seed_after_copy");
     if tmp.is_file() {
         let cache = Cache::open_file(&tmp, deadline)?;
+        // The paths the base holds index errors for: shards carry no error rows, so a layer
+        // must never reuse the base's shard for these (FEAT-043 R-20).
+        let errored: Vec<(String, String)> = {
+            cache
+                .read()?
+                .index_error_files()?
+                .into_iter()
+                .map(|((repo, path), _)| (repo, path.as_str().to_string()))
+                .collect()
+        };
         let mut tx = cache.write()?;
+        tx.set_meta(
+            META_BASE_ERRORS,
+            &serde_json::to_vec(&errored).map_err(|e| StoreError::Row(e.to_string()))?,
+        )?;
         for t in [
             TableId::ShardHashes,
             TableId::Pending,
@@ -142,6 +161,12 @@ pub fn seed_layer(
             TableId::Journal,
         ] {
             tx.clear_table(t)?;
+        }
+        // The commit the base reflected, when the caller did not name one.
+        if m.seed_commit.is_none() {
+            m.seed_commit = tx
+                .meta(&format!("base_commit.{}", m.repo))?
+                .and_then(|b| String::from_utf8(b).ok());
         }
         tx.set_meta(
             "layer_seed_commit",

@@ -24,7 +24,7 @@ pub use cache::{
     Posting, ReadTx, Reader, RefId, Restitch, ShardStat, Snapshot, SymbolBrief, SymbolRow,
     SyncReport, TableId, WriteTx,
 };
-pub use context::{ContextId, ContextKind, ContextManifest, seed_layer};
+pub use context::{ContextId, ContextKind, ContextManifest, META_BASE_ERRORS, seed_layer};
 pub use error::StoreError;
 pub use guard::{GuardError, needles_from, scan_for_absolute, scan_for_absolute_with};
 pub use inspect::{CacheInspection, InspectedTables, OpenCache};

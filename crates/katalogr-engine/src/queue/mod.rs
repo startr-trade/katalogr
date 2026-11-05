@@ -1,7 +1,7 @@
 //! The durable change queue: inbox spool, processor (FEAT-047, ADR-0008, ADR-0014).
 
 pub mod inbox;
-pub(crate) mod lock;
+pub mod lock;
 mod plan;
 pub mod processor;
 

@@ -335,6 +335,16 @@ impl ProjectDir {
         }
     }
 
+    /// The base of this project: the same project with its data root at the project itself.
+    pub fn base(&self) -> ProjectDir {
+        ProjectDir {
+            root: self.project_root.clone(),
+            project_root: self.project_root.clone(),
+            kindex_root: self.kindex_root.clone(),
+            config: self.config.clone(),
+        }
+    }
+
     /// Where `config.yaml` and `profiles/` live, for a layer too. `root()` keeps meaning the
     /// data root, so journal and shard paths stay relative to it.
     pub fn project_root(&self) -> &Utf8Path {

@@ -324,7 +324,13 @@ mod hooks {
 
     /// `(path, kind)` of every inbox entry, sorted; the inbox is emptied.
     fn drain_inbox(e: &Env) -> Vec<(String, String)> {
-        let dir = e.kx.join("projects/demo/.cache/inbox");
+        // A git checkout reads and writes its own context; the first one found is it.
+        let ctxs = e.kx.join("projects/demo/.cache/contexts");
+        let dir = std::fs::read_dir(&ctxs)
+            .ok()
+            .and_then(|mut rd| rd.find_map(|d| d.ok()))
+            .map(|d| d.path().join(".cache/inbox"))
+            .unwrap_or_else(|| e.kx.join("projects/demo/.cache/inbox"));
         let mut out = Vec::new();
         if let Ok(rd) = std::fs::read_dir(&dir) {
             for f in rd.flatten() {
@@ -349,6 +355,8 @@ mod hooks {
         let e = env();
         git(&e.repo, &["init", "-q", "-b", "main"]);
         ok(&e.repo, &e.home, &["hooks", "install"]);
+        // Reading seeds the checkout's own context, which then holds the events.
+        ok(&e.repo, &e.home, &["status"]);
         let _ = drain_inbox(&e);
 
         // First commit: the whole tree (a rescan of the repo).

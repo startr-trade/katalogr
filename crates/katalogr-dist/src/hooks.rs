@@ -526,7 +526,8 @@ impl Katalogr {
                 }
             }
         }
-        let inbox = katalogr_engine::queue::Inbox::new(&self.project);
+        let layer = self.layer_dir(Instant::now() + Duration::from_secs(30))?;
+        let inbox = katalogr_engine::queue::Inbox::new(&layer);
         for ev in &events {
             inbox.append(ev)?;
         }

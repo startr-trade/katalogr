@@ -132,6 +132,16 @@ impl<'a> Processor<'a> {
                 }
             }
         }
+        if self.engine.dir().is_layer() {
+            // A layer's `shard_hashes` holds only its delta, so every stored artifact counts.
+            for (_, row) in tx.artifacts()? {
+                let p = &row.provenance;
+                if p.repo == ev.repo && !p.path.as_str().starts_with(crate::history::HISTORY_PREFIX)
+                {
+                    out.insert(p.path.clone());
+                }
+            }
+        }
         for ((repo, path), _) in tx.shard_hashes()? {
             if repo == ev.repo {
                 out.insert(path);

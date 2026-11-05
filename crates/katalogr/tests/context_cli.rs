@@ -73,10 +73,16 @@ mod cli {
         let repo = project(tmp.path(), &[("a.tx", "sym fn Committed\n")]);
         std::fs::write(repo.join("a.tx"), "sym fn Dirty\n").unwrap();
         ok(&repo, &["index"]);
-        let base = ok(&repo, &["find", "Committed"]);
-        assert!(base.contains("Committed"), "{base}");
+        // The checkout's own context sees the disk; the base reflects the commit.
         let (code, out, _) = run(&repo, &["find", "Dirty"]);
-        assert!(code != 0 && !out.contains("Dirty"), "{out}");
+        assert_eq!(code, 0, "{out}");
+        let mut k = katalogr_dist::Katalogr::resolve(&repo, &Default::default()).unwrap();
+        k.set_context(katalogr_dist::contexts::ContextChoice::Base);
+        let found = |k: &katalogr_dist::Katalogr, t: &str| {
+            format!("{:?}", k.find(t, &Default::default()).unwrap().outcome).starts_with("Found")
+        };
+        assert!(found(&k, "Committed"));
+        assert!(!found(&k, "Dirty"));
         // The recorded commit is the default branch's tip.
         let k = katalogr_dist::Katalogr::resolve(&repo, &Default::default()).unwrap();
         let head = Command::new("git")

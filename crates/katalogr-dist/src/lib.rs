@@ -202,6 +202,10 @@ pub struct Katalogr {
     repo: Option<String>,
     /// Repo name to root on this machine: `roots.yaml`, overridden by the marker for its repo.
     roots: BTreeMap<String, Utf8PathBuf>,
+    /// Which context a read or write goes through (FEAT-043); `Current` unless set.
+    context: contexts::ContextChoice,
+    /// Warnings raised while choosing a context, handed out with the next report.
+    notes: std::sync::Mutex<Vec<String>>,
 }
 
 /// Profiles embedded in the binary, applied before the project's own: `(file name, text)`.
@@ -449,6 +453,8 @@ impl Katalogr {
             project,
             repo: r.repo,
             roots,
+            context: contexts::ContextChoice::Current,
+            notes: std::sync::Mutex::new(Vec::new()),
         })
     }
 
@@ -479,12 +485,12 @@ impl Katalogr {
     }
 
     fn engine(&self, deadline: Instant) -> Result<Engine, DistError> {
-        let mut engine = Engine::open(
-            self.project.clone(),
-            build_registry(),
-            self.roots.clone(),
-            deadline,
-        )?;
+        self.engine_on(self.layer_dir(deadline)?, deadline)
+    }
+
+    /// An engine over `dir`: the base, or one of its layers.
+    fn engine_on(&self, dir: ProjectDir, deadline: Instant) -> Result<Engine, DistError> {
+        let mut engine = Engine::open(dir, build_registry(), self.roots.clone(), deadline)?;
         engine.set_builtin_profiles(builtin_profiles());
         engine.set_parallelism(resolve_parallelism(
             &self.project.config().settings,
@@ -519,7 +525,9 @@ impl Katalogr {
             .iter()
             .map(|p| rel_to_root(root, p))
             .collect::<Result<Vec<_>, _>>()?;
-        let inbox = katalogr_engine::queue::Inbox::new(&self.project);
+        let layer =
+            self.layer_dir(Instant::now() + Duration::from_secs_f64(DEFAULT_TIMEOUT_SECS))?;
+        let inbox = katalogr_engine::queue::Inbox::new(&layer);
         for rel in &rels {
             inbox.append(&NewEvent::file(repo, rel, kind))?;
         }
@@ -1211,6 +1219,7 @@ impl Katalogr {
             |tx| katalogr_engine::profiles::stored_errors(tx),
         )?;
         warnings.extend(a.value.iter().map(|e| format!("profile refused: {e}")));
+        warnings.extend(self.take_notes());
         Ok(Report {
             watermark: a.watermark.0,
             pending: a.pending,
