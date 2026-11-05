@@ -115,6 +115,31 @@ pub fn options_with(cli: &Cli, diagnostic: bool) -> Options {
     }
 }
 
+/// The read options of a question (FEAT-084): `op` and `args` name it for the view ID. `args`
+/// holds what changes the answer, never `--json`, `--timeout` or `--consistency`; `--budget`
+/// is added when set, since it cuts the answer.
+pub fn options_for(cli: &Cli, op: &str, args: &[(&str, String)]) -> Options {
+    options_for_diag(cli, op, args, false)
+}
+
+/// [`options_for`] with a diagnostic trace when `diagnostic` (a per-command flag).
+pub fn options_for_diag(cli: &Cli, op: &str, args: &[(&str, String)], diagnostic: bool) -> Options {
+    let mut view = katalogr_dist::ViewQuery {
+        op: op.to_string(),
+        args: args
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.clone()))
+            .collect(),
+    };
+    if let Some(b) = cli.budget {
+        view.args.insert("budget".to_string(), b.to_string());
+    }
+    Options {
+        view: Some(view),
+        ..options_with(cli, diagnostic)
+    }
+}
+
 /// Print a read report and map staleness to the exit status.
 pub fn render(cli: &Cli, r: &katalogr_dist::Report, line: &str) -> ExitCode {
     if cli.json {

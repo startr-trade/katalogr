@@ -1003,3 +1003,33 @@ fn ignore_stat(root: &Path, path: &str) -> Option<(u64, u64)> {
     };
     stat_of(&full).map(|s| (s.size, s.mtime_ns))
 }
+
+impl crate::consistency::Engine {
+    /// The facts part of a view ID (chain decision CD-3): the SHA-256, in hex, of the sorted
+    /// extractor ids with their revision salts, and the profile hash each extension had when
+    /// the snapshot was published. Binary versions and `CACHE_SCHEMA` take no part.
+    pub fn facts_version(
+        &self,
+        snap: &impl katalogr_store::Reader,
+    ) -> Result<String, crate::error::EngineError> {
+        let mut rows: Vec<(&str, &str)> = self
+            .registry()
+            .extractors()
+            .map(|e| (e.id(), e.revision_salt()))
+            .collect();
+        rows.sort();
+        let mut h = Sha256::new();
+        for (id, salt) in rows {
+            h.update(id.as_bytes());
+            h.update([0u8]);
+            h.update(salt.as_bytes());
+            h.update([0u8]);
+            let profile = snap
+                .meta(&format!("profile_hash:{id}"))?
+                .unwrap_or_default();
+            h.update(profile.len().to_le_bytes());
+            h.update(&profile);
+        }
+        Ok(h.finalize().iter().map(|b| format!("{b:02x}")).collect())
+    }
+}

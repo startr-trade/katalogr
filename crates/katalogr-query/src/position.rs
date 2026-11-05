@@ -79,3 +79,48 @@ pub struct ViewQuery {
     pub op: String,
     pub args: std::collections::BTreeMap<String, String>,
 }
+
+/// The format version in every view ID; a change of the ID's input bumps it.
+pub const VIEW_FORMAT: u32 = 1;
+
+fn quoted(s: &str) -> String {
+    serde_json::to_string(s).expect("a string serialises")
+}
+
+/// The view ID of an answer (chain decision CD-3): `v1-` plus the first 32 hex characters of the
+/// SHA-256 of the compact JSON, keys sorted,
+/// `{"facts":F,"positions":[…],"query":{"args":{…},"op":"…"},"view_format":1}`. Pure and total.
+/// `positions` must be sorted by repo. `facts` is the tool's own part (see the engine's
+/// `facts_version`).
+pub fn view_id(positions: &[PositionRef], facts: &str, q: &ViewQuery) -> String {
+    use sha2::{Digest, Sha256};
+    let opt = |v: &Option<String>| v.as_deref().map_or("null".to_string(), quoted);
+    let mut s = String::with_capacity(256);
+    s.push_str("{\"facts\":");
+    s.push_str(&quoted(facts));
+    s.push_str(",\"positions\":[");
+    for (i, p) in positions.iter().enumerate() {
+        if i > 0 {
+            s.push(',');
+        }
+        s.push_str(&format!(
+            "{{\"commit\":{},\"dirty\":{},\"repo\":{}}}",
+            opt(&p.commit),
+            opt(&p.dirty),
+            quoted(&p.repo)
+        ));
+    }
+    s.push_str("],\"query\":{\"args\":{");
+    for (i, (k, v)) in q.args.iter().enumerate() {
+        if i > 0 {
+            s.push(',');
+        }
+        s.push_str(&format!("{}:{}", quoted(k), quoted(v)));
+    }
+    s.push_str("},\"op\":");
+    s.push_str(&quoted(&q.op));
+    s.push_str(&format!("}},\"view_format\":{VIEW_FORMAT}}}"));
+    let digest = Sha256::digest(s.as_bytes());
+    let hex: String = digest.iter().map(|b| format!("{b:02x}")).collect();
+    format!("v1-{}", &hex[..32])
+}

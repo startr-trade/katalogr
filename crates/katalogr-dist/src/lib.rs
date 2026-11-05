@@ -849,6 +849,7 @@ impl Katalogr {
                         ContextChoice::Named(id) => id.to_string(),
                         _ => "base".to_string(),
                     });
+                    self.finish_report(&engine, &mut reply.report, opts.view.as_ref());
                     Ok(reply)
                 }
                 at::Resolved::Unavailable { wanted, available } => Ok(Reply {
@@ -932,6 +933,30 @@ impl Katalogr {
             },
             diagnostic: diag.finish(),
         })
+        .map(|mut reply| {
+            self.finish_report(engine, &mut reply.report, opts.view.as_ref());
+            reply
+        })
+    }
+
+    /// FEAT-084. Give an exact answer to a question its view ID. A snapshot that cannot be read
+    /// leaves the ID off.
+    pub(crate) fn finish_report(
+        &self,
+        engine: &Engine,
+        report: &mut Report,
+        view: Option<&katalogr_query::ViewQuery>,
+    ) {
+        report.view_id = None;
+        let Some(view) = view else { return };
+        if !report.exact {
+            return;
+        }
+        if let Ok(snap) = engine.cache().read()
+            && let Ok(facts) = engine.facts_version(&snap)
+        {
+            report.view_id = Some(katalogr_query::view_id(&report.positions, &facts, view));
+        }
     }
 
     /// Symbols whose name matches `text`.

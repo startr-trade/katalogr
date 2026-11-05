@@ -1522,7 +1522,7 @@ mod retrieval {
 }
 
 mod diagnostic_cli {
-    use super::cli::{ok, query_project, run_raw};
+    use super::cli::{query_project, run_raw};
     use serde_json::Value;
     use std::path::Path;
 
@@ -2195,5 +2195,157 @@ mod position {
             .map(|p| p["repo"].as_str().unwrap())
             .collect();
         assert_eq!(repos, ["app", "other", "plain"], "sorted by repo");
+    }
+}
+
+mod view {
+    use super::cli::{ok, query_project, run_raw};
+    use serde_json::Value;
+    use std::path::{Path, PathBuf};
+    use std::process::Command;
+
+    fn git(root: &Path, args: &[&str]) {
+        let st = Command::new("git")
+            .current_dir(root)
+            .args(args)
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .status()
+            .expect("run git");
+        assert!(st.success(), "git {args:?} failed");
+    }
+
+    /// The `.tx` query project as a clean, committed repository whose base is at the tip.
+    fn clean_project(tmp: &Path) -> (PathBuf, PathBuf) {
+        let (kx, repo) = query_project(tmp);
+        git(&repo, &["init", "-q", "-b", "main"]);
+        git(&repo, &["config", "user.name", "Test"]);
+        git(&repo, &["config", "user.email", "test@example.com"]);
+        git(&repo, &["config", "commit.gpgsign", "false"]);
+        git(&repo, &["add", "-A"]);
+        git(&repo, &["commit", "-q", "-m", "c1"]);
+        ok(&repo, &["index"]);
+        (kx, repo)
+    }
+
+    fn json(repo: &Path, args: &[&str]) -> Value {
+        let (_code, out, err) = run_raw(repo, args);
+        serde_json::from_str(&out).unwrap_or_else(|e| panic!("{args:?}: {e}: {out} {err}"))
+    }
+
+    fn id(v: &Value) -> String {
+        v["view_id"]
+            .as_str()
+            .unwrap_or_else(|| panic!("no view_id: {v}"))
+            .to_string()
+    }
+
+    /// R-6. The same question at the same position repeats its ID.
+    #[test]
+    fn id_repeats_at_same_position() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (_kx, repo) = clean_project(tmp.path());
+        let a = json(&repo, &["--json", "find", "call"]);
+        let b = json(&repo, &["--json", "find", "call"]);
+        assert!(id(&a).starts_with("v1-") && id(&a).len() == 3 + 32);
+        assert_eq!(id(&a), id(&b));
+        // Also after a long way round: an edit and its undoing.
+        let user = std::fs::read(repo.join("user.tx")).unwrap();
+        let mut edited = user.clone();
+        edited.extend_from_slice(b"sym fn extra\n");
+        std::fs::write(repo.join("user.tx"), edited).unwrap();
+        let mid = json(&repo, &["--json", "find", "call"]);
+        assert_ne!(id(&mid), id(&a));
+        std::fs::write(repo.join("user.tx"), user).unwrap();
+        let back = json(&repo, &["--json", "find", "call"]);
+        assert_eq!(id(&back), id(&a));
+    }
+
+    /// R-6. The checkout's context and the base, at the same position, give the same ID.
+    #[test]
+    fn id_repeats_across_contexts() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (_kx, repo) = clean_project(tmp.path());
+        let cur = json(&repo, &["--json", "find", "call"]);
+        let base = json(&repo, &["--json", "--context", "base", "find", "call"]);
+        assert_eq!(cur["positions"], base["positions"]);
+        assert_eq!(id(&cur), id(&base));
+    }
+
+    /// R-6. Output flags are not part of the question.
+    #[test]
+    fn id_ignores_output_flags() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (_kx, repo) = clean_project(tmp.path());
+        let a = id(&json(&repo, &["--json", "find", "call"]));
+        for extra in [
+            vec!["--timeout", "20"],
+            vec!["--consistency", "wait-all"],
+            vec!["--consistency", "wait"],
+        ] {
+            let mut args = vec!["--json"];
+            args.extend(extra.iter().copied());
+            args.extend(["find", "call"]);
+            assert_eq!(id(&json(&repo, &args)), a, "{extra:?}");
+        }
+    }
+
+    /// R-7. A different position is a different ID.
+    #[test]
+    fn id_changes_with_position() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (_kx, repo) = clean_project(tmp.path());
+        let a = id(&json(&repo, &["--json", "find", "call"]));
+        let mut lib = std::fs::read(repo.join("lib.tx")).unwrap();
+        lib.extend_from_slice(b"sym fn extra\n");
+        std::fs::write(repo.join("lib.tx"), lib).unwrap();
+        let b = id(&json(&repo, &["--json", "find", "call"]));
+        assert_ne!(a, b);
+    }
+
+    /// R-7. A different question is a different ID.
+    #[test]
+    fn id_changes_with_query() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (_kx, repo) = clean_project(tmp.path());
+        let a = id(&json(&repo, &["--json", "find", "call"]));
+        assert_ne!(a, id(&json(&repo, &["--json", "find", "caller"])));
+        assert_ne!(a, id(&json(&repo, &["--json", "search", "call"])));
+        assert_ne!(
+            a,
+            id(&json(&repo, &["--json", "--budget", "50", "find", "call"]))
+        );
+    }
+
+    /// R-7. A different profile (the extraction rules) is a different ID.
+    #[test]
+    fn id_changes_with_profile() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (kx, repo) = clean_project(tmp.path());
+        let a = id(&json(&repo, &["--json", "find", "call"]));
+        let dir = kx.join("projects/demo/profiles");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("p.yaml"),
+            "profile: p\nversion: 1\nrules:\n  - id: r\n    when: { extension: test, kind: fn, name: '^zzz$' }\n    emit:\n      bind: { contract: { kind: channel, key: orders }, role: provides }\n",
+        )
+        .unwrap();
+        let b = json(&repo, &["--json", "find", "call"]);
+        assert_ne!(a, id(&b), "{b}");
+    }
+
+    /// R-8. An answer that is not exact has no ID.
+    #[test]
+    fn no_id_when_not_exact() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (_kx, repo) = clean_project(tmp.path());
+        let v = json(
+            &repo,
+            &["--json", "--consistency", "stale-ok", "find", "call"],
+        );
+        assert_eq!(v["exact"], false);
+        assert!(v.get("view_id").is_none(), "{v}");
+        let exact = json(&repo, &["--json", "find", "call"]);
+        assert!(exact.get("view_id").is_some());
     }
 }
