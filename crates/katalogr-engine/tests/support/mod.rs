@@ -760,11 +760,19 @@ pub fn cache_dump(e: &Engine) -> CacheDump {
     out.push(("doc_len".to_string(), docs));
     for (name, t) in [
         ("lexicon_stats", TableId::LexiconStats),
-        ("shard_hashes", TableId::ShardHashes),
         ("rank", TableId::Rank),
     ] {
         out.push((name.to_string(), r.raw_scan(t, &[]).unwrap()));
     }
+    // The hash of each shard; the `(size, mtime)` recorded beside it is the file's own, which
+    // differs from run to run.
+    let hashes = r
+        .raw_scan(TableId::ShardHashes, &[])
+        .unwrap()
+        .into_iter()
+        .map(|(k, v)| (k, v[..32].to_vec()))
+        .collect();
+    out.push(("shard_hashes".to_string(), hashes));
     out
 }
 

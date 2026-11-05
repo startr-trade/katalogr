@@ -130,6 +130,55 @@ mod cache {
         katalogr_store::cache::commits_on_this_thread()
     }
 
+    /// FEAT-075 / FEAT-076 R-7. The first open after an index run writes nothing: the publish
+    /// recorded each shard's size and mtime with its hash. A write there would also grow a
+    /// freshly compacted file to twice its size, since it has no free page to put the rows in.
+    #[test]
+    fn open_after_index_writes_nothing() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = Utf8PathBuf::from_path_buf(tmp.path().to_path_buf()).unwrap();
+        let (kx, work) = (root.join("kx"), root.join("work"));
+        std::fs::create_dir_all(&work).unwrap();
+        for (p, t) in [
+            ("a.tx", "sym fn A\nexport k:a A\n"),
+            ("b.tx", "sym fn B\nref B calls k:a\n"),
+        ] {
+            std::fs::write(work.join(p), t).unwrap();
+        }
+        support::init_project(&kx);
+        {
+            let e = support::open_engine(&kx, &work);
+            support::full_index(&e);
+        }
+        let dir = Kindex::open(&kx)
+            .unwrap()
+            .project(&ProjectName::new("p").unwrap())
+            .unwrap();
+        let settled = commits();
+        let cache = Cache::open_or_rebuild(&dir, &Stitcher::new(), soon()).unwrap();
+        assert_eq!(cache.report().hashed, 0, "no shard was read");
+        assert_eq!(commits(), settled, "the open committed nothing");
+        let size = cache.file_bytes().unwrap();
+        drop(cache);
+        // A compacted file does not grow either.
+        let cache = Cache::open_or_rebuild(&dir, &Stitcher::new(), soon()).unwrap();
+        let (cache, _) = cache
+            .compact(&dir, katalogr_store::CompactMode::Rewrite, soon())
+            .unwrap();
+        let compacted = cache.file_bytes().unwrap();
+        drop(cache);
+        drop(Cache::open_or_rebuild(&dir, &Stitcher::new(), soon()).unwrap());
+        let after = std::fs::metadata(dir.cache_dir().join("index.redb"))
+            .unwrap()
+            .len();
+        // Not doubled: an open may move the file by a page, a write that finds no free page
+        // doubles it.
+        assert!(
+            after <= compacted + 16 * 1024,
+            "{after} after the open, {compacted} compacted ({size} before)"
+        );
+    }
+
     #[test]
     fn open_unchanged_writes_nothing() {
         let tmp = tempfile::tempdir().unwrap();

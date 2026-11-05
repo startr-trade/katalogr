@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 9cc6e9832a45b03718d834ca7fdc61f6be08e5772b025132e69b47745c954175 # shrinks to files = [("g0/t0.tx", "sym fn A0\nsym fn B0\nexport k:e0 A0\nref B0 calls k:e0\nref A0 calls k:e0\nbind B0 consumes res:c0\nlink A0 calls B0\n")]
