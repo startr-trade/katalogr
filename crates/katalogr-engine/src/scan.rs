@@ -294,18 +294,155 @@ fn dirty_paths(repo_root: &std::path::Path) -> Result<Vec<String>, ScanError> {
 
 /// Every regular file under `repo_root` (the `.git` directory is never entered, symbolic links
 /// are skipped) whose repo-relative path matches an `include` glob and no `exclude` glob.
+/// In a root with a `.git` entry, paths git ignores are dropped (a tracked file stays); if git's
+/// ignore data cannot be read, the warning goes to stderr and the walk lists without it.
 /// Paths that are not UTF-8 or not valid [`RelPath`]s are skipped. Output is sorted by path.
 pub fn list_files(
     repo_root: &std::path::Path,
     include: &[String],
     exclude: &[String],
 ) -> Result<Vec<RelPath>, ScanError> {
+    let (files, warnings) = list_files_warned(repo_root, include, exclude)?;
+    for w in warnings {
+        eprintln!("warning: {w}");
+    }
+    Ok(files)
+}
+
+/// As [`list_files`], returning the warnings instead of printing them.
+pub fn list_files_warned(
+    repo_root: &std::path::Path,
+    include: &[String],
+    exclude: &[String],
+) -> Result<(Vec<RelPath>, Vec<String>), ScanError> {
     let include = glob_set(include)?;
     let exclude = glob_set(exclude)?;
-    let mut out = Vec::new();
-    walk(repo_root, "", &include, &exclude, &mut out)?;
-    out.sort();
-    Ok(out)
+    let mut warnings = Vec::new();
+    let out = with_filter(repo_root, &mut warnings, |filter, warnings| {
+        let mut out = Vec::new();
+        walk(
+            repo_root, "", &include, &exclude, filter, warnings, &mut out,
+        )?;
+        out.sort();
+        Ok::<_, ScanError>(out)
+    })?;
+    Ok((out, warnings))
+}
+
+/// Runs `f` with git's ignore filter for `repo_root`: `None` for a root with no `.git` entry, or
+/// when the ignore data cannot be read (a warning is added then).
+fn with_filter<R>(
+    repo_root: &std::path::Path,
+    warnings: &mut Vec<String>,
+    f: impl FnOnce(Option<&mut IgnoreFilter<'_>>, &mut Vec<String>) -> R,
+) -> R {
+    // `.git` is a directory, or a file in a linked worktree; without it nothing is ignored.
+    let git = if repo_root.join(".git").exists() {
+        match gix::open(repo_root) {
+            Ok(g) => Some(g),
+            Err(e) => {
+                warnings.push(format!(
+                    "git ignore data of {} unreadable, listing without it: {e}",
+                    repo_root.display()
+                ));
+                None
+            }
+        }
+    } else {
+        None
+    };
+    let index = git.as_ref().and_then(|g| match g.index_or_empty() {
+        Ok(i) => Some(i),
+        Err(e) => {
+            warnings.push(format!(
+                "git index of {} unreadable, listing without ignore rules: {e}",
+                repo_root.display()
+            ));
+            None
+        }
+    });
+    let mut filter = match (&git, &index) {
+        (Some(g), Some(i)) => match crate::position::excludes_stack(g, i) {
+            Ok(stack) => {
+                let tracked = i
+                    .entries()
+                    .iter()
+                    .map(|e| e.path(i).to_string())
+                    .collect::<std::collections::BTreeSet<_>>();
+                Some(IgnoreFilter { stack, tracked })
+            }
+            Err(e) => {
+                warnings.push(format!(
+                    "git ignore data of {} unreadable, listing without it: {e}",
+                    repo_root.display()
+                ));
+                None
+            }
+        },
+        _ => None,
+    };
+    f(filter.as_mut(), warnings)
+}
+
+/// Of `paths`, those git ignores and does not track under `repo_root`; none for a root with no
+/// `.git` entry. Unreadable ignore data admits everything and adds a warning.
+pub(crate) fn ignored_among<'a>(
+    repo_root: &std::path::Path,
+    paths: impl IntoIterator<Item = &'a RelPath>,
+) -> (std::collections::BTreeSet<RelPath>, Vec<String>) {
+    let mut warnings = Vec::new();
+    let set = with_filter(repo_root, &mut warnings, |filter, warnings| {
+        let mut out = std::collections::BTreeSet::new();
+        if let Some(f) = filter {
+            for p in paths {
+                if f.skip_file(p.as_str(), warnings) {
+                    out.insert(p.clone());
+                }
+            }
+        }
+        out
+    });
+    (set, warnings)
+}
+
+/// Git's ignore rules for a walk, and the index paths (a tracked file is never dropped).
+struct IgnoreFilter<'r> {
+    stack: gix::AttributeStack<'r>,
+    tracked: std::collections::BTreeSet<String>,
+}
+
+impl IgnoreFilter<'_> {
+    fn has_tracked_under(&self, dir: &str) -> bool {
+        let prefix = format!("{dir}/");
+        self.tracked
+            .range(prefix.clone()..)
+            .next()
+            .is_some_and(|p| p.starts_with(&prefix))
+    }
+
+    /// An ignored directory is skipped unless it holds a tracked path.
+    fn skip_dir(&mut self, rel: &str, warnings: &mut Vec<String>) -> bool {
+        match crate::position::stack_excluded(&mut self.stack, rel, true) {
+            Ok(ignored) => ignored && !self.has_tracked_under(rel),
+            Err(e) => {
+                warnings.push(format!("ignore check of {rel} failed, listing it: {e}"));
+                false
+            }
+        }
+    }
+
+    fn skip_file(&mut self, rel: &str, warnings: &mut Vec<String>) -> bool {
+        if self.tracked.contains(rel) {
+            return false;
+        }
+        match crate::position::stack_excluded(&mut self.stack, rel, false) {
+            Ok(ignored) => ignored,
+            Err(e) => {
+                warnings.push(format!("ignore check of {rel} failed, listing it: {e}"));
+                false
+            }
+        }
+    }
 }
 
 pub(crate) fn glob_set(globs: &[String]) -> Result<globset::GlobSet, ScanError> {
@@ -328,6 +465,8 @@ fn walk(
     prefix: &str,
     include: &globset::GlobSet,
     exclude: &globset::GlobSet,
+    mut filter: Option<&mut IgnoreFilter<'_>>,
+    warnings: &mut Vec<String>,
     out: &mut Vec<RelPath>,
 ) -> Result<(), ScanError> {
     let io = |e: std::io::Error| ScanError::Io {
@@ -342,12 +481,24 @@ fn walk(
         let ft = entry.file_type().map_err(io)?;
         let rel = format!("{prefix}{name}");
         if ft.is_dir() {
-            if name != ".git" && !exclude.is_match(format!("{rel}/{DIR_PROBE}")) {
-                walk(&entry.path(), &format!("{rel}/"), include, exclude, out)?;
+            if name != ".git"
+                && !exclude.is_match(format!("{rel}/{DIR_PROBE}"))
+                && !filter.as_mut().is_some_and(|f| f.skip_dir(&rel, warnings))
+            {
+                walk(
+                    &entry.path(),
+                    &format!("{rel}/"),
+                    include,
+                    exclude,
+                    filter.as_deref_mut(),
+                    warnings,
+                    out,
+                )?;
             }
         } else if ft.is_file()
             && include.is_match(&rel)
             && !exclude.is_match(&rel)
+            && !filter.as_mut().is_some_and(|f| f.skip_file(&rel, warnings))
             && let Ok(p) = RelPath::new(&rel)
         {
             out.push(p);

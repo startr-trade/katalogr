@@ -58,6 +58,8 @@ pub(super) struct PlanEnv<'e> {
     row_revisions: BTreeMap<(String, RelPath), String>,
     /// In a layer: paths the base held index errors for at seed time (never reused).
     base_errors: BTreeSet<(String, String)>,
+    /// Paths of the round that git ignores and does not track: treated as gone (FEAT-099).
+    not_admitted: BTreeSet<(String, RelPath)>,
 }
 
 impl<'e> PlanEnv<'e> {
@@ -111,8 +113,30 @@ impl<'e> PlanEnv<'e> {
                 base_errors.extend(pairs);
             }
         }
+        let mut not_admitted = BTreeSet::new();
+        let mut by_repo: BTreeMap<&str, Vec<&RelPath>> = BTreeMap::new();
+        for (key, _) in items {
+            if !key
+                .path
+                .as_str()
+                .starts_with(crate::history::HISTORY_PREFIX)
+            {
+                by_repo.entry(&key.repo).or_default().push(&key.path);
+            }
+        }
+        for (repo, paths) in by_repo {
+            let Some(source) = engine.source(repo) else {
+                continue;
+            };
+            let (gone, warnings) = source.not_admitted(paths);
+            for w in warnings {
+                eprintln!("warning: {w}");
+            }
+            not_admitted.extend(gone.into_iter().map(|p| (repo.to_string(), p)));
+        }
         Ok(PlanEnv {
             engine,
+            not_admitted,
             profiles,
             contexts,
             guests,
@@ -142,7 +166,14 @@ pub(super) fn plan_one(env: &PlanEnv, key: &PendingKey, seq: u64) -> Result<Acti
     let Some(source) = engine.source(&key.repo) else {
         return Ok(Action::Skip);
     };
-    let content = source.read(&key.path)?;
+    let content = if env
+        .not_admitted
+        .contains(&(key.repo.clone(), key.path.clone()))
+    {
+        None
+    } else {
+        source.read(&key.path)?
+    };
     let layer = dir.is_layer();
     let existing = if layer {
         None

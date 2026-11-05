@@ -142,6 +142,27 @@ mod position {
     }
 
     #[test]
+    fn ignored_file_edit_keeps_same_answer() {
+        // FEAT-099: a file git ignores neither shows in the scan nor moves the position.
+        let d = repo();
+        let before = pos(d.path());
+        put(d.path(), "x.log", "noise\n");
+        let listed = |root: &Path| {
+            katalogr_engine::scan::list_files(root, &["**".to_string()], &[]).unwrap()
+        };
+        assert!(listed(d.path()).iter().all(|p| p.as_str() != "x.log"));
+        put(d.path(), "x.log", "noise, edited\n");
+        assert_eq!(pos(d.path()), before);
+        assert!(listed(d.path()).iter().all(|p| p.as_str() != "x.log"));
+        // The same holds through the cached reader and the reference.
+        let inc = vec!["**".to_string()];
+        let r = reference_position("r", d.path(), &inc, &[])
+            .unwrap()
+            .position;
+        assert_eq!(r, before);
+    }
+
+    #[test]
     fn deleted_uses_dash() {
         let d = repo();
         std::fs::remove_file(d.path().join("src/b.txt")).unwrap();
