@@ -64,6 +64,28 @@ pub enum RenderAction {
     },
 }
 
+/// Document modes of `view` (FEAT-035).
+#[derive(Debug, Subcommand)]
+pub enum ViewAction {
+    /// Report every `katalogr-query` block under a folder or Markdown file that does not parse,
+    /// with its file and line. Reads no index. Exits 1 when a block is bad.
+    Check {
+        /// A folder (searched for `.md` files) or one Markdown file.
+        path: std::path::PathBuf,
+    },
+    /// Write the view of every query block under `--docs` for one position (`--at`, else the
+    /// current checkout) into `--out`. All or nothing: a view that is not exact, or a position
+    /// no context holds, writes nothing and exits non-zero. Documents are never changed.
+    Snapshot {
+        /// The folder of Markdown documents.
+        #[arg(long, value_name = "DIR")]
+        docs: std::path::PathBuf,
+        /// The folder to create; it must not exist, or must be empty.
+        #[arg(long, value_name = "DIR")]
+        out: std::path::PathBuf,
+    },
+}
+
 /// How sure a dead-code candidate is.
 #[derive(Debug, Clone, Copy, ValueEnum)]
 #[value(rename_all = "kebab-case")]
@@ -265,12 +287,15 @@ pub enum Command {
     /// when it is there. The view is an op (`structure`, `contracts`, `callers <symbol>`,
     /// `path <from> <to>`, `cycles`) with its flags, as in a `katalogr-query` block. With
     /// `--json` the answer is what `GET /api/v1/views/<op>` returns.
+    #[command(args_conflicts_with_subcommands = true)]
     View {
+        #[command(subcommand)]
+        action: Option<ViewAction>,
         /// Compute the view again and compare it with the stored one; exit 1 on a difference.
         #[arg(long)]
         fresh: bool,
         /// The view: an op, then its arguments and flags.
-        #[arg(allow_hyphen_values = true, value_name = "OP [ARGS]", required = true)]
+        #[arg(allow_hyphen_values = true, value_name = "OP [ARGS]")]
         words: Vec<String>,
     },
     /// Describe a symbol: signature, doc, links and rationale.

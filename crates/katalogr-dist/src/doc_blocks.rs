@@ -69,7 +69,7 @@ fn error_box(source: &str, message: &str) -> String {
 }
 
 /// A fenced Mermaid block whose fence is longer than any run of backticks in the text.
-fn mermaid_fence(text: &str) -> String {
+pub(crate) fn mermaid_fence(text: &str) -> String {
     let mut longest = 0;
     let mut run = 0;
     for c in text.chars() {

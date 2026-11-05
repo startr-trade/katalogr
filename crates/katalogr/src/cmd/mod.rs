@@ -43,6 +43,7 @@ pub mod status;
 pub mod tests;
 pub mod version;
 pub mod view;
+pub mod view_doc;
 pub mod watch;
 pub mod why;
 

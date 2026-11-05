@@ -11,6 +11,7 @@ pub mod contexts;
 pub mod contract;
 pub use katalogr_query::{PositionAnswer, PositionRef, ViewQuery, WorkingSetSummary};
 pub mod doc_blocks;
+pub mod doc_views;
 pub mod doctor;
 mod error;
 pub mod eval;
