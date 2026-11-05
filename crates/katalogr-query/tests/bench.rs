@@ -1,5 +1,7 @@
 //! Timing benchmarks, run on demand: `cargo test -p katalogr-query --release -- --ignored --nocapture`.
 
+mod support;
+
 use camino::Utf8PathBuf;
 use katalogr_model::{
     ArtifactName, Confidence, Fact, Field, Fragment, Id, LinkKind, Name, Provenance, RelPath,
@@ -944,6 +946,84 @@ mod bench {
         assert!(
             elapsed < Duration::from_millis(1000),
             "mirror_drift took {elapsed:?}"
+        );
+    }
+
+    use crate::support::{artifact, link, open};
+    use katalogr_query::{ChangedFile, DocImpactInput, doc_impact};
+
+    /// FEAT-086 R-9: 100 changed files on a 10,000-symbol graph (100 files of 100 symbols), each
+    /// with a 100-line changed range, and 1,000 documents linking to symbols and files: within
+    /// 200 ms.
+    #[test]
+    #[ignore]
+    fn docs_affected_100_files() {
+        const FILES: usize = 100;
+        const PER_FILE: usize = 100;
+        const DOCS: usize = 1000;
+        let tmp = tempfile::tempdir().unwrap();
+        let cache = open(&tmp, &["r"]);
+        let mut tx = cache.write().unwrap();
+        let mut files = Vec::new();
+        let names: Vec<String> = (0..PER_FILE).map(|i| format!("s{i}")).collect();
+        for f in 0..FILES {
+            let syms: Vec<(&str, u32, u32)> = names
+                .iter()
+                .enumerate()
+                .map(|(i, n)| (n.as_str(), (i * 10 + 1) as u32, (i * 10 + 10) as u32))
+                .collect();
+            let (aid, ids) = artifact(&mut tx, "r", &format!("src/f{f}.tx"), &syms);
+            files.push((aid, ids));
+        }
+        let mut state = 0x9e37_79b9_7f4a_7c15u64;
+        for d in 0..DOCS {
+            let path = format!("docs/d{d}.md");
+            let (_, sec) = artifact(&mut tx, "r", &path, &[("sec", 1, 10)]);
+            for _ in 0..5 {
+                state = state
+                    .wrapping_mul(6364136223846793005)
+                    .wrapping_add(1442695040888963407);
+                let f = (state >> 33) as usize % FILES;
+                let s = (state >> 13) as usize % PER_FILE;
+                link(&mut tx, "r", &path, sec[0], "links-to", files[f].1[s]);
+            }
+            state = state
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            link(
+                &mut tx,
+                "r",
+                &path,
+                sec[0],
+                "links-to",
+                files[(state >> 33) as usize % FILES].0,
+            );
+        }
+        tx.commit().unwrap();
+
+        let changes: Vec<ChangedFile> = (0..FILES)
+            .map(|f| ChangedFile {
+                path: RelPath::new(&format!("src/f{f}.tx")).unwrap(),
+                kind: "modified".into(),
+                ranges: vec![(401, 500)],
+            })
+            .collect();
+        let read = cache.read().unwrap();
+        let input = DocImpactInput {
+            repo: "r",
+            changes: &changes,
+            kinds: &[],
+            limit: 200,
+        };
+        let mut docs = 0;
+        let ms = best_ms(|| {
+            docs = doc_impact(&read, &input).unwrap().docs.len();
+        });
+        println!("bench::docs_affected_100_files: {ms} ms, {docs} docs");
+        assert!(docs > 0);
+        assert!(
+            Duration::from_secs_f64(ms / 1000.0) < Duration::from_millis(200),
+            "{ms} ms"
         );
     }
 }

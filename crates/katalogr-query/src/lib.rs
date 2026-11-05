@@ -8,6 +8,7 @@ pub mod budget;
 mod callers;
 mod dangling;
 pub mod diagnostic;
+pub mod doc_impact;
 mod explain;
 mod find;
 pub mod fold;
@@ -33,6 +34,9 @@ pub use diagnostic::{
     DIAG_PACK, DIAG_REFS, DIAG_TERMS, DIAG_TOP, DIAG_WEIGHTS, Diagnostic, ExpandedTerm, FoldTrace,
     PackEntry, PackTrace, PartTrace, PrefixTrace, RankSource, RankTrace, RoutingTrace, TermTrace,
     Trace, WeightTrace,
+};
+pub use doc_impact::{
+    AffectedDoc, AffectedLink, ChangedFile, DOC_LINK_KINDS, DocImpact, DocImpactInput, doc_impact,
 };
 pub use explain::explain;
 pub use find::find;

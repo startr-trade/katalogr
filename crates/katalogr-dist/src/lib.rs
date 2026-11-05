@@ -5,6 +5,8 @@
 mod at;
 pub use at::position_without_board;
 mod claude;
+mod docs_affected;
+pub use docs_affected::{DEFAULT_DOCS_LIMIT, DocsAffectedParams};
 pub mod contexts;
 pub mod contract;
 pub use katalogr_query::{PositionAnswer, PositionRef, ViewQuery};

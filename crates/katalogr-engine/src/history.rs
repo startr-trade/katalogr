@@ -281,7 +281,7 @@ fn changed_files(
 }
 
 /// New-file line ranges that differ between `old` and `new`.
-fn line_ranges(old: &[u8], new: &[u8]) -> Vec<(u32, u32)> {
+pub(crate) fn line_ranges(old: &[u8], new: &[u8]) -> Vec<(u32, u32)> {
     if old.len() > MAX_DIFF_BYTES || new.len() > MAX_DIFF_BYTES {
         return Vec::new();
     }

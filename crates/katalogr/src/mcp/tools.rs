@@ -83,8 +83,8 @@ pub struct ToolSpec {
     pub args: &'static [Arg],
 }
 
-/// Fixed order: find, refs, callers, explain, show, path, map, search, dangling, why, index,
-/// status.
+/// Fixed order: find, refs, callers, explain, show, path, map, search, dangling, why,
+/// docs-affected, index, status.
 pub const TOOLS: &[ToolSpec] = &[
     ToolSpec {
         name: "find",
@@ -156,6 +156,16 @@ pub const TOOLS: &[ToolSpec] = &[
         description: "The symbol at FILE:LINE and the rationale linked to it.",
         query: true,
         args: &[req("location", Ty::Str)],
+    },
+    ToolSpec {
+        name: "docs-affected",
+        description: "Documents linked to code that changed since a revision.",
+        query: true,
+        args: &[
+            opt("since", Ty::Str),
+            opt("kind", Ty::Str),
+            opt_int("limit", 1, 200),
+        ],
     },
     ToolSpec {
         name: "index",
@@ -249,6 +259,7 @@ fn output_schema(name: &str) -> Option<JsonObject> {
         "search" => include_str!("../../../../schema/v1/search.schema.json"),
         "dangling" => include_str!("../../../../schema/v1/dangling.schema.json"),
         "why" => include_str!("../../../../schema/v1/why.schema.json"),
+        "docs-affected" => include_str!("../../../../schema/v1/docs-affected.schema.json"),
         _ => return None,
     };
     match serde_json::from_str::<Value>(text) {
@@ -570,6 +581,22 @@ pub fn call(cfg: &ServeConfig, name: &str, args: &Value) -> Result<JsonAnswer, U
             );
             answer(Katalogr::why(&k, location, Some(limit), opts), |r| {
                 render_json::why(r, budget)
+            })
+        }
+        "docs-affected" => {
+            let since = p.text("since");
+            let kinds: Vec<String> = p.text("kind").map(str::to_string).into_iter().collect();
+            let limit = p.int("limit", katalogr_dist::DEFAULT_DOCS_LIMIT as u32) as usize;
+            let params = katalogr_dist::DocsAffectedParams {
+                kinds: kinds.clone(),
+                limit,
+            };
+            let opts = &mk(
+                "docs-affected",
+                &crate::cmd::docs_affected::args(since, &kinds, limit),
+            );
+            answer(Katalogr::docs_affected(&k, since, &params, opts), |r| {
+                render_json::plain(r, |_| false)
             })
         }
         "index" => {

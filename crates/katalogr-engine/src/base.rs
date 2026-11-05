@@ -116,3 +116,21 @@ pub fn resolve_commit(repo_root: &Path, rev: &str) -> Result<String, ScanError> 
         .map_err(|e| bad(&e))?;
     Ok(commit.id().to_hex().to_string())
 }
+
+/// The merge-base of two revisions as lower-case hex; `None` when they share no history.
+pub fn merge_base(repo_root: &Path, a: &str, b: &str) -> Result<Option<String>, ScanError> {
+    let repo = open(repo_root)?;
+    let a = resolve_commit(repo_root, a)?;
+    let b = resolve_commit(repo_root, b)?;
+    let id = |hex: &str| {
+        gix::ObjectId::from_hex(hex.as_bytes()).map_err(|e| ScanError::BadRevision {
+            rev: hex.to_string(),
+            message: e.to_string(),
+        })
+    };
+    Ok(repo
+        .merge_base(id(&a)?, id(&b)?)
+        .ok()
+        .flatten()
+        .map(|i| i.to_hex().to_string()))
+}
