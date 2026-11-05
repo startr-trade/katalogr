@@ -256,10 +256,20 @@ impl<'a> Processor<'a> {
                     prepared,
                     errors,
                     hash,
+                    tmp,
                     ..
                 } => {
                     engine.stitcher().apply(&mut tx, *prepared)?;
-                    tx.put_shard_hash(&key.repo, &key.path, &hash)?;
+                    // The shard is renamed after this commit, which keeps its size and mtime:
+                    // recording them now lets the next open skip hashing, and write nothing,
+                    // when no shard changed (FEAT-076 R-7).
+                    let stat = std::fs::metadata(engine.dir().root().join(&tmp))
+                        .ok()
+                        .and_then(|m| katalogr_store::ShardStat::of(&m));
+                    match stat {
+                        Some(st) => tx.put_shard_hash_stat(&key.repo, &key.path, &hash, st)?,
+                        None => tx.put_shard_hash(&key.repo, &key.path, &hash)?,
+                    }
                     tx.put_index_errors(&key.repo, &key.path, &errors)?;
                 }
                 Ready::Delete { .. } => {
