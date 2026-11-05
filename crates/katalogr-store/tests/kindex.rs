@@ -272,9 +272,9 @@ mod kindex {
         let s = std::fs::read_to_string(p.root().join("format.json")).unwrap();
         assert_eq!(
             s,
-            "{\n  \"min_katalogr\": \"0.1.0\",\n  \"shard_format\": 1\n}\n"
+            "{\n  \"min_katalogr\": \"0.2.0\",\n  \"shard_format\": 2\n}\n"
         );
-        assert_eq!(SHARD_FORMAT, 1);
+        assert_eq!(SHARD_FORMAT, 2);
     }
 
     #[test]
@@ -284,12 +284,12 @@ mod kindex {
         let p = k.create_project(&pname("demo"), cfg()).unwrap();
         std::fs::write(
             p.root().join("format.json"),
-            "{\"min_katalogr\": \"9.9.0\", \"shard_format\": 2}\n",
+            "{\"min_katalogr\": \"9.9.0\", \"shard_format\": 3}\n",
         )
         .unwrap();
         let e = k.project(&pname("demo")).unwrap_err();
         assert!(
-            matches!(e, StoreError::FormatTooNew { found: 2, .. }),
+            matches!(e, StoreError::FormatTooNew { found: 3, .. }),
             "{e}"
         );
         assert!(e.to_string().contains("9.9.0"));

@@ -10,9 +10,9 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::io::Write;
 
-pub const SHARD_FORMAT: u32 = 1;
-const MIN_KATALOGR: &str = "0.1.0";
-const GITIGNORE: &str = "projects/*/.cache/\n";
+pub const SHARD_FORMAT: u32 = 2;
+const MIN_KATALOGR: &str = "0.2.0";
+const GITIGNORE: &str = "projects/*/.cache/\nprojects/*/shards/\n";
 
 fn is_lower_alnum(c: u8) -> bool {
     c.is_ascii_lowercase() || c.is_ascii_digit()
@@ -205,7 +205,7 @@ impl Kindex {
         }
         config.repos.iter().try_for_each(RepoConfig::validate)?;
         config.repos.sort_by(|a, b| a.name.cmp(&b.name));
-        for sub in ["profiles", "shards", ".cache"] {
+        for sub in ["profiles", ".cache"] {
             mkdir(&dir.join(sub))?;
         }
         let format = FormatFile {
@@ -384,6 +384,12 @@ impl ProjectDir {
             path: fpath.to_string(),
             message: e.to_string(),
         })
+    }
+
+    /// True when a `shards/` folder exists in the project: a format 1 leftover, which nothing
+    /// reads or writes.
+    pub fn leftover_shards(&self) -> bool {
+        self.project_root.join("shards").is_dir()
     }
 
     /// `shards/<repo>/<path>.kshard.json` under the project directory.

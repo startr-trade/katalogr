@@ -15,7 +15,7 @@ pub fn shard_path(repo: &str, path: &RelPath) -> Utf8PathBuf {
 }
 
 /// Serialise a value with sorted keys, 2-space indentation, LF and one trailing newline.
-pub(crate) fn to_sorted_json(v: &Value) -> String {
+pub fn to_sorted_json(v: &Value) -> String {
     let mut out = String::new();
     write_value(v, 0, &mut out);
     out.push('\n');
