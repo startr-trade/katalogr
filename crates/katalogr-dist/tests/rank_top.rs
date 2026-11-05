@@ -74,11 +74,14 @@ mod rank_top {
     #[test]
     fn session_start_matches_full_map() {
         let s = setup(&corpus(60));
-        let with_top: Vec<String> = [40, 120, 600, 4000].iter().map(|b| session(&s, *b)).collect();
+        let with_top: Vec<String> = [120, 300, 600, 4000]
+            .iter()
+            .map(|b| session(&s, *b))
+            .collect();
         assert!(with_top[0].contains("partial:"), "{}", with_top[0]);
         assert!(!with_top[3].contains("partial:"), "{}", with_top[3]);
         stale_rank(&s);
-        for (b, want) in [40u64, 120, 600, 4000].iter().zip(&with_top) {
+        for (b, want) in [120u64, 300, 600, 4000].iter().zip(&with_top) {
             assert_eq!(&session(&s, *b), want, "budget {b}");
         }
     }

@@ -128,6 +128,9 @@ pub(crate) enum RefClass {
     Inferred,
 }
 
+/// The receiver of a walk over reference entries: `(from, kind, ref index, resolved)`.
+pub(crate) type RefSink<'a> = dyn FnMut(Id, &str, u32, bool) + 'a;
+
 /// The class of every linked reference: one walk over the ref-origin entries; an entry that
 /// came from a reference is resolved when it is not inferred and its reference had at most one
 /// target, else inferred; the better class wins per `(from, kind, ref index)`.
@@ -137,7 +140,7 @@ fn link_classes(tx: &impl Reader) -> Result<BTreeMap<(Id, String, u32), RefClass
 
 /// [`link_classes`] over the entries `walk` delivers as `(from, kind, ref index, resolved)`.
 pub(crate) fn classes_from(
-    walk: &mut dyn FnMut(&mut dyn FnMut(Id, &str, u32, bool)) -> Result<(), StoreError>,
+    walk: &mut dyn FnMut(&mut RefSink<'_>) -> Result<(), StoreError>,
 ) -> Result<BTreeMap<(Id, String, u32), RefClass>, StoreError> {
     let mut out: BTreeMap<(Id, String, u32), RefClass> = BTreeMap::new();
     walk(&mut |from, kind, i, resolved| {
@@ -155,9 +158,7 @@ pub(crate) fn classes_from(
 
 /// The classes the old way: one expanded `links_all` scan. The reference of the tests.
 #[cfg(test)]
-pub(crate) fn link_classes_for_test(
-    tx: &impl Reader,
-) -> BTreeMap<(Id, String, u32), RefClass> {
+pub(crate) fn link_classes_for_test(tx: &impl Reader) -> BTreeMap<(Id, String, u32), RefClass> {
     use katalogr_store::LinkOrigin;
     let mut out: BTreeMap<(Id, String, u32), RefClass> = BTreeMap::new();
     for (key, row) in tx.links_all().unwrap() {

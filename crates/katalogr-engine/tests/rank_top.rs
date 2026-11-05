@@ -37,7 +37,8 @@ impl Fixture {
     }
 }
 
-const BASE: &str = "sym fn a\nsym fn b\nsym fn c\nsym fn d\nlink a calls b\nlink c calls b\nlink b calls d\n";
+const BASE: &str =
+    "sym fn a\nsym fn b\nsym fn c\nsym fn d\nlink a calls b\nlink c calls b\nlink b calls d\n";
 
 mod rank_top {
     use super::*;

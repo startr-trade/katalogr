@@ -78,8 +78,14 @@ fn sym(path: &str, name: &str) -> Id {
 /// a single-target reference, an unresolved one, and a second source with its own fan row.
 fn graph() -> Env {
     let e = env();
-    e.put("x.tx", "sym fn X\nexport ns:k X\nexport ns:j X\nexport ns:x X\n");
-    e.put("y.tx", "sym fn Y\nexport ns:k Y\nexport ns:j Y\nexport ns:s Y\n");
+    e.put(
+        "x.tx",
+        "sym fn X\nexport ns:k X\nexport ns:j X\nexport ns:x X\n",
+    );
+    e.put(
+        "y.tx",
+        "sym fn Y\nexport ns:k Y\nexport ns:j Y\nexport ns:s Y\n",
+    );
     e.put("w.tx", "sym fn W\nexport ns:k W\nref W uses ns:s\n");
     e.put(
         "z.tx",
@@ -100,8 +106,10 @@ type Walked = Vec<(Id, String, Id, u64, bool)>;
 
 fn walked(tx: &impl Reader) -> Walked {
     let mut out = Vec::new();
-    tx.for_each_link(&mut |from, kind, to, w, s| out.push((from, kind.to_string(), to, w.to_bits(), s)))
-        .unwrap();
+    tx.for_each_link(&mut |from, kind, to, w, s| {
+        out.push((from, kind.to_string(), to, w.to_bits(), s))
+    })
+    .unwrap();
     out
 }
 
@@ -109,7 +117,15 @@ fn expanded(tx: &impl Reader) -> Walked {
     tx.links_all()
         .unwrap()
         .into_iter()
-        .map(|(k, row)| (k.from, k.kind.0, k.to, row_weight(&row).to_bits(), strong(&row)))
+        .map(|(k, row)| {
+            (
+                k.from,
+                k.kind.0,
+                k.to,
+                row_weight(&row).to_bits(),
+                strong(&row),
+            )
+        })
         .collect()
 }
 
@@ -120,7 +136,11 @@ mod link_walk {
     fn matches_links_all_order_and_weight() {
         let e = graph();
         let rx = e.cache.read().unwrap();
-        assert_eq!(rx.fans_all().unwrap().len(), 3, "the fixture stores fan rows");
+        assert_eq!(
+            rx.fans_all().unwrap().len(),
+            3,
+            "the fixture stores fan rows"
+        );
         let got = walked(&rx);
         assert!(got.len() > 8);
         assert_eq!(got, expanded(&rx));
@@ -213,7 +233,9 @@ mod link_walk {
                 };
                 let resolved =
                     en.confidence != Confidence::Inferred && en.fanout.is_none_or(|n| n <= 1);
-                let slot = want.entry((key.from, key.kind.0.clone(), i)).or_insert(resolved);
+                let slot = want
+                    .entry((key.from, key.kind.0.clone(), i))
+                    .or_insert(resolved);
                 *slot |= resolved;
             }
         }
@@ -239,7 +261,12 @@ mod link_walk {
         assert!(entries.iter().any(|m| m.in_degree > 0.0));
         for m in &entries {
             let want = degree.get(&Id::of(&m.symbol.name)).copied().unwrap_or(0.0);
-            assert_eq!(m.in_degree, (want * 100.0).round() / 100.0, "{}", m.symbol.name);
+            assert_eq!(
+                m.in_degree,
+                (want * 100.0).round() / 100.0,
+                "{}",
+                m.symbol.name
+            );
         }
     }
 }

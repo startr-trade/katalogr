@@ -7,8 +7,8 @@ use crate::graph::{InsightGraph, LinkSink, Strength, row_strength};
 use crate::options::{DeadCodeOptions, GraphOptions, STRUCTURAL_KINDS};
 use crate::result::{DeadConfidence, Level};
 use crate::testkit::{Built, Fx};
-use katalogr_model::insight::FACT_ROOT;
 use katalogr_model::Id;
+use katalogr_model::insight::FACT_ROOT;
 use katalogr_store::{Reader, StoreError, row_weight};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -35,19 +35,23 @@ fn fixture() -> Built {
     fx.link(b[0], "calls", a[3]);
     fx.link(c[0], "calls", c[1]);
     fx.link_ref(c[1], "calls", d, 0, Some(1));
-    fx.link_with(b[1], "calls", c[1], katalogr_model::Confidence::Inferred, None);
+    fx.link_with(
+        b[1],
+        "calls",
+        c[1],
+        katalogr_model::Confidence::Inferred,
+        None,
+    );
     fx.link(a[0], "contains", a[1]);
     fx.link(b[2], "calls", b[1]);
-    fx.bind(a[1], false, "rpc", "svc/get");
-    fx.bind(b[1], true, "rpc", "svc/get");
-    fx.bind(c[1], true, "rpc", "svc/get");
+    fx.bind(a[1], false, "svc", "svc/get");
+    fx.bind(b[1], true, "svc", "svc/get");
+    fx.bind(c[1], true, "svc", "svc/get");
     fx.build()
 }
 
 /// The old data source: every link row expanded, with the row's weight and strength.
-fn expanding(
-    tx: &impl Reader,
-) -> impl FnMut(&mut LinkSink<'_>) -> Result<(), StoreError> + '_ {
+fn expanding(tx: &impl Reader) -> impl FnMut(&mut LinkSink<'_>) -> Result<(), StoreError> + '_ {
     move |f| {
         for (key, row) in tx.links_all()? {
             f(
@@ -75,7 +79,14 @@ fn load(tx: &impl Reader, opts: &GraphOptions, old: bool) -> InsightGraph {
     let artifacts = tx.artifacts().unwrap();
     let contracts = tx.contracts().unwrap();
     if old {
-        InsightGraph::build(symbols, artifacts, contracts, old_kinds(tx), opts, &mut expanding(tx))
+        InsightGraph::build(
+            symbols,
+            artifacts,
+            contracts,
+            old_kinds(tx),
+            opts,
+            &mut expanding(tx),
+        )
     } else {
         InsightGraph::build(
             symbols,
@@ -145,7 +156,10 @@ fn dead_code_identical() {
     let (old, new) = (run(true), run(false));
     assert_eq!(old, new);
     assert!(old["candidates_total"].as_u64().unwrap() > 0);
-    assert_eq!(serde_json::to_value(crate::dead_code(&tx, &opts).unwrap()).unwrap(), old);
+    assert_eq!(
+        serde_json::to_value(crate::dead_code(&tx, &opts).unwrap()).unwrap(),
+        old
+    );
 }
 
 #[test]

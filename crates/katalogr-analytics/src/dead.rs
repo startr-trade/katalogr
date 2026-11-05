@@ -125,31 +125,33 @@ pub(crate) fn dead_code_from(
     let mut incoming = vec![0u64; n];
     let mut weak_incoming = vec![0u64; n];
     let mut providers: BTreeSet<u32> = BTreeSet::new();
-    walk(&mut |from: Id, kind: &str, to: Id, _weight: f64, strong: bool| {
-        let Some(&a) = index.get(&from) else {
-            return;
-        };
-        if kind == "provides" {
-            providers.insert(a);
-            return;
-        }
-        let Some(&b) = index.get(&to) else {
-            return;
-        };
-        if kind == "contains" {
-            // A reached member makes its container reachable.
-            edges.push((b, a, true));
-            return;
-        }
-        if opts.exclude_kinds.iter().any(|x| x == kind) || a == b {
-            return;
-        }
-        edges.push((a, b, strong));
-        incoming[b as usize] += 1;
-        if !strong {
-            weak_incoming[b as usize] += 1;
-        }
-    })?;
+    walk(
+        &mut |from: Id, kind: &str, to: Id, _weight: f64, strong: bool| {
+            let Some(&a) = index.get(&from) else {
+                return;
+            };
+            if kind == "provides" {
+                providers.insert(a);
+                return;
+            }
+            let Some(&b) = index.get(&to) else {
+                return;
+            };
+            if kind == "contains" {
+                // A reached member makes its container reachable.
+                edges.push((b, a, true));
+                return;
+            }
+            if opts.exclude_kinds.iter().any(|x| x == kind) || a == b {
+                return;
+            }
+            edges.push((a, b, strong));
+            incoming[b as usize] += 1;
+            if !strong {
+                weak_incoming[b as usize] += 1;
+            }
+        },
+    )?;
     for (i, (_, row)) in symbols.iter().enumerate() {
         if let Some(&art) = index.get(&row.artifact) {
             edges.push((i as u32, art, true));

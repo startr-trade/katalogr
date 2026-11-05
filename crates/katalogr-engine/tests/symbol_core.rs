@@ -11,8 +11,8 @@ use katalogr_model::{
 use katalogr_query::{Resolution, SymbolHit};
 use katalogr_store::cache::{RawRows, TableId};
 use katalogr_store::{
-    Cache, Kindex, LinkEntry, LinkKey, LinkOrigin, LinkRow, ProjectConfig, ProjectDir,
-    ProjectName, Reader, RepoConfig, StoreError, SymbolRow,
+    Cache, Kindex, LinkEntry, LinkKey, LinkOrigin, LinkRow, ProjectConfig, ProjectDir, ProjectName,
+    Reader, RepoConfig, StoreError, SymbolRow,
 };
 use std::cell::RefCell;
 use std::collections::BTreeSet;
@@ -85,8 +85,10 @@ impl Env {
 }
 
 /// Mixed case, non-ASCII, two symbols of one plain name, an alias and an impl.
-const A: &str = "sym struct Foo\nsym fn foo\nsym fn FOO\nsym fn Éclair\nsym fn éCLAIR\nsym fn bar_foo\n";
-const B: &str = "sym fn Foo\nsym use Alias\nsym fn Target\nlink Alias reexports Target\nsym fn Baz\n";
+const A: &str =
+    "sym struct Foo\nsym fn foo\nsym fn FOO\nsym fn Éclair\nsym fn éCLAIR\nsym fn bar_foo\n";
+const B: &str =
+    "sym fn Foo\nsym use Alias\nsym fn Target\nlink Alias reexports Target\nsym fn Baz\n";
 
 /// An `impl` symbol named like the struct `Foo` of `a.tx`, linked to it (`implements-for`).
 fn add_impl(e: &Env) {
@@ -134,7 +136,11 @@ fn dump(rows: &RawRows) -> Vec<(Vec<u8>, Vec<u8>)> {
 // ---- the reference: the old full-scan tiers, copied
 
 fn plain(row: &SymbolRow) -> String {
-    row.name.segments.last().map_or("", |s| s.name.as_str()).to_string()
+    row.name
+        .segments
+        .last()
+        .map_or("", |s| s.name.as_str())
+        .to_string()
 }
 
 fn hit(row: &SymbolRow) -> SymbolHit {
@@ -321,7 +327,11 @@ mod symbol_core {
         cores_match_symbols(&e.cache.read().unwrap());
         let rx = e.cache.read().unwrap();
         let ids = rx.symbol_ids_by_plain_ci("foo").unwrap();
-        assert_eq!(rx.symbols_many(&ids).unwrap().len(), 2, "foo (a.tx), Foo (b.tx)");
+        assert_eq!(
+            rx.symbols_many(&ids).unwrap().len(),
+            2,
+            "foo (a.tx), Foo (b.tx)"
+        );
         drop(rx);
 
         // A removed file takes them away.
@@ -372,7 +382,6 @@ mod symbol_core {
         let _ = &e.dir;
     }
 
-
     #[test]
     fn resolve_matches_full_scan() {
         let e = fixture();
@@ -389,7 +398,10 @@ mod symbol_core {
                 Resolution::None => 2,
             }] = true;
         }
-        assert_eq!(kinds, [true; 3], "one, ambiguous and none are all exercised");
+        assert_eq!(
+            kinds, [true; 3],
+            "one, ambiguous and none are all exercised"
+        );
     }
 
     #[test]
@@ -411,7 +423,11 @@ mod symbol_core {
         let e = fixture();
         let rx = e.cache.read().unwrap();
         for p in probes(&rx) {
-            assert_eq!(katalogr_query::find(&rx, &p).unwrap(), old_find(&rx, &p), "find {p:?}");
+            assert_eq!(
+                katalogr_query::find(&rx, &p).unwrap(),
+                old_find(&rx, &p),
+                "find {p:?}"
+            );
         }
     }
 

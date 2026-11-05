@@ -329,7 +329,8 @@ fn core_decode(b: &[u8]) -> Result<SymbolCore, StoreError> {
         return Err(bad());
     }
     let artifact = Id(rest[..16].try_into().expect("16 bytes"));
-    let n = |i: usize| u32::from_be_bytes(rest[16 + i * 4..20 + i * 4].try_into().expect("4 bytes"));
+    let n =
+        |i: usize| u32::from_be_bytes(rest[16 + i * 4..20 + i * 4].try_into().expect("4 bytes"));
     Ok(SymbolCore {
         name: name.to_string(),
         kind: kind.to_string(),
@@ -880,7 +881,9 @@ pub trait Reader {
     fn symbol_cores(&self) -> Result<Vec<(Id, SymbolCore)>, StoreError> {
         let mut out = Vec::new();
         for (k, v) in self.raw_scan(TableId::SymbolCore, &[])? {
-            let id = Id(id_bytes(k.get(k.len().saturating_sub(16)..).unwrap_or(&[]))?);
+            let id = Id(id_bytes(
+                k.get(k.len().saturating_sub(16)..).unwrap_or(&[]),
+            )?);
             out.push((id, core_decode(&v)?));
         }
         out.sort_by_key(|(id, _)| *id);
@@ -921,7 +924,9 @@ pub trait Reader {
         }
         let total = u64::from_le_bytes(v[..8].try_into().expect("8 bytes"));
         let entries = v[8..]
-            .chunks_exact(24)
+            .as_chunks::<24>()
+            .0
+            .iter()
             .map(|c| {
                 let id = Id(c[..16].try_into().expect("16 bytes"));
                 let bits = u64::from_le_bytes(c[16..].try_into().expect("8 bytes"));
@@ -946,9 +951,10 @@ pub trait Reader {
         for t in [TableId::LinksOut, TableId::FanOut] {
             let mut last: Option<Vec<u8>> = None;
             for k in self.raw_scan_keys(t, &[])? {
-                let (kind, _) = split_lp(k.get(16..).ok_or_else(|| {
-                    StoreError::Row("malformed key".into())
-                })?)?;
+                let (kind, _) = split_lp(
+                    k.get(16..)
+                        .ok_or_else(|| StoreError::Row("malformed key".into()))?,
+                )?;
                 if last.as_deref() != Some(kind.as_bytes()) {
                     out.insert(kind.to_string());
                     last = Some(kind.as_bytes().to_vec());
@@ -961,10 +967,7 @@ pub trait Reader {
     /// Calls `f(from, kind, ref_index, resolved)` for every entry that came from a reference,
     /// stored or fan row, per fan row and not per target. A fan row whose key has no target
     /// calls nothing.
-    fn for_each_ref_entry(
-        &self,
-        f: &mut dyn FnMut(Id, &str, u32, bool),
-    ) -> Result<(), StoreError> {
+    fn for_each_ref_entry(&self, f: &mut dyn FnMut(Id, &str, u32, bool)) -> Result<(), StoreError> {
         for (k, v) in self.raw_scan(TableId::LinksOut, &[])? {
             let from = Id(id_bytes(k.get(..16).unwrap_or(&[]))?);
             let (kind, _) = split_lp(&k[16..])?;
@@ -2115,6 +2118,14 @@ impl WriteTx<'_> {
         self.put(TableId::SymbolCore, &core_key(row, id), &core_value(row))
     }
 
+    /// Writes the symbol row without its `symbol_core` row, which leaves the cache inconsistent.
+    /// Only for the benchmark that prices the core row.
+    #[doc(hidden)]
+    pub fn put_symbol_row_only(&mut self, id: Id, row: &SymbolRow) -> Result<(), StoreError> {
+        self.touch_symbol(id)?;
+        self.put(TableId::Symbols, &id.0, &ser(row)?)
+    }
+
     pub fn remove_symbol(&mut self, id: Id) -> Result<(), StoreError> {
         self.touch_symbol(id)?;
         // The core row is keyed by the plain name, so the symbol is read to build its key.
@@ -2804,9 +2815,7 @@ impl Cache {
 fn schema_current(database: &Database) -> Result<bool, StoreError> {
     {
         let txn = database.begin_read().map_err(db)?;
-        let all_tables = TableId::ALL
-            .iter()
-            .all(|t| txn.open_table(t.def()).is_ok());
+        let all_tables = TableId::ALL.iter().all(|t| txn.open_table(t.def()).is_ok());
         if all_tables {
             let rx = ReadTx {
                 txn,

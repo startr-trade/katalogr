@@ -9,12 +9,29 @@
 //! KATALOGR_BUDGET=wall_s=360,rss_mib=3600,index_mib=1500,files=12541 \
 //!   cargo test -p katalogr-bench --release --test budget -- --ignored --nocapture
 //! ```
+//!
+//! FEAT-076 R-9 to R-11: `corpus_query_budget` times the read commands on an index it builds
+//! (or on one you name), against limits from the environment:
+//!
+//! ```text
+//! KATALOGR_BIN=<release binary> \
+//! KATALOGR_BUDGET_REPOS=name=/path/to/clone[,name2=/path2] \
+//! KATALOGR_QUERY_TARGET=<canonical name of a symbol that has references> \
+//! KATALOGR_QUERY_BUDGET=query_ms=500,query_mib=200,session_ms=500,session_mib=64,map_ms=2500,insight_ms=2500,insight_mib=1300 \
+//!   cargo test -p katalogr-bench --release --test budget corpus_query_budget -- --ignored --nocapture
+//! ```
+//!
+//! `<command>_ms` (`hubs_ms`, `communities_ms`, `cycles_ms`, `dead-code_ms`, `coverage_ms`,
+//! `map_ms`) overrides `insight_ms` for one command. `KATALOGR_QUERY_KINDEX` and
+//! `KATALOGR_QUERY_PROJECT` name an index that is already built and is only read.
+//! `KATALOGR_QUERY_REPS` (default 5) is the number of runs per command.
 
 mod bench {
     use camino::{Utf8Path, Utf8PathBuf};
     use katalogr_bench::katalogr::Katalogr;
     use katalogr_bench::proc::run_with_timeout;
     use katalogr_bench::sizes::{cache_bytes, shard_stats};
+    use katalogr_bench::stats::nearest_rank;
     use std::collections::BTreeMap;
     use std::process::Command;
     use std::time::Duration;
@@ -158,5 +175,146 @@ mod bench {
             "index {index_mib:.0} MiB"
         );
         assert_eq!(files, want["files"], "claimed files");
+    }
+
+    /// The limits of one command group: `<group>_ms` (p95 wall) and `<group>_mib` (peak RSS).
+    fn limits(spec: &BTreeMap<String, u64>, group: &str, command: &str) -> (f64, f64) {
+        let ms = spec
+            .get(&format!("{command}_ms"))
+            .or_else(|| spec.get(&format!("{group}_ms")))
+            .unwrap_or_else(|| panic!("KATALOGR_QUERY_BUDGET lacks `{group}_ms`"));
+        let mib = spec
+            .get(&format!("{command}_mib"))
+            .or_else(|| spec.get(&format!("{group}_mib")))
+            .unwrap_or_else(|| panic!("KATALOGR_QUERY_BUDGET lacks `{group}_mib`"));
+        (*ms as f64, *mib as f64)
+    }
+
+    #[test]
+    #[ignore = "benchmark: needs a corpus; see the module comment"]
+    fn corpus_query_budget() {
+        let bin = Utf8PathBuf::from(env("KATALOGR_BIN"));
+        let spec: BTreeMap<String, u64> = env("KATALOGR_QUERY_BUDGET")
+            .split(',')
+            .map(|kv| {
+                let (k, v) = kv
+                    .split_once('=')
+                    .unwrap_or_else(|| panic!("KATALOGR_QUERY_BUDGET: bad entry `{kv}`"));
+                (
+                    k.trim().to_string(),
+                    v.trim().parse().unwrap_or_else(|_| {
+                        panic!("KATALOGR_QUERY_BUDGET: `{kv}` is not a number")
+                    }),
+                )
+            })
+            .collect();
+        let target = env("KATALOGR_QUERY_TARGET");
+        let reps: usize = std::env::var("KATALOGR_QUERY_REPS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(5);
+        let _keep;
+        let k = match (
+            std::env::var("KATALOGR_QUERY_KINDEX"),
+            std::env::var("KATALOGR_QUERY_PROJECT"),
+        ) {
+            (Ok(kindex), Ok(project)) => Katalogr {
+                bin: bin.clone(),
+                kindex: Utf8PathBuf::from(kindex),
+                project,
+            },
+            _ => {
+                let repos = env("KATALOGR_BUDGET_REPOS");
+                let tmp = tempfile::tempdir().expect("temporary kindex");
+                let kindex = Utf8Path::from_path(tmp.path())
+                    .expect("UTF-8 temporary directory")
+                    .join("kx");
+                _keep = tmp;
+                let mut init = Command::new(&bin);
+                init.args([
+                    "--kindex",
+                    kindex.as_str(),
+                    "kindex",
+                    "init",
+                    kindex.as_str(),
+                ]);
+                ok(init, "kindex init");
+                let mut project = Command::new(&bin);
+                project.args(["--kindex", kindex.as_str(), "project", "init", PROJECT]);
+                for r in repos.split(',') {
+                    project.args(["--repo", r]);
+                }
+                project.arg("--mark");
+                ok(project, "project init");
+                let k = Katalogr {
+                    bin: bin.clone(),
+                    kindex,
+                    project: PROJECT.into(),
+                };
+                let mut index = k.cmd(&["index", "--full"]);
+                index.env("KATALOGR_THREADS", "4");
+                let run = run_with_timeout(&mut index, Duration::from_secs(7200))
+                    .expect("run index --full");
+                assert_eq!(
+                    run.status,
+                    Some(0),
+                    "{}",
+                    String::from_utf8_lossy(&run.stderr)
+                );
+                k
+            }
+        };
+
+        // (group, command, arguments)
+        let t = target.as_str();
+        let plan: Vec<(&str, &str, Vec<&str>)> = vec![
+            ("query", "find", vec!["find", "no_such_name_anywhere_zq"]),
+            ("query", "refs", vec!["refs", t]),
+            ("query", "callers", vec!["callers", t]),
+            ("query", "explain", vec!["explain", t]),
+            ("query", "tests", vec!["tests", t]),
+            ("session", "session-start", vec!["session-start"]),
+            ("map", "map", vec!["map"]),
+            ("insight", "hubs", vec!["hubs"]),
+            ("insight", "communities", vec!["communities"]),
+            ("insight", "cycles", vec!["cycles"]),
+            ("insight", "dead-code", vec!["dead-code"]),
+            ("insight", "coverage", vec!["coverage"]),
+        ];
+        let mut failures = Vec::new();
+        for (group, command, args) in &plan {
+            let (ms_limit, mib_limit) = limits(&spec, group, command);
+            let (mut walls, mut peak) = (Vec::new(), 0.0f64);
+            let load = load_average();
+            for _ in 0..reps {
+                let mut cmd = k.cmd(args);
+                cmd.env("KATALOGR_THREADS", "4");
+                let run = run_with_timeout(&mut cmd, Duration::from_secs(600)).expect("run");
+                assert_eq!(
+                    run.status,
+                    Some(0),
+                    "{command}: {}",
+                    String::from_utf8_lossy(&run.stderr)
+                );
+                walls.push(run.wall.as_secs_f64() * 1000.0);
+                peak = peak.max(run.peak_rss_kib.expect("peak RSS (Linux)") as f64 / 1024.0);
+            }
+            walls.sort_by(|a, b| a.total_cmp(b));
+            let p95 = nearest_rank(&walls, 95.0);
+            println!(
+                "load {load} to {}: {command}: p50 {:.0} ms, p95 {p95:.0} ms (limit {ms_limit}), peak RSS {peak:.0} MiB (limit {mib_limit}), {reps} runs",
+                load_average(),
+                walls[walls.len() / 2],
+            );
+            if p95 > ms_limit {
+                failures.push(format!("{command}: p95 {p95:.0} ms over {ms_limit}"));
+            }
+            if peak > mib_limit {
+                failures.push(format!(
+                    "{command}: peak RSS {peak:.0} MiB over {mib_limit}"
+                ));
+            }
+        }
+        assert!(failures.is_empty(), "{}", failures.join("; "));
     }
 }

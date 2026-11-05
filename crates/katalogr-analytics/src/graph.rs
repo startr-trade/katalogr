@@ -205,14 +205,9 @@ impl InsightGraph {
                 kinds.join().expect(PANIC)?,
             ))
         })?;
-        Self::build(
-            symbols,
-            artifacts,
-            contracts,
-            link_kinds,
-            opts,
-            &mut |f| tx.for_each_link(f),
-        )
+        Self::build(symbols, artifacts, contracts, link_kinds, opts, &mut |f| {
+            tx.for_each_link(f)
+        })
     }
 
     /// The graph of the given rows, with the usage links delivered by `walk`: one call per link
@@ -338,46 +333,48 @@ impl InsightGraph {
         let mut consumers: BTreeMap<Id, Side> = BTreeMap::new();
         let mut providers: BTreeMap<Id, Side> = BTreeMap::new();
         let mut raw: Vec<RawEdge> = Vec::new();
-        walk(&mut |from: Id, kind: &str, to: Id, weight: f64, strong: bool| {
-            let strength = if strong {
-                Strength::Strong
-            } else {
-                Strength::Weak
-            };
-            if strength == Strength::Weak && !opts.include_inferred {
-                return;
-            }
-            if weight <= 0.0 {
-                return;
-            }
-            let Some(&a) = node_of.get(&from) else {
-                return;
-            };
-            if contract_ids.contains(&to) {
-                match kind {
-                    "consumes" => consumers.entry(to).or_default().push((a, weight, strength)),
-                    "provides" => providers.entry(to).or_default().push((a, weight, strength)),
-                    _ => {}
+        walk(
+            &mut |from: Id, kind: &str, to: Id, weight: f64, strong: bool| {
+                let strength = if strong {
+                    Strength::Strong
+                } else {
+                    Strength::Weak
+                };
+                if strength == Strength::Weak && !opts.include_inferred {
+                    return;
                 }
-                return;
-            }
-            if opts.exclude_kinds.iter().any(|x| x == kind) {
-                return;
-            }
-            let Some(&b) = node_of.get(&to) else {
-                return;
-            };
-            if a == b {
-                return;
-            }
-            raw.push(RawEdge {
-                a,
-                b,
-                kind: kind_index[kind],
-                weight,
-                strength,
-            });
-        })?;
+                if weight <= 0.0 {
+                    return;
+                }
+                let Some(&a) = node_of.get(&from) else {
+                    return;
+                };
+                if contract_ids.contains(&to) {
+                    match kind {
+                        "consumes" => consumers.entry(to).or_default().push((a, weight, strength)),
+                        "provides" => providers.entry(to).or_default().push((a, weight, strength)),
+                        _ => {}
+                    }
+                    return;
+                }
+                if opts.exclude_kinds.iter().any(|x| x == kind) {
+                    return;
+                }
+                let Some(&b) = node_of.get(&to) else {
+                    return;
+                };
+                if a == b {
+                    return;
+                }
+                raw.push(RawEdge {
+                    a,
+                    b,
+                    kind: kind_index[kind],
+                    weight,
+                    strength,
+                });
+            },
+        )?;
         let mut skipped_contracts = 0u64;
         let via = kind_index[CONTRACT_EDGE_KIND];
         for (cid, cs) in &consumers {
