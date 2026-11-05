@@ -483,8 +483,10 @@ mod cache {
 
     // ------------------------------------------------ compaction (FEAT-075 T6)
 
+    type RawRows = Vec<(Vec<u8>, Vec<u8>)>;
+
     /// Every table but `meta` as raw rows: a rewrite copies them verbatim.
-    fn raw_tables(rx: &impl Reader) -> Vec<(String, Vec<(Vec<u8>, Vec<u8>)>)> {
+    fn raw_tables(rx: &impl Reader) -> Vec<(String, RawRows)> {
         use katalogr_store::cache::TableId;
         TableId::ALL
             .iter()
