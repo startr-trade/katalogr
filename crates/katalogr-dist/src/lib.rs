@@ -22,6 +22,7 @@ pub use claude::{
 pub use error::DistError;
 pub use katalogr_analytics as analytics;
 pub use katalogr_query as query;
+pub use katalogr_query::DEFAULT_USE_LIMIT;
 use katalogr_query::{
     Blame, CallerHit, DanglingRef, Diagnostic, Explain, Fold, MapEntry, MirrorDrift, Partial,
     PathStep, RefHit, Resolution, SearchHit, SearchParams, SymbolHit, TestHit, TestsOptions, Trace,

@@ -479,7 +479,7 @@ pub fn call(cfg: &ServeConfig, name: &str, args: &Value) -> Result<JsonAnswer, U
             Katalogr::why(
                 &k,
                 p.need("location"),
-                Some(katalogr_dist::query::DEFAULT_USE_LIMIT),
+                Some(katalogr_dist::DEFAULT_USE_LIMIT),
                 opts,
             ),
             |r| render_json::why(r, budget),
