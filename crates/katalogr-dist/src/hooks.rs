@@ -241,7 +241,7 @@ fn pre_read(
     }
     let bytes = std::fs::read(&abs).map_err(|e| DistError::io(abs.display(), e))?;
     let blob = git_blob_id(&bytes);
-    let engine = k.engine(deadline)?;
+    let engine = k.engine_for(EngineConsistency::StaleOk, deadline)?;
     let artifact = ArtifactName {
         repo: repo.clone(),
         path: rel.clone(),
@@ -414,7 +414,7 @@ fn post_search(
     if idents.is_empty() {
         return allow("search: no identifiers");
     }
-    let engine = k.engine(deadline)?;
+    let engine = k.engine_for(EngineConsistency::StaleOk, deadline)?;
     let answer = engine.with_consistency(
         &QueryOptions {
             consistency: EngineConsistency::StaleOk,
@@ -422,12 +422,13 @@ fn post_search(
             scope: EngineScope::Project,
         },
         |tx| -> Result<(Vec<String>, Vec<String>), StoreError> {
-            let symbols = tx.symbols()?;
             let (mut briefs, mut ambiguous) = (Vec::new(), Vec::new());
             for ident in &idents {
-                let mut found: Vec<&SymbolRow> = symbols
-                    .iter()
-                    .map(|(_, r)| r)
+                let ids = tx.symbol_ids_by_plain_ci(&ident.to_lowercase())?;
+                let mut found: Vec<SymbolRow> = tx
+                    .symbols_many(&ids)?
+                    .into_iter()
+                    .flatten()
                     .filter(|r| plain_name(r) == ident)
                     .collect();
                 found.sort_by_key(|r| r.name.canonical());
@@ -435,7 +436,7 @@ fn post_search(
                     0 => {}
                     1 => {
                         if briefs.len() < MAX_BRIEFS {
-                            let e = katalogr_query::explain(tx, &symbol_hit(found[0]), 5)?;
+                            let e = katalogr_query::explain(tx, &symbol_hit(&found[0]), 5)?;
                             briefs.push(brief(&e));
                         }
                     }

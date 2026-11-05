@@ -21,8 +21,8 @@ pub use cache::ShardKey;
 pub use cache::{
     ArtifactRow, BindingRow, CACHE_SCHEMA, Cache, ContractRow, ErrorRow, FanKey, JournalEntry,
     LEXICON_FIELDS, LexiconStats, LinkBrief, LinkEntry, LinkKey, LinkOrigin, LinkRow, PendingKey,
-    Posting, ReadTx, Reader, RefId, Restitch, ShardStat, Snapshot, SymbolBrief, SymbolRow,
-    SyncReport, TableId, WriteTx,
+    Posting, RANK_TOP_ENTRIES, RankTop, ReadTx, Reader, RefId, Restitch, ShardStat, Snapshot,
+    SymbolBrief, SymbolCore, SymbolRow, SyncReport, TableId, WriteTx,
 };
 pub use context::{ContextId, ContextKind, ContextManifest, META_BASE_ERRORS, seed_layer};
 pub use error::StoreError;

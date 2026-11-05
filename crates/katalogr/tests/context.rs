@@ -504,4 +504,64 @@ mod context {
         assert_eq!(layers(&p).len(), 2);
         assert!(!l_main.exists());
     }
+
+    /// FEAT-080 with contexts: a read-only handle taken beside a writer opens the chosen
+    /// context's own cache, not the base's.
+    #[test]
+    fn reader_opens_the_layer() {
+        use katalogr_store::{Cache, Restitch, WriteTx};
+        struct Noop;
+        impl Restitch for Noop {
+            fn replace_fragment(
+                &self,
+                _: &mut WriteTx,
+                _: katalogr_model::Fragment,
+            ) -> Result<(), katalogr_store::StoreError> {
+                Ok(())
+            }
+            fn remove_artifact(
+                &self,
+                _: &mut WriteTx,
+                _: &katalogr_model::ArtifactName,
+            ) -> Result<(), katalogr_store::StoreError> {
+                Ok(())
+            }
+        }
+        let p = based();
+        std::fs::write(p.repo.join("c.tx"), "sym fn GammaLayer\n").unwrap();
+        ok(&p.repo, &["notify", "c.tx"]);
+        assert!(has(&p.repo, ContextChoice::Current, "GammaLayer"));
+        let layer = layers(&p).remove(0);
+        let dir = Katalogr::resolve(&p.repo, &Overrides::default())
+            .unwrap()
+            .project()
+            .clone();
+        let id =
+            katalogr_store::ContextId::new(layer.file_name().unwrap().to_str().unwrap()).unwrap();
+        // A writer holds the layer's cache, so the read has to take a read-only handle.
+        let held = Cache::open_or_rebuild(
+            &dir.layer(&id),
+            &Noop,
+            std::time::Instant::now() + std::time::Duration::from_secs(5),
+        )
+        .unwrap();
+        let out = ok(
+            &p.repo,
+            &["--consistency", "stale-ok", "find", "GammaLayer"],
+        );
+        assert!(out.contains("GammaLayer"), "{out}");
+        let (code, _, _) = run(
+            &p.repo,
+            &[
+                "--context",
+                "base",
+                "--consistency",
+                "stale-ok",
+                "find",
+                "GammaLayer",
+            ],
+        );
+        assert_eq!(code, 4);
+        drop(held);
+    }
 }

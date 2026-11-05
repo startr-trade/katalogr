@@ -434,4 +434,90 @@ mod bench {
         );
         assert!(ratio <= 6.0, "x{ratio:.2}");
     }
+
+    /// FEAT-076 R-13: the `symbol_core` table adds at most 10% to the stitch and 12% to the
+    /// cache. 100,000 symbols are stitched; the stitch is timed whole, and the price of the core
+    /// rows is the difference between writing the same symbol rows with and without them.
+    #[test]
+    #[ignore = "benchmark: run in release with --ignored"]
+    fn symbol_core_stitch_overhead() {
+        use katalogr_model::{ExtractInput, Extractor};
+        use katalogr_store::cache::TableId;
+        const FILES: usize = 100;
+        const PER_FILE: usize = 1000;
+        let tmp = tempfile::tempdir().unwrap();
+        let (cache, stitcher) = stitch_env(&tmp);
+        let fragments: Vec<_> = (0..FILES)
+            .map(|f| {
+                let text: String = (0..PER_FILE)
+                    .map(|i| format!("sym fn function_{f}_{i}\n"))
+                    .collect();
+                let path = RelPath::new(&format!("d{}/f{f}.tx", f % 10)).unwrap();
+                support::TestExtractor
+                    .extract(&ExtractInput {
+                        repo: "r",
+                        path: &path,
+                        revision: "ce013625030ba8dba906f756967f9e9ca394464a",
+                        content: text.as_bytes(),
+                        context: &[],
+                    })
+                    .unwrap()
+            })
+            .collect();
+        let started = Instant::now();
+        let mut tx = cache.write().unwrap();
+        for f in fragments {
+            stitcher.replace_fragment(&mut tx, f).unwrap();
+        }
+        tx.commit().unwrap();
+        let stitch = started.elapsed();
+
+        let rx = cache.read().unwrap();
+        let symbols = rx.symbols().unwrap();
+        let core: u64 = rx
+            .raw_scan(TableId::SymbolCore, &[])
+            .unwrap()
+            .iter()
+            .map(|(k, v)| (k.len() + v.len()) as u64)
+            .sum();
+        drop(rx);
+        let file = std::fs::metadata(tmp.path().join("kx/projects/p/.cache/index.redb"))
+            .expect("the cache file")
+            .len();
+        // The price of the core rows: the same writes into fresh caches, with and without them.
+        let write_all = |with_core: bool| {
+            let t = tempfile::tempdir().unwrap();
+            let (cache, _) = stitch_env(&t);
+            let started = Instant::now();
+            let mut tx = cache.write().unwrap();
+            for (id, row) in &symbols {
+                if with_core {
+                    tx.put_symbol(*id, row).unwrap();
+                } else {
+                    tx.put_symbol_row_only(*id, row).unwrap();
+                }
+            }
+            tx.commit().unwrap();
+            started.elapsed()
+        };
+        let mut extra = Vec::new();
+        for _ in 0..3 {
+            let (with, without) = (write_all(true), write_all(false));
+            extra.push(with.as_secs_f64() - without.as_secs_f64());
+        }
+        extra.sort_by(|a, b| a.total_cmp(b));
+        let extra = extra[1].max(0.0);
+        let base = (stitch.as_secs_f64() - extra).max(f64::MIN_POSITIVE);
+        let time_pct = extra / base * 100.0;
+        let size_pct = core as f64 / (file.saturating_sub(core).max(1)) as f64 * 100.0;
+        println!(
+            "load {}: {} symbols, stitch {stitch:?} (core rows cost {:.0} ms = +{time_pct:.1}%), \
+             cache file {file} bytes, core rows {core} bytes = +{size_pct:.1}%",
+            load_average(),
+            symbols.len(),
+            extra * 1000.0,
+        );
+        assert!(time_pct <= 10.0, "stitch +{time_pct:.1}%");
+        assert!(size_pct <= 12.0, "cache +{size_pct:.1}%");
+    }
 }
