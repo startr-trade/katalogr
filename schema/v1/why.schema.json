@@ -1,5 +1,33 @@
 {
   "$defs": {
+    "CallerHit": {
+      "properties": {
+        "caller": {
+          "$ref": "#/$defs/SymbolHit"
+        },
+        "confidence": {
+          "$ref": "#/$defs/Confidence"
+        },
+        "depth": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "via": {
+          "description": "The contract (`contract:<kind>:<key>`) the call goes through, when it does.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "caller",
+        "depth",
+        "confidence"
+      ],
+      "type": "object"
+    },
     "CommitHit": {
       "description": "A commit that introduced the line and the board items its trailers name.",
       "properties": {
@@ -24,6 +52,15 @@
         "items"
       ],
       "type": "object"
+    },
+    "Confidence": {
+      "description": "Schema-only mirror of [`katalogr_model::Confidence`].",
+      "enum": [
+        "Extracted",
+        "Inferred",
+        "Declared"
+      ],
+      "type": "string"
     },
     "ExpandedTerm": {
       "properties": {
@@ -645,6 +682,70 @@
       ],
       "type": "object"
     },
+    "TestHit": {
+      "description": "A test that exercises or verifies a symbol (FEAT-063).",
+      "properties": {
+        "chain": {
+          "description": "Canonical names between the test and the seed, test side first; contracts excluded.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "confidence": {
+          "$ref": "#/$defs/Confidence",
+          "description": "The weakest confidence on the path (Extracted > Declared > Inferred)."
+        },
+        "depth": {
+          "description": "Hops from the seed; 0 when the seed itself is test code.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "requirements": {
+          "description": "Canonical names of the nodes with a `verified-by` link to the test, sorted.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "role": {
+          "description": "`case`, `suite`, `support`, or any other string an extension or profile set.",
+          "type": "string"
+        },
+        "score": {
+          "description": "Product of the row weights on the path, rounded to 4 decimals.",
+          "format": "double",
+          "type": "number"
+        },
+        "seed": {
+          "description": "Canonical name of the seed reached.",
+          "type": "string"
+        },
+        "test": {
+          "$ref": "#/$defs/SymbolHit",
+          "description": "The test node; an artifact is shown with kind `artifact` (as `dangling` shows referrers)."
+        },
+        "via": {
+          "description": "The first contract on the path from the test side, `contract:<kind>:<key>`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "test",
+        "role",
+        "depth",
+        "confidence",
+        "score",
+        "seed",
+        "chain",
+        "requirements"
+      ],
+      "type": "object"
+    },
     "Trace": {
       "description": "What `--diagnostic` reports.",
       "properties": {
@@ -820,8 +921,26 @@
           },
           "type": "array"
         },
+        "sources": {
+          "description": "Which tool owns each section of the answer, and where this answer took it from.",
+          "items": {
+            "$ref": "#/$defs/WhySource"
+          },
+          "type": "array"
+        },
         "symbol": {
           "$ref": "#/$defs/SymbolHit"
+        },
+        "used_by": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/WhyUse"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Who uses the symbol: callers, tests and contract bindings (FEAT-087). Omitted when empty\nor when not asked for."
         }
       },
       "required": [
@@ -829,6 +948,75 @@
         "rationale",
         "goals",
         "commits"
+      ],
+      "type": "object"
+    },
+    "WhySource": {
+      "description": "The owner of one section of a `why` answer and where this answer took it from.",
+      "properties": {
+        "owner": {
+          "description": "`index`, `board`, or `both` for commits.",
+          "type": "string"
+        },
+        "section": {
+          "description": "`symbol`, `used_by`, `notes`, `commits`, `rationale` or `goals`.",
+          "type": "string"
+        },
+        "source": {
+          "description": "Where this answer read it: `index`.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "section",
+        "owner",
+        "source"
+      ],
+      "type": "object"
+    },
+    "WhyUse": {
+      "description": "Who uses a symbol: depth-1 callers, tests and the contracts it is bound to.",
+      "properties": {
+        "callers": {
+          "description": "At most the limit, sorted as `callers` sorts.",
+          "items": {
+            "$ref": "#/$defs/CallerHit"
+          },
+          "type": "array"
+        },
+        "callers_total": {
+          "description": "All callers, before the limit.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "contracts": {
+          "description": "`contract:<kind>:<key>`, sorted.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "tests": {
+          "description": "At most the limit, sorted as `tests` sorts.",
+          "items": {
+            "$ref": "#/$defs/TestHit"
+          },
+          "type": "array"
+        },
+        "tests_total": {
+          "description": "All tests, before the limit.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "callers",
+        "callers_total",
+        "tests",
+        "tests_total",
+        "contracts"
       ],
       "type": "object"
     }

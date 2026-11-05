@@ -1,0 +1,164 @@
+{
+  "exact": true,
+  "next": [
+    "katalogr explain code:src/a.tx#fn:alpha",
+    "katalogr show code:src/a.tx#fn:alpha",
+    "katalogr refs code:src/a.tx#fn:alpha",
+    "kanbanr why src/a.tx:1"
+  ],
+  "pending": 0,
+  "positions": [
+    {
+      "commit": null,
+      "dirty": null,
+      "repo": "board"
+    },
+    {
+      "commit": "8ac937b5ea436e45cd3c4e1021993aa7960a4304",
+      "dirty": "0ab27beddb0ccfcc8d33687750823c61e9cf91ea9a24dea1f2c507ab5dcae03a",
+      "repo": "code"
+    }
+  ],
+  "result": {
+    "commits": [
+      {
+        "items": [
+          "board:projects/demo/features/Planned/FEAT-001.yaml#item:FEAT-001/req:R-1"
+        ],
+        "sha": "931ee62531873d7c0f8b6a79d1b8087005006dcd",
+        "summary": "feat: add alpha"
+      }
+    ],
+    "goals": [
+      {
+        "kind": "serves",
+        "label": "G-1",
+        "target": "board:projects/demo/charter.yaml#goal:G-1"
+      }
+    ],
+    "note": null,
+    "notes": [
+      {
+        "line": 8,
+        "marker": "WHY",
+        "text": "the order matters"
+      }
+    ],
+    "rationale": [
+      {
+        "kind": "changed-by",
+        "label": "FEAT-001/R-1",
+        "target": "board:projects/demo/features/Planned/FEAT-001.yaml#item:FEAT-001/req:R-1"
+      }
+    ],
+    "sources": [
+      {
+        "owner": "index",
+        "section": "symbol",
+        "source": "index"
+      },
+      {
+        "owner": "index",
+        "section": "used_by",
+        "source": "index"
+      },
+      {
+        "owner": "index",
+        "section": "notes",
+        "source": "index"
+      },
+      {
+        "owner": "both",
+        "section": "commits",
+        "source": "index"
+      },
+      {
+        "owner": "board",
+        "section": "rationale",
+        "source": "index"
+      },
+      {
+        "owner": "board",
+        "section": "goals",
+        "source": "index"
+      }
+    ],
+    "symbol": {
+      "kind": "fn",
+      "name": "code:src/a.tx#fn:alpha",
+      "path": "src/a.tx",
+      "span": {
+        "end_col": 12,
+        "end_line": 1,
+        "start_col": 1,
+        "start_line": 1
+      }
+    },
+    "used_by": {
+      "callers": [
+        {
+          "caller": {
+            "kind": "fn",
+            "name": "code:src/a.tx#fn:caller_one",
+            "path": "src/a.tx",
+            "span": {
+              "end_col": 17,
+              "end_line": 2,
+              "start_col": 1,
+              "start_line": 2
+            }
+          },
+          "confidence": "Extracted",
+          "depth": 1
+        },
+        {
+          "caller": {
+            "kind": "fn",
+            "name": "code:src/a.tx#fn:check_alpha",
+            "path": "src/a.tx",
+            "span": {
+              "end_col": 18,
+              "end_line": 3,
+              "start_col": 1,
+              "start_line": 3
+            }
+          },
+          "confidence": "Extracted",
+          "depth": 1
+        }
+      ],
+      "callers_total": 2,
+      "contracts": [
+        "contract:topic:orders"
+      ],
+      "tests": [
+        {
+          "chain": [],
+          "confidence": "Extracted",
+          "depth": 1,
+          "requirements": [],
+          "role": "case",
+          "score": 1.0,
+          "seed": "code:src/a.tx#fn:alpha",
+          "test": {
+            "kind": "fn",
+            "name": "code:src/a.tx#fn:check_alpha",
+            "path": "src/a.tx",
+            "span": {
+              "end_col": 18,
+              "end_line": 3,
+              "start_col": 1,
+              "start_line": 3
+            }
+          }
+        }
+      ],
+      "tests_total": 1
+    }
+  },
+  "schema": 1,
+  "stale": false,
+  "truncated": null,
+  "view_id": "v1-bc4dda9ef9b3c8760ad9b627039a8f87",
+  "watermark": 9
+}

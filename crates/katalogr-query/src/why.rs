@@ -1,7 +1,11 @@
 //! `why`: the symbol at a line, and the rationale linked to it.
 
+use crate::callers::callers;
 use crate::resolve::hit;
-use crate::result::{CommitHit, Note, RationaleLink, Resolution, SymbolHit, WhyResult};
+use crate::result::{
+    CommitHit, Note, RationaleLink, Resolution, SymbolHit, WhyResult, WhySource, WhyUse,
+};
+use crate::tests::{TestsOptions, tests};
 use katalogr_model::insight::FACT_RATIONALE;
 use katalogr_model::{ArtifactName, Fact, Id, LinkKind, Name, RelPath, SymbolName};
 use katalogr_store::{Reader, StoreError};
@@ -121,14 +125,90 @@ pub fn why(
     rationale.dedup();
 
     let goals = goals_of(tx, &reached)?;
-    Ok(Resolution::One(WhyResult {
+    let mut result = WhyResult {
         symbol: hit(&sym),
         rationale,
         goals,
         commits,
         note,
         notes: notes_of(&sym.facts),
-    }))
+        used_by: None,
+        sources: Vec::new(),
+    };
+    result.sources = why_sources(&result);
+    Ok(Resolution::One(result))
+}
+
+/// Default number of callers and tests `why_use` lists.
+pub const DEFAULT_USE_LIMIT: usize = 10;
+
+/// Who uses `symbol`: its depth-1 callers, the tests that reach it and the contracts it is bound
+/// to. At most `limit` callers and tests, sorted as `callers` and `tests` sort, with the totals
+/// before the cut. Pure; a cut is reported by the caller as a `partial` marker.
+pub fn why_use(tx: &impl Reader, symbol: &SymbolHit, limit: usize) -> Result<WhyUse, StoreError> {
+    let mut callers = callers(tx, symbol, 1)?;
+    let callers_total = callers.len() as u64;
+    callers.truncate(limit);
+    let mut tests = tests(tx, symbol, TestsOptions::default())?;
+    let tests_total = tests.len() as u64;
+    tests.truncate(limit);
+
+    let artifact = match katalogr_model::parse_name(&symbol.name) {
+        Ok(katalogr_model::AnyName::Symbol(s)) => s.artifact,
+        _ => {
+            return Err(StoreError::Row(format!(
+                "{}: not a symbol name",
+                symbol.name
+            )));
+        }
+    };
+    let me = Id::of(&symbol.name);
+    let mut contracts = BTreeSet::new();
+    for b in tx.bindings_of(artifact.id())? {
+        if b.symbol != me {
+            continue;
+        }
+        if let Some(c) = tx.contract(b.contract)? {
+            contracts.insert(c.name.canonical());
+        }
+    }
+    Ok(WhyUse {
+        callers,
+        callers_total,
+        tests,
+        tests_total,
+        contracts: contracts.into_iter().collect(),
+    })
+}
+
+/// Set `used_by` (left unset when it is empty) and refresh `sources` to match.
+pub fn attach_use(result: &mut WhyResult, used: WhyUse) {
+    let empty = used.callers_total == 0 && used.tests_total == 0 && used.contracts.is_empty();
+    result.used_by = (!empty).then_some(used);
+    result.sources = why_sources(result);
+}
+
+/// The owner of each section present in `result`, in the order symbol, used_by, notes, commits,
+/// rationale, goals. Owners are neutral words: `index` (code facts), `board` (items and goals),
+/// `both` (commits, which each tool reads from git). Every section is read from the index.
+pub fn why_sources(result: &WhyResult) -> Vec<WhySource> {
+    let sections = [
+        ("symbol", "index", true),
+        ("used_by", "index", result.used_by.is_some()),
+        ("notes", "index", !result.notes.is_empty()),
+        ("commits", "both", !result.commits.is_empty()),
+        ("rationale", "board", !result.rationale.is_empty()),
+        ("goals", "board", !result.goals.is_empty()),
+    ];
+    sections
+        .into_iter()
+        .filter(|(_, _, present)| *present)
+        .map(|(section, owner, _)| WhySource {
+            section: section.to_string(),
+            owner: owner.to_string(),
+            source: "index".to_string(),
+        })
+        .collect()
 }
 
 /// The rationale markers recorded on a symbol, in line order. Entries of the wrong shape are

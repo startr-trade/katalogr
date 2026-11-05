@@ -167,6 +167,9 @@ pub enum Command {
     Why {
         /// `FILE:LINE`, with FILE relative to the repository root.
         location: String,
+        /// Leave out who uses the symbol (callers, tests, contracts); faster, for hooks.
+        #[arg(long)]
+        no_use: bool,
     },
     /// Outline the project: symbols by PageRank over the reference graph.
     Map {

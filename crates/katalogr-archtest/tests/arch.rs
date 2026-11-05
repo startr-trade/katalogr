@@ -212,6 +212,84 @@ mod archtest {
         );
     }
 
+    /// FEAT-087 R-5: katalogr never runs a kanbanr process. Every `Command::new("kanbanr")` in the
+    /// workspace's shipped sources (`src/`, outside `#[cfg(test)]` items) is refused.
+    #[test]
+    fn no_kanbanr_process() {
+        struct Spawn {
+            hits: Vec<LineColumn>,
+        }
+        fn is_test_cfg(attrs: &[syn::Attribute]) -> bool {
+            attrs
+                .iter()
+                .any(|a| a.path().is_ident("cfg") && quote_has_test(&a.meta))
+        }
+        fn quote_has_test(meta: &syn::Meta) -> bool {
+            matches!(meta, syn::Meta::List(l) if l.tokens.to_string() == "test")
+        }
+        impl<'ast> Visit<'ast> for Spawn {
+            fn visit_item_mod(&mut self, m: &'ast syn::ItemMod) {
+                if !is_test_cfg(&m.attrs) {
+                    syn::visit::visit_item_mod(self, m);
+                }
+            }
+            fn visit_item_fn(&mut self, f: &'ast syn::ItemFn) {
+                if !is_test_cfg(&f.attrs) {
+                    syn::visit::visit_item_fn(self, f);
+                }
+            }
+            fn visit_expr_call(&mut self, c: &'ast syn::ExprCall) {
+                if let syn::Expr::Path(p) = &*c.func {
+                    let segs: Vec<String> = p
+                        .path
+                        .segments
+                        .iter()
+                        .map(|s| s.ident.to_string())
+                        .collect();
+                    let spawns = segs.len() >= 2
+                        && segs[segs.len() - 2] == "Command"
+                        && segs[segs.len() - 1] == "new";
+                    if spawns
+                        && let Some(syn::Expr::Lit(l)) = c.args.first()
+                        && let syn::Lit::Str(s) = &l.lit
+                        && s.value().rsplit('/').next() == Some("kanbanr")
+                    {
+                        self.hits.push(s.span().start());
+                    }
+                }
+                syn::visit::visit_expr_call(self, c);
+            }
+        }
+
+        let md = metadata(false);
+        let mut failures = Vec::new();
+        for p in md.workspace_packages() {
+            let root = p.manifest_path.parent().expect("manifest dir");
+            let mut files = Vec::new();
+            rs_files(root.join("src").as_std_path(), &mut files);
+            files.sort();
+            for f in files {
+                let src = std::fs::read_to_string(&f).expect("read source");
+                let ast = syn::parse_file(&src)
+                    .unwrap_or_else(|e| panic!("{}: parse error: {e}", f.display()));
+                let mut scan = Spawn { hits: Vec::new() };
+                scan.visit_file(&ast);
+                for h in scan.hits {
+                    failures.push(format!(
+                        "{}:{}: runs a kanbanr process",
+                        f.display(),
+                        h.line
+                    ));
+                }
+            }
+        }
+        assert!(
+            failures.is_empty(),
+            "katalogr must not run kanbanr:\n{}",
+            failures.join("\n")
+        );
+    }
+
     #[test]
     fn analytics_layering() {
         let md = metadata(false);

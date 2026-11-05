@@ -148,7 +148,7 @@ fn run(cli: &Cli) -> Result<ExitCode, DistError> {
             expand,
         }) => cmd::callers::run(cli, text, *depth, *expand),
         Some(Command::Tests { text, depth, cases }) => cmd::tests::run(cli, text, *depth, *cases),
-        Some(Command::Why { location }) => cmd::why::run(cli, location),
+        Some(Command::Why { location, no_use }) => cmd::why::run(cli, location, *no_use),
         Some(Command::Map { diagnostic }) => cmd::map::run(cli, *diagnostic),
         Some(Command::Search {
             terms,

@@ -560,8 +560,15 @@ pub fn call(cfg: &ServeConfig, name: &str, args: &Value) -> Result<JsonAnswer, U
         }
         "why" => {
             let location = p.need("location");
-            let opts = &mk("why", &[("location", location.to_string())]);
-            answer(Katalogr::why(&k, location, opts), |r| {
+            let limit = k.why_use_limit();
+            let opts = &mk(
+                "why",
+                &[
+                    ("location", location.to_string()),
+                    ("use_limit", limit.to_string()),
+                ],
+            );
+            answer(Katalogr::why(&k, location, Some(limit), opts), |r| {
                 render_json::why(r, budget)
             })
         }

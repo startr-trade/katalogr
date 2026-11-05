@@ -340,7 +340,8 @@ pub fn why(reply: Reply<WhyResult>, budget_tokens: Option<u64>) -> JsonAnswer {
                     w.rationale.truncate(fit.kept);
                 }
             }
-            let next = hints("why", &w);
+            let mut next = hints("why", &w);
+            next.extend(katalogr_dist::why_next(&w));
             let e = envelope(&reply.report, truncated, partial, w, next, None);
             found(exit, &reply.report, line(&e))
         }

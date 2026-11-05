@@ -671,6 +671,139 @@ fn session_start_100k() {
 mod bench {
     use super::*;
 
+    /// FEAT-087 R-7. `why_use` on a symbol of a 10,000-symbol artifact: 1,000 depth-1 callers (100
+    /// of them tests, each called by two more symbols), and an artifact that binds every symbol to
+    /// its own contract. Budget: at most 100 ms with the default limit of 10.
+    #[test]
+    #[ignore]
+    fn why_with_use() {
+        use katalogr_model::insight::{FACT_TEST, TEST_CASE};
+        use katalogr_model::{ContractName, ContractRole};
+        use katalogr_query::{DEFAULT_USE_LIMIT, SymbolHit, why_use};
+        use katalogr_store::{BindingRow, ContractRow};
+
+        const SYMBOLS: usize = 10_000;
+        const CALLERS: usize = 1_000;
+        const TESTS: usize = 100;
+        let tmp = tempfile::tempdir().unwrap();
+        let cache = open_bench_cache(&tmp);
+        let path = RelPath::new("bench.tx").unwrap();
+        let artifact = ArtifactName {
+            repo: "r".into(),
+            path: path.clone(),
+        };
+        let provenance = Provenance {
+            repo: "r".into(),
+            path,
+            revision: "ce013625030ba8dba906f756967f9e9ca394464a".into(),
+        };
+        let span = Span {
+            start_line: 1,
+            start_col: 1,
+            end_line: 1,
+            end_col: 1,
+        };
+        let mut tx = cache.write().unwrap();
+        let mut ids: Vec<Id> = Vec::with_capacity(SYMBOLS);
+        let mut names: Vec<SymbolName> = Vec::with_capacity(SYMBOLS);
+        for i in 0..SYMBOLS {
+            let name = SymbolName {
+                artifact: artifact.clone(),
+                segments: vec![Segment {
+                    kind: "fn".into(),
+                    name: format!("s{i}"),
+                }],
+                ordinal: 1,
+            };
+            let mut facts = std::collections::BTreeMap::new();
+            if (1..=TESTS).contains(&i) {
+                facts.insert(FACT_TEST.to_string(), Fact::Str(TEST_CASE.to_string()));
+            }
+            let id = name.id();
+            tx.put_symbol(
+                id,
+                &SymbolRow {
+                    name: name.clone(),
+                    artifact: artifact.id(),
+                    kind: "fn".into(),
+                    span,
+                    facts,
+                },
+            )
+            .unwrap();
+            ids.push(id);
+            names.push(name);
+        }
+        let call = |tx: &mut WriteTx, from: usize, to: usize| {
+            tx.put_link(
+                &LinkKey {
+                    from: ids[from],
+                    kind: LinkKind("calls".into()),
+                    to: ids[to],
+                },
+                &LinkRow {
+                    entries: vec![LinkEntry {
+                        origin: LinkOrigin::Intra,
+                        confidence: Confidence::Extracted,
+                        span: Some(span),
+                        provenance: provenance.clone(),
+                        fanout: None,
+                        produced_by: None,
+                    }],
+                },
+            )
+            .unwrap();
+        };
+        // Symbol 0 is the target; symbols 1..=CALLERS call it (the first TESTS are tests); each
+        // caller is called by two symbols above CALLERS.
+        for c in 1..=CALLERS {
+            call(&mut tx, c, 0);
+            call(&mut tx, CALLERS + 2 * c, c);
+            call(&mut tx, CALLERS + 2 * c + 1, c);
+        }
+        let mut rows = Vec::with_capacity(SYMBOLS);
+        for (i, id) in ids.iter().enumerate() {
+            let contract = ContractName {
+                kind: "topic".into(),
+                key: format!("k{i}"),
+            };
+            let cid = contract.id();
+            tx.put_contract(
+                cid,
+                &ContractRow {
+                    name: contract,
+                    providers: 1,
+                    consumers: 0,
+                    declarers: 0,
+                },
+            )
+            .unwrap();
+            rows.push(BindingRow {
+                symbol: *id,
+                contract: cid,
+                role: ContractRole::Provides,
+            });
+        }
+        tx.put_bindings(artifact.id(), &rows).unwrap();
+        tx.commit().unwrap();
+
+        let read = cache.read().unwrap();
+        let target = SymbolHit {
+            name: names[0].canonical(),
+            kind: "fn".into(),
+            path: "bench.tx".into(),
+            span,
+        };
+        let first = why_use(&read, &target, DEFAULT_USE_LIMIT).unwrap();
+        assert_eq!(first.callers_total, CALLERS as u64);
+        assert_eq!(first.callers.len(), DEFAULT_USE_LIMIT);
+        assert_eq!(first.tests_total, TESTS as u64);
+        assert_eq!(first.contracts, ["contract:topic:k0"]);
+        let ms = best_ms(|| why_use(&read, &target, DEFAULT_USE_LIMIT).unwrap());
+        println!("bench::why_with_use: {ms:.1} ms");
+        assert!(ms < 100.0, "{ms} ms is over the 100 ms budget");
+    }
+
     /// R-14 (FEAT-009). Drift over 10,000 contracts, each declared by two types of 10 fields: one
     /// of every ten pairs differs in a field. Budget: the full report in under 1000 ms.
     #[test]
