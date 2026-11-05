@@ -1,6 +1,6 @@
 ---
 name: katalogr
-description: Deterministic code and artifact graph for the current project. Use it before reading or grepping whenever the question is where something is, who uses it, why it exists, how two things connect, or what a change would touch, in any indexed project (a `.katalogr` marker exists, or `katalogr` answers). It replaces whole-file reads with exact spans and ranked, budgeted answers. Covers search, show, explain, refs, callers, path, why, map, dangling, index and notify, with playbooks for scoping work, finding where to implement, assessing a change, tracing a flow, reviewing a change, and keeping docs and schemas in sync.
+description: Deterministic code and artifact graph for the current project. Use it before reading or grepping whenever the question is where something is, who uses it, why it exists, how two things connect, or what a change would touch, in any indexed project (a `.katalogr` marker exists, or `katalogr` answers). It replaces whole-file reads with exact spans and ranked, budgeted answers. Covers search, show, explain, refs, callers, path, why, map, dangling, docs-affected, view, render, index and notify, with playbooks for scoping work, finding where to implement, assessing a change, tracing a flow, reviewing a change, and keeping docs and schemas in sync.
 ---
 
 # katalogr: ask the graph before you read
@@ -35,8 +35,9 @@ katalogr has already parsed this project into a graph of artifacts, symbols, con
    - `callers <symbol> --depth 2`: who calls it, and who calls those.
    - `refs` and `callers` fold a name with 50 or more same-named targets into one line; add `--expand` to list them.
    - `path <a> <b>`: the shortest chain between two things, with each link's kind and confidence.
-   - `why <file>:<line>`: the symbol at that line, the board items and goals it serves, and the commit that last changed it.
-6. **Orient in an unfamiliar project.** `katalogr map --budget 1500` gives the most central symbols first (PageRank).
+   - `why <file>:<line>`: the symbol at that line, the board items and goals it serves, the commit that last changed it, and who uses it (callers, tests, contracts). `--no-use` leaves the users out (faster, for hooks).
+   - `docs-affected [--since <rev>]`: documents linked to code that changed since the merge-base, or `--since`.
+6. **Orient in an unfamiliar project.** `katalogr map --budget 1500` gives the most central symbols first (PageRank). `map` and `search` favour the files you are working on; `--neutral` ranks by relevance alone.
 7. **Follow the `next:` line.** Every answer ends with the most useful follow-up commands.
 8. **Respect confidence.**
    - `[Extracted]` links are certain.
@@ -47,6 +48,7 @@ katalogr has already parsed this project into a graph of artifacts, symbols, con
 - `--json` gives a versioned envelope with `watermark`, `pending`, `stale` and `next`.
 - `--consistency wait|wait-all|stale-ok` and `--timeout <s>` choose how fresh the answer must be. The CLI default is `wait`.
 - `--at <position>` answers for an exact position (a commit, or `commit+hash` of uncommitted changes); `katalogr position` prints the checkout's. An exact answer carries `positions` and a `view_id` that repeats.
+- `katalogr watch` polls the checkout and reindexes edits made outside Claude. `katalogr context list|show|add|diff` manages contexts.
 
 ## 3. Playbooks
 
@@ -83,6 +85,12 @@ katalogr has already parsed this project into a graph of artifacts, symbols, con
 1. `katalogr dangling --kind links-to`: doc links that no longer resolve
 2. `katalogr why <doc>:<line>` and `katalogr refs <doc section>`: what the doc claims to describe
 3. After a code change, `katalogr refs <changed symbol>` lists the docs that mention it. Update them in the same change.
+
+### 3.7 Draw or store a view
+- `katalogr render <op> --format mermaid|dot|graphml|structurizr|svg` draws `structure`, `contracts`, `callers <symbol>`, `path <a> <b>` or `cycles`. `render mdbook` and `render filter` fill `katalogr-query` blocks in docs.
+- `katalogr view <op> [--fresh]` answers from the view store by view ID; with `--json` it is what the API returns. `--fresh` recomputes and compares.
+- `katalogr view check <path>` lists bad query blocks (no index needed). `katalogr view snapshot --docs <dir> --out <dir> [--at <position>]` writes every block's view for one position, or nothing.
+- `katalogr api [--listen 127.0.0.1:7878]` serves the read queries as HTTP/JSON on loopback; the default is `stale-ok`, and an `ETag` needs `consistency=wait`.
 
 ## 4. Cost routing
 
