@@ -55,8 +55,9 @@ pub struct InspectedTables {
 const UNREADABLE_TABLES: &str = "the cache tables cannot be read";
 
 impl Cache {
-    /// Opens `<project>/.cache/index.redb` read-only, beside a running writer (FEAT-080). Maps a database held by a
-    /// writer to `InUse`, a missing file to `Missing`, and corruption, a needed upgrade and any
+    /// Opens `<project>/.cache/index.redb` read-only, beside a running writer (FEAT-080). Maps a
+    /// database that cannot be shared (a repair running or needed, or no byte-range locks) to
+    /// `InUse`, a missing file to `Missing`, and corruption, a needed upgrade and any
     /// other open error to `Unreadable` (a message without paths). Reads one snapshot.
     pub fn inspect(dir: &ProjectDir) -> Result<CacheInspection, StoreError> {
         let path = dir.cache_dir().join("index.redb");
