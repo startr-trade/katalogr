@@ -481,6 +481,247 @@ mod cache {
         );
     }
 
+    // ------------------------------------------------ compaction (FEAT-075 T6)
+
+    /// Every table but `meta` as raw rows: a rewrite copies them verbatim.
+    fn raw_tables(rx: &impl Reader) -> Vec<(String, Vec<(Vec<u8>, Vec<u8>)>)> {
+        use katalogr_store::cache::TableId;
+        TableId::ALL
+            .iter()
+            .filter(|t| **t != TableId::Meta)
+            .map(|t| (format!("{t:?}"), rx.raw_scan(*t, &[]).unwrap()))
+            .collect()
+    }
+
+    /// redb trims the unused tail of a file when it closes it, so the size recorded for the
+    /// closed file and the size of the open one differ by a small allocation step.
+    fn near(recorded: u64, file: u64) {
+        assert!(
+            recorded.abs_diff(file) <= 64 * 1024,
+            "recorded {recorded}, file {file}"
+        );
+    }
+
+    fn sample_project(tmp: &tempfile::TempDir) -> ProjectDir {
+        let dir = project(tmp);
+        for (p, t) in [
+            (
+                "a.tx",
+                "sym fn A\nsym fn A2\nlink A calls A2\nexport ns:k A\n",
+            ),
+            (
+                "b.tx",
+                "sym fn B\nsym fn B2\nlink B calls B2\nref B calls ns:k\nref B calls ns:nope\n",
+            ),
+            ("c.tx", "sym fn C\nexport ns:k C\n"),
+        ] {
+            dir.write_shard(&extract(p, t)).unwrap();
+        }
+        dir
+    }
+
+    #[test]
+    fn rewrite_preserves_dump() {
+        use katalogr_store::{CompactMode, CompactOutcome};
+        for mode in [CompactMode::Rewrite, CompactMode::InPlace] {
+            let tmp = tempfile::tempdir().unwrap();
+            let dir = sample_project(&tmp);
+            let cache = Cache::open_or_rebuild(&dir, &Stitcher::new(), soon()).unwrap();
+            let before = {
+                let rx = cache.read().unwrap();
+                (
+                    rx.dump_graph().unwrap(),
+                    raw_tables(&rx),
+                    rx.links_all().unwrap(),
+                )
+            };
+            let (cache, report) = cache.compact(&dir, mode, soon()).unwrap();
+            assert_eq!(report.outcome, CompactOutcome::Done, "{mode:?}");
+            assert_eq!(report.mode, mode);
+            let rx = cache.read().unwrap();
+            assert_eq!(rx.dump_graph().unwrap(), before.0, "{mode:?}");
+            assert_eq!(raw_tables(&rx), before.1, "{mode:?}");
+            assert_eq!(rx.links_all().unwrap(), before.2, "{mode:?}");
+            drop(rx);
+            near(
+                cache.compacted_bytes().unwrap().unwrap(),
+                cache.file_bytes().unwrap(),
+            );
+            assert!(!dir.cache_dir().join(katalogr_store::REWRITE_FILE).exists());
+            // The compacted cache is a working cache: a reopen finds it current.
+            drop(cache);
+            let cache = Cache::open_or_rebuild(&dir, &Stitcher::new(), soon()).unwrap();
+            assert_eq!(cache.report().replaced, 0);
+        }
+    }
+
+    #[test]
+    fn rewrite_shrinks_fragmented_file() {
+        use katalogr_store::{CompactMode, CompactOutcome};
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = project(&tmp);
+        let mut cache = Cache::open_or_rebuild(&dir, &Stitcher::new(), soon()).unwrap();
+        for round in 0..20 {
+            for i in 0..25 {
+                let n = round * 25 + i;
+                dir.write_shard(&extract(
+                    &format!("f{n:03}.tx"),
+                    &format!(
+                        "sym fn F{n}\nsym fn G{n}\nlink F{n} calls G{n}\nexport ns:k{n} F{n}\nref G{n} calls ns:k{}\n",
+                        n / 2
+                    ),
+                ))
+                .unwrap();
+            }
+            drop(cache);
+            cache = Cache::open_or_rebuild(&dir, &Stitcher::new(), soon()).unwrap();
+        }
+        assert_eq!(cache.read().unwrap().artifacts().unwrap().len(), 500);
+        let before_dump = cache.read().unwrap().dump_graph().unwrap();
+        let before = cache.file_bytes().unwrap();
+        let (cache, report) = cache.compact(&dir, CompactMode::Rewrite, soon()).unwrap();
+        assert_eq!(report.outcome, CompactOutcome::Done);
+        assert_eq!(report.bytes_before, before);
+        assert_eq!(report.bytes_after, cache.file_bytes().unwrap());
+        assert!(
+            report.bytes_after < before,
+            "{} < {before}",
+            report.bytes_after
+        );
+        assert_eq!(cache.read().unwrap().dump_graph().unwrap(), before_dump);
+    }
+
+    #[test]
+    fn rewrite_failure_keeps_cache() {
+        use katalogr_store::{CompactMode, CompactOutcome};
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = sample_project(&tmp);
+        let cache = Cache::open_or_rebuild(&dir, &Stitcher::new(), soon()).unwrap();
+        let before = cache.read().unwrap().dump_graph().unwrap();
+        let size = cache.file_bytes().unwrap();
+        // A directory where the rewrite file goes: it cannot be removed or created.
+        let blocker = dir.cache_dir().join(katalogr_store::REWRITE_FILE);
+        std::fs::create_dir(&blocker).unwrap();
+        let (cache, report) = cache.compact(&dir, CompactMode::Rewrite, soon()).unwrap();
+        assert!(
+            matches!(report.outcome, CompactOutcome::Skipped(_)),
+            "{report:?}"
+        );
+        assert_eq!(cache.file_bytes().unwrap(), size);
+        assert_eq!(cache.read().unwrap().dump_graph().unwrap(), before);
+        assert!(blocker.is_dir(), "the blocker is left alone");
+        // Still usable: it takes a write.
+        let mut tx = cache.write().unwrap();
+        tx.put_index_errors("r", &RelPath::new("x.tx").unwrap(), &[])
+            .unwrap();
+        tx.commit().unwrap();
+    }
+
+    #[test]
+    fn orphan_rewrite_file_removed() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = sample_project(&tmp);
+        let cache = Cache::open_or_rebuild(&dir, &Stitcher::new(), soon()).unwrap();
+        drop(cache);
+        let orphan = dir.cache_dir().join(katalogr_store::REWRITE_FILE);
+        std::fs::write(&orphan, b"left by a process that stopped").unwrap();
+        let cache = Cache::open_or_rebuild(&dir, &Stitcher::new(), soon()).unwrap();
+        assert!(!orphan.exists());
+        assert_eq!(cache.report().replaced, 0);
+    }
+
+    #[test]
+    fn rebuild_from_shards_compacts() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = sample_project(&tmp);
+        let cache = Cache::open_or_rebuild(&dir, &Stitcher::new(), soon()).unwrap();
+        assert_eq!(cache.report().replaced, 3);
+        near(
+            cache.compacted_bytes().unwrap().unwrap(),
+            cache.file_bytes().unwrap(),
+        );
+        drop(cache);
+        // A warm open leaves the file as it is.
+        let cache = Cache::open_or_rebuild(&dir, &Stitcher::new(), soon()).unwrap();
+        let size = cache.file_bytes().unwrap();
+        drop(cache);
+        std::fs::remove_dir_all(dir.cache_dir()).unwrap();
+        let cache = Cache::open_or_rebuild(&dir, &Stitcher::new(), soon()).unwrap();
+        assert_eq!(cache.report().replaced, 3);
+        let compacted = cache
+            .compacted_bytes()
+            .unwrap()
+            .expect("compacted after the rebuild");
+        near(compacted, cache.file_bytes().unwrap());
+        assert!(compacted <= size + 4096 * 4, "{compacted} against {size}");
+        assert!(!dir.cache_dir().join(katalogr_store::REWRITE_FILE).exists());
+    }
+
+    /// FEAT-080: a read-only handle opened before a rewrite goes on reading the file it opened,
+    /// a complete older snapshot; a handle opened after sees the new file and what was written
+    /// to it since. The rename never makes the old handle read garbage or fail.
+    #[test]
+    fn rewrite_beside_read_only_handle() {
+        use katalogr_store::CompactMode;
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = sample_project(&tmp);
+        let cache = Cache::open_or_rebuild(&dir, &Stitcher::new(), soon()).unwrap();
+        let Some(old_reader) = Cache::open_reader(&dir).unwrap() else {
+            // No byte-range locks on this platform: a reader waits for the writer instead.
+            return;
+        };
+        assert!(old_reader.is_reader());
+        let held = old_reader.read().unwrap();
+        let graph = held.links_all().unwrap();
+        assert!(!graph.is_empty());
+
+        let (cache, report) = cache.compact(&dir, CompactMode::Rewrite, soon()).unwrap();
+        assert_eq!(report.outcome, katalogr_store::CompactOutcome::Done);
+
+        // The snapshot held across the swap, and a new one on the same handle, read as before.
+        assert_eq!(held.links_all().unwrap(), graph);
+        assert_eq!(old_reader.read().unwrap().links_all().unwrap(), graph);
+        drop(held);
+        // The old handle is never compacted.
+        let (old_reader, skipped) = old_reader
+            .compact(&dir, CompactMode::Rewrite, soon())
+            .unwrap();
+        assert!(matches!(
+            skipped.outcome,
+            katalogr_store::CompactOutcome::Skipped(_)
+        ));
+        assert!(old_reader.is_reader());
+
+        // A write after the swap reaches handles opened after it, not the one on the old file.
+        let mut tx = cache.write().unwrap();
+        tx.put_index_errors(
+            "r",
+            &RelPath::new("x.tx").unwrap(),
+            &[katalogr_store::ErrorRow {
+                span: None,
+                message: "after the swap".into(),
+            }],
+        )
+        .unwrap();
+        tx.commit().unwrap();
+        let new_reader = Cache::open_reader(&dir)
+            .unwrap()
+            .expect("a reader opens the new file");
+        assert_eq!(new_reader.read().unwrap().links_all().unwrap(), graph);
+        assert_eq!(
+            new_reader.read().unwrap().index_errors_all().unwrap().len(),
+            1
+        );
+        assert!(
+            old_reader
+                .read()
+                .unwrap()
+                .index_errors_all()
+                .unwrap()
+                .is_empty()
+        );
+    }
+
     #[test]
     fn index_errors_all_sorted() {
         use katalogr_store::ErrorRow;

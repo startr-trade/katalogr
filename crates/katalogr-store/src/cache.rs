@@ -6,6 +6,9 @@
 //! interned through the dictionaries in `dict.rs`; readers give back the logical rows.
 
 use crate::codec::{self, EntryBrief, Pid, Vid};
+use crate::compact::{
+    self, COMPACTED_BYTES_META, CompactMode, CompactOutcome, CompactPolicy, CompactReport,
+};
 use crate::dict;
 use crate::error::StoreError;
 use crate::fan;
@@ -570,7 +573,7 @@ fn de<T: for<'a> Deserialize<'a>>(b: &[u8]) -> Result<T, StoreError> {
     codec::dec(b)
 }
 
-fn db<E: Into<redb::Error>>(e: E) -> StoreError {
+pub(crate) fn db<E: Into<redb::Error>>(e: E) -> StoreError {
     match e.into() {
         redb::Error::DatabaseAlreadyOpen => StoreError::Busy,
         other => StoreError::Db(other.to_string()),
@@ -627,7 +630,7 @@ pub enum TableId {
 }
 
 impl TableId {
-    pub(crate) const ALL: [TableId; 32] = [
+    pub const ALL: [TableId; 32] = [
         TableId::Meta,
         TableId::ShardHashes,
         TableId::Artifacts,
@@ -2931,6 +2934,8 @@ enum Handle {
 pub struct Cache {
     db: RwLock<Handle>,
     report: SyncReport,
+    /// `.cache/index.redb`.
+    path: Utf8PathBuf,
 }
 
 const BACKOFF_START: Duration = Duration::from_millis(5);
@@ -2973,12 +2978,12 @@ fn open_db(
     path: &Utf8PathBuf,
     busy_until: Instant,
     deadline: Instant,
-) -> Result<Database, StoreError> {
+) -> Result<(Database, bool), StoreError> {
     let mut wait = BACKOFF_START;
     let mut recreated = false;
     loop {
         match writer_builder(deadline).create(path.as_std_path()) {
-            Ok(d) => return Ok(d),
+            Ok(d) => return Ok((d, recreated)),
             Err(DatabaseError::DatabaseAlreadyOpen) => {
                 let now = Instant::now();
                 if now >= busy_until {
@@ -3001,20 +3006,23 @@ fn open_db(
     }
 }
 
-/// The writer open: creates the file, and recreates it when its schema differs.
+/// The writer open: creates the file, and recreates it when its schema differs. The flag is
+/// true when the database is new: the file was missing, corrupt or of another schema.
 fn open_writer(
     path: &Utf8PathBuf,
     busy_until: Instant,
     deadline: Instant,
-) -> Result<Database, StoreError> {
-    let mut database = open_db(path, busy_until, deadline)?;
+) -> Result<(Database, bool), StoreError> {
+    let existed = path.exists();
+    let (mut database, mut recreated) = open_db(path, busy_until, deadline)?;
     if !schema_current(&database)? {
         drop(database);
         std::fs::remove_file(path).map_err(|e| StoreError::io(path, e))?;
-        database = open_db(path, busy_until, deadline)?;
+        (database, _) = open_db(path, busy_until, deadline)?;
         schema_current(&database)?;
+        recreated = true;
     }
-    Ok(database)
+    Ok((database, recreated || !existed))
 }
 
 impl Cache {
@@ -3045,12 +3053,22 @@ impl Cache {
         let cache_dir = dir.cache_dir();
         std::fs::create_dir_all(&cache_dir).map_err(|e| StoreError::io(&cache_dir, e))?;
         let path = cache_dir.join("index.redb");
-        let database = open_writer(&path, busy_until, deadline)?;
+        let (database, created) = open_writer(&path, busy_until, deadline)?;
+        // This process holds the database now, so no other process is mid-rewrite: a rewrite
+        // file that exists is an orphan.
+        crate::compact::remove_orphan(&cache_dir);
         let mut cache = Cache {
             db: RwLock::new(Handle::Writer(database)),
             report: SyncReport::default(),
+            path,
         };
         cache.report = cache.after_open(dir, stitch, deadline)?;
+        // A database built from the shards by this open holds the rows in the order the rounds
+        // wrote them: rewrite it sorted (the "sorted bulk load").
+        if created && cache.report.replaced > 0 && !cache.report.deadline_hit {
+            let (c, _) = cache.compact(dir, CompactMode::preferred(), deadline)?;
+            cache = c;
+        }
         Ok(cache)
     }
 
@@ -3100,6 +3118,7 @@ impl Cache {
         Ok(Some(Cache {
             db: RwLock::new(Handle::Reader(database)),
             report: SyncReport::default(),
+            path,
         }))
     }
 
@@ -3204,6 +3223,155 @@ impl Cache {
     /// What the last `open_or_rebuild` did.
     pub fn report(&self) -> &SyncReport {
         &self.report
+    }
+
+    /// Bytes of `.cache/index.redb` on disk.
+    pub fn file_bytes(&self) -> Result<u64, StoreError> {
+        std::fs::metadata(&self.path)
+            .map(|m| m.len())
+            .map_err(|e| StoreError::io(&self.path, e))
+    }
+
+    /// File size right after the last compaction (`meta.compacted_bytes`), if any.
+    pub fn compacted_bytes(&self) -> Result<Option<u64>, StoreError> {
+        self.read()?
+            .meta(COMPACTED_BYTES_META)?
+            .map(u64_value)
+            .transpose()
+    }
+
+    /// Whether `policy` asks for a compaction now (see [`CompactPolicy::due`]).
+    pub fn compaction_due(&self, policy: &CompactPolicy) -> Result<bool, StoreError> {
+        Ok(policy.due(self.file_bytes()?, self.compacted_bytes()?))
+    }
+
+    /// Compact the cache (R-6, R-7). Consumes the cache because a rewrite swaps the file.
+    /// Errors before the swap are absorbed: the original cache comes back with
+    /// [`CompactOutcome::Skipped`]. After the swap, a reopen that stays busy until `deadline`
+    /// gives `Err(StoreError::Busy)`; the data is safe in the new file.
+    ///
+    /// A read-only handle (see [`Cache::open_reader`]) is never compacted.
+    pub fn compact(
+        self,
+        dir: &ProjectDir,
+        mode: CompactMode,
+        deadline: Instant,
+    ) -> Result<(Cache, CompactReport), StoreError> {
+        let started = Instant::now();
+        let Cache { db, report, path } = self;
+        let handle = db.into_inner().unwrap_or_else(PoisonError::into_inner);
+        let bytes_before = std::fs::metadata(&path).map_or(0, |m| m.len());
+        let report_of = |outcome: CompactOutcome, after: u64| CompactReport {
+            mode,
+            outcome,
+            bytes_before,
+            bytes_after: after,
+            millis: started.elapsed().as_millis() as u64,
+        };
+        let mut database = match handle {
+            Handle::Writer(d) => d,
+            reader @ Handle::Reader(_) => {
+                let cache = Cache {
+                    db: RwLock::new(reader),
+                    report,
+                    path,
+                };
+                let r = report_of(
+                    CompactOutcome::Skipped("the cache is open read-only".into()),
+                    bytes_before,
+                );
+                return Ok((cache, r));
+            }
+        };
+        let tmp = dir.cache_dir().join(compact::REWRITE_FILE);
+        let skipped = |database: Database, why: String, report: SyncReport, path: Utf8PathBuf| {
+            let after = std::fs::metadata(&path).map_or(bytes_before, |m| m.len());
+            let cache = Cache {
+                db: RwLock::new(Handle::Writer(database)),
+                report,
+                path,
+            };
+            Ok((cache, report_of(CompactOutcome::Skipped(why), after)))
+        };
+        match mode {
+            CompactMode::InPlace => {
+                if let Err(e) = database.compact() {
+                    return skipped(
+                        database,
+                        format!("in-place compaction failed: {e}"),
+                        report,
+                        path,
+                    );
+                }
+            }
+            CompactMode::Rewrite => {
+                // Steps 1 to 5: any failure leaves the original file as it was.
+                let built = std::fs::remove_file(&tmp)
+                    .or_else(|e| {
+                        if e.kind() == std::io::ErrorKind::NotFound {
+                            Ok(())
+                        } else {
+                            Err(e)
+                        }
+                    })
+                    .map_err(|e| format!("the rewrite file cannot be removed ({:?})", e.kind()))
+                    .and_then(|()| {
+                        compact::rewrite(&database, &tmp, deadline)
+                            .map_err(|e| format!("rewrite failed: {e}"))
+                    });
+                if let Err(why) = built {
+                    let _ = std::fs::remove_file(&tmp);
+                    return skipped(database, why, report, path);
+                }
+                #[cfg(feature = "failpoints")]
+                crate::failpoint::hit("before_rewrite_rename");
+                // The rename happens while this process still holds the old file.
+                if let Err(e) = compact::swap(&tmp, &path) {
+                    let _ = std::fs::remove_file(&tmp);
+                    return skipped(
+                        database,
+                        format!(
+                            "the rewritten file cannot replace the cache ({:?})",
+                            e.kind()
+                        ),
+                        report,
+                        path,
+                    );
+                }
+                #[cfg(feature = "failpoints")]
+                crate::failpoint::hit("after_rewrite_rename");
+                drop(database);
+                database = open_db(&path, deadline, deadline)?.0;
+            }
+        }
+        let cache = Cache {
+            db: RwLock::new(Handle::Writer(database)),
+            report,
+            path,
+        };
+        if mode == CompactMode::InPlace {
+            // The rewrite recorded its size in the new file before the swap.
+            cache.record_compacted_bytes()?;
+        }
+        let after = cache.file_bytes()?;
+        Ok((cache, report_of(CompactOutcome::Done, after)))
+    }
+
+    /// Writes `meta.compacted_bytes` as the size of the file. The write can itself grow the
+    /// file, so it repeats until the stored number is the size it left (a few rounds at most).
+    fn record_compacted_bytes(&self) -> Result<(), StoreError> {
+        let mut size = self.file_bytes()?;
+        for _ in 0..4 {
+            let mut tx = self.write()?;
+            tx.set_meta(COMPACTED_BYTES_META, &size.to_le_bytes())?;
+            tx.commit()?;
+            let now = self.file_bytes()?;
+            if now == size {
+                break;
+            }
+            size = now;
+        }
+        Ok(())
     }
 
     /// Compare the shard files with the stored hashes and stats on a read snapshot: true when

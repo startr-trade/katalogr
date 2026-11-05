@@ -731,13 +731,29 @@ pub fn cache_dump(e: &Engine) -> CacheDump {
         ("doc_len", TableId::DocLen),
         ("lexicon_stats", TableId::LexiconStats),
         ("shard_hashes", TableId::ShardHashes),
-        ("vocab", TableId::Vocab),
-        ("prov", TableId::Prov),
         ("rank", TableId::Rank),
     ] {
         out.push((name.to_string(), r.raw_scan(t, &[]).unwrap()));
     }
     out
+}
+
+/// The raw dictionary tables. Their ids follow the order rows were written, so two caches built
+/// by different histories number them differently; runs of the same input at different thread
+/// counts must agree on them byte for byte.
+pub fn dictionary_dump(e: &Engine) -> CacheDump {
+    use katalogr_store::Reader;
+    use katalogr_store::cache::TableId;
+    let r = e.cache().read().unwrap();
+    [
+        ("vocab", TableId::Vocab),
+        ("vocab_ix", TableId::VocabIx),
+        ("prov", TableId::Prov),
+        ("prov_ix", TableId::ProvIx),
+    ]
+    .into_iter()
+    .map(|(n, t)| (n.to_string(), r.raw_scan(t, &[]).unwrap()))
+    .collect()
 }
 
 /// Every file under the project's `shards/` as `(relative path, bytes)`.

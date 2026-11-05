@@ -378,9 +378,10 @@ mod symbol_core {
             table(&e.cache, TableId::SymbolCore),
             table(&rebuilt, TableId::SymbolCore)
         );
+        // The symbol rows hold kind ids that depend on the history, so compare the rows.
         assert_eq!(
-            table(&e.cache, TableId::Symbols),
-            table(&rebuilt, TableId::Symbols)
+            e.cache.read().unwrap().symbols().unwrap(),
+            rebuilt.read().unwrap().symbols().unwrap()
         );
         let _ = &e.dir;
     }

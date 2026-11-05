@@ -3,6 +3,7 @@
 pub mod blob;
 pub mod cache;
 mod codec;
+pub mod compact;
 mod dict;
 pub mod error;
 #[cfg(feature = "failpoints")]
@@ -22,6 +23,7 @@ pub use cache::{
     Posting, RANK_TOP_ENTRIES, RankTop, ReadTx, Reader, RefId, Restitch, ShardStat, Snapshot,
     SymbolBrief, SymbolCore, SymbolRow, SyncReport, WriteTx,
 };
+pub use compact::{CompactMode, CompactOutcome, CompactPolicy, CompactReport, REWRITE_FILE};
 #[doc(hidden)]
 pub use dict::Memo;
 pub use error::StoreError;
