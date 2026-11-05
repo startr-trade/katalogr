@@ -1,73 +1,18 @@
 //! SVG output: the graph is written as DOT and laid out in pure Rust by `layout-rs`.
 
 use crate::RenderError;
+use crate::graph::ViewGraph;
 #[cfg(test)]
-use crate::graph::{ViewEdge, node_id};
-use crate::graph::{ViewGraph, ViewNode};
-use crate::mermaid::short_label;
+use crate::graph::{ViewEdge, ViewNode, node_id};
 use layout::backends::svg::SVGWriter;
 use layout::gv::{DotParser, GraphBuilder};
-use std::collections::BTreeMap;
-use std::fmt::Write;
-
-/// Escape text for a double-quoted DOT string: backslash before `\` and `"`, a space for a line
-/// break.
-fn dot_escape(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    for c in s.chars() {
-        match c {
-            '\\' => out.push_str("\\\\"),
-            '"' => out.push_str("\\\""),
-            '\n' | '\r' => out.push(' '),
-            c => out.push(c),
-        }
-    }
-    out
-}
-
-fn label_of(n: &ViewNode) -> String {
-    if n.label.is_empty() {
-        short_label(&n.name)
-    } else {
-        n.label.clone()
-    }
-}
-
-/// The DOT text the layout step reads: sorted nodes, then sorted edges, inferred edges dashed.
-/// A partial view gets one more node noting how much is shown.
-fn dot_text(g: &ViewGraph) -> String {
-    let nodes: BTreeMap<&str, &ViewNode> = g.nodes.iter().map(|n| (n.id.as_str(), n)).collect();
-    let mut edges: Vec<_> = g.edges.iter().collect();
-    edges.sort_by(|a, b| (&a.from, &a.to, &a.kind).cmp(&(&b.from, &b.to, &b.kind)));
-    let mut out = String::from("digraph G {\n");
-    for (id, n) in &nodes {
-        let _ = writeln!(out, "  {id} [label=\"{}\"];", dot_escape(&label_of(n)));
-    }
-    for e in edges {
-        let style = if e.inferred { ", style=dashed" } else { "" };
-        let _ = writeln!(
-            out,
-            "  {} -> {} [label=\"{}\"{style}];",
-            e.from,
-            e.to,
-            dot_escape(&e.kind)
-        );
-    }
-    if g.total > g.shown {
-        let _ = writeln!(
-            out,
-            "  partial [label=\"{}\"];",
-            dot_escape(&format!("{} of {} nodes shown", g.shown, g.total))
-        );
-    }
-    out.push_str("}\n");
-    out
-}
 
 /// Lays the graph out as SVG. Errors only if the layout crate refuses the text. The output holds
 /// no script element: the writer escapes text and emits only shapes, paths and text.
 pub fn to_svg(g: &ViewGraph) -> Result<String, RenderError> {
-    let dot = dot_text(g);
+    // layout-rs gives different bytes from run to run when the graph sets `rankdir`, so the
+    // attribute is dropped and the layout runs top to bottom.
+    let dot = crate::dot::to_dot(g).replace("  rankdir=LR;\n", "");
     let mut parser = DotParser::new(&dot);
     let ast = parser.process().map_err(RenderError::Layout)?;
     let mut builder = GraphBuilder::new();
@@ -139,4 +84,16 @@ fn no_script_in_output() {
     assert!(!svg.to_lowercase().contains("<script"), "{svg}");
     assert!(!svg.contains("onload") && !svg.contains("javascript:"));
     assert!(svg.contains("&lt;script&gt;"), "label text is escaped");
+}
+
+#[cfg(test)]
+#[test]
+fn quote_in_label_parses() {
+    let mut g = sample(3);
+    g.nodes[0].label = "say \"hi\" \\ there".into();
+    let svg = to_svg(&g).expect("layout");
+    assert!(
+        svg.contains("say &quot;hi&quot;") || svg.contains("say \"hi\""),
+        "{svg}"
+    );
 }

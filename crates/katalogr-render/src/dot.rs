@@ -1,20 +1,8 @@
 //! Graphviz DOT output (FEAT-032 R-1). Same node and edge order as the Mermaid renderer.
 
 use crate::graph::{ViewEdge, ViewGraph, ViewNode};
-use crate::mermaid::short_label;
+use crate::mermaid::node_text;
 use std::fmt::Write;
-
-/// Most characters of a label, as in the Mermaid renderer.
-const LABEL_MAX: usize = 60;
-
-/// Text to draw: the label, or the shortened canonical name when the label is empty.
-fn node_text(n: &ViewNode) -> String {
-    if n.label.is_empty() {
-        short_label(&n.name)
-    } else {
-        n.label.chars().take(LABEL_MAX).collect()
-    }
-}
 
 /// A double-quoted DOT string: backslash and double quote are escaped with a backslash, and a
 /// line break becomes a space.

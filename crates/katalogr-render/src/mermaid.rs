@@ -45,12 +45,18 @@ pub(crate) fn escape(s: &str) -> String {
     out
 }
 
-fn node_line(n: &ViewNode, indent: &str) -> String {
-    let text = if n.label.is_empty() {
+/// Text to draw for a node: its label cut to 60 characters, or the shortened canonical name
+/// when the label is empty. Every renderer uses this one rule.
+pub(crate) fn node_text(n: &ViewNode) -> String {
+    if n.label.is_empty() {
         short_label(&n.name)
     } else {
         cut(&n.label)
-    };
+    }
+}
+
+fn node_line(n: &ViewNode, indent: &str) -> String {
+    let text = node_text(n);
     format!("{indent}{}[\"{}\"]\n", n.id, escape(&text))
 }
 
