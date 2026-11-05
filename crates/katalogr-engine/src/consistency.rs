@@ -76,6 +76,8 @@ pub struct IndexStats {
     /// The stitch loop inside the publish transaction.
     pub stitch: Duration,
     pub commit: Duration,
+    /// Rank computations since the engine opened (ADR-0033: one per drained queue).
+    pub rank_refreshes: u64,
 }
 
 /// A project's index with its queue: cache, extractors and stitcher.
@@ -162,6 +164,7 @@ impl Engine {
         g.prepare += s.prepare;
         g.stitch += s.stitch;
         g.commit += s.commit;
+        g.rank_refreshes += s.rank_refreshes;
     }
 
     /// Set the built-in profiles, as `(file name, text)` pairs.
