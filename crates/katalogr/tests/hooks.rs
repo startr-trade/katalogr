@@ -243,6 +243,52 @@ mod hooks {
         assert_eq!(hook(&e.repo, &e.home, "post-search", &none), "");
     }
 
+    /// FEAT-076 R-2: the hook finds a name through the case-insensitive index and keeps exactly
+    /// the symbols a scan of every symbol kept: those whose plain name equals the identifier.
+    #[test]
+    fn search_brief_matches_full_scan() {
+        let e = env();
+        std::fs::write(
+            e.repo.join("case.tx"),
+            "sym fn Widget\nsym fn widget\nsym fn WIDGET_LONG\nsym fn Gadget\n",
+        )
+        .unwrap();
+        std::fs::write(
+            e.repo.join("case2.tx"),
+            "sym fn Gadget\nsym fn widget_long\n",
+        )
+        .unwrap();
+        ok(&e.repo, &e.home, &["index", "--full"]);
+        let ask = |pattern: &str| {
+            let input = fill(
+                &fixture("post_tool_use_grep_input.json"),
+                &[("CWD", e.repo.to_str().unwrap()), ("PATTERN", pattern)],
+            );
+            let out = hook(&e.repo, &e.home, "post-search", &input);
+            if out.is_empty() {
+                return String::new();
+            }
+            json(&out)["hookSpecificOutput"]["additionalContext"]
+                .as_str()
+                .unwrap()
+                .to_string()
+        };
+        // Exact case only: `Widget` is one symbol although `widget` shares its lowercase name.
+        let ctx = ask("Widget");
+        assert!(ctx.contains("app:case.tx#fn:Widget"), "{ctx}");
+        assert!(!ctx.contains("#fn:widget"), "{ctx}");
+        assert!(!ctx.contains("symbols have this name"), "{ctx}");
+        // Two symbols of one name: a count, no detail.
+        let ctx = ask("Gadget");
+        assert!(ctx.contains("Gadget: 2 symbols"), "{ctx}");
+        // Upper and lower case names are distinct names.
+        let ctx = ask("WIDGET_LONG");
+        assert!(ctx.contains("app:case.tx#fn:WIDGET_LONG"), "{ctx}");
+        assert!(!ctx.contains("widget_long"), "{ctx}");
+        // A name that exists only in another case prints nothing.
+        assert_eq!(ask("GADGET"), "");
+    }
+
     #[test]
     fn fail_open_when_stale() {
         let e = env();
@@ -324,7 +370,13 @@ mod hooks {
 
     /// `(path, kind)` of every inbox entry, sorted; the inbox is emptied.
     fn drain_inbox(e: &Env) -> Vec<(String, String)> {
-        let dir = e.kx.join("projects/demo/.cache/inbox");
+        // A git checkout reads and writes its own context; the first one found is it.
+        let ctxs = e.kx.join("projects/demo/.cache/contexts");
+        let dir = std::fs::read_dir(&ctxs)
+            .ok()
+            .and_then(|mut rd| rd.find_map(|d| d.ok()))
+            .map(|d| d.path().join(".cache/inbox"))
+            .unwrap_or_else(|| e.kx.join("projects/demo/.cache/inbox"));
         let mut out = Vec::new();
         if let Ok(rd) = std::fs::read_dir(&dir) {
             for f in rd.flatten() {
@@ -349,6 +401,8 @@ mod hooks {
         let e = env();
         git(&e.repo, &["init", "-q", "-b", "main"]);
         ok(&e.repo, &e.home, &["hooks", "install"]);
+        // Reading seeds the checkout's own context, which then holds the events.
+        ok(&e.repo, &e.home, &["status"]);
         let _ = drain_inbox(&e);
 
         // First commit: the whole tree (a rescan of the repo).

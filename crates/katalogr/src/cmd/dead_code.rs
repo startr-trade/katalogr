@@ -6,7 +6,7 @@ use katalogr_dist::DistError;
 use katalogr_dist::analytics::{DeadCodeOptions, DeadConfidence};
 
 use crate::cli::{Cli, ConfidenceArg};
-use crate::cmd::{options, resolve};
+use crate::cmd::{options_for, resolve};
 use crate::exit::ExitCode;
 use crate::render;
 
@@ -33,7 +33,8 @@ pub fn run(
         path_prefix: path.map(str::to_string),
         limit,
     };
-    let reply = k.dead_code(opts, &options(cli))?;
+    let o = options_for(cli, "dead-code", &[("options", format!("{opts:?}"))]);
+    let reply = k.dead_code(opts, &o)?;
     let shape = if check {
         &render::DEAD_CODE_CHECK
     } else {

@@ -60,6 +60,16 @@ pub struct Cli {
     #[arg(long, global = true, value_name = "NAME")]
     pub project: Option<String>,
 
+    /// Context to read: `current` (this checkout's own), `base`, or an id from `context list`.
+    /// Default: the `KATALOGR_CONTEXT` environment variable, else `current`.
+    #[arg(long, global = true, value_name = "NAME")]
+    pub context: Option<String>,
+
+    /// Answer for this position: `<commit>`, `<commit>+<dirty>` or `none+<dirty>` (see
+    /// `katalogr position`). Exit 6 when no context holds it.
+    #[arg(long, global = true, value_name = "POSITION")]
+    pub at: Option<String>,
+
     /// Emit machine-readable JSON.
     #[arg(long, global = true)]
     pub json: bool,
@@ -252,6 +262,13 @@ pub enum Command {
     },
     /// Show the index watermark, pending changes and staleness.
     Status,
+    /// Show the checkout's position (commit plus a hash of uncommitted changes) and what the
+    /// index reflects. Works without a project.
+    Position {
+        /// The repo to show (default: the marked repo).
+        #[arg(long, value_name = "REPO")]
+        repo: Option<String>,
+    },
     /// Serve katalogr's queries over MCP (stdio) for non-Claude agent hosts.
     #[cfg(feature = "mcp")]
     Mcp {
@@ -376,6 +393,11 @@ pub enum Command {
         #[arg(long, value_name = "KIND")]
         kind: Vec<String>,
     },
+    /// List, add and remove contexts: the base, each checkout's own, and pinned commits.
+    Context {
+        #[command(subcommand)]
+        action: ContextAction,
+    },
     /// Show the profiles in force, or print a built-in profile so it can be copied.
     Profiles {
         #[command(subcommand)]
@@ -433,6 +455,44 @@ pub enum EvalAction {
         /// The metric to order combinations by.
         #[arg(long, default_value = "retrieval.ndcg@10", value_name = "METRIC")]
         objective: String,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum ContextAction {
+    /// List the base and every context on this machine (no paths).
+    List,
+    /// Show one context by id.
+    Show {
+        /// An id from `context list`, or `base`.
+        id: String,
+    },
+    /// Add a context that reads a commit from git objects, with no checkout.
+    Add {
+        /// The commit (or any revision) to read.
+        #[arg(long, value_name = "REV")]
+        commit: String,
+        /// The repo; default: the current one.
+        #[arg(long, value_name = "NAME")]
+        repo: Option<String>,
+    },
+    /// Compare two contexts' graphs: links, dangling references and measures that differ.
+    Diff {
+        /// `base`, `current` or an id from `context list`.
+        a: String,
+        b: String,
+        /// Entries per list.
+        #[arg(long, default_value_t = 50, value_name = "N")]
+        limit: usize,
+    },
+    /// Contracts that both contexts changed against the base. Exits 1 when there are any.
+    Conflicts { a: String, b: String },
+    /// Remove contexts down to `contexts.max` (default 8): missing checkouts first, then the
+    /// least recently used. Never the base, the current context or one in use.
+    Prune {
+        /// Keep at most this many.
+        #[arg(long, value_name = "N")]
+        keep: Option<usize>,
     },
 }
 

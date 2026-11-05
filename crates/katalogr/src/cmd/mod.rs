@@ -3,6 +3,7 @@
 pub mod callers;
 pub mod claude;
 pub mod communities;
+pub mod context;
 pub mod coverage;
 pub mod cycles;
 pub mod dangling;
@@ -22,6 +23,7 @@ pub mod mcp;
 pub mod mirrors;
 pub mod notify;
 pub mod path;
+pub mod position;
 pub mod profiles;
 pub mod project;
 pub mod rationale;
@@ -52,14 +54,25 @@ pub fn resolve(cli: &Cli) -> Result<Katalogr, DistError> {
         &Overrides {
             kindex: cli.kindex.clone(),
             project: cli.project.clone(),
+            context: context_choice(cli),
         },
     )
+}
+
+/// `--context`, else `KATALOGR_CONTEXT`.
+pub fn context_choice(cli: &Cli) -> Option<String> {
+    cli.context.clone().or_else(|| {
+        std::env::var("KATALOGR_CONTEXT")
+            .ok()
+            .filter(|v| !v.is_empty())
+    })
 }
 
 pub fn overrides(cli: &Cli) -> Overrides {
     Overrides {
         kindex: cli.kindex.clone(),
         project: cli.project.clone(),
+        context: context_choice(cli),
     }
 }
 
@@ -98,6 +111,33 @@ pub fn options_with(cli: &Cli, diagnostic: bool) -> Options {
         timeout: cli.timeout,
         diagnostic,
         expand: false,
+        at: cli.at.clone(),
+        view: None,
+    }
+}
+
+/// The read options of a question (FEAT-084): `op` and `args` name it for the view ID. `args`
+/// holds what changes the answer, never `--json`, `--timeout` or `--consistency`; `--budget`
+/// is added when set, since it cuts the answer.
+pub fn options_for(cli: &Cli, op: &str, args: &[(&str, String)]) -> Options {
+    options_for_diag(cli, op, args, false)
+}
+
+/// [`options_for`] with a diagnostic trace when `diagnostic` (a per-command flag).
+pub fn options_for_diag(cli: &Cli, op: &str, args: &[(&str, String)], diagnostic: bool) -> Options {
+    let mut view = katalogr_dist::ViewQuery {
+        op: op.to_string(),
+        args: args
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.clone()))
+            .collect(),
+    };
+    if let Some(b) = cli.budget {
+        view.args.insert("budget".to_string(), b.to_string());
+    }
+    Options {
+        view: Some(view),
+        ..options_with(cli, diagnostic)
     }
 }
 

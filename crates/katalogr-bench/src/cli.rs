@@ -365,7 +365,7 @@ fn execute(cli: &Cli) -> Result<i32> {
                     version: RUN_VERSION,
                     run_id: run_id.clone(),
                     date: utc_date(),
-                    machine: MachineProfile::detect(&ws, &k),
+                    machine: MachineProfile::detect(&ws, &k)?,
                     settings: SettingsRecord {
                         runs: runs.unwrap_or(3),
                         reps: *reps,

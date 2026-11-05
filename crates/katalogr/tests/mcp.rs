@@ -288,6 +288,116 @@ mod mcp {
         assert!(c.finish().success());
     }
 
+    /// FEAT-043 R-4. The `context` argument of a read tool selects the base or the checkout's
+    /// own context; an unknown id is a usage error.
+    #[test]
+    fn context_argument_selects() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (_kx, repo) = setup(tmp.path());
+        let git = |args: &[&str]| {
+            let st = Command::new("git")
+                .current_dir(&repo)
+                .args(args)
+                .status()
+                .unwrap();
+            assert!(st.success(), "git {args:?}");
+        };
+        git(&["init", "-q", "-b", "main"]);
+        git(&["config", "user.name", "Test"]);
+        git(&["config", "user.email", "test@example.com"]);
+        git(&["config", "commit.gpgsign", "false"]);
+        std::fs::write(repo.join("a.tx"), "sym fn Committed\n").unwrap();
+        git(&["add", "-A"]);
+        git(&["commit", "-q", "-m", "c1"]);
+        std::fs::write(repo.join("a.tx"), "sym fn Dirty\n").unwrap();
+        ok(&repo, &["index"]);
+        let mut c = Client::spawn(&repo, &[], &[]);
+        c.initialize("2025-06-18");
+        let mine = c.call(1, "find", json!({"text": "Dirty"}));
+        assert_eq!(mine["result"]["isError"], false, "{mine}");
+        let mine = c.call(2, "find", json!({"text": "Dirty", "context": "current"}));
+        assert_eq!(mine["result"]["isError"], false, "{mine}");
+        let base = c.call(3, "find", json!({"text": "Dirty", "context": "base"}));
+        assert_eq!(exit_meta(&base), 4, "{base}");
+        let base = c.call(4, "find", json!({"text": "Committed", "context": "base"}));
+        assert_eq!(base["result"]["isError"], false, "{base}");
+        let bad = c.call(5, "find", json!({"text": "Dirty", "context": "w-nosuch"}));
+        assert_eq!(exit_meta(&bad), 2, "{bad}");
+        let bad = c.call(6, "find", json!({"text": "Dirty", "context": "Not Valid"}));
+        assert_eq!(exit_meta(&bad), 2, "{bad}");
+        assert!(c.finish().success());
+    }
+
+    /// A committed repository with one `.tx` file, indexed, and a server started in it.
+    fn position_server(tmp: &Path) -> (PathBuf, Client) {
+        let (_kx, repo) = setup(tmp);
+        let git = |args: &[&str]| {
+            let st = Command::new("git")
+                .current_dir(&repo)
+                .args(args)
+                .status()
+                .unwrap();
+            assert!(st.success(), "git {args:?}");
+        };
+        git(&["init", "-q", "-b", "main"]);
+        git(&["config", "user.name", "Test"]);
+        git(&["config", "user.email", "test@example.com"]);
+        git(&["config", "commit.gpgsign", "false"]);
+        std::fs::write(repo.join("a.tx"), "sym fn Committed\n").unwrap();
+        git(&["add", "-A"]);
+        git(&["commit", "-q", "-m", "c1"]);
+        ok(&repo, &["index"]);
+        let mut c = Client::spawn(&repo, &[], &[]);
+        c.initialize("2025-06-18");
+        (repo, c)
+    }
+
+    fn position_text(p: &Value) -> String {
+        match (p["commit"].as_str(), p["dirty"].as_str()) {
+            (Some(c), None) => c.to_string(),
+            (Some(c), Some(d)) => format!("{c}+{d}"),
+            (None, Some(d)) => format!("none+{d}"),
+            (None, None) => "none".to_string(),
+        }
+    }
+
+    /// FEAT-084 R-13. The `at` argument of a read tool answers for that position, with the same
+    /// envelope as the CLI (positions, exact, view ID).
+    #[test]
+    fn at_argument_answers() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (_repo, mut c) = position_server(tmp.path());
+        let live = c.call(1, "find", json!({"text": "Committed"}));
+        assert_eq!(live["result"]["isError"], false, "{live}");
+        let v: Value = serde_json::from_str(&last_text(&live)).unwrap();
+        assert_eq!(v["exact"], true);
+        let text = position_text(&v["positions"][0]);
+        let at = c.call(2, "find", json!({"text": "Committed", "at": text}));
+        assert_eq!(at["result"]["isError"], false, "{at}");
+        let w: Value = serde_json::from_str(&last_text(&at)).unwrap();
+        assert_eq!(w["result"], v["result"]);
+        assert_eq!(w["positions"], v["positions"]);
+        assert_eq!(w["view_id"], v["view_id"]);
+        assert!(c.finish().success());
+    }
+
+    /// FEAT-084 R-13. A position no context holds is a tool error carrying exit 6.
+    #[test]
+    fn at_unavailable_is_tool_error() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (_repo, mut c) = position_server(tmp.path());
+        let nowhere = "0".repeat(40);
+        let r = c.call(1, "find", json!({"text": "Committed", "at": nowhere}));
+        assert_eq!(r["result"]["isError"], true, "{r}");
+        assert_eq!(exit_meta(&r), 6, "{r}");
+        let v: Value = serde_json::from_str(&last_text(&r)).unwrap();
+        assert_eq!(v["error"], "position-unavailable");
+        assert_eq!(v["wanted"], nowhere.as_str());
+        let bad = c.call(2, "find", json!({"text": "Committed", "at": "nonsense"}));
+        assert_eq!(exit_meta(&bad), 2, "{bad}");
+        assert!(c.finish().success());
+    }
+
     /// R-1. A known version is echoed; an unknown one gets the server's latest.
     #[test]
     fn negotiates_protocol_version() {

@@ -746,6 +746,12 @@ fn other_outcomes<T>(cli: &Cli, report: &Report, outcome: Outcome<T>, trace: Opt
             eprintln!("katalogr: {msg}");
             print_trace(trace.as_ref());
         }
+        Outcome::PositionUnavailable { wanted, available } => {
+            eprintln!("katalogr: position unavailable: {wanted}");
+            for p in available {
+                eprintln!("katalogr:   available: {}", p.text());
+            }
+        }
         Outcome::Found(_) => {}
     }
 }
@@ -1048,6 +1054,35 @@ where
             print_partial(&partial);
             print_next(&next);
             if code == ExitCode::Ok && failing {
+                return ExitCode::Error;
+            }
+        }
+        other => other_outcomes(cli, &reply.report, other, None),
+    }
+    code
+}
+
+/// A report that is a few sorted lines: JSON envelope with `--json`, else `lines`. `fails`
+/// makes a found report exit 1.
+pub fn plain<R: Serialize>(
+    cli: &Cli,
+    reply: Reply<R>,
+    _command: &str,
+    lines: fn(&R) -> Vec<String>,
+    fails: fn(&R) -> bool,
+) -> ExitCode {
+    if cli.json {
+        return emit(&json::plain(reply, fails));
+    }
+    let code = exit_for(&reply);
+    match reply.outcome {
+        Outcome::Found(r) => {
+            note_stale(&reply.report);
+            for l in lines(&r) {
+                println!("{l}");
+            }
+            print_partial(&reply.partial);
+            if code == ExitCode::Ok && fails(&r) {
                 return ExitCode::Error;
             }
         }

@@ -4,7 +4,7 @@ use katalogr_dist::DistError;
 use katalogr_dist::analytics::CommunityOptions;
 
 use crate::cli::{Cli, LevelArg};
-use crate::cmd::{graph_options, options, resolve};
+use crate::cmd::{graph_options, options_for, resolve};
 use crate::exit::ExitCode;
 use crate::render;
 
@@ -30,7 +30,10 @@ pub fn run(
         limit,
         of: of.map(str::to_string),
     };
-    let reply = k.communities(&opts, &options(cli))?;
+    let reply = k.communities(
+        &opts,
+        &options_for(cli, "communities", &[("options", format!("{opts:?}"))]),
+    )?;
     Ok(render::insight(
         cli,
         reply,

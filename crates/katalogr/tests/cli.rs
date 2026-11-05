@@ -872,7 +872,7 @@ mod query {
     fn schemas_current() {
         let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../schema/v1");
         let fresh = katalogr_dist::schemas();
-        assert_eq!(fresh.len(), 21);
+        assert_eq!(fresh.len(), 24);
         for (name, schema) in fresh {
             let mut want = serde_json::to_string_pretty(&schema).unwrap();
             want.push('\n');
@@ -922,6 +922,7 @@ mod retrieval {
             timeout: None,
             diagnostic: false,
             expand: false,
+            ..Options::default()
         };
         for q in ["apply rate code", "rate", "apply"] {
             let plain = k.search(q, 10, &o).unwrap();
@@ -1003,7 +1004,17 @@ mod retrieval {
         );
         // The signature needs no file: it still works while the file is being edited.
         std::fs::write(repo.join("src/lib.rs"), "changed\n").unwrap();
-        let (code, out2, _) = run(&repo, &["show", "apply_rate_code", "--signature"]);
+        // (An edit with no event is now found by a waiting read, so this read asks not to wait.)
+        let (code, out2, _) = run(
+            &repo,
+            &[
+                "--consistency",
+                "stale-ok",
+                "show",
+                "apply_rate_code",
+                "--signature",
+            ],
+        );
         assert_eq!(code, 0);
         assert_eq!(out, out2);
     }
@@ -1359,14 +1370,25 @@ mod retrieval {
         // A file that changed behind the index's back is never touched: exit 5.
         let edited = format!("// edited\n{want}");
         std::fs::write(repo.join("src/lib.rs"), &edited).unwrap();
-        let (code, out, err) = run(&repo, &["replace", "rate", "--file", body_s]);
+        // (A waiting read would now index the edit, FEAT-084 R-9; stale-ok keeps the old path.)
+        let (code, out, err) = run(
+            &repo,
+            &[
+                "--consistency",
+                "stale-ok",
+                "replace",
+                "rate",
+                "--file",
+                body_s,
+            ],
+        );
         assert_eq!(code, 5, "{out}{err}");
         assert!(err.contains("stale"), "{err}");
         assert_eq!(
             std::fs::read_to_string(repo.join("src/lib.rs")).unwrap(),
             edited
         );
-        let (code, out, err) = run(&repo, &["show", "rate"]);
+        let (code, out, err) = run(&repo, &["--consistency", "stale-ok", "show", "rate"]);
         assert_eq!(code, 5, "{out}");
         assert_eq!(out, "", "no span is printed for a stale file");
         assert!(err.contains("katalogr index"), "{err}");
@@ -1888,11 +1910,534 @@ mod render_json {
     fn cli_json_unchanged() {
         let tmp = tempfile::tempdir().unwrap();
         let (_kx, repo) = query_project(tmp.path());
+        // FEAT-084 added `positions` and `exact` to every envelope; the rest is unchanged.
+        let without_position = |out: &str| {
+            let mut v: serde_json::Value = serde_json::from_str(out).unwrap();
+            let o = v.as_object_mut().unwrap();
+            assert!(
+                o.remove("positions").is_some_and(|p| p.is_array()),
+                "positions"
+            );
+            assert!(o.remove("exact").is_some_and(|e| e.is_boolean()), "exact");
+            // An exact answer to a read command also carries its view ID.
+            o.remove("view_id");
+            v
+        };
+        let golden = |s: &str| serde_json::from_str::<serde_json::Value>(s).unwrap();
         let (code, out, _) = run_raw(&repo, &["--json", "find", "call"]);
         assert_eq!(code, 0);
-        assert_eq!(out, FIND_CALL, "find call");
+        assert_eq!(without_position(&out), golden(FIND_CALL), "find call");
         let (code, out, _) = run_raw(&repo, &["--json", "refs", "dup"]);
         assert_eq!(code, 3);
-        assert_eq!(out, REFS_DUP, "refs dup");
+        assert_eq!(without_position(&out), golden(REFS_DUP), "refs dup");
+    }
+}
+
+mod position {
+    use super::cli::{ok, query_project, run_raw};
+    use serde_json::Value;
+    use std::path::Path;
+    use std::process::Command;
+
+    fn git(root: &Path, args: &[&str]) {
+        let st = Command::new("git")
+            .current_dir(root)
+            .args(args)
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .status()
+            .expect("run git");
+        assert!(st.success(), "git {args:?} failed");
+    }
+
+    /// The `.tx` query project, as a committed git repository.
+    fn committed_project(tmp: &Path) -> std::path::PathBuf {
+        let (_kx, repo) = query_project(tmp);
+        git(&repo, &["init", "-q"]);
+        git(&repo, &["config", "user.name", "Test"]);
+        git(&repo, &["config", "user.email", "test@example.com"]);
+        git(&repo, &["config", "commit.gpgsign", "false"]);
+        git(&repo, &["add", "."]);
+        git(&repo, &["commit", "-q", "-m", "c1"]);
+        repo
+    }
+
+    fn json(repo: &Path, args: &[&str]) -> Value {
+        let (_code, out, _) = run_raw(repo, args);
+        serde_json::from_str(&out).unwrap_or_else(|e| panic!("{args:?}: {e}: {out}"))
+    }
+
+    fn head(repo: &Path) -> String {
+        let out = Command::new("git")
+            .current_dir(repo)
+            .args(["rev-parse", "HEAD"])
+            .output()
+            .unwrap();
+        String::from_utf8(out.stdout).unwrap().trim().to_string()
+    }
+
+    /// R-3. Every read command's envelope names the repo's position and says it is exact.
+    #[test]
+    fn every_answer_has_positions() {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = committed_project(tmp.path());
+        let commit = head(&repo);
+        for args in [
+            vec!["--json", "find", "call"],
+            vec!["--json", "refs", "target"],
+            vec!["--json", "callers", "target"],
+            vec!["--json", "search", "caller"],
+            vec!["--json", "map"],
+        ] {
+            let v = json(&repo, &args);
+            assert_eq!(v["exact"], true, "{args:?}: {v}");
+            let positions = v["positions"].as_array().expect("positions");
+            assert_eq!(positions.len(), 1, "{args:?}");
+            assert_eq!(positions[0]["repo"], "app", "{args:?}");
+            assert_eq!(positions[0]["commit"], commit.as_str(), "{args:?}");
+        }
+        // An edit shows as a dirty hash, and a commit of it as a new commit.
+        std::fs::write(
+            repo.join("lib.tx"),
+            "sym fn target\nexport ns:target target\n",
+        )
+        .unwrap();
+        let v = json(&repo, &["--json", "find", "target"]);
+        assert_eq!(v["exact"], true);
+        assert!(v["positions"][0]["dirty"].is_string(), "{v}");
+        assert_eq!(v["positions"][0]["commit"], commit.as_str());
+    }
+
+    /// R-3. A stale-ok read does not look at the checkout: it reports the recorded position and
+    /// does not claim to be exact.
+    #[test]
+    fn stale_ok_reports_recorded_not_exact() {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = committed_project(tmp.path());
+        let first = json(&repo, &["--json", "find", "call"]);
+        assert_eq!(first["exact"], true);
+        std::fs::write(repo.join("user.tx"), "sym fn changed\n").unwrap();
+        let v = json(
+            &repo,
+            &["--json", "--consistency", "stale-ok", "find", "call"],
+        );
+        assert_eq!(v["exact"], false, "{v}");
+        assert_eq!(v["positions"], first["positions"]);
+        // The next waiting read catches up.
+        let v = json(&repo, &["--json", "find", "changed"]);
+        assert_eq!(v["exact"], true);
+        assert_ne!(v["positions"], first["positions"]);
+    }
+
+    fn commit_all(repo: &Path, msg: &str) -> String {
+        git(repo, &["add", "-A"]);
+        git(repo, &["commit", "-q", "-m", msg]);
+        head(repo)
+    }
+
+    fn position_text(p: &Value) -> String {
+        match (p["commit"].as_str(), p["dirty"].as_str()) {
+            (Some(c), None) => c.to_string(),
+            (Some(c), Some(d)) => format!("{c}+{d}"),
+            (None, Some(d)) => format!("none+{d}"),
+            (None, None) => "none".to_string(),
+        }
+    }
+
+    /// R-4. The checkout's own live position, given to `--at`, is read as usual.
+    #[test]
+    fn at_current_answers() {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = committed_project(tmp.path());
+        let live = json(&repo, &["--json", "find", "call"]);
+        let text = position_text(&live["positions"][0]);
+        let at = json(&repo, &["--json", "--at", &text, "find", "call"]);
+        assert_eq!(at["result"], live["result"]);
+        assert_eq!(at["positions"], live["positions"]);
+        assert_eq!(at["exact"], true);
+        assert!(at.get("context").is_none(), "{at}");
+    }
+
+    /// R-1. A bad position text is a usage error.
+    #[test]
+    fn at_bad_text_exit_2() {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = committed_project(tmp.path());
+        for bad in ["nonsense", "abc+def", "none"] {
+            let (code, _out, err) = run_raw(&repo, &["--at", bad, "find", "call"]);
+            assert_eq!(code, 2, "{bad}: {err}");
+        }
+    }
+
+    /// R-4. A clean base commit is answered from the base.
+    #[test]
+    fn at_base_commit_reads_base() {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = committed_project(tmp.path());
+        // `index` advances the base to the default branch tip.
+        let (code, _, err) = run_raw(&repo, &["index"]);
+        assert_eq!(code, 0, "{err}");
+        let commit = head(&repo);
+        // The checkout has moved on, so the base is the only holder of this position.
+        std::fs::write(repo.join("user.tx"), "sym fn changed\n").unwrap();
+        let v = json(&repo, &["--json", "--at", &commit, "find", "caller"]);
+        assert_eq!(v["exact"], true, "{v}");
+        assert_eq!(v["context"], "base");
+        assert_eq!(v["positions"][0]["commit"], commit.as_str());
+        assert!(v["positions"][0]["dirty"].is_null());
+        assert!(!v["result"].as_array().unwrap().is_empty(), "{v}");
+        // The live read no longer finds them.
+        let (code, _, _) = run_raw(&repo, &["find", "caller"]);
+        assert_eq!(code, 4);
+    }
+
+    /// R-4. Another context that holds the position answers for it.
+    #[test]
+    fn at_other_context_reads_it() {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = committed_project(tmp.path());
+        let c1 = head(&repo);
+        std::fs::write(repo.join("user.tx"), "sym fn changed\n").unwrap();
+        commit_all(&repo, "c2");
+        let (code, _, err) = run_raw(&repo, &["context", "add", "--commit", &c1]);
+        assert_eq!(code, 0, "{err}");
+        let v = json(&repo, &["--json", "--at", &c1, "find", "caller"]);
+        assert_eq!(v["exact"], true, "{v}");
+        assert!(v["context"].as_str().unwrap().starts_with("c-"), "{v}");
+        assert!(!v["result"].as_array().unwrap().is_empty(), "{v}");
+        let (code, _, _) = run_raw(&repo, &["find", "caller"]);
+        assert_eq!(code, 4, "the current context has moved on");
+    }
+
+    /// R-5. A position no context holds is refused with exit 6, listing the ones held.
+    #[test]
+    fn at_unknown_exit_6_lists_available() {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = committed_project(tmp.path());
+        let nowhere = "0".repeat(40);
+        let (code, out, _err) = run_raw(&repo, &["--json", "--at", &nowhere, "find", "call"]);
+        assert_eq!(code, 6, "{out}");
+        let v: Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(v["schema"], 1);
+        assert_eq!(v["error"], "position-unavailable");
+        assert_eq!(v["wanted"], nowhere.as_str());
+        let available = v["available"].as_array().unwrap();
+        assert!(!available.is_empty());
+        assert_eq!(available[0]["repo"], "app");
+        assert!(
+            available
+                .iter()
+                .all(|p| p.get("commit").is_some() && p.get("dirty").is_some())
+        );
+        // Text mode: a message on stderr, nothing on stdout.
+        let (code, out, err) = run_raw(&repo, &["--at", &nowhere, "find", "call"]);
+        assert_eq!(code, 6);
+        assert_eq!(out, "");
+        assert!(err.contains("position unavailable"), "{err}");
+    }
+
+    /// R-10. `position` prints the live position and what the context's index reflects.
+    #[test]
+    fn command_prints_live_and_reflected() {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = committed_project(tmp.path());
+        let commit = head(&repo);
+        // Read once so the index records its position, then edit.
+        let first = json(&repo, &["--json", "find", "call"]);
+        let mut lib = std::fs::read(repo.join("lib.tx")).unwrap();
+        lib.extend_from_slice(b"sym fn extra\n");
+        std::fs::write(repo.join("lib.tx"), lib).unwrap();
+        let v = json(&repo, &["--json", "position"]);
+        assert_eq!(v["schema"], 1);
+        assert_eq!(v["live"]["repo"], "app");
+        assert_eq!(v["live"]["commit"], commit.as_str());
+        assert!(v["live"]["dirty"].is_string(), "{v}");
+        assert_eq!(v["text"], position_text(&v["live"]).as_str());
+        // The index still reflects the position of the first read.
+        assert_eq!(v["reflected"], first["positions"]);
+        assert_eq!(v["exact"], false);
+        // Text mode: the position first, then what is reflected.
+        let (code, out, _) = run_raw(&repo, &["position"]);
+        assert_eq!(code, 0);
+        let lines: Vec<&str> = out.lines().collect();
+        assert_eq!(lines[0], v["text"].as_str().unwrap());
+        assert!(lines[1].starts_with("reflects: "), "{out}");
+        // After a waiting read the index has caught up.
+        let _ = json(&repo, &["--json", "find", "call"]);
+        let v = json(&repo, &["--json", "position"]);
+        assert_eq!(v["exact"], true, "{v}");
+    }
+
+    /// R-10. With no project at all, the command still gives the checkout's position.
+    #[test]
+    fn command_works_without_board() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("plain-repo");
+        std::fs::create_dir_all(&dir).unwrap();
+        git(&dir, &["init", "-q"]);
+        git(&dir, &["config", "user.name", "Test"]);
+        git(&dir, &["config", "user.email", "test@example.com"]);
+        git(&dir, &["config", "commit.gpgsign", "false"]);
+        std::fs::write(dir.join("a.txt"), "one\n").unwrap();
+        git(&dir, &["add", "."]);
+        git(&dir, &["commit", "-q", "-m", "c1"]);
+        let v = json(&dir, &["--json", "position"]);
+        assert_eq!(v["live"]["commit"], head(&dir).as_str());
+        assert!(v["live"]["dirty"].is_null());
+        assert_eq!(v["text"], head(&dir).as_str());
+        assert!(v.get("reflected").is_none());
+        // Outside any checkout it is a usage error.
+        let (code, _, _) = run_raw(tmp.path(), &["position"]);
+        assert_eq!(code, 2);
+    }
+
+    /// R-11. Two contexts at the same position give byte-identical answers to the same question.
+    #[test]
+    fn same_position_same_bytes() {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = committed_project(tmp.path());
+        ok(&repo, &["index"]);
+        for args in [
+            vec!["find", "call"],
+            vec!["refs", "target"],
+            vec!["callers", "target"],
+            vec!["search", "caller"],
+            vec!["map"],
+        ] {
+            let mut cur = vec!["--json"];
+            cur.extend(&args);
+            let mut base = vec!["--json", "--context", "base"];
+            base.extend(&args);
+            let (c1, a, _) = run_raw(&repo, &cur);
+            let (c2, b, _) = run_raw(&repo, &base);
+            assert_eq!(c1, c2, "{args:?}");
+            // The watermark counts a context's own queue and cannot agree across contexts; every
+            // other byte, the view ID included, does.
+            let unmarked = |s: &str| {
+                let at = s.find("\"watermark\":").expect("watermark");
+                let end = at + s[at..].find(',').expect("comma") + 1;
+                format!("{}{}", &s[..at], &s[end..])
+            };
+            assert_eq!(
+                unmarked(&a),
+                unmarked(&b),
+                "{args:?}: the checkout's context and the base differ"
+            );
+        }
+    }
+
+    /// R-3. A repo that is not this context's checkout reports the commit the base reflects and
+    /// no uncommitted part; a repo with no base commit reports null.
+    #[test]
+    fn other_repo_reports_base_commit() {
+        let tmp = tempfile::tempdir().unwrap();
+        let t = tmp.path();
+        let kx = t.join("kx");
+        let (app, other, plain) = (t.join("app"), t.join("other"), t.join("plain"));
+        for d in [&app, &other, &plain] {
+            std::fs::create_dir_all(d).unwrap();
+        }
+        std::fs::write(app.join("a.tx"), "sym fn Alpha\n").unwrap();
+        std::fs::write(other.join("b.tx"), "sym fn Beta\n").unwrap();
+        std::fs::write(plain.join("c.tx"), "sym fn Gamma\n").unwrap();
+        for d in [&app, &other] {
+            git(d, &["init", "-q"]);
+            git(d, &["config", "user.name", "Test"]);
+            git(d, &["config", "user.email", "test@example.com"]);
+            git(d, &["config", "commit.gpgsign", "false"]);
+            git(d, &["add", "."]);
+            git(d, &["commit", "-q", "-m", "c1"]);
+        }
+        ok(t, &["kindex", "init", kx.to_str().unwrap()]);
+        let specs: Vec<String> = [("app", &app), ("other", &other), ("plain", &plain)]
+            .iter()
+            .map(|(n, p)| format!("{n}={}", p.display()))
+            .collect();
+        let mut args = vec!["--kindex", kx.to_str().unwrap(), "project", "init", "demo"];
+        for s in &specs {
+            args.extend(["--repo", s]);
+        }
+        args.push("--mark");
+        ok(&app, &args);
+        ok(&app, &["index"]);
+        let other_head = head(&other);
+
+        // An uncommitted edit in the other repo is not this context's business.
+        std::fs::write(other.join("b.tx"), "sym fn BetaEdited\n").unwrap();
+        let v = json(&app, &["--json", "find", "Alpha"]);
+        assert_eq!(v["exact"], true, "{v}");
+        let by_repo = |name: &str| {
+            v["positions"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|p| p["repo"] == name)
+                .unwrap_or_else(|| panic!("no position for {name}: {v}"))
+                .clone()
+        };
+        assert_eq!(by_repo("app")["commit"], head(&app).as_str());
+        assert_eq!(by_repo("other")["commit"], other_head.as_str());
+        assert!(by_repo("other")["dirty"].is_null());
+        assert!(by_repo("plain")["commit"].is_null());
+        assert!(by_repo("plain")["dirty"].is_null());
+        let repos: Vec<&str> = v["positions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|p| p["repo"].as_str().unwrap())
+            .collect();
+        assert_eq!(repos, ["app", "other", "plain"], "sorted by repo");
+    }
+}
+
+mod view {
+    use super::cli::{ok, query_project, run_raw};
+    use serde_json::Value;
+    use std::path::{Path, PathBuf};
+    use std::process::Command;
+
+    fn git(root: &Path, args: &[&str]) {
+        let st = Command::new("git")
+            .current_dir(root)
+            .args(args)
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .status()
+            .expect("run git");
+        assert!(st.success(), "git {args:?} failed");
+    }
+
+    /// The `.tx` query project as a clean, committed repository whose base is at the tip.
+    fn clean_project(tmp: &Path) -> (PathBuf, PathBuf) {
+        let (kx, repo) = query_project(tmp);
+        git(&repo, &["init", "-q", "-b", "main"]);
+        git(&repo, &["config", "user.name", "Test"]);
+        git(&repo, &["config", "user.email", "test@example.com"]);
+        git(&repo, &["config", "commit.gpgsign", "false"]);
+        git(&repo, &["add", "-A"]);
+        git(&repo, &["commit", "-q", "-m", "c1"]);
+        ok(&repo, &["index"]);
+        (kx, repo)
+    }
+
+    fn json(repo: &Path, args: &[&str]) -> Value {
+        let (_code, out, err) = run_raw(repo, args);
+        serde_json::from_str(&out).unwrap_or_else(|e| panic!("{args:?}: {e}: {out} {err}"))
+    }
+
+    fn id(v: &Value) -> String {
+        v["view_id"]
+            .as_str()
+            .unwrap_or_else(|| panic!("no view_id: {v}"))
+            .to_string()
+    }
+
+    /// R-6. The same question at the same position repeats its ID.
+    #[test]
+    fn id_repeats_at_same_position() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (_kx, repo) = clean_project(tmp.path());
+        let a = json(&repo, &["--json", "find", "call"]);
+        let b = json(&repo, &["--json", "find", "call"]);
+        assert!(id(&a).starts_with("v1-") && id(&a).len() == 3 + 32);
+        assert_eq!(id(&a), id(&b));
+        // Also after a long way round: an edit and its undoing.
+        let user = std::fs::read(repo.join("user.tx")).unwrap();
+        let mut edited = user.clone();
+        edited.extend_from_slice(b"sym fn extra\n");
+        std::fs::write(repo.join("user.tx"), edited).unwrap();
+        let mid = json(&repo, &["--json", "find", "call"]);
+        assert_ne!(id(&mid), id(&a));
+        std::fs::write(repo.join("user.tx"), user).unwrap();
+        let back = json(&repo, &["--json", "find", "call"]);
+        assert_eq!(id(&back), id(&a));
+    }
+
+    /// R-6. The checkout's context and the base, at the same position, give the same ID.
+    #[test]
+    fn id_repeats_across_contexts() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (_kx, repo) = clean_project(tmp.path());
+        let cur = json(&repo, &["--json", "find", "call"]);
+        let base = json(&repo, &["--json", "--context", "base", "find", "call"]);
+        assert_eq!(cur["positions"], base["positions"]);
+        assert_eq!(id(&cur), id(&base));
+    }
+
+    /// R-6. Output flags are not part of the question.
+    #[test]
+    fn id_ignores_output_flags() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (_kx, repo) = clean_project(tmp.path());
+        let a = id(&json(&repo, &["--json", "find", "call"]));
+        for extra in [
+            vec!["--timeout", "20"],
+            vec!["--consistency", "wait-all"],
+            vec!["--consistency", "wait"],
+        ] {
+            let mut args = vec!["--json"];
+            args.extend(extra.iter().copied());
+            args.extend(["find", "call"]);
+            assert_eq!(id(&json(&repo, &args)), a, "{extra:?}");
+        }
+    }
+
+    /// R-7. A different position is a different ID.
+    #[test]
+    fn id_changes_with_position() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (_kx, repo) = clean_project(tmp.path());
+        let a = id(&json(&repo, &["--json", "find", "call"]));
+        let mut lib = std::fs::read(repo.join("lib.tx")).unwrap();
+        lib.extend_from_slice(b"sym fn extra\n");
+        std::fs::write(repo.join("lib.tx"), lib).unwrap();
+        let b = id(&json(&repo, &["--json", "find", "call"]));
+        assert_ne!(a, b);
+    }
+
+    /// R-7. A different question is a different ID.
+    #[test]
+    fn id_changes_with_query() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (_kx, repo) = clean_project(tmp.path());
+        let a = id(&json(&repo, &["--json", "find", "call"]));
+        assert_ne!(a, id(&json(&repo, &["--json", "find", "caller"])));
+        assert_ne!(a, id(&json(&repo, &["--json", "search", "call"])));
+        assert_ne!(
+            a,
+            id(&json(&repo, &["--json", "--budget", "50", "find", "call"]))
+        );
+    }
+
+    /// R-7. A different profile (the extraction rules) is a different ID.
+    #[test]
+    fn id_changes_with_profile() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (kx, repo) = clean_project(tmp.path());
+        let a = id(&json(&repo, &["--json", "find", "call"]));
+        let dir = kx.join("projects/demo/profiles");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("p.yaml"),
+            "profile: p\nversion: 1\nrules:\n  - id: r\n    when: { extension: test, kind: fn, name: '^zzz$' }\n    emit:\n      bind: { contract: { kind: channel, key: orders }, role: provides }\n",
+        )
+        .unwrap();
+        let b = json(&repo, &["--json", "find", "call"]);
+        assert_ne!(a, id(&b), "{b}");
+    }
+
+    /// R-8. An answer that is not exact has no ID.
+    #[test]
+    fn no_id_when_not_exact() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (_kx, repo) = clean_project(tmp.path());
+        let v = json(
+            &repo,
+            &["--json", "--consistency", "stale-ok", "find", "call"],
+        );
+        assert_eq!(v["exact"], false);
+        assert!(v.get("view_id").is_none(), "{v}");
+        let exact = json(&repo, &["--json", "find", "call"]);
+        assert!(exact.get("view_id").is_some());
     }
 }

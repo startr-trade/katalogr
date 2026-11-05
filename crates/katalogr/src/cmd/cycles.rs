@@ -4,7 +4,7 @@ use katalogr_dist::DistError;
 use katalogr_dist::analytics::CycleOptions;
 
 use crate::cli::{Cli, LevelArg};
-use crate::cmd::{graph_options, options, resolve};
+use crate::cmd::{graph_options, options_for, resolve};
 use crate::exit::ExitCode;
 use crate::render;
 
@@ -22,7 +22,10 @@ pub fn run(
         members,
         limit,
     };
-    let reply = k.cycles(&opts, &options(cli))?;
+    let reply = k.cycles(
+        &opts,
+        &options_for(cli, "cycles", &[("options", format!("{opts:?}"))]),
+    )?;
     // Any cycle fails the command, so CI can gate on it.
     Ok(render::insight(cli, reply, "cycles", &render::CYCLES))
 }

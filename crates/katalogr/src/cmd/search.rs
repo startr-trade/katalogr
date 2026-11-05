@@ -3,7 +3,7 @@
 use katalogr_dist::DistError;
 
 use crate::cli::Cli;
-use crate::cmd::{options_with, resolve};
+use crate::cmd::{options_for_diag, resolve};
 use crate::exit::ExitCode;
 use crate::render;
 
@@ -13,6 +13,15 @@ pub fn run(
     limit: usize,
     diagnostic: bool,
 ) -> Result<ExitCode, DistError> {
-    let reply = resolve(cli)?.search(&terms.join(" "), limit, &options_with(cli, diagnostic))?;
+    let reply = resolve(cli)?.search(
+        &terms.join(" "),
+        limit,
+        &options_for_diag(
+            cli,
+            "search",
+            &[("terms", terms.join(" ")), ("limit", limit.to_string())],
+            diagnostic,
+        ),
+    )?;
     Ok(render::list(cli, reply, render::search_line, "search"))
 }

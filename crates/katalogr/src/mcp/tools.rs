@@ -67,6 +67,12 @@ const fn opt_int(name: &'static str, min: i64, default: i64) -> Arg {
 /// The `budget` argument every query tool takes.
 const BUDGET: Arg = opt("budget", Ty::Int(1));
 
+/// The `context` argument every query tool takes: `current`, `base` or an id (FEAT-043).
+const CONTEXT: Arg = opt("context", Ty::Str);
+
+/// The `at` argument every query tool takes: answer for this position (FEAT-084).
+const AT: Arg = opt("at", Ty::Str);
+
 /// A tool: its name, a description of at most 100 characters and its arguments.
 #[derive(Debug, Clone, Copy)]
 pub struct ToolSpec {
@@ -204,6 +210,8 @@ fn all_args(spec: &ToolSpec) -> Vec<Arg> {
     let mut v = spec.args.to_vec();
     if spec.query {
         v.push(BUDGET);
+        v.push(CONTEXT);
+        v.push(AT);
     }
     v
 }
@@ -421,74 +429,155 @@ pub fn call(cfg: &ServeConfig, name: &str, args: &Value) -> Result<JsonAnswer, U
     {
         return Ok(usage(message));
     }
-    let k = match Katalogr::resolve(&cfg.root, &cfg.overrides) {
+    let mut overrides = cfg.overrides.clone();
+    if let Some(c) = p.text("context") {
+        overrides.context = Some(c.to_string());
+    }
+    let k = match Katalogr::resolve(&cfg.root, &overrides) {
         Ok(k) => k,
         Err(e) => return Ok(render_json::error(&e)),
     };
     let budget = p.budget().or(cfg.budget);
-    let opts = &cfg.options;
+    // The same `op` names and argument keys as the CLI, so both give one view ID.
+    let mk = |op: &str, args: &[(&str, String)]| -> Options {
+        let mut view = katalogr_dist::ViewQuery {
+            op: op.to_string(),
+            args: args
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.clone()))
+                .collect(),
+        };
+        if let Some(b) = budget {
+            view.args.insert("budget".to_string(), b.to_string());
+        }
+        Options {
+            at: p.text("at").map(str::to_string).or(cfg.options.at.clone()),
+            view: Some(view),
+            ..cfg.options.clone()
+        }
+    };
     let out = match name {
-        "find" => answer(Katalogr::find(&k, p.need("text"), opts), |r| {
-            render_json::list(r, budget, "find")
-        }),
+        "find" => {
+            let text = p.need("text");
+            answer(
+                Katalogr::find(&k, text, &mk("find", &[("text", text.to_string())])),
+                |r| render_json::list(r, budget, "find"),
+            )
+        }
         "refs" => {
+            let symbol = p.need("symbol");
             let opts = &Options {
                 expand: p.flag("expand"),
-                ..opts.clone()
+                ..mk(
+                    "refs",
+                    &[
+                        ("text", symbol.to_string()),
+                        ("expand", p.flag("expand").to_string()),
+                    ],
+                )
             };
-            answer(Katalogr::refs(&k, p.need("symbol"), opts), |r| {
+            answer(Katalogr::refs(&k, symbol, opts), |r| {
                 render_json::list_folded(r, budget, "refs")
             })
         }
         "callers" => {
+            let symbol = p.need("symbol");
+            let depth = p.int("depth", 1);
             let opts = &Options {
                 expand: p.flag("expand"),
-                ..opts.clone()
+                ..mk(
+                    "callers",
+                    &[
+                        ("text", symbol.to_string()),
+                        ("depth", depth.to_string()),
+                        ("expand", p.flag("expand").to_string()),
+                    ],
+                )
             };
-            answer(
-                Katalogr::callers(&k, p.need("symbol"), p.int("depth", 1), opts),
-                |r| render_json::list_folded(r, budget, "callers"),
-            )
+            answer(Katalogr::callers(&k, symbol, depth, opts), |r| {
+                render_json::list_folded(r, budget, "callers")
+            })
         }
-        "explain" => answer(
-            Katalogr::explain(&k, p.need("symbol"), p.int("per_side", 10) as usize, opts),
-            |r| render_json::explain(r, budget),
-        ),
-        "show" => answer(
-            Katalogr::show(&k, p.need("symbol"), p.flag("signature"), opts),
-            |r| render_json::show(r, budget),
-        ),
-        "path" => answer(
-            Katalogr::path(&k, p.need("from"), p.need("to"), p.int("max_len", 6), opts),
-            |r| render_json::list(r, budget, "path"),
-        ),
-        "map" => answer(Katalogr::map(&k, opts), |r| {
+        "explain" => {
+            let (symbol, per_side) = (p.need("symbol"), p.int("per_side", 10) as usize);
+            let opts = &mk(
+                "explain",
+                &[
+                    ("symbol", symbol.to_string()),
+                    ("per_side", per_side.to_string()),
+                ],
+            );
+            answer(Katalogr::explain(&k, symbol, per_side, opts), |r| {
+                render_json::explain(r, budget)
+            })
+        }
+        "show" => {
+            let (symbol, signature) = (p.need("symbol"), p.flag("signature"));
+            let opts = &mk(
+                "show",
+                &[
+                    ("symbol", symbol.to_string()),
+                    ("signature", signature.to_string()),
+                ],
+            );
+            answer(Katalogr::show(&k, symbol, signature, opts), |r| {
+                render_json::show(r, budget)
+            })
+        }
+        "path" => {
+            let (from, to, max_len) = (p.need("from"), p.need("to"), p.int("max_len", 6));
+            let opts = &mk(
+                "path",
+                &[
+                    ("from", from.to_string()),
+                    ("to", to.to_string()),
+                    ("max_len", max_len.to_string()),
+                ],
+            );
+            answer(Katalogr::path(&k, from, to, max_len, opts), |r| {
+                render_json::list(r, budget, "path")
+            })
+        }
+        "map" => answer(Katalogr::map(&k, &mk("map", &[])), |r| {
             render_json::list(r, budget, "map")
         }),
-        "search" => answer(
-            Katalogr::search(&k, p.need("terms"), p.int("limit", 20) as usize, opts),
-            |r| render_json::list(r, budget, "search"),
-        ),
+        "search" => {
+            let (terms, limit) = (p.need("terms"), p.int("limit", 20) as usize);
+            let opts = &mk(
+                "search",
+                &[("terms", terms.to_string()), ("limit", limit.to_string())],
+            );
+            answer(Katalogr::search(&k, terms, limit, opts), |r| {
+                render_json::list(r, budget, "search")
+            })
+        }
         "dangling" => {
             let kinds: Vec<&str> = p.text("kind").into_iter().collect();
+            let opts = &mk("dangling", &[("kinds", kinds.join(","))]);
             answer(Katalogr::dangling(&k, &kinds, opts), |r| {
                 render_json::dangling(r, budget)
             })
         }
-        "why" => answer(Katalogr::why(&k, p.need("location"), opts), |r| {
-            render_json::why(r, budget)
-        }),
+        "why" => {
+            let location = p.need("location");
+            let opts = &mk("why", &[("location", location.to_string())]);
+            answer(Katalogr::why(&k, location, opts), |r| {
+                render_json::why(r, budget)
+            })
+        }
         "index" => {
             let since = owned(p.text("since"));
             let range = owned(p.text("range"));
             let (files, hist) =
                 crate::cmd::index::scope(since.as_ref(), range.as_ref(), p.flag("history"));
             answer(
-                Katalogr::index(&k, files, p.flag("full"), hist.as_ref(), opts),
+                Katalogr::index(&k, files, p.flag("full"), hist.as_ref(), &cfg.options),
                 |r| render_json::report(&r),
             )
         }
-        "status" => answer(Katalogr::status(&k, opts), |r| render_json::report(&r)),
+        "status" => answer(Katalogr::status(&k, &cfg.options), |r| {
+            render_json::report(&r)
+        }),
         _ => return Err(UnknownTool),
     };
     Ok(out)
@@ -499,7 +588,10 @@ pub fn call(cfg: &ServeConfig, name: &str, args: &Value) -> Result<JsonAnswer, U
 /// findings and a stale answer are answers, not failures.
 fn is_error(a: &JsonAnswer) -> bool {
     match a.exit {
-        ExitCode::Ambiguous | ExitCode::NoMatch | ExitCode::Usage => true,
+        ExitCode::Ambiguous
+        | ExitCode::NoMatch
+        | ExitCode::Usage
+        | ExitCode::PositionUnavailable => true,
         ExitCode::Error | ExitCode::Stale => a.stdout.is_none(),
         ExitCode::Ok => false,
     }

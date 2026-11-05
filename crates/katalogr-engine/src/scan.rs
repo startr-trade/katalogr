@@ -311,7 +311,7 @@ pub fn list_files(
     Ok(out)
 }
 
-fn glob_set(globs: &[String]) -> Result<globset::GlobSet, ScanError> {
+pub(crate) fn glob_set(globs: &[String]) -> Result<globset::GlobSet, ScanError> {
     let bad = |glob: &str, e: globset::Error| ScanError::BadGlob {
         glob: glob.to_string(),
         message: e.to_string(),
@@ -324,7 +324,7 @@ fn glob_set(globs: &[String]) -> Result<globset::GlobSet, ScanError> {
 }
 
 /// A name no real file is likely to have; used to ask whether a glob excludes a whole directory.
-const DIR_PROBE: &str = "__katalogr_dir_probe__";
+pub(crate) const DIR_PROBE: &str = "__katalogr_dir_probe__";
 
 fn walk(
     dir: &std::path::Path,

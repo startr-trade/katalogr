@@ -325,6 +325,32 @@
       ],
       "type": "object"
     },
+    "PositionRef": {
+      "description": "One repo's position. Serialises as `{\"repo\",\"commit\",\"dirty\"}`, absent parts as `null`.",
+      "properties": {
+        "commit": {
+          "description": "40 lower-case hex, or `None` for a directory with no commit.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "dirty": {
+          "description": "64 lower-case hex, or `None` when the checkout is clean.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "repo": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "repo"
+      ],
+      "type": "object"
+    },
     "PrefixTrace": {
       "properties": {
         "attempted": {
@@ -790,6 +816,13 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "description": "What `--json` prints.",
   "properties": {
+    "context": {
+      "description": "The context the answer was read from, when it names one.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "diagnostic": {
       "anyOf": [
         {
@@ -800,6 +833,11 @@
         }
       ],
       "description": "The trace of the query, present only with `--diagnostic` (FEAT-065)."
+    },
+    "exact": {
+      "default": false,
+      "description": "Nothing was pending and every checkout's position was the same before and after the read.",
+      "type": "boolean"
     },
     "folded": {
       "description": "`refs` and `callers` only: hits folded into summaries (absent with `--expand` and\nwhenever nothing was folded).",
@@ -827,6 +865,13 @@
       "minimum": 0,
       "type": "integer"
     },
+    "positions": {
+      "description": "What the index reflects, one entry per repo sorted by repo (FEAT-084). Omitted when empty.",
+      "items": {
+        "$ref": "#/$defs/PositionRef"
+      },
+      "type": "array"
+    },
     "result": {
       "$ref": "#/$defs/SweepReport"
     },
@@ -846,6 +891,13 @@
         {
           "type": "null"
         }
+      ]
+    },
+    "view_id": {
+      "description": "Identifies this answer; present only on an exact answer to a question that has one.",
+      "type": [
+        "string",
+        "null"
       ]
     },
     "watermark": {

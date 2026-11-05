@@ -13,12 +13,12 @@ use crate::parallel::{Parallelism, wave_size};
 use crate::profiles::ProfileSet;
 use crate::stitch::{PreparedFragment, Stitcher};
 use camino::Utf8Path;
-use katalogr_model::{ExtractError, ExtractInput, Fragment};
+use katalogr_model::{ArtifactName, ExtractError, ExtractInput, Fragment, Name, RelPath};
 use katalogr_store::blob::git_blob_id;
 use katalogr_store::{ErrorRow, PendingKey, ReadTx, Reader, StoreError};
 use rayon::prelude::*;
 use sha2::{Digest, Sha256};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs::File;
 use std::time::Instant;
 
@@ -54,6 +54,10 @@ pub(super) struct PlanEnv<'e> {
     /// For each `(repo, host id)` whose routed extractor `embeds()`: its guests' contexts.
     guests: BTreeMap<(String, &'static str), GuestContexts>,
     embed_sig: Option<[u8; 32]>,
+    /// In a layer: the stored revision of each path of the round that has an artifact row.
+    row_revisions: BTreeMap<(String, RelPath), String>,
+    /// In a layer: paths the base held index errors for at seed time (never reused).
+    base_errors: BTreeSet<(String, String)>,
 }
 
 impl<'e> PlanEnv<'e> {
@@ -85,12 +89,36 @@ impl<'e> PlanEnv<'e> {
                 guests.insert(pair, g);
             }
         }
+        let mut row_revisions = BTreeMap::new();
+        let mut base_errors = BTreeSet::new();
+        if engine.dir().is_layer() {
+            for (key, _) in items {
+                let id = ArtifactName {
+                    repo: key.repo.clone(),
+                    path: key.path.clone(),
+                }
+                .id();
+                if let Some(row) = snap.artifact(id)? {
+                    row_revisions.insert(
+                        (key.repo.clone(), key.path.clone()),
+                        row.provenance.revision,
+                    );
+                }
+            }
+            if let Some(bytes) = snap.meta(katalogr_store::META_BASE_ERRORS)? {
+                let pairs: Vec<(String, String)> =
+                    serde_json::from_slice(&bytes).unwrap_or_default();
+                base_errors.extend(pairs);
+            }
+        }
         Ok(PlanEnv {
             engine,
             profiles,
             contexts,
             guests,
             embed_sig: embed::signature(engine.registry()),
+            row_revisions,
+            base_errors,
         })
     }
 }
@@ -103,7 +131,6 @@ pub(super) fn plan_one(env: &PlanEnv, key: &PendingKey, seq: u64) -> Result<Acti
     let Some(root) = engine.roots().get(&key.repo) else {
         return Ok(Action::Skip);
     };
-    let file = root.join(key.path.as_str());
     let fin = relative_shard(dir.root(), &dir.shard_path(&key.repo, &key.path));
     if let Some(sha) = key
         .path
@@ -112,12 +139,23 @@ pub(super) fn plan_one(env: &PlanEnv, key: &PendingKey, seq: u64) -> Result<Acti
     {
         return plan_history(engine, key, seq, root, sha, fin);
     }
-    let content = match std::fs::read(&file) {
-        Ok(c) => Some(c),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
-        Err(e) => return Err(EngineError::io(&file, e)),
+    let Some(source) = engine.source(&key.repo) else {
+        return Ok(Action::Skip);
     };
-    let existing = dir.read_shard(&key.repo, &key.path).unwrap_or_default();
+    let content = source.read(&key.path)?;
+    let layer = dir.is_layer();
+    let existing = if layer {
+        None
+    } else {
+        dir.read_shard(&key.repo, &key.path).unwrap_or_default()
+    };
+    let stored_revision = if layer {
+        env.row_revisions
+            .get(&(key.repo.clone(), key.path.clone()))
+            .cloned()
+    } else {
+        existing.as_ref().map(|f| f.provenance.revision.clone())
+    };
     let Some(content) = content else {
         let has_shard = dir.shard_path(&key.repo, &key.path).exists();
         return Ok(Action::Delete {
@@ -128,8 +166,11 @@ pub(super) fn plan_one(env: &PlanEnv, key: &PendingKey, seq: u64) -> Result<Acti
         // No extractor applies any more (a `select` was removed, or the extension is gone):
         // a shard left from before is stale.
         let has_shard = dir.shard_path(&key.repo, &key.path).exists();
+        let has_row = stored_revision.is_some();
         return Ok(if has_shard {
             Action::Delete { fin: Some(fin) }
+        } else if has_row {
+            Action::Delete { fin: None }
         } else {
             Action::Skip
         });
@@ -162,8 +203,11 @@ pub(super) fn plan_one(env: &PlanEnv, key: &PendingKey, seq: u64) -> Result<Acti
         &no_guests
     };
     let revision = context::revision(&git_blob_id(&content), &keyed);
-    if existing.is_some_and(|f| f.provenance.revision == revision) {
+    if stored_revision.as_deref() == Some(revision.as_str()) {
         return Ok(Action::Skip);
+    }
+    if layer && let Some(action) = reuse_shard(env, key, seq, &revision, &fin) {
+        return Ok(action);
     }
     match extractor.extract_full(&ExtractInput {
         repo: &key.repo,
@@ -208,6 +252,37 @@ pub(super) fn plan_one(env: &PlanEnv, key: &PendingKey, seq: u64) -> Result<Acti
         }
         Err(e) => Ok(Action::Failed(e.to_string())),
     }
+}
+
+/// In a layer: when the base's shard for this path has exactly the revision computed here, use
+/// it without extracting. Not when the base held index errors for the path, because shards do
+/// not carry error rows and the context's errors must equal a clean index's.
+fn reuse_shard(
+    env: &PlanEnv,
+    key: &PendingKey,
+    seq: u64,
+    revision: &str,
+    fin: &str,
+) -> Option<Action> {
+    if env
+        .base_errors
+        .contains(&(key.repo.clone(), key.path.as_str().to_string()))
+    {
+        return None;
+    }
+    let base = env.engine.dir().base();
+    let fragment = base.read_shard(&key.repo, &key.path).ok().flatten()?;
+    if fragment.provenance.revision != revision {
+        return None;
+    }
+    let leaf = Utf8Path::new(fin).file_name().unwrap_or("shard");
+    let parent = Utf8Path::new(fin).parent().unwrap_or(Utf8Path::new(""));
+    Some(Action::Replace {
+        fragment: Box::new(fragment),
+        errors: Vec::new(),
+        tmp: parent.join(format!(".tmp-{seq}-{leaf}")).to_string(),
+        fin: fin.to_string(),
+    })
 }
 
 /// A history path (`@history/<sha>`) names a commit, not a file: its fragment comes from the
