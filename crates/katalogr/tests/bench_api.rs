@@ -78,7 +78,7 @@ mod bench {
 
     fn serve(repo: &Path, workers: &str) -> (Child, SocketAddr) {
         let log = repo.join("../api.log");
-        let child = Command::new(env!("CARGO_BIN_EXE_katalogr"))
+        let mut child = Command::new(env!("CARGO_BIN_EXE_katalogr"))
             .current_dir(repo)
             .env("KATALOGR_THREADS", "4")
             .args(["api", "--listen", "127.0.0.1:0", "--workers", workers])
@@ -93,7 +93,11 @@ mod bench {
                 let rest = &text[i + "listening on http://".len()..];
                 return (child, rest.lines().next().unwrap().trim().parse().unwrap());
             }
-            assert!(t.elapsed() < Duration::from_secs(60), "no start: {text}");
+            if t.elapsed() >= Duration::from_secs(60) {
+                let _ = child.kill();
+                let _ = child.wait();
+                panic!("no start: {text}");
+            }
             std::thread::sleep(Duration::from_millis(50));
         }
     }
