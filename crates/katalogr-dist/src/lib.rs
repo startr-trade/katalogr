@@ -24,9 +24,9 @@ mod test_extractor;
 #[cfg(feature = "test-extractor")]
 pub use test_extractor::extract_calls;
 mod threads;
+mod views;
 pub mod watch;
 pub mod working_set;
-mod views;
 
 use crate::contexts::ContextChoice;
 pub use claude::{

@@ -509,6 +509,7 @@ mod api {
         ("dangling", ""),
         ("mirrors", ""),
         ("status", ""),
+        ("docs-affected", ""),
         ("position", ""),
         ("hubs", ""),
         ("cycles", ""),
@@ -594,6 +595,10 @@ mod api {
             "profiles",
             "context",
             "help",
+            // Polls and reindexes until interrupted, like `api`.
+            "watch",
+            // Draws a view for a person; the `/api/v1/views/` prefix is reserved for it.
+            "render",
         ];
         // Served at another path.
         let elsewhere = [("contract", "meta")];

@@ -415,12 +415,25 @@ fn mirrors(k: &Katalogr, a: &Args, o: &Options) -> JsonAnswer {
 }
 
 fn status(k: &Katalogr, _a: &Args, o: &Options) -> JsonAnswer {
-    answer(k.status(o), |r| {
-        let mut out = render_json::report(&r);
-        let mut v = r.to_json();
-        v["context"] = serde_json::Value::String(k.context_name());
-        out.stdout = Some(v.to_string());
-        out
+    answer(k.status(o), |r| render_json::status(&r, k.context_name()))
+}
+
+fn docs_affected(k: &Katalogr, a: &Args, o: &Options) -> JsonAnswer {
+    let since = a.opt("since").filter(|s| !s.is_empty());
+    let kinds: Vec<String> = kinds(a).into_iter().map(str::to_string).collect();
+    let limit = a.int("limit") as usize;
+    let params = katalogr_dist::DocsAffectedParams {
+        kinds: kinds.clone(),
+        limit,
+    };
+    let o = q(
+        o,
+        a,
+        "docs-affected",
+        &crate::cmd::docs_affected::args(since, &kinds, limit),
+    );
+    answer(k.docs_affected(since, &params, &o), |r| {
+        render_json::plain(r, |_| false)
     })
 }
 
@@ -620,7 +633,7 @@ macro_rules! op {
 }
 
 /// Every route. Impact, flows, checks and exports add a row each when their items land; the
-/// `docs-affected` row waits for FEAT-086.
+/// `docs-affected` row is FEAT-086's.
 pub const OPS: &[Op] = &[
     op!(
         "find",
@@ -726,6 +739,17 @@ pub const OPS: &[Op] = &[
         &[opt("kind", Ty::Str, "contract kinds, comma separated")],
         Some("mirrors"),
         Call::Project(mirrors)
+    ),
+    op!(
+        "docs-affected",
+        "Documents that link to code changed since a revision or position.",
+        &[
+            opt("since", Ty::Str, "a revision or a clean position"),
+            opt("kind", Ty::Str, "link kinds, comma separated"),
+            dflt("limit", Ty::Int(1), "200", "how many documents to report"),
+        ],
+        Some("docs-affected"),
+        Call::Project(docs_affected)
     ),
     op!(
         "status",
