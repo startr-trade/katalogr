@@ -32,6 +32,10 @@ tiny_http = { workspace = true, optional = true }
 name = "mcp"
 required-features = ["mcp"]
 
+[[test]]
+name = "api"
+required-features = ["api"]
+
 [dev-dependencies]
 # The `.tx` test extractor gives integration tests symbols to query.
 katalogr-dist = { workspace = true, features = ["test-extractor"] }

@@ -111,7 +111,7 @@ impl Reply {
 
 /// `GET path` with `extra` headers; `Host` is the server's own unless `extra` sets one.
 pub fn get(addr: SocketAddr, path: &str, extra: &[(&str, &str)]) -> Reply {
-    let mut req = format!("GET {path} HTTP/1.1\r\n");
+    let mut req = format!("GET {path} HTTP/1.0\r\n");
     if !extra.iter().any(|(k, _)| k.eq_ignore_ascii_case("host")) {
         req.push_str(&format!("Host: {addr}\r\n"));
     }

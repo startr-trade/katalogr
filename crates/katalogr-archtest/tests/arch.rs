@@ -608,6 +608,247 @@ mod archtest {
         assert!(mcp_violations("other.rs", false, fine).is_empty());
     }
 
+    /// Paths the API module must not name: the store, engine, model and query crates (the
+    /// facade re-exports the option types it needs); the facade's hook and Claude modules; file,
+    /// process and signal APIs; sockets (the HTTP server crate does the listening); and tokio.
+    const API_DENIED_PATHS: [&str; 12] = [
+        "katalogr_query",
+        "katalogr_store",
+        "katalogr_engine",
+        "katalogr_model",
+        "katalogr_dist::hooks",
+        "katalogr_dist::claude",
+        "std::fs",
+        "std::process",
+        "std::net::TcpListener",
+        "std::net::TcpStream",
+        "std::net::UdpSocket",
+        "tokio",
+    ];
+
+    /// Facade or function names that edit source files, settings, hooks, the index or the project.
+    const API_DENIED_NAMES: [&str; 11] = [
+        "replace",
+        "notify",
+        "add_root",
+        "claude_sync",
+        "skill_install",
+        "session_start",
+        "index",
+        "context_add_commit",
+        "context_prune",
+        "project_init",
+        "kindex_init",
+    ];
+
+    /// The read calls an op row makes on the facade; each row makes exactly one.
+    const API_READ_CALLS: [&str; 24] = [
+        "find",
+        "refs",
+        "callers",
+        "tests",
+        "why",
+        "explain",
+        "show",
+        "path",
+        "map",
+        "search",
+        "dangling",
+        "mirrors",
+        "status",
+        "position",
+        "hubs",
+        "cycles",
+        "communities",
+        "dead_code",
+        "coverage",
+        "rationale",
+        "context_list",
+        "context_diff",
+        "context_conflicts",
+        "doctor",
+    ];
+
+    #[derive(Default)]
+    struct ApiScan {
+        file: String,
+        violations: Vec<String>,
+    }
+
+    impl ApiScan {
+        fn violation(&mut self, line: usize, rule: &str) {
+            self.violations
+                .push(format!("{}:{line}: {rule}", self.file));
+        }
+
+        fn check_path(&mut self, line: usize, path: &str) {
+            for denied in API_DENIED_PATHS {
+                if under(path, denied) {
+                    self.violation(line, &format!("path `{path}` is under `{denied}`"));
+                }
+            }
+            let segs: Vec<&str> = path.split("::").collect();
+            let via_facade = segs
+                .iter()
+                .any(|s| *s == "Katalogr" || *s == "katalogr_dist");
+            if let Some(last) = segs.last()
+                && via_facade
+                && API_DENIED_NAMES.contains(last)
+            {
+                self.violation(
+                    line,
+                    &format!("path `{path}` names the editing call `{last}`"),
+                );
+            }
+        }
+    }
+
+    /// Counts the read calls in one function body.
+    #[derive(Default)]
+    struct CountCalls(Vec<String>);
+
+    impl<'ast> Visit<'ast> for CountCalls {
+        fn visit_expr_method_call(&mut self, m: &'ast syn::ExprMethodCall) {
+            let name = m.method.to_string();
+            // Only calls on the facade value `k`: `.map()` on an iterator is not a query.
+            let on_facade = matches!(&*m.receiver, syn::Expr::Path(p) if p.path.is_ident("k"));
+            if on_facade && API_READ_CALLS.contains(&name.as_str()) {
+                self.0.push(name);
+            }
+            syn::visit::visit_expr_method_call(self, m);
+        }
+    }
+
+    /// True for a parameter `k: &Katalogr`.
+    fn takes_facade(f: &syn::ItemFn) -> bool {
+        f.sig.inputs.iter().any(|a| match a {
+            syn::FnArg::Typed(t) => {
+                matches!(&*t.pat, syn::Pat::Ident(i) if i.ident == "k")
+                    && matches!(&*t.ty, syn::Type::Reference(r)
+                        if matches!(&*r.elem, syn::Type::Path(p)
+                            if p.path.segments.last().is_some_and(|s| s.ident == "Katalogr")))
+            }
+            _ => false,
+        })
+    }
+
+    impl<'ast> Visit<'ast> for ApiScan {
+        fn visit_item_use(&mut self, i: &'ast syn::ItemUse) {
+            let mut paths = Vec::new();
+            use_paths(&i.tree, "", &mut paths);
+            let line = i.use_token.span.start().line;
+            for p in paths {
+                self.check_path(line, &p);
+            }
+        }
+
+        fn visit_path(&mut self, p: &'ast syn::Path) {
+            let line = p
+                .segments
+                .first()
+                .map_or(0, |s| s.ident.span().start().line);
+            self.check_path(line, &path_string(p));
+            syn::visit::visit_path(self, p);
+        }
+
+        fn visit_item_fn(&mut self, f: &'ast syn::ItemFn) {
+            if takes_facade(f) {
+                let mut c = CountCalls::default();
+                c.visit_block(&f.block);
+                if c.0.len() != 1 {
+                    self.violation(
+                        f.sig.ident.span().start().line,
+                        &format!(
+                            "op `{}` makes facade calls {:?}, want exactly one",
+                            f.sig.ident, c.0
+                        ),
+                    );
+                }
+            }
+            syn::visit::visit_item_fn(self, f);
+        }
+
+        fn visit_expr_method_call(&mut self, m: &'ast syn::ExprMethodCall) {
+            if API_DENIED_NAMES.contains(&m.method.to_string().as_str()) {
+                self.violation(
+                    m.method.span().start().line,
+                    &format!("method `{}` edits what the API must not", m.method),
+                );
+            }
+            syn::visit::visit_expr_method_call(self, m);
+        }
+    }
+
+    /// The violations of the API wrapper rules in one file's source.
+    fn api_violations(file: &str, src: &str) -> Vec<String> {
+        let ast = match syn::parse_file(src) {
+            Ok(a) => a,
+            Err(e) => return vec![format!("{file}: parse error: {e}")],
+        };
+        let mut scan = ApiScan {
+            file: file.to_string(),
+            ..ApiScan::default()
+        };
+        scan.visit_file(&ast);
+        scan.violations
+    }
+
+    /// R-12 (ADR-0010, FEAT-049). The API module is a wrapper: each op is one facade call, and
+    /// nothing under `src/api` reaches the core crates, edits files or the index, or opens a
+    /// socket itself. Test support and unit-test files are not shipped code and are not scanned.
+    #[test]
+    fn api_is_a_wrapper() {
+        let dir = workspace_root().join("crates/katalogr/src/api");
+        let mut files = Vec::new();
+        rs_files(&dir, &mut files);
+        files.sort();
+        assert!(
+            files.iter().any(|f| f.ends_with("ops.rs")),
+            "no ops.rs under src/api"
+        );
+        let mut failures = Vec::new();
+        for f in &files {
+            let name = f.file_name().and_then(|n| n.to_str()).unwrap_or("");
+            if name == "test_support.rs" || name.ends_with("_tests.rs") {
+                continue;
+            }
+            let src = std::fs::read_to_string(f).expect("read source");
+            failures.extend(api_violations(&f.display().to_string(), &src));
+        }
+        assert!(
+            failures.is_empty(),
+            "the API module is not a thin wrapper:\n{}",
+            failures.join("\n")
+        );
+    }
+
+    /// The rules above catch what they claim to, so a pass of `api_is_a_wrapper` means something.
+    #[test]
+    fn api_rules_detect_violations() {
+        let bad = r#"
+            use std::{fs, net::TcpStream};
+            use katalogr_store::Cache;
+            fn two(k: &Katalogr) { k.find(); k.refs(); }
+            fn none(k: &Katalogr) { let _ = 1; }
+            fn edits() { Katalogr::replace(); x.notify(); tokio::spawn(); }
+        "#;
+        let v = api_violations("ops.rs", bad);
+        for needle in [
+            "std::fs",
+            "std::net::TcpStream",
+            "katalogr_store",
+            "op `two`",
+            "op `none`",
+            "`Katalogr::replace`",
+            "method `notify`",
+            "tokio",
+        ] {
+            assert!(v.iter().any(|l| l.contains(needle)), "{needle}: {v:?}");
+        }
+        let fine = "use std::net::SocketAddr;\nfn a(k: &Katalogr) { k.find(); }";
+        assert!(api_violations("ops.rs", fine).is_empty());
+    }
+
     #[test]
     fn extensions_depend_on_model_only() {
         // Vacuous today: no `katalogr-ext-*` packages exist yet, so the loop body
