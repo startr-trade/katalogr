@@ -35,4 +35,24 @@ mod ci {
             );
         }
     }
+
+    /// Runner labels that GitHub has retired must not appear in the release workflow (R-11).
+    #[test]
+    fn release_runners_current() {
+        const RETIRED: [&str; 4] = ["macos-11", "macos-12", "macos-13", "macos-14"];
+        let path =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.github/workflows/release.yml");
+        let text = std::fs::read_to_string(&path).expect("read release.yml");
+        let mut bad = Vec::new();
+        for (n, line) in text.lines().enumerate() {
+            let t = line.trim_start().trim_start_matches("- ");
+            if let Some(v) = t.strip_prefix("os:") {
+                let v = v.split('#').next().unwrap_or("").trim().trim_matches('"');
+                if RETIRED.contains(&v) {
+                    bad.push(format!("release.yml:{}: retired runner `{v}`", n + 1));
+                }
+            }
+        }
+        assert!(bad.is_empty(), "{}", bad.join("\n"));
+    }
 }

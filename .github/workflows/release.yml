@@ -35,10 +35,10 @@ jobs:
             os: ubuntu-latest
             runnable: false
           - target: x86_64-apple-darwin
-            os: macos-13
+            os: macos-15-intel
             runnable: true
           - target: aarch64-apple-darwin
-            os: macos-14
+            os: macos-15
             runnable: true
           - target: x86_64-pc-windows-msvc
             os: windows-latest
