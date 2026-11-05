@@ -16,6 +16,9 @@ mod setup;
 mod span;
 #[cfg(feature = "test-extractor")]
 mod test_extractor;
+/// How many `.tx` files the test extractor has parsed in this process (for benchmarks).
+#[cfg(feature = "test-extractor")]
+pub use test_extractor::extract_calls;
 mod threads;
 
 use crate::contexts::ContextChoice;

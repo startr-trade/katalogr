@@ -105,6 +105,18 @@ impl Katalogr {
         Some(ContextId::for_checkout(&root.canonicalize_utf8().ok()?))
     }
 
+    /// The id of the context this invocation reads: `base`, a checkout's `w-...` or a named one.
+    /// Never a path.
+    pub fn context_name(&self) -> String {
+        match &self.context {
+            ContextChoice::Base => ContextId::BASE.to_string(),
+            ContextChoice::Named(id) => id.to_string(),
+            ContextChoice::Current => self
+                .own_id()
+                .map_or_else(|| ContextId::BASE.to_string(), |id| id.to_string()),
+        }
+    }
+
     fn info_of(&self, m: &ContextManifest, dir: &ProjectDir) -> ContextInfo {
         let used = std::fs::metadata(dir.root().join(".used"))
             .and_then(|md| md.modified())

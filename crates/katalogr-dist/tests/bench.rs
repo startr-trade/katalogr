@@ -420,4 +420,68 @@ mod bench {
         );
         assert!(per_gib <= 5.0, "{per_gib:.2} s/GiB exceeds 5 s/GiB");
     }
+
+    /// FEAT-085 R-5: seeding a second worktree at the base commit extracts nothing.
+    #[cfg(feature = "test-extractor")]
+    #[test]
+    #[ignore]
+    fn second_worktree_seed_extracts_nothing() {
+        use katalogr_dist::{
+            Katalogr, Options, Overrides, extract_calls, kindex_init, project_init,
+        };
+        let git = |dir: &Path, args: &[&str]| {
+            let out = std::process::Command::new("git")
+                .args([
+                    "-c",
+                    "user.name=t",
+                    "-c",
+                    "user.email=t@t",
+                    "-c",
+                    "commit.gpgsign=false",
+                ])
+                .args(args)
+                .current_dir(dir)
+                .output()
+                .unwrap();
+            assert!(out.status.success(), "{args:?}");
+        };
+        let tmp = scratch();
+        let root = std::fs::canonicalize(tmp.path()).unwrap();
+        let main = root.join("app");
+        let wt = root.join("app-wt");
+        std::fs::create_dir_all(&main).unwrap();
+        git(&main, &["init", "-q", "-b", "main"]);
+        for i in 0..200 {
+            std::fs::write(main.join(format!("f{i}.tx")), format!("sym fn gen{i}\n")).unwrap();
+        }
+        std::fs::write(main.join(".gitignore"), ".katalogr\n").unwrap();
+        git(&main, &["add", "."]);
+        git(&main, &["commit", "-q", "-m", "base"]);
+        git(
+            &main,
+            &["worktree", "add", "-q", "-b", "wt", wt.to_str().unwrap()],
+        );
+        let kx = root.join("kx");
+        kindex_init(&kx).unwrap();
+        project_init(&kx, "demo", vec![("app".into(), main.clone())], true).unwrap();
+
+        let km = Katalogr::resolve(&main, &Overrides::default()).unwrap();
+        let before = extract_calls();
+        km.index(None, false, None, &Options::default()).unwrap();
+        let base_calls = extract_calls() - before;
+
+        let load_before = load();
+        let kw = Katalogr::resolve(&wt, &Overrides::default()).unwrap();
+        let before = extract_calls();
+        let t = Instant::now();
+        kw.index(None, false, None, &Options::default()).unwrap();
+        let secs = t.elapsed().as_secs_f64();
+        let seed_calls = extract_calls() - before;
+        println!(
+            "second_worktree_seed_extracts_nothing: base extracted {base_calls} files; second worktree {seed_calls} files in {secs:.3} s; load {load_before} -> {}",
+            load()
+        );
+        assert!(base_calls >= 200, "{base_calls}");
+        assert_eq!(seed_calls, 0);
+    }
 }

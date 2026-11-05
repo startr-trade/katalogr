@@ -106,3 +106,5 @@ katalogr has already parsed this project into a graph of artifacts, symbols, con
 - after editing files outside Claude, run `katalogr notify <paths…>`;
 - after switching branches, run `katalogr index --since <previous HEAD>`;
 - for a full refresh, run `katalogr index --full`.
+
+**In a linked git worktree** katalogr reads and writes that worktree's own context, found through the main checkout's marker, so answers come from the code you are editing, not another checkout's. `katalogr status` names the context. To read another checkout or the base, pass `--context <id>` (ids from `katalogr context list`) or set `KATALOGR_CONTEXT`; opting out is per command.
