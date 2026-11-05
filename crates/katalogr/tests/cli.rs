@@ -840,6 +840,70 @@ mod cli {
             }
         }
     }
+
+    /// The `.tx` query project as a git repository with a document that links to `target`,
+    /// then an uncommitted edit of `target`'s line. No board exists anywhere.
+    fn docs_project(tmp: &Path) -> PathBuf {
+        let (_kx, repo) = query_project(tmp);
+        std::fs::write(
+            repo.join("doc.tx"),
+            "sym fn docsec\nref docsec links-to ns:target\n",
+        )
+        .unwrap();
+        let git = |args: &[&str]| {
+            let st = Command::new("git")
+                .current_dir(&repo)
+                .args(["-c", "user.name=t", "-c", "user.email=t@t"])
+                .args(["-c", "commit.gpgsign=false"])
+                .args(args)
+                .status()
+                .unwrap();
+            assert!(st.success(), "git {args:?}");
+        };
+        git(&["init", "-q"]);
+        git(&["add", "."]);
+        git(&["commit", "-q", "-m", "c1"]);
+        let lib = std::fs::read_to_string(repo.join("lib.tx")).unwrap();
+        std::fs::write(
+            repo.join("lib.tx"),
+            lib.replacen("sym fn target", "sym  fn target", 1),
+        )
+        .unwrap();
+        ok(&repo, &["index"]);
+        repo
+    }
+
+    /// R-8. The command works with no board: text names the document and the link.
+    #[test]
+    fn docs_affected_works_without_board() {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = docs_project(tmp.path());
+        let (code, out, err) = run(&repo, &["docs-affected", "--since", "HEAD"]);
+        assert_eq!(code, 0, "{err}");
+        assert!(out.contains("doc.tx"), "{out}");
+        assert!(out.contains("links-to") && out.contains("symbol"), "{out}");
+        // A bad revision is a usage error.
+        let (code, _, _) = run(&repo, &["docs-affected", "--since", "no-such-rev"]);
+        assert_eq!(code, 2);
+    }
+
+    /// R-8. The JSON answer validates against `schema/v1/docs-affected.schema.json`.
+    #[test]
+    fn docs_affected_json_validates() {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = docs_project(tmp.path());
+        let schema: Value = serde_json::from_str(
+            &std::fs::read_to_string(schema_dir().join("docs-affected.schema.json")).unwrap(),
+        )
+        .unwrap();
+        let (code, out, err) = run(&repo, &["--json", "docs-affected", "--since", "HEAD"]);
+        assert_eq!(code, 0, "{err}");
+        let v: Value = serde_json::from_str(&out).unwrap();
+        validate(&schema, &schema, &v, "$").unwrap_or_else(|e| panic!("{e}\n{out}"));
+        assert_eq!(v["result"]["docs"][0]["doc"]["path"], "doc.tx");
+        assert_eq!(v["result"]["changed_files"], 1);
+        assert!(v["exact"].is_boolean());
+    }
 }
 
 mod query {
@@ -872,7 +936,7 @@ mod query {
     fn schemas_current() {
         let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../schema/v1");
         let fresh = katalogr_dist::schemas();
-        assert_eq!(fresh.len(), 24);
+        assert_eq!(fresh.len(), 25);
         for (name, schema) in fresh {
             let mut want = serde_json::to_string_pretty(&schema).unwrap();
             want.push('\n');

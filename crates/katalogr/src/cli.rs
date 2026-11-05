@@ -393,6 +393,20 @@ pub enum Command {
         #[arg(long, value_name = "KIND")]
         kind: Vec<String>,
     },
+    /// List documents linked to code that changed since a revision (default: the merge-base with
+    /// the default branch), up to `--at` (default: this checkout, uncommitted changes included).
+    DocsAffected {
+        /// A revision or a clean position; a dirty position is refused.
+        #[arg(long, value_name = "REV")]
+        since: Option<String>,
+        /// Link kinds that connect a document to code; repeatable (default: the `docs.link_kinds`
+        /// setting, else links-to, documented-by, annotated-by and specifies).
+        #[arg(long, value_name = "KIND")]
+        kind: Vec<String>,
+        /// How many documents to report.
+        #[arg(long, default_value_t = katalogr_dist::DEFAULT_DOCS_LIMIT, value_name = "N")]
+        limit: usize,
+    },
     /// List, add and remove contexts: the base, each checkout's own, and pinned commits.
     Context {
         #[command(subcommand)]

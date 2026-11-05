@@ -1091,6 +1091,30 @@ pub fn plain<R: Serialize>(
     code
 }
 
+/// `docs-affected`: one block per document, its links indented below it.
+pub fn docs_affected(cli: &Cli, reply: Reply<katalogr_dist::query::DocImpact>) -> ExitCode {
+    plain(cli, reply, "docs-affected", docs_affected_lines, |_| false)
+}
+
+fn docs_affected_lines(d: &katalogr_dist::query::DocImpact) -> Vec<String> {
+    let mut out = Vec::new();
+    for doc in &d.docs {
+        let note = if doc.doc_changed {
+            "  (document also changed)"
+        } else {
+            ""
+        };
+        out.push(format!("{}  {}{note}", doc.doc.name, doc.doc.path));
+        for l in &doc.links {
+            out.push(format!(
+                "  {}  {} -> {}  {} {}",
+                l.kind, l.from, l.target, l.change, l.precision
+            ));
+        }
+    }
+    out
+}
+
 /// The `doctor` report: JSON with `--json`, else one line per finding with its fix.
 pub fn doctor(cli: &Cli, r: &katalogr_dist::doctor::Report) -> ExitCode {
     if cli.json {

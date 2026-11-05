@@ -276,7 +276,7 @@ mod mcp {
         c.send(json!({"jsonrpc": "2.0", "id": "two", "method": "tools/list"}));
         let list = c.recv();
         assert_eq!(list["id"], "two");
-        assert!(list["result"]["tools"].as_array().unwrap().len() == 12);
+        assert!(list["result"]["tools"].as_array().unwrap().len() == 13);
         let found = c.call(3, "find", json!({"text": "target"}));
         assert_eq!(found["result"]["isError"], false, "{found}");
         let out = last_text(&found);
@@ -473,8 +473,19 @@ mod mcp {
         assert_eq!(
             names,
             [
-                "find", "refs", "callers", "explain", "show", "path", "map", "search", "dangling",
-                "why", "index", "status"
+                "find",
+                "refs",
+                "callers",
+                "explain",
+                "show",
+                "path",
+                "map",
+                "search",
+                "dangling",
+                "why",
+                "docs-affected",
+                "index",
+                "status"
             ]
         );
         for banned in [
@@ -525,7 +536,7 @@ mod mcp {
             assert_eq!(t["outputSchema"], want, "{name}");
             with_schema += 1;
         }
-        assert_eq!(with_schema, 10);
+        assert_eq!(with_schema, 11);
         // A client on an older protocol gets none.
         drop(c);
         let mut c = Client::spawn(&repo, &[], &["--output-schemas"]);
@@ -542,8 +553,19 @@ mod mcp {
     fn every_tool_has_a_cli_command() {
         let tmp = tempfile::tempdir().unwrap();
         for name in [
-            "find", "refs", "callers", "explain", "show", "path", "map", "search", "dangling",
-            "why", "index", "status",
+            "find",
+            "refs",
+            "callers",
+            "explain",
+            "show",
+            "path",
+            "map",
+            "search",
+            "dangling",
+            "why",
+            "docs-affected",
+            "index",
+            "status",
         ] {
             let out = katalogr(tmp.path(), &[name, "--help"]);
             assert!(out.status.success(), "{name} --help: {out:?}");
@@ -740,6 +762,50 @@ mod mcp {
                 assert_eq!(r["result"]["structuredContent"], text, "{cli:?}");
             }
         }
+    }
+
+    /// FEAT-086 R-8. The `docs-affected` tool answers as the CLI's `--json` does.
+    #[test]
+    fn docs_affected_tool() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (_kx, repo) = query_project(tmp.path());
+        std::fs::write(
+            repo.join("doc.tx"),
+            "sym fn docsec\nref docsec links-to ns:target\n",
+        )
+        .unwrap();
+        let git = |args: &[&str]| {
+            let st = Command::new("git")
+                .current_dir(&repo)
+                .args(["-c", "user.name=t", "-c", "user.email=t@t"])
+                .args(["-c", "commit.gpgsign=false"])
+                .args(args)
+                .status()
+                .unwrap();
+            assert!(st.success(), "git {args:?}");
+        };
+        git(&["init", "-q"]);
+        git(&["add", "."]);
+        git(&["commit", "-q", "-m", "c1"]);
+        let lib = std::fs::read_to_string(repo.join("lib.tx")).unwrap();
+        std::fs::write(
+            repo.join("lib.tx"),
+            lib.replacen("sym fn target", "sym  fn target", 1),
+        )
+        .unwrap();
+        ok(&repo, &["index"]);
+
+        let (code, cli, err) = run_raw(&repo, &["--json", "docs-affected", "--since", "HEAD"]);
+        assert_eq!(code, 0, "{err}");
+        let mut c = Client::spawn(&repo, &[], &[]);
+        c.initialize("2025-06-18");
+        let r = c.call(1, "docs-affected", json!({"since": "HEAD"}));
+        let text = r["result"]["content"].as_array().unwrap().last().unwrap()["text"]
+            .as_str()
+            .unwrap();
+        assert_eq!(text.trim_end(), cli.trim_end());
+        assert_eq!(r["result"]["isError"], false, "{r}");
+        assert_eq!(r["result"]["_meta"]["katalogr/exit"], 0);
     }
 
     /// R-3. For every tool, with and without `budget`, the text is the CLI's `--json` stdout

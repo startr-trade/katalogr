@@ -1,5 +1,6 @@
 //! JSON Schemas of the `--json` output, one per command.
 
+use crate::doc_impact::DocImpact;
 use crate::position::PositionAnswer;
 use crate::result::{
     CallerHit, DanglingRef, Envelope, Explain, MapEntry, MirrorDrift, PathStep, RefHit, SearchHit,
@@ -27,6 +28,7 @@ pub fn schemas() -> BTreeMap<&'static str, Value> {
         ("search", to_value(schema_for!(Envelope<Vec<SearchHit>>))),
         ("path", to_value(schema_for!(Envelope<Vec<PathStep>>))),
         ("explain", to_value(schema_for!(Envelope<Explain>))),
+        ("docs-affected", to_value(schema_for!(Envelope<DocImpact>))),
         ("tests", to_value(schema_for!(Envelope<Vec<TestHit>>))),
     ])
 }
