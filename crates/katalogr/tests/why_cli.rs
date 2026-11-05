@@ -336,8 +336,8 @@ mod why_cli {
         assert_eq!(repos, ["board", "code"], "{v}");
         let mine = positions.iter().find(|p| p["repo"] == "code").unwrap();
         assert_eq!(mine["commit"], head.as_str());
-        // The marker file the project init wrote is untracked, so the checkout is not clean.
-        assert!(mine["dirty"].is_string(), "{v}");
+        // The marker file the project init wrote does not dirty the position (FEAT-099 R-6).
+        assert!(mine["dirty"].is_null(), "{v}");
         // The board directory is not a git repository: it has no commit.
         let board = positions.iter().find(|p| p["repo"] == "board").unwrap();
         assert!(board["commit"].is_null(), "{v}");
