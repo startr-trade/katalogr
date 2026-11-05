@@ -101,9 +101,32 @@ mod readers {
         drop(w);
     }
 
-    /// R-7: with no stored head the full map answers, as before.
+    /// R-7: a first index (no head, changes queued) gives no map, promptly, and says why.
     #[test]
-    fn session_start_without_top_uses_full_map() {
+    fn session_start_first_index_skips_map() {
+        let s = setup();
+        let w = writer(&s);
+        {
+            let mut tx = w.write().unwrap();
+            tx.store_rank(&[], 0).unwrap();
+            tx.commit().unwrap();
+        }
+        start_drain(&w);
+        let t = Instant::now();
+        let during = session(&s);
+        assert!(t.elapsed() < Duration::from_secs(1), "{:?}", t.elapsed());
+        assert!(symbol_lines(&during).is_empty(), "{during}");
+        assert!(
+            during.contains("map appears when indexing finishes"),
+            "{during}"
+        );
+        assert!(during.contains("1 pending"), "{during}");
+        drop(w);
+    }
+
+    /// R-7: with no stored head and nothing queued the full map answers, as before.
+    #[test]
+    fn session_start_no_head_idle_uses_full_map() {
         let s = setup();
         let before = session(&s);
         let w = writer(&s);
@@ -112,10 +135,10 @@ mod readers {
             tx.store_rank(&[], 0).unwrap();
             tx.commit().unwrap();
         }
-        start_drain(&w);
-        let during = session(&s);
-        assert!(during.contains("1 pending, stale"), "{during}");
-        assert_eq!(symbol_lines(&during), symbol_lines(&before));
+        let idle = session(&s);
+        assert!(!idle.contains("still building"), "{idle}");
+        assert_eq!(symbol_lines(&idle), symbol_lines(&before));
+        assert!(!symbol_lines(&idle).is_empty());
         drop(w);
     }
 
