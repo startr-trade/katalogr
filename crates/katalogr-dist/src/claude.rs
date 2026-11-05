@@ -208,22 +208,29 @@ impl Katalogr {
             ..Options::default()
         };
         // The head of the stored rank answers a normal budget; a stale or absent one, and a
-        // budget that reaches past it, use the whole map (FEAT-076 R-6).
-        let reply = self.query(&opts, |tx| match katalogr_query::map_top(tx)? {
-            Some((total, entries)) => Ok(Outcome::Found((total, entries, true))),
-            None => {
-                let entries = katalogr_query::map(tx)?;
-                Ok(Outcome::Found((entries.len() as u64, entries, false)))
+        // budget that reaches past it, use the whole map (FEAT-076 R-6). While changes are
+        // queued the rank is not current, and a live compute can take seconds: the last stored
+        // head answers instead, marked stale by the header (FEAT-080 R-7). With no head stored,
+        // the full map is computed.
+        let reply = self.query(&opts, |tx| {
+            let draining = !katalogr_store::Reader::pending_entries(tx, None)?.is_empty();
+            if let Some((total, entries)) = katalogr_query::map_top(tx)? {
+                return Ok(Outcome::Found((total, entries, true, false)));
             }
+            if draining && let Some((total, entries)) = katalogr_query::map_top_behind(tx)? {
+                return Ok(Outcome::Found((total, entries, true, true)));
+            }
+            let entries = katalogr_query::map(tx)?;
+            Ok(Outcome::Found((entries.len() as u64, entries, false, false)))
         })?;
-        let Outcome::Found((total, entries, from_top)) = reply.outcome else {
+        let Outcome::Found((total, entries, from_top, behind)) = reply.outcome else {
             return Ok(None);
         };
         if entries.is_empty() {
             return Ok(None);
         }
         let (text, exhausted) = self.render_session_map(&reply.report, total, &entries, budget);
-        if from_top && exhausted && total > entries.len() as u64 {
+        if from_top && !behind && exhausted && total > entries.len() as u64 {
             let reply = self.query(&opts, |tx| Ok(Outcome::Found(katalogr_query::map(tx)?)))?;
             let Outcome::Found(entries) = reply.outcome else {
                 return Ok(None);

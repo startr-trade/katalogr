@@ -101,3 +101,24 @@ pub fn map_top(tx: &impl Reader) -> Result<Option<(u64, Vec<MapEntry>)>, StoreEr
     }
     Ok(Some((top.total, out)))
 }
+
+/// As [`map_top`], for an answer already marked stale (FEAT-080 R-7): the stored head of the
+/// rank is used whether or not it is current, and symbols no longer present are skipped. `None`
+/// when no head is stored. Only for `session-start` during a drain; [`map`] stays exact.
+pub fn map_top_behind(tx: &impl Reader) -> Result<Option<(u64, Vec<MapEntry>)>, StoreError> {
+    let Some(top) = tx.rank_top()? else {
+        return Ok(None);
+    };
+    let ids: Vec<Id> = top.entries.iter().map(|(id, _)| *id).collect();
+    let rows = tx.symbols_many(&ids)?;
+    let mut out = Vec::with_capacity(rows.len());
+    for (row, (_, score)) in rows.iter().zip(&top.entries) {
+        let Some(row) = row else { continue };
+        out.push(MapEntry {
+            symbol: crate::resolve::hit(row),
+            rank: round6(*score),
+            in_degree: 0.0,
+        });
+    }
+    Ok(Some((top.total, out)))
+}

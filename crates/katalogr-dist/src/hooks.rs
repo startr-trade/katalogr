@@ -241,7 +241,7 @@ fn pre_read(
     }
     let bytes = std::fs::read(&abs).map_err(|e| DistError::io(abs.display(), e))?;
     let blob = git_blob_id(&bytes);
-    let engine = k.engine(deadline)?;
+    let engine = k.engine_for(EngineConsistency::StaleOk, deadline)?;
     let artifact = ArtifactName {
         repo: repo.clone(),
         path: rel.clone(),
@@ -414,7 +414,7 @@ fn post_search(
     if idents.is_empty() {
         return allow("search: no identifiers");
     }
-    let engine = k.engine(deadline)?;
+    let engine = k.engine_for(EngineConsistency::StaleOk, deadline)?;
     let answer = engine.with_consistency(
         &QueryOptions {
             consistency: EngineConsistency::StaleOk,
