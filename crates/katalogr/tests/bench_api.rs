@@ -76,6 +76,8 @@ mod bench {
         std::fs::read_to_string("/proc/loadavg").unwrap_or_default()
     }
 
+    // The caller owns the child and reaps it; the lint cannot follow it out of this function.
+    #[allow(clippy::zombie_processes)]
     fn serve(repo: &Path, workers: &str) -> (Child, SocketAddr) {
         let log = repo.join("../api.log");
         let mut child = Command::new(env!("CARGO_BIN_EXE_katalogr"))
