@@ -38,204 +38,11 @@ fn soon() -> Instant {
     Instant::now() + Duration::from_secs(5)
 }
 
-mod kindex {
-    use super::*;
-
-    #[test]
-    fn cache_rebuilds_from_shards() {
-        let tmp = tempfile::tempdir().unwrap();
-        let dir = project(&tmp);
-        for (p, t) in [
-            ("a.tx", "sym fn A\nexport ns:k A\n"),
-            (
-                "b.tx",
-                "sym fn B\nsym fn B2\nlink B calls B2\nref B calls ns:k\n",
-            ),
-            ("c.tx", "sym fn C\nref C calls ns:nope\n"),
-        ] {
-            dir.write_shard(&extract(p, t)).unwrap();
-        }
-
-        let stitcher = Stitcher::new();
-        let cache = Cache::open_or_rebuild(&dir, &stitcher, soon()).unwrap();
-        assert_eq!(cache.report().replaced, 3);
-        let before = cache.read().unwrap().dump_graph().unwrap();
-        let rows = |name: &str| {
-            before
-                .iter()
-                .find(|(n, _)| *n == name)
-                .map(|(_, r)| r.len())
-                .unwrap()
-        };
-        assert_eq!(rows("artifacts"), 3);
-        assert_eq!(rows("symbols"), 4);
-        assert_eq!(rows("links_out"), 2);
-        assert_eq!(rows("refs_unresolved"), 1);
-        drop(cache);
-
-        // Warm open: nothing changed, nothing replayed.
-        let cache = Cache::open_or_rebuild(&dir, &Stitcher::new(), soon()).unwrap();
-        assert_eq!(cache.report().replaced, 0);
-        assert_eq!(cache.read().unwrap().dump_graph().unwrap(), before);
-        drop(cache);
-
-        // Delete the cache; rebuilding from the shards gives the same graph.
-        std::fs::remove_dir_all(dir.cache_dir()).unwrap();
-        let cache = Cache::open_or_rebuild(&dir, &Stitcher::new(), soon()).unwrap();
-        assert_eq!(cache.report().replaced, 3);
-        assert_eq!(cache.read().unwrap().dump_graph().unwrap(), before);
-        drop(cache);
-
-        // A shard removed on disk is removed from the cache; same result as a fresh build.
-        std::fs::remove_file(dir.shard_path("r", &RelPath::new("a.tx").unwrap())).unwrap();
-        let cache = Cache::open_or_rebuild(&dir, &Stitcher::new(), soon()).unwrap();
-        assert_eq!(cache.report().removed, 1);
-        let incremental = cache.read().unwrap().dump_graph().unwrap();
-        drop(cache);
-        std::fs::remove_dir_all(dir.cache_dir()).unwrap();
-        let fresh = Cache::open_or_rebuild(&dir, &Stitcher::new(), soon()).unwrap();
-        assert_eq!(fresh.read().unwrap().dump_graph().unwrap(), incremental);
-        assert_ne!(incremental, before);
-    }
-}
+mod kindex {}
 
 mod cache {
     use super::*;
     use katalogr_store::StoreError;
-
-    #[test]
-    fn warm_open_skips_unchanged() {
-        let tmp = tempfile::tempdir().unwrap();
-        let dir = project(&tmp);
-        for (p, t) in [("a.tx", "sym fn A\n"), ("b.tx", "sym fn B\n")] {
-            dir.write_shard(&extract(p, t)).unwrap();
-        }
-        let cache = Cache::open_or_rebuild(&dir, &Stitcher::new(), soon()).unwrap();
-        assert_eq!(cache.report().hashed, 2);
-        drop(cache);
-
-        let cache = Cache::open_or_rebuild(&dir, &Stitcher::new(), soon()).unwrap();
-        assert_eq!(cache.report().hashed, 0);
-        assert_eq!(cache.report().replaced, 0);
-        drop(cache);
-
-        dir.write_shard(&extract("a.tx", "sym fn A\nsym fn A2\n"))
-            .unwrap();
-        let cache = Cache::open_or_rebuild(&dir, &Stitcher::new(), soon()).unwrap();
-        assert_eq!(cache.report().hashed, 1);
-        assert_eq!(cache.report().replaced, 1);
-    }
-
-    fn commits() -> u64 {
-        katalogr_store::cache::commits_on_this_thread()
-    }
-
-    /// FEAT-075 / FEAT-076 R-7. The first open after an index run writes nothing: the publish
-    /// recorded each shard's size and mtime with its hash. A write there would also grow a
-    /// freshly compacted file to twice its size, since it has no free page to put the rows in.
-    #[test]
-    fn open_after_index_writes_nothing() {
-        let tmp = tempfile::tempdir().unwrap();
-        let root = Utf8PathBuf::from_path_buf(tmp.path().to_path_buf()).unwrap();
-        let (kx, work) = (root.join("kx"), root.join("work"));
-        std::fs::create_dir_all(&work).unwrap();
-        for (p, t) in [
-            ("a.tx", "sym fn A\nexport k:a A\n"),
-            ("b.tx", "sym fn B\nref B calls k:a\n"),
-        ] {
-            std::fs::write(work.join(p), t).unwrap();
-        }
-        support::init_project(&kx);
-        {
-            let e = support::open_engine(&kx, &work);
-            support::full_index(&e);
-        }
-        let dir = Kindex::open(&kx)
-            .unwrap()
-            .project(&ProjectName::new("p").unwrap())
-            .unwrap();
-        let settled = commits();
-        let cache = Cache::open_or_rebuild(&dir, &Stitcher::new(), soon()).unwrap();
-        assert_eq!(cache.report().hashed, 0, "no shard was read");
-        assert_eq!(commits(), settled, "the open committed nothing");
-        let size = cache.file_bytes().unwrap();
-        drop(cache);
-        // A compacted file does not grow either.
-        let cache = Cache::open_or_rebuild(&dir, &Stitcher::new(), soon()).unwrap();
-        let (cache, _) = cache
-            .compact(&dir, katalogr_store::CompactMode::Rewrite, soon())
-            .unwrap();
-        let compacted = cache.file_bytes().unwrap();
-        drop(cache);
-        drop(Cache::open_or_rebuild(&dir, &Stitcher::new(), soon()).unwrap());
-        let after = std::fs::metadata(dir.cache_dir().join("index.redb"))
-            .unwrap()
-            .len();
-        // Not doubled: an open may move the file by a page, a write that finds no free page
-        // doubles it.
-        assert!(
-            after <= compacted + 16 * 1024,
-            "{after} after the open, {compacted} compacted ({size} before)"
-        );
-    }
-
-    #[test]
-    fn open_unchanged_writes_nothing() {
-        let tmp = tempfile::tempdir().unwrap();
-        let dir = project(&tmp);
-        for (p, t) in [("a.tx", "sym fn A\n"), ("b.tx", "sym fn B\n")] {
-            dir.write_shard(&extract(p, t)).unwrap();
-        }
-        let first = commits();
-        drop(Cache::open_or_rebuild(&dir, &Stitcher::new(), soon()).unwrap());
-        assert!(commits() > first, "the cold open commits");
-        let settled = commits();
-        for i in 0..3 {
-            let cache = Cache::open_or_rebuild(&dir, &Stitcher::new(), soon()).unwrap();
-            assert_eq!(cache.report().hashed, 0);
-            assert_eq!(cache.report().replaced, 0);
-            assert_eq!(cache.report().removed, 0);
-            drop(cache);
-            assert_eq!(commits(), settled, "warm open {i} commits nothing");
-        }
-    }
-
-    #[test]
-    fn open_changed_shard_still_syncs() {
-        let tmp = tempfile::tempdir().unwrap();
-        let dir = project(&tmp);
-        for (p, t) in [("a.tx", "sym fn A\n"), ("b.tx", "sym fn B\n")] {
-            dir.write_shard(&extract(p, t)).unwrap();
-        }
-        drop(Cache::open_or_rebuild(&dir, &Stitcher::new(), soon()).unwrap());
-
-        // A changed shard.
-        dir.write_shard(&extract("a.tx", "sym fn A\nsym fn A2\n"))
-            .unwrap();
-        let cache = Cache::open_or_rebuild(&dir, &Stitcher::new(), soon()).unwrap();
-        assert_eq!(cache.report().replaced, 1);
-        assert_eq!(cache.read().unwrap().symbols().unwrap().len(), 3);
-        drop(cache);
-
-        // A new shard.
-        dir.write_shard(&extract("c.tx", "sym fn C\n")).unwrap();
-        let cache = Cache::open_or_rebuild(&dir, &Stitcher::new(), soon()).unwrap();
-        assert_eq!(cache.report().replaced, 1);
-        assert_eq!(cache.read().unwrap().symbols().unwrap().len(), 4);
-        drop(cache);
-
-        // A removed shard.
-        std::fs::remove_file(dir.shard_path("r", &RelPath::new("b.tx").unwrap())).unwrap();
-        let cache = Cache::open_or_rebuild(&dir, &Stitcher::new(), soon()).unwrap();
-        assert_eq!(cache.report().removed, 1);
-        assert_eq!(cache.read().unwrap().symbols().unwrap().len(), 3);
-        drop(cache);
-
-        // Settled again: the next open writes nothing.
-        let before = commits();
-        drop(Cache::open_or_rebuild(&dir, &Stitcher::new(), soon()).unwrap());
-        assert_eq!(commits(), before);
-    }
 
     #[test]
     fn schema_8_cache_rebuilds() {
@@ -248,7 +55,7 @@ mod cache {
         ] {
             dir.write_shard(&extract(p, t)).unwrap();
         }
-        let cache = Cache::open_or_rebuild(&dir, &Stitcher::new(), soon()).unwrap();
+        let cache = Cache::open(&dir, soon()).unwrap();
         let before = cache.read().unwrap().dump_graph().unwrap();
         {
             let mut tx = cache.write().unwrap();
@@ -257,8 +64,7 @@ mod cache {
         }
         drop(cache);
 
-        let cache = Cache::open_or_rebuild(&dir, &Stitcher::new(), soon()).unwrap();
-        assert_eq!(cache.report().replaced, 3, "rebuilt from the shards");
+        let cache = Cache::open(&dir, soon()).unwrap();
         assert_eq!(cache.read().unwrap().dump_graph().unwrap(), before);
     }
 
@@ -273,7 +79,7 @@ mod cache {
         ] {
             dir.write_shard(&extract(p, t)).unwrap();
         }
-        let cache = Cache::open_or_rebuild(&dir, &Stitcher::new(), soon()).unwrap();
+        let cache = Cache::open(&dir, soon()).unwrap();
         let before = cache.read().unwrap().dump_graph().unwrap();
         {
             let mut tx = cache.write().unwrap();
@@ -282,8 +88,7 @@ mod cache {
         }
         drop(cache);
 
-        let cache = Cache::open_or_rebuild(&dir, &Stitcher::new(), soon()).unwrap();
-        assert_eq!(cache.report().replaced, 3, "rebuilt from the shards");
+        let cache = Cache::open(&dir, soon()).unwrap();
         let after = cache.read().unwrap().dump_graph().unwrap();
         assert_eq!(after, before);
         let fan_rows = after.iter().find(|(n, _)| *n == "fan_out").unwrap().1.len();
@@ -300,7 +105,7 @@ mod cache {
         ] {
             dir.write_shard(&extract(p, t)).unwrap();
         }
-        let cache = Cache::open_or_rebuild(&dir, &Stitcher::new(), soon()).unwrap();
+        let cache = Cache::open(&dir, soon()).unwrap();
         let before = cache.read().unwrap().dump_graph().unwrap();
         {
             let mut tx = cache.write().unwrap();
@@ -312,8 +117,7 @@ mod cache {
             tx.commit().unwrap();
         }
         drop(cache);
-        let cache = Cache::open_or_rebuild(&dir, &Stitcher::new(), soon()).unwrap();
-        assert_eq!(cache.report().replaced, 2, "rebuilt from the shards");
+        let cache = Cache::open(&dir, soon()).unwrap();
         assert_eq!(cache.read().unwrap().dump_graph().unwrap(), before);
     }
 
@@ -328,7 +132,7 @@ mod cache {
             "sym fn A\nsym fn B\nsym fn C\nlink A zz B\nlink A a B\nlink A calls C\nlink A calls B\n",
         ))
         .unwrap();
-        let cache = Cache::open_or_rebuild(&dir, &Stitcher::new(), soon()).unwrap();
+        let cache = Cache::open(&dir, soon()).unwrap();
         let rx = cache.read().unwrap();
         let kinds = |keys: Vec<katalogr_store::LinkKey>| -> Vec<String> {
             keys.into_iter().map(|k| k.kind.0).collect()
@@ -369,7 +173,7 @@ mod cache {
         let dir = project(&tmp);
         dir.write_shard(&extract("c.tx", "sym fn C\nref C calls ns:nope\n"))
             .unwrap();
-        let cache = Cache::open_or_rebuild(&dir, &Stitcher::new(), soon()).unwrap();
+        let cache = Cache::open(&dir, soon()).unwrap();
         let rx = cache.read().unwrap();
         let unresolved = rx.unresolved_refs(None).unwrap();
         assert_eq!(unresolved.len(), 1);
@@ -412,13 +216,12 @@ mod cache {
         ] {
             dir.write_shard(&extract(p, t)).unwrap();
         }
-        let cache = Cache::open_or_rebuild(&dir, &Stitcher::new(), soon()).unwrap();
+        let cache = Cache::open(&dir, soon()).unwrap();
         let rows = prov_rows(&cache.read().unwrap());
         assert!(rows.iter().any(|v| contains(v, "b.tx")));
         drop(cache);
         std::fs::remove_file(dir.shard_path("r", &RelPath::new("b.tx").unwrap())).unwrap();
-        let cache = Cache::open_or_rebuild(&dir, &Stitcher::new(), soon()).unwrap();
-        assert_eq!(cache.report().removed, 1);
+        let cache = Cache::open(&dir, soon()).unwrap();
         let rows = prov_rows(&cache.read().unwrap());
         assert!(!rows.is_empty());
         assert!(
@@ -434,7 +237,7 @@ mod cache {
         let dir = project(&tmp);
         dir.write_shard(&extract("a.tx", "sym fn A\nsym fn A2\nlink A calls A2\n"))
             .unwrap();
-        let cache = Cache::open_or_rebuild(&dir, &Stitcher::new(), soon()).unwrap();
+        let cache = Cache::open(&dir, soon()).unwrap();
         drop(cache);
         let path = RelPath::new("a.tx").unwrap();
         let new_rev = "1".repeat(40);
@@ -448,8 +251,7 @@ mod cache {
             })
             .unwrap();
         dir.write_shard(&frag).unwrap();
-        let cache = Cache::open_or_rebuild(&dir, &Stitcher::new(), soon()).unwrap();
-        assert_eq!(cache.report().replaced, 1);
+        let cache = Cache::open(&dir, soon()).unwrap();
         let rows: Vec<_> = prov_rows(&cache.read().unwrap())
             .into_iter()
             .filter(|v| contains(v, "a.tx"))
@@ -481,7 +283,7 @@ mod cache {
         }
         dir.write_shard(&extract("gone.tx", "sym fn Gone\nexport ns:gone Gone\n"))
             .unwrap();
-        let cache = Cache::open_or_rebuild(&dir, &Stitcher::new(), soon()).unwrap();
+        let cache = Cache::open(&dir, soon()).unwrap();
         drop(cache);
         let mut seed = 7u64;
         let mut next = || {
@@ -501,7 +303,7 @@ mod cache {
                 dir.write_shard(&extract(&format!("f{i}.tx"), &text(i, next())))
                     .unwrap();
             }
-            let c = Cache::open_or_rebuild(&dir, &Stitcher::new(), soon()).unwrap();
+            let c = Cache::open(&dir, soon()).unwrap();
             drop(c);
         }
         for i in 0..8 {
@@ -509,7 +311,7 @@ mod cache {
                 .unwrap();
         }
         std::fs::remove_file(dir.shard_path("r", &RelPath::new("gone.tx").unwrap())).unwrap();
-        let history = Cache::open_or_rebuild(&dir, &Stitcher::new(), soon()).unwrap();
+        let history = Cache::open(&dir, soon()).unwrap();
         let h = history.read().unwrap();
         let hist_dump = h.dump_graph().unwrap();
         let hist_links = h.links_all().unwrap();
@@ -519,7 +321,7 @@ mod cache {
 
         // History (a): one full index of the final files.
         std::fs::remove_dir_all(dir.cache_dir()).unwrap();
-        let fresh = Cache::open_or_rebuild(&dir, &Stitcher::new(), soon()).unwrap();
+        let fresh = Cache::open(&dir, soon()).unwrap();
         let f = fresh.read().unwrap();
         assert_eq!(f.dump_graph().unwrap(), hist_dump);
         assert_eq!(f.links_all().unwrap(), hist_links);
@@ -577,7 +379,7 @@ mod cache {
         for mode in [CompactMode::Rewrite, CompactMode::InPlace] {
             let tmp = tempfile::tempdir().unwrap();
             let dir = sample_project(&tmp);
-            let cache = Cache::open_or_rebuild(&dir, &Stitcher::new(), soon()).unwrap();
+            let cache = Cache::open(&dir, soon()).unwrap();
             let before = {
                 let rx = cache.read().unwrap();
                 (
@@ -601,8 +403,7 @@ mod cache {
             assert!(!dir.cache_dir().join(katalogr_store::REWRITE_FILE).exists());
             // The compacted cache is a working cache: a reopen finds it current.
             drop(cache);
-            let cache = Cache::open_or_rebuild(&dir, &Stitcher::new(), soon()).unwrap();
-            assert_eq!(cache.report().replaced, 0);
+            let _cache = Cache::open(&dir, soon()).unwrap();
         }
     }
 
@@ -611,7 +412,7 @@ mod cache {
         use katalogr_store::{CompactMode, CompactOutcome};
         let tmp = tempfile::tempdir().unwrap();
         let dir = project(&tmp);
-        let mut cache = Cache::open_or_rebuild(&dir, &Stitcher::new(), soon()).unwrap();
+        let mut cache = Cache::open(&dir, soon()).unwrap();
         for round in 0..20 {
             for i in 0..25 {
                 let n = round * 25 + i;
@@ -625,7 +426,7 @@ mod cache {
                 .unwrap();
             }
             drop(cache);
-            cache = Cache::open_or_rebuild(&dir, &Stitcher::new(), soon()).unwrap();
+            cache = Cache::open(&dir, soon()).unwrap();
         }
         assert_eq!(cache.read().unwrap().artifacts().unwrap().len(), 500);
         let before_dump = cache.read().unwrap().dump_graph().unwrap();
@@ -647,7 +448,7 @@ mod cache {
         use katalogr_store::{CompactMode, CompactOutcome};
         let tmp = tempfile::tempdir().unwrap();
         let dir = sample_project(&tmp);
-        let cache = Cache::open_or_rebuild(&dir, &Stitcher::new(), soon()).unwrap();
+        let cache = Cache::open(&dir, soon()).unwrap();
         let before = cache.read().unwrap().dump_graph().unwrap();
         let size = cache.file_bytes().unwrap();
         // A directory where the rewrite file goes: it cannot be removed or created.
@@ -672,40 +473,12 @@ mod cache {
     fn orphan_rewrite_file_removed() {
         let tmp = tempfile::tempdir().unwrap();
         let dir = sample_project(&tmp);
-        let cache = Cache::open_or_rebuild(&dir, &Stitcher::new(), soon()).unwrap();
+        let cache = Cache::open(&dir, soon()).unwrap();
         drop(cache);
         let orphan = dir.cache_dir().join(katalogr_store::REWRITE_FILE);
         std::fs::write(&orphan, b"left by a process that stopped").unwrap();
-        let cache = Cache::open_or_rebuild(&dir, &Stitcher::new(), soon()).unwrap();
+        let _cache = Cache::open(&dir, soon()).unwrap();
         assert!(!orphan.exists());
-        assert_eq!(cache.report().replaced, 0);
-    }
-
-    #[test]
-    fn rebuild_from_shards_compacts() {
-        let tmp = tempfile::tempdir().unwrap();
-        let dir = sample_project(&tmp);
-        let cache = Cache::open_or_rebuild(&dir, &Stitcher::new(), soon()).unwrap();
-        assert_eq!(cache.report().replaced, 3);
-        near(
-            cache.compacted_bytes().unwrap().unwrap(),
-            cache.file_bytes().unwrap(),
-        );
-        drop(cache);
-        // A warm open leaves the file as it is.
-        let cache = Cache::open_or_rebuild(&dir, &Stitcher::new(), soon()).unwrap();
-        let size = cache.file_bytes().unwrap();
-        drop(cache);
-        std::fs::remove_dir_all(dir.cache_dir()).unwrap();
-        let cache = Cache::open_or_rebuild(&dir, &Stitcher::new(), soon()).unwrap();
-        assert_eq!(cache.report().replaced, 3);
-        let compacted = cache
-            .compacted_bytes()
-            .unwrap()
-            .expect("compacted after the rebuild");
-        near(compacted, cache.file_bytes().unwrap());
-        assert!(compacted <= size + 4096 * 4, "{compacted} against {size}");
-        assert!(!dir.cache_dir().join(katalogr_store::REWRITE_FILE).exists());
     }
 
     /// FEAT-080: a read-only handle opened before a rewrite goes on reading the file it opened,
@@ -716,7 +489,7 @@ mod cache {
         use katalogr_store::CompactMode;
         let tmp = tempfile::tempdir().unwrap();
         let dir = sample_project(&tmp);
-        let cache = Cache::open_or_rebuild(&dir, &Stitcher::new(), soon()).unwrap();
+        let cache = Cache::open(&dir, soon()).unwrap();
         let Some(old_reader) = Cache::open_reader(&dir).unwrap() else {
             // No byte-range locks on this platform: a reader waits for the writer instead.
             return;
@@ -781,7 +554,7 @@ mod cache {
         dir.write_shard(&extract("a.tx", "sym fn Alpha\nsym fn Beta\n"))
             .unwrap();
         dir.write_shard(&extract("b.tx", "sym fn Gamma\n")).unwrap();
-        let cache = Cache::open_or_rebuild(&dir, &Stitcher::new(), soon()).unwrap();
+        let cache = Cache::open(&dir, soon()).unwrap();
         let n = |rx: &dyn Fn(TableId) -> usize| (rx(TableId::DocOrd), rx(TableId::DocByOrd));
         {
             let rx = cache.read().unwrap();
@@ -790,7 +563,7 @@ mod cache {
         }
         drop(cache);
         std::fs::remove_file(dir.shard_path("r", &RelPath::new("a.tx").unwrap())).unwrap();
-        let cache = Cache::open_or_rebuild(&dir, &Stitcher::new(), soon()).unwrap();
+        let cache = Cache::open(&dir, soon()).unwrap();
         let rx = cache.read().unwrap();
         let count = |t| rx.raw_scan(t, &[]).unwrap().len();
         assert_eq!(
@@ -808,7 +581,7 @@ mod cache {
         use katalogr_store::ErrorRow;
         let tmp = tempfile::tempdir().unwrap();
         let dir = project(&tmp);
-        let cache = Cache::open_or_rebuild(&dir, &Stitcher::new(), soon()).unwrap();
+        let cache = Cache::open(&dir, soon()).unwrap();
         let row = |m: &str| ErrorRow {
             span: None,
             message: m.to_string(),
@@ -838,11 +611,11 @@ mod cache {
     fn busy_retries_until_deadline() {
         let tmp = tempfile::tempdir().unwrap();
         let dir = project(&tmp);
-        let stitcher = Stitcher::new();
-        let _held = Cache::open_or_rebuild(&dir, &stitcher, soon()).unwrap();
+        let _stitcher = Stitcher::new();
+        let _held = Cache::open(&dir, soon()).unwrap();
 
         let start = Instant::now();
-        let second = Cache::open_or_rebuild(&dir, &stitcher, start + Duration::from_millis(200));
+        let second = Cache::open(&dir, start + Duration::from_millis(200));
         let waited = start.elapsed();
         assert!(matches!(second, Err(StoreError::Busy)));
         assert!(

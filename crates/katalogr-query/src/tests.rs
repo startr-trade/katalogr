@@ -319,25 +319,14 @@ mod explain_contract_fixture {
     use crate::{Explain, explain};
     use camino::Utf8PathBuf;
     use katalogr_model::{
-        ArtifactName, Confidence, ContractName, Fragment, Id, LinkKind, Name, Provenance, RelPath,
-        Segment, Span, SymbolName,
+        ArtifactName, Confidence, ContractName, Id, LinkKind, Name, Provenance, RelPath, Segment,
+        Span, SymbolName,
     };
     use katalogr_store::{
         Cache, ContractRow, Kindex, LinkEntry, LinkKey, LinkOrigin, LinkRow, ProjectConfig,
-        ProjectName, RepoConfig, Restitch, StoreError, SymbolRow, WriteTx,
+        ProjectName, RepoConfig, SymbolRow,
     };
     use std::time::{Duration, Instant};
-
-    struct NoShards;
-
-    impl Restitch for NoShards {
-        fn replace_fragment(&self, _: &mut WriteTx, _: Fragment) -> Result<(), StoreError> {
-            Ok(())
-        }
-        fn remove_artifact(&self, _: &mut WriteTx, _: &ArtifactName) -> Result<(), StoreError> {
-            Ok(())
-        }
-    }
 
     const SPAN: Span = Span {
         start_line: 3,
@@ -365,9 +354,7 @@ mod explain_contract_fixture {
                 },
             )
             .unwrap();
-        let cache =
-            Cache::open_or_rebuild(&dir, &NoShards, Instant::now() + Duration::from_secs(60))
-                .unwrap();
+        let cache = Cache::open(&dir, Instant::now() + Duration::from_secs(60)).unwrap();
         let path = RelPath::new("f.tx").unwrap();
         let artifact = ArtifactName {
             repo: "r".into(),

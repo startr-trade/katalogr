@@ -327,24 +327,7 @@ mod context {
 
     #[test]
     fn schema_mismatch_reseeds() {
-        use katalogr_store::{CACHE_SCHEMA, Cache, Restitch, WriteTx};
-        struct Noop;
-        impl Restitch for Noop {
-            fn replace_fragment(
-                &self,
-                _: &mut WriteTx,
-                _: katalogr_model::Fragment,
-            ) -> Result<(), katalogr_store::StoreError> {
-                Ok(())
-            }
-            fn remove_artifact(
-                &self,
-                _: &mut WriteTx,
-                _: &katalogr_model::ArtifactName,
-            ) -> Result<(), katalogr_store::StoreError> {
-                Ok(())
-            }
-        }
+        use katalogr_store::{CACHE_SCHEMA, Cache};
         let p = based();
         assert!(has(&p.repo, ContextChoice::Current, "Alpha"));
         let layer = layers(&p).remove(0);
@@ -357,9 +340,8 @@ mod context {
                 .clone();
             let id = katalogr_store::ContextId::new(layer.file_name().unwrap().to_str().unwrap())
                 .unwrap();
-            let c = Cache::open_or_rebuild(
+            let c = Cache::open(
                 &dir.layer(&id),
-                &Noop,
                 std::time::Instant::now() + std::time::Duration::from_secs(5),
             )
             .unwrap();
@@ -531,24 +513,7 @@ mod context {
     /// context's own cache, not the base's.
     #[test]
     fn reader_opens_the_layer() {
-        use katalogr_store::{Cache, Restitch, WriteTx};
-        struct Noop;
-        impl Restitch for Noop {
-            fn replace_fragment(
-                &self,
-                _: &mut WriteTx,
-                _: katalogr_model::Fragment,
-            ) -> Result<(), katalogr_store::StoreError> {
-                Ok(())
-            }
-            fn remove_artifact(
-                &self,
-                _: &mut WriteTx,
-                _: &katalogr_model::ArtifactName,
-            ) -> Result<(), katalogr_store::StoreError> {
-                Ok(())
-            }
-        }
+        use katalogr_store::Cache;
         let p = based();
         std::fs::write(p.repo.join("c.tx"), "sym fn GammaLayer\n").unwrap();
         ok(&p.repo, &["notify", "c.tx"]);
@@ -561,9 +526,8 @@ mod context {
         let id =
             katalogr_store::ContextId::new(layer.file_name().unwrap().to_str().unwrap()).unwrap();
         // A writer holds the layer's cache, so the read has to take a read-only handle.
-        let held = Cache::open_or_rebuild(
+        let held = Cache::open(
             &dir.layer(&id),
-            &Noop,
             std::time::Instant::now() + std::time::Duration::from_secs(5),
         )
         .unwrap();

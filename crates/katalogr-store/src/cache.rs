@@ -16,8 +16,8 @@ use crate::kindex::ProjectDir;
 use crate::postings::{self, PostingBuf};
 use camino::Utf8PathBuf;
 use katalogr_model::{
-    ArtifactName, Confidence, ContractName, ContractRole, Export, ExportKey, Fact, Fragment, Id,
-    LinkKind, Name, OutRef, Provenance, RelPath, Span, SymbolName,
+    ArtifactName, Confidence, ContractName, ContractRole, Export, ExportKey, Fact, Id, LinkKind,
+    Name, OutRef, Provenance, RelPath, Span, SymbolName,
 };
 use redb::{
     ConcurrencyMode, Database, DatabaseError, ReadOnlyDatabase, ReadTransaction, ReadableDatabase,
@@ -2933,30 +2933,21 @@ pub fn commits_on_this_thread() -> u64 {
 
 // ---------------------------------------------------------------- cache
 
-/// What a fragment-level writer must provide so the store can rebuild the graph tables from the
-/// shards without depending on the engine.
-pub trait Restitch {
-    fn replace_fragment(&self, tx: &mut WriteTx, f: Fragment) -> Result<(), StoreError>;
-    fn remove_artifact(&self, tx: &mut WriteTx, a: &ArtifactName) -> Result<(), StoreError>;
-}
-
 /// A `file_revisions` value: the 32-byte SHA-256 of the revision string.
 fn revision_value(v: &[u8]) -> Result<[u8; 32], StoreError> {
     v.try_into()
         .map_err(|_| StoreError::Row("bad file revision".into()))
 }
 
-/// What `open_or_rebuild` did.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct SyncReport {
-    pub replaced: usize,
-    pub removed: usize,
-    /// Shards whose bytes were read and hashed (those with an unchanged size and mtime are not).
-    pub hashed: usize,
-    /// Shards that failed to decode and were moved to `.cache/quarantine/`.
-    pub quarantined: Vec<(String, RelPath)>,
-    /// The deadline passed before every shard was handled; the next open continues.
-    pub deadline_hit: bool,
+/// What opening found. `Replaced` means another schema or a corrupt file was recreated.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum OpenState {
+    /// The file existed with the current schema.
+    Existing,
+    /// The file was missing and has been created.
+    Created,
+    /// The file was of another schema, or corrupt, and has been recreated empty.
+    Replaced,
 }
 
 /// The redb handle behind a [`Cache`]: the single writer, or a read-only handle beside one
@@ -2968,7 +2959,7 @@ enum Handle {
 
 pub struct Cache {
     db: RwLock<Handle>,
-    report: SyncReport,
+    state: OpenState,
     /// `.cache/index.redb`.
     path: Utf8PathBuf,
 }
@@ -3028,10 +3019,17 @@ fn open_db(
                 wait = (wait * 2).min(BACKOFF_MAX);
             }
             Err(DatabaseError::RepairAborted) => return Err(StoreError::Busy),
-            // A corrupt cache is deleted and rebuilt (FEAT-003 section 8).
+            // A corrupt cache is deleted and rebuilt (FEAT-003 section 8). A file that is not a
+            // redb database at all (wrong magic number) reads as invalid data.
             Err(DatabaseError::Storage(StorageError::Corrupted(_)))
             | Err(DatabaseError::UpgradeRequired(_))
                 if !recreated =>
+            {
+                recreated = true;
+                std::fs::remove_file(path).map_err(|e| StoreError::io(path, e))?;
+            }
+            Err(DatabaseError::Storage(StorageError::Io(e)))
+                if !recreated && e.kind() == std::io::ErrorKind::InvalidData =>
             {
                 recreated = true;
                 std::fs::remove_file(path).map_err(|e| StoreError::io(path, e))?;
@@ -3041,70 +3039,65 @@ fn open_db(
     }
 }
 
-/// The writer open: creates the file, and recreates it when its schema differs. The flag is
-/// true when the database is new: the file was missing, corrupt or of another schema.
+/// The writer open: creates the file, and recreates it when it is corrupt or its schema differs.
 fn open_writer(
     path: &Utf8PathBuf,
     busy_until: Instant,
     deadline: Instant,
-) -> Result<(Database, bool), StoreError> {
+) -> Result<(Database, OpenState), StoreError> {
     let existed = path.exists();
-    let (mut database, mut recreated) = open_db(path, busy_until, deadline)?;
+    let (mut database, mut replaced) = open_db(path, busy_until, deadline)?;
     if !schema_current(&database)? {
         drop(database);
         std::fs::remove_file(path).map_err(|e| StoreError::io(path, e))?;
         (database, _) = open_db(path, busy_until, deadline)?;
         schema_current(&database)?;
-        recreated = true;
+        replaced = true;
     }
-    Ok((database, recreated || !existed))
+    let state = if replaced {
+        OpenState::Replaced
+    } else if existed {
+        OpenState::Existing
+    } else {
+        OpenState::Created
+    };
+    Ok((database, state))
 }
 
 impl Cache {
-    /// R-6. Open `.cache/index.redb` (creating it, or recreating it when its schema differs),
-    /// then bring it in line with the shards: every shard is hashed (SHA-256) and compared with
-    /// `shard_hashes`; changed and new shards are decoded and passed to
-    /// [`Restitch::replace_fragment`], deleted ones to [`Restitch::remove_artifact`]; the hashes
-    /// are written and everything commits once. When `deadline` passes mid-way the work done so
-    /// far is committed and the next open continues. A busy database is retried with backoff
+    /// Open or create the graph database, reading no file but the database itself. A file of
+    /// another schema, or a corrupt one, is removed and recreated empty ([`OpenState::Replaced`]);
+    /// a missing one is created ([`OpenState::Created`]). A busy database is retried with backoff
     /// until `deadline`, then [`StoreError::Busy`].
-    pub fn open_or_rebuild(
-        dir: &ProjectDir,
-        stitch: &dyn Restitch,
-        deadline: Instant,
-    ) -> Result<Cache, StoreError> {
-        Cache::open_or_rebuild_busy(dir, stitch, deadline, deadline)
+    pub fn open(dir: &ProjectDir, deadline: Instant) -> Result<Cache, StoreError> {
+        Cache::open_busy(dir, deadline, deadline)
     }
 
-    /// As [`Cache::open_or_rebuild`], but a database held by another writer is retried only until
-    /// `busy_until` (FEAT-080: `busy_until` already passed means one try); the repair bound and
-    /// the sync use `deadline`.
-    pub fn open_or_rebuild_busy(
+    /// As [`Cache::open`], but a database held by another writer is retried only until
+    /// `busy_until` (FEAT-080: `busy_until` already passed means one try); the repair bound uses
+    /// `deadline`.
+    pub fn open_busy(
         dir: &ProjectDir,
-        stitch: &dyn Restitch,
         busy_until: Instant,
         deadline: Instant,
     ) -> Result<Cache, StoreError> {
         let cache_dir = dir.cache_dir();
         std::fs::create_dir_all(&cache_dir).map_err(|e| StoreError::io(&cache_dir, e))?;
         let path = cache_dir.join("index.redb");
-        let (database, created) = open_writer(&path, busy_until, deadline)?;
+        let (database, state) = open_writer(&path, busy_until, deadline)?;
         // This process holds the database now, so no other process is mid-rewrite: a rewrite
         // file that exists is an orphan.
         crate::compact::remove_orphan(&cache_dir);
-        let mut cache = Cache {
+        Ok(Cache {
             db: RwLock::new(Handle::Writer(database)),
-            report: SyncReport::default(),
+            state,
             path,
-        };
-        cache.report = cache.after_open(dir, stitch, deadline)?;
-        // A database built from the shards by this open holds the rows in the order the rounds
-        // wrote them: rewrite it sorted (the "sorted bulk load").
-        if created && cache.report.replaced > 0 && !cache.report.deadline_hit {
-            let (c, _) = cache.compact(dir, CompactMode::preferred(), deadline)?;
-            cache = c;
-        }
-        Ok(cache)
+        })
+    }
+
+    /// What opening found.
+    pub fn state(&self) -> OpenState {
+        self.state
     }
 
     /// Open an existing database file as it is: no schema check, no journal replay and no
@@ -3113,21 +3106,9 @@ impl Cache {
         let (database, _) = open_db(path, deadline, deadline)?;
         Ok(Cache {
             db: RwLock::new(Handle::Writer(database)),
-            report: SyncReport::default(),
+            state: OpenState::Existing,
             path: path.clone(),
         })
-    }
-
-    /// What follows every writer open. An interrupted publish is finished before the shards are
-    /// compared with the hashes.
-    fn after_open(
-        &self,
-        _dir: &ProjectDir,
-        _stitch: &dyn Restitch,
-        _deadline: Instant,
-    ) -> Result<SyncReport, StoreError> {
-        // Nothing to replay and no shard files to compare (FEAT-094); T5 removes this step.
-        Ok(SyncReport::default())
     }
 
     /// FEAT-080 R-1, R-6. A read-only handle beside any writer. Never writes, syncs or replays.
@@ -3171,7 +3152,7 @@ impl Cache {
         drop(rx);
         Ok(Some(Cache {
             db: RwLock::new(Handle::Reader(database)),
-            report: SyncReport::default(),
+            state: OpenState::Existing,
             path,
         }))
     }
@@ -3185,14 +3166,9 @@ impl Cache {
     }
 
     /// FEAT-080 R-4. Replace a read-only handle with the writer, then run what
-    /// `open_or_rebuild` runs after its open. `Ok(false)` when another process holds the writer
+    /// `Cache::open` runs after its open. `Ok(false)` when another process holds the writer
     /// (the reader is kept). No [`ReadTx`] may be alive.
-    pub fn try_upgrade(
-        &self,
-        dir: &ProjectDir,
-        stitch: &dyn Restitch,
-        deadline: Instant,
-    ) -> Result<bool, StoreError> {
+    pub fn try_upgrade(&self, dir: &ProjectDir, deadline: Instant) -> Result<bool, StoreError> {
         if !self.is_reader() {
             return Ok(true);
         }
@@ -3207,7 +3183,6 @@ impl Cache {
             return Err(StoreError::Db("the cache schema changed".into()));
         }
         *self.db.write().unwrap_or_else(PoisonError::into_inner) = Handle::Writer(database);
-        self.after_open(dir, stitch, deadline)?;
         Ok(true)
     }
 
@@ -3226,11 +3201,6 @@ impl Cache {
             Handle::Reader(_) => return Err(StoreError::Busy),
         };
         Ok(WriteTx::new(txn))
-    }
-
-    /// What the last `open_or_rebuild` did.
-    pub fn report(&self) -> &SyncReport {
-        &self.report
     }
 
     /// Bytes of `.cache/index.redb` on disk.
@@ -3266,7 +3236,7 @@ impl Cache {
         deadline: Instant,
     ) -> Result<(Cache, CompactReport), StoreError> {
         let started = Instant::now();
-        let Cache { db, report, path } = self;
+        let Cache { db, state, path } = self;
         let handle = db.into_inner().unwrap_or_else(PoisonError::into_inner);
         let bytes_before = std::fs::metadata(&path).map_or(0, |m| m.len());
         let report_of = |outcome: CompactOutcome, after: u64| CompactReport {
@@ -3281,7 +3251,7 @@ impl Cache {
             reader @ Handle::Reader(_) => {
                 let cache = Cache {
                     db: RwLock::new(reader),
-                    report,
+                    state,
                     path,
                 };
                 let r = report_of(
@@ -3292,11 +3262,11 @@ impl Cache {
             }
         };
         let tmp = dir.cache_dir().join(compact::REWRITE_FILE);
-        let skipped = |database: Database, why: String, report: SyncReport, path: Utf8PathBuf| {
+        let skipped = |database: Database, why: String, state: OpenState, path: Utf8PathBuf| {
             let after = std::fs::metadata(&path).map_or(bytes_before, |m| m.len());
             let cache = Cache {
                 db: RwLock::new(Handle::Writer(database)),
-                report,
+                state,
                 path,
             };
             Ok((cache, report_of(CompactOutcome::Skipped(why), after)))
@@ -3307,7 +3277,7 @@ impl Cache {
                     return skipped(
                         database,
                         format!("in-place compaction failed: {e}"),
-                        report,
+                        state,
                         path,
                     );
                 }
@@ -3329,7 +3299,7 @@ impl Cache {
                     });
                 if let Err(why) = built {
                     let _ = std::fs::remove_file(&tmp);
-                    return skipped(database, why, report, path);
+                    return skipped(database, why, state, path);
                 }
                 #[cfg(feature = "failpoints")]
                 crate::failpoint::hit("before_rewrite_rename");
@@ -3342,7 +3312,7 @@ impl Cache {
                             "the rewritten file cannot replace the cache ({:?})",
                             e.kind()
                         ),
-                        report,
+                        state,
                         path,
                     );
                 }
@@ -3354,7 +3324,7 @@ impl Cache {
         }
         let cache = Cache {
             db: RwLock::new(Handle::Writer(database)),
-            report,
+            state,
             path,
         };
         if mode == CompactMode::InPlace {
@@ -3419,21 +3389,10 @@ fn schema_current(database: &Database) -> Result<bool, StoreError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Kindex, ProjectConfig, ProjectName, Restitch};
+    use crate::{Kindex, ProjectConfig, ProjectName};
     use camino::Utf8PathBuf;
-    use katalogr_model::{ArtifactName, Fragment};
+
     use std::time::Duration;
-
-    struct Noop;
-
-    impl Restitch for Noop {
-        fn replace_fragment(&self, _: &mut WriteTx, _: Fragment) -> Result<(), StoreError> {
-            Ok(())
-        }
-        fn remove_artifact(&self, _: &mut WriteTx, _: &ArtifactName) -> Result<(), StoreError> {
-            Ok(())
-        }
-    }
 
     fn cache(t: &tempfile::TempDir) -> Cache {
         let root = Utf8PathBuf::from_path_buf(t.path().join("kx")).unwrap();
@@ -3441,7 +3400,7 @@ mod tests {
             .unwrap()
             .create_project(&ProjectName::new("p").unwrap(), ProjectConfig::default())
             .unwrap();
-        Cache::open_or_rebuild(&dir, &Noop, Instant::now() + Duration::from_secs(5)).unwrap()
+        Cache::open(&dir, Instant::now() + Duration::from_secs(5)).unwrap()
     }
 
     fn key(ns: &str, k: &str) -> ExportKey {

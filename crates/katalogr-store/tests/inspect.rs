@@ -2,27 +2,11 @@
 
 mod inspect {
     use camino::Utf8PathBuf;
-    use katalogr_model::{ArtifactName, RelPath};
+    use katalogr_model::RelPath;
     use katalogr_store::{
         CACHE_SCHEMA, Cache, CacheInspection, Kindex, ProjectConfig, ProjectDir, ProjectName,
-        Restitch, StoreError, WriteTx,
     };
     use std::time::{Duration, Instant};
-
-    struct Noop;
-
-    impl Restitch for Noop {
-        fn replace_fragment(
-            &self,
-            _: &mut WriteTx,
-            _: katalogr_model::Fragment,
-        ) -> Result<(), StoreError> {
-            Ok(())
-        }
-        fn remove_artifact(&self, _: &mut WriteTx, _: &ArtifactName) -> Result<(), StoreError> {
-            Ok(())
-        }
-    }
 
     fn project(t: &tempfile::TempDir) -> ProjectDir {
         let root = Utf8PathBuf::from_path_buf(t.path().join("kx")).unwrap();
@@ -33,7 +17,7 @@ mod inspect {
     }
 
     fn open(dir: &ProjectDir) -> Cache {
-        Cache::open_or_rebuild(dir, &Noop, Instant::now() + Duration::from_secs(5)).unwrap()
+        Cache::open(dir, Instant::now() + Duration::from_secs(5)).unwrap()
     }
 
     #[test]

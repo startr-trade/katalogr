@@ -4,30 +4,20 @@ mod support;
 
 use camino::Utf8PathBuf;
 use katalogr_model::{
-    ArtifactName, Confidence, Fact, Field, Fragment, Id, LinkKind, Name, Provenance, RelPath,
-    Segment, Span, SymbolName, tokenize,
+    ArtifactName, Confidence, Fact, Field, Id, LinkKind, Name, Provenance, RelPath, Segment, Span,
+    SymbolName, tokenize,
 };
 use katalogr_query::{
     Diagnostic, TestsOptions, rank, refs, resolve, result::Resolution, search, search_traced, tests,
 };
 use katalogr_store::{
     Cache, Kindex, LEXICON_FIELDS, LinkEntry, LinkKey, LinkOrigin, LinkRow, ProjectConfig,
-    ProjectName, Reader, RepoConfig, Restitch, StoreError, SymbolRow, WriteTx,
+    ProjectName, Reader, RepoConfig, SymbolRow, WriteTx,
 };
 use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
 
 /// The bench graph has no shards, so restitching never runs.
-struct NoShards;
-
-impl Restitch for NoShards {
-    fn replace_fragment(&self, _: &mut WriteTx, _: Fragment) -> Result<(), StoreError> {
-        Ok(())
-    }
-    fn remove_artifact(&self, _: &mut WriteTx, _: &ArtifactName) -> Result<(), StoreError> {
-        Ok(())
-    }
-}
 
 const SYMBOLS: usize = 100_000;
 
@@ -46,8 +36,7 @@ fn query_refs_100k() {
             },
         )
         .unwrap();
-    let cache =
-        Cache::open_or_rebuild(&dir, &NoShards, Instant::now() + Duration::from_secs(60)).unwrap();
+    let cache = Cache::open(&dir, Instant::now() + Duration::from_secs(60)).unwrap();
 
     // One artifact, SYMBOLS functions named s0..sN, and every other function calls the hub `hub`.
     let path = RelPath::new("bench.tx").unwrap();
@@ -366,7 +355,7 @@ fn open_bench_cache(tmp: &tempfile::TempDir) -> Cache {
             },
         )
         .unwrap();
-    Cache::open_or_rebuild(&dir, &NoShards, Instant::now() + Duration::from_secs(60)).unwrap()
+    Cache::open(&dir, Instant::now() + Duration::from_secs(60)).unwrap()
 }
 
 /// Index a symbol whose only searchable text is `name`, exactly as the engine's lexicon does for
@@ -1046,8 +1035,7 @@ fn tests_100k() {
             },
         )
         .unwrap();
-    let cache =
-        Cache::open_or_rebuild(&dir, &NoShards, Instant::now() + Duration::from_secs(60)).unwrap();
+    let cache = Cache::open(&dir, Instant::now() + Duration::from_secs(60)).unwrap();
     let path = RelPath::new("bench.tx").unwrap();
     let artifact = ArtifactName {
         repo: "r".into(),

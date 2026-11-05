@@ -21,9 +21,9 @@ pub mod shard;
 pub use cache::PathKey;
 pub use cache::{
     ArtifactRow, BindingRow, CACHE_SCHEMA, Cache, ContractRow, ErrorRow, FanKey, LEXICON_FIELDS,
-    LexiconStats, LinkBrief, LinkEntry, LinkKey, LinkOrigin, LinkRow, PendingKey, Posting,
-    RANK_TOP_ENTRIES, RankTop, ReadTx, Reader, RefId, Restitch, Snapshot, SymbolBrief, SymbolCore,
-    SymbolRow, SyncReport, TableId, WriteTx,
+    LexiconStats, LinkBrief, LinkEntry, LinkKey, LinkOrigin, LinkRow, OpenState, PendingKey,
+    Posting, RANK_TOP_ENTRIES, RankTop, ReadTx, Reader, RefId, Snapshot, SymbolBrief, SymbolCore,
+    SymbolRow, TableId, WriteTx,
 };
 pub use compact::{CompactMode, CompactOutcome, CompactPolicy, CompactReport, REWRITE_FILE};
 pub use context::{ContextId, ContextKind, ContextManifest, META_BASE_ERRORS, seed_layer};

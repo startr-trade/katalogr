@@ -2,26 +2,14 @@
 
 use camino::Utf8PathBuf;
 use katalogr_model::{
-    ArtifactName, Confidence, Fragment, Id, LinkKind, Name, Provenance, RelPath, Segment, Span,
-    SymbolName,
+    ArtifactName, Confidence, Id, LinkKind, Name, Provenance, RelPath, Segment, Span, SymbolName,
 };
 use katalogr_query::{rank, rank_cached_or_live, rank_live};
 use katalogr_store::{
     Cache, Kindex, LinkEntry, LinkKey, LinkOrigin, LinkRow, ProjectConfig, ProjectName,
-    RANK_CONTEXT, Reader, RepoConfig, Restitch, StoreError, SymbolRow, WriteTx, pagerank,
+    RANK_CONTEXT, Reader, RepoConfig, SymbolRow, WriteTx, pagerank,
 };
 use std::time::{Duration, Instant};
-
-struct NoShards;
-
-impl Restitch for NoShards {
-    fn replace_fragment(&self, _: &mut WriteTx, _: Fragment) -> Result<(), StoreError> {
-        Ok(())
-    }
-    fn remove_artifact(&self, _: &mut WriteTx, _: &ArtifactName) -> Result<(), StoreError> {
-        Ok(())
-    }
-}
 
 mod rank {
     use super::*;
@@ -108,9 +96,7 @@ mod rank {
                 },
             )
             .unwrap();
-        let cache =
-            Cache::open_or_rebuild(&dir, &NoShards, Instant::now() + Duration::from_secs(60))
-                .unwrap();
+        let cache = Cache::open(&dir, Instant::now() + Duration::from_secs(60)).unwrap();
         let mut tx = cache.write().unwrap();
         let ids = graph(&mut tx);
         tx.commit().unwrap();

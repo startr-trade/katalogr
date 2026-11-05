@@ -201,9 +201,7 @@ mod bench {
             )
             .unwrap();
         let stitcher = Stitcher::new();
-        let cache =
-            Cache::open_or_rebuild(&dir, &stitcher, Instant::now() + Duration::from_secs(60))
-                .unwrap();
+        let cache = Cache::open(&dir, Instant::now() + Duration::from_secs(60)).unwrap();
         let fragments: Vec<_> = (0..FILES)
             .map(|f| {
                 let mut text = String::new();
@@ -259,9 +257,7 @@ mod bench {
             )
             .unwrap();
         let stitcher = Stitcher::new();
-        let cache =
-            Cache::open_or_rebuild(&dir, &stitcher, Instant::now() + Duration::from_secs(60))
-                .unwrap();
+        let cache = Cache::open(&dir, Instant::now() + Duration::from_secs(60)).unwrap();
         (cache, stitcher)
     }
 
@@ -539,12 +535,7 @@ mod bench {
                 katalogr_store::ProjectConfig::default(),
             )
             .unwrap();
-        Cache::open_or_rebuild(
-            &dir,
-            &katalogr_engine::Stitcher::new(),
-            Instant::now() + Duration::from_secs(30),
-        )
-        .unwrap()
+        Cache::open(&dir, Instant::now() + Duration::from_secs(30)).unwrap()
     }
 
     fn id_of(n: u32) -> Id {

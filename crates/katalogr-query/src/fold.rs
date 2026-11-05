@@ -124,24 +124,14 @@ mod tests {
     use crate::{Diagnostic, callers_folded, refs_folded_traced};
     use camino::Utf8PathBuf;
     use katalogr_model::{
-        ArtifactName, Confidence, Fragment, Id, LinkKind, Name, Provenance, RelPath, Segment, Span,
+        ArtifactName, Confidence, Id, LinkKind, Name, Provenance, RelPath, Segment, Span,
         SymbolName,
     };
     use katalogr_store::{
         Cache, FanKey, Kindex, LinkEntry, LinkOrigin, LinkRow, ProjectConfig, ProjectName,
-        RepoConfig, Restitch, SymbolRow, WriteTx,
+        RepoConfig, SymbolRow,
     };
     use std::time::{Duration, Instant};
-
-    struct NoShards;
-    impl Restitch for NoShards {
-        fn replace_fragment(&self, _: &mut WriteTx, _: Fragment) -> Result<(), StoreError> {
-            Ok(())
-        }
-        fn remove_artifact(&self, _: &mut WriteTx, _: &ArtifactName) -> Result<(), StoreError> {
-            Ok(())
-        }
-    }
 
     const SPAN: Span = Span {
         start_line: 1,
@@ -216,9 +206,7 @@ mod tests {
                 },
             )
             .unwrap();
-        let cache =
-            Cache::open_or_rebuild(&dir, &NoShards, Instant::now() + Duration::from_secs(60))
-                .unwrap();
+        let cache = Cache::open(&dir, Instant::now() + Duration::from_secs(60)).unwrap();
         let artifact = ArtifactName::new("r", "f.tx").unwrap();
         let g = G {
             _tmp: tmp,

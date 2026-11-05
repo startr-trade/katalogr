@@ -450,15 +450,11 @@ mod readers {
         let f = crashed();
         let dir = f.dir();
         let past = Instant::now();
-        let err = Cache::open_or_rebuild(&dir, &katalogr_engine::Stitcher::new(), past)
+        let err = Cache::open(&dir, past)
             .err()
             .expect("the repair is aborted");
         assert!(matches!(err, StoreError::Busy), "{err:?}");
-        let ok = Cache::open_or_rebuild(
-            &dir,
-            &katalogr_engine::Stitcher::new(),
-            Instant::now() + Duration::from_secs(30),
-        );
+        let ok = Cache::open(&dir, Instant::now() + Duration::from_secs(30));
         assert!(ok.is_ok());
     }
 }

@@ -31,8 +31,7 @@ fn env() -> Env {
         )
         .unwrap();
     let stitcher = Stitcher::new();
-    let cache =
-        Cache::open_or_rebuild(&dir, &stitcher, Instant::now() + Duration::from_secs(5)).unwrap();
+    let cache = Cache::open(&dir, Instant::now() + Duration::from_secs(5)).unwrap();
     Env {
         _tmp: tmp,
         cache,

@@ -53,7 +53,7 @@ mod bench {
     // ------------------------------------------------ cache size and cost (FEAT-075 T9)
 
     use katalogr_dist::{Katalogr, Options, Overrides, kindex_init, project_init};
-    use katalogr_engine::Stitcher;
+
     use katalogr_store::{Cache, CompactMode, Kindex, ProjectDir, ProjectName, Reader};
     use std::path::PathBuf;
 
@@ -695,12 +695,7 @@ mod bench {
         crate::synth::rust_corpus(&repo, 20, 40, 12);
         let (dir, took) = index_full(tmp.path(), &repo);
         // The compaction alone, on the cache the run just left: a rewrite of the same rows.
-        let cache = Cache::open_or_rebuild(
-            &dir,
-            &Stitcher::new(),
-            Instant::now() + std::time::Duration::from_secs(60),
-        )
-        .unwrap();
+        let cache = Cache::open(&dir, Instant::now() + std::time::Duration::from_secs(60)).unwrap();
         let before = cache.file_bytes().unwrap();
         let (cache, report) = cache
             .compact(

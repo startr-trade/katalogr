@@ -1,6 +1,6 @@
 //! Read-only inspection of the cache (FEAT-064 section 3): what `katalogr doctor` looks at.
 //!
-//! Unlike [`Cache::open_or_rebuild`], inspecting never creates the database, replays the journal,
+//! Unlike [`Cache::open`], inspecting never creates the database, replays the journal,
 //! rebuilds anything or quarantines a shard. It opens redb's read-only handle, reads one
 //! snapshot and closes it.
 

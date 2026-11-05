@@ -43,8 +43,7 @@ fn env() -> Env {
     let tmp = tempfile::tempdir().unwrap();
     let dir = project(Utf8PathBuf::from_path_buf(tmp.path().join("kx")).unwrap());
     let stitcher = Stitcher::new();
-    let cache =
-        Cache::open_or_rebuild(&dir, &stitcher, Instant::now() + Duration::from_secs(5)).unwrap();
+    let cache = Cache::open(&dir, Instant::now() + Duration::from_secs(5)).unwrap();
     Env {
         _tmp: tmp,
         dir,
@@ -367,12 +366,7 @@ mod symbol_core {
         dir.write_shard(&extract("a.tx", "sym struct Foo\nsym fn Other\n"))
             .unwrap();
         dir.write_shard(&extract("b.tx", B)).unwrap();
-        let rebuilt = Cache::open_or_rebuild(
-            &dir,
-            &Stitcher::new(),
-            Instant::now() + Duration::from_secs(5),
-        )
-        .unwrap();
+        let rebuilt = Cache::open(&dir, Instant::now() + Duration::from_secs(5)).unwrap();
         let table = |c: &Cache, t: TableId| dump(&c.read().unwrap().raw_scan(t, &[]).unwrap());
         assert_eq!(
             table(&e.cache, TableId::SymbolCore),

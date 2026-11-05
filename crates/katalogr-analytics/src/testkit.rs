@@ -3,26 +3,15 @@
 
 use camino::Utf8PathBuf;
 use katalogr_model::{
-    ArtifactName, Confidence, ContractName, ExportKey, Fact, Fragment, Id, LinkKind, Name, OutRef,
+    ArtifactName, Confidence, ContractName, ExportKey, Fact, Id, LinkKind, Name, OutRef,
     Provenance, RelPath, Segment, Span, SymbolName,
 };
 use katalogr_store::{
     ArtifactRow, Cache, ContractRow, FanKey, Kindex, LinkEntry, LinkKey, LinkOrigin, LinkRow,
-    ProjectConfig, ProjectName, ReadTx, RepoConfig, Restitch, StoreError, SymbolRow, WriteTx,
+    ProjectConfig, ProjectName, ReadTx, RepoConfig, SymbolRow,
 };
 use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
-
-struct NoShards;
-
-impl Restitch for NoShards {
-    fn replace_fragment(&self, _: &mut WriteTx, _: Fragment) -> Result<(), StoreError> {
-        Ok(())
-    }
-    fn remove_artifact(&self, _: &mut WriteTx, _: &ArtifactName) -> Result<(), StoreError> {
-        Ok(())
-    }
-}
 
 pub const SPAN: Span = Span {
     start_line: 1,
@@ -356,9 +345,7 @@ impl Fx {
                 },
             )
             .unwrap();
-        let cache =
-            Cache::open_or_rebuild(&dir, &NoShards, Instant::now() + Duration::from_secs(60))
-                .unwrap();
+        let cache = Cache::open(&dir, Instant::now() + Duration::from_secs(60)).unwrap();
         let mut tx = cache.write().unwrap();
         for (id, row) in &self.artifacts {
             tx.put_artifact(*id, row).unwrap();
