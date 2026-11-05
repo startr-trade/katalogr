@@ -10,6 +10,7 @@ pub(crate) mod failpoint;
 pub mod history;
 pub mod lexicon;
 pub mod parallel;
+pub mod position;
 pub mod profiles;
 pub mod queue;
 pub mod registry;

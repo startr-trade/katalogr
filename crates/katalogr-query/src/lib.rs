@@ -15,6 +15,7 @@ mod hints;
 mod map;
 mod mirror;
 mod path;
+pub mod position;
 mod rank;
 mod refs;
 mod resolve;
@@ -40,6 +41,7 @@ pub use hints::{HintSource, hints};
 pub use map::{map, map_traced};
 pub use mirror::mirror_drift;
 pub use path::path;
+pub use position::{PositionError, PositionRef};
 pub use rank::{
     link_weight, rank, rank_cached_or_live, rank_cached_or_live_with_source, rank_live,
 };
