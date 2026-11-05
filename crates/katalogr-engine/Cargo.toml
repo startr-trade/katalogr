@@ -29,4 +29,5 @@ rayon.workspace = true
 tempfile.workspace = true
 
 [dev-dependencies]
+katalogr-query.workspace = true
 proptest.workspace = true

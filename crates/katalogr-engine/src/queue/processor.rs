@@ -151,7 +151,17 @@ impl<'a> Processor<'a> {
     ) -> Result<Seq, EngineError> {
         let wm = self.process_to_commit(scope, budget, deadline)?;
         self.recover()?;
-        self.refresh_rank()?;
+        // ADR-0033: the rank is computed once, when this round leaves nothing pending. A
+        // reader meanwhile finds a rank whose watermark is behind and computes live.
+        if self
+            .engine
+            .cache()
+            .read()?
+            .pending_entries(None)?
+            .is_empty()
+        {
+            self.refresh_rank()?;
+        }
         Ok(wm)
     }
 
@@ -171,6 +181,10 @@ impl<'a> Processor<'a> {
         let wm = tx.watermark(RANK_CONTEXT)?;
         tx.store_rank(&ranked, wm)?;
         tx.commit()?;
+        self.engine.add_stats(IndexStats {
+            rank_refreshes: 1,
+            ..IndexStats::default()
+        });
         Ok(())
     }
 
@@ -292,6 +306,7 @@ impl<'a> Processor<'a> {
             prepare,
             stitch,
             commit: commit_started.elapsed(),
+            rank_refreshes: 0,
         });
         fail!("after_publish_commit");
         Ok(Seq(wm))

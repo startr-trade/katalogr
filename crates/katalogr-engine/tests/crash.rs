@@ -132,7 +132,11 @@ mod queue {
 
     /// The crash-injection scenario with the child (and the recovering parent) at `threads`.
     fn no_loss(threads: usize) {
-        for name in FAILPOINTS {
+        no_loss_at(threads, &FAILPOINTS);
+    }
+
+    fn no_loss_at(threads: usize, failpoints: &[&str]) {
+        for &name in failpoints {
             let s = scenario();
             run_child(&s, name, threads);
             let acks = acked(&s);
@@ -207,6 +211,15 @@ mod queue {
     #[test]
     fn crash_injection_no_loss_parallel() {
         no_loss(4);
+    }
+
+    /// FEAT-093 R-6. Directories are synced once, after the last rename: a crash in the middle
+    /// of the renames or just before the journal is cleared loses nothing, at 1 and 8 threads.
+    #[test]
+    fn no_loss_after_batched_dir_sync() {
+        for threads in [1, 8] {
+            no_loss_at(threads, &["mid_renames", "before_journal_clear"]);
+        }
     }
 
     #[test]

@@ -30,5 +30,6 @@ pub use kindex::{
     FormatFile, GitState, Kindex, ProjectConfig, ProjectDir, ProjectName, RepoConfig, SHARD_FORMAT,
 };
 pub use rank::{
-    PAGERANK_DAMPING, PAGERANK_ITERATIONS, RANK_CONTEXT, link_weight, pagerank, row_weight,
+    PAGERANK_DAMPING, PAGERANK_ITERATIONS, RANK_CONTEXT, fan_weight, link_weight, pagerank,
+    row_weight,
 };
