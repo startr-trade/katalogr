@@ -2,7 +2,7 @@
 
 use super::model::{DoctorOptions, Finding, Severity};
 use crate::profiles::ProfileError;
-use crate::queue::{Inbox, find_orphan_temps};
+use crate::queue::Inbox;
 use crate::registry::ExtensionRegistry;
 use camino::{Utf8Path, Utf8PathBuf};
 use katalogr_store::{GitState, InspectedTables, PathKey, ProjectDir, SHARD_FORMAT, StoreError};
@@ -124,87 +124,18 @@ pub(crate) fn lock(held: bool) -> CheckResult {
     })
 }
 
-fn orphan_temps(dir: &ProjectDir) -> Result<Vec<Utf8PathBuf>, String> {
-    find_orphan_temps(&dir.root().join("shards")).map_err(|e| engine_kind(&e))
-}
-
 fn rel_to(base: &Utf8Path, p: &Utf8Path) -> String {
     p.strip_prefix(base).unwrap_or(p).to_string()
 }
 
-/// KD-JNL-001 to 003. `tables` is None when the cache could not be read: only the orphan-temp
-/// part can run then.
+/// The publish journal is gone (FEAT-094): nothing to report. T7 removes the area.
 pub(crate) fn journal(
-    dir: &ProjectDir,
-    tables: Option<&InspectedTables>,
-    held: bool,
-    o: &DoctorOptions,
+    _dir: &ProjectDir,
+    _tables: Option<&InspectedTables>,
+    _held: bool,
+    _o: &DoctorOptions,
 ) -> CheckResult {
-    let mut out = Vec::new();
-    let entries = tables.map(|t| t.journal.as_slice()).unwrap_or(&[]);
-    if !entries.is_empty() {
-        let key = |fin: &str| {
-            fin.strip_prefix("shards/")
-                .and_then(|s| s.strip_suffix(katalogr_store::shard::SUFFIX))
-                .map(|s| s.replacen('/', ":", 1))
-                .unwrap_or_else(|| fin.to_string())
-        };
-        let sample = entries.iter().map(|(_, fin)| key(fin));
-        if held {
-            out.push(
-                Finding::new(
-                    "KD-JNL-002",
-                    Severity::Info,
-                    "journal",
-                    format!(
-                        "a publish is in flight: {} journal entries while a processor is running",
-                        entries.len()
-                    ),
-                )
-                .count(entries.len())
-                .sample(sample, o),
-            );
-        } else {
-            let temps = entries
-                .iter()
-                .filter(|(tmp, _)| !tmp.is_empty() && dir.root().join(tmp).exists())
-                .count();
-            out.push(
-                Finding::new(
-                    "KD-JNL-001",
-                    Severity::Error,
-                    "journal",
-                    format!(
-                        "interrupted publish: {} journal entries, no processor running ({temps} temp files still present)",
-                        entries.len()
-                    ),
-                )
-                .fix("katalogr index")
-                .count(entries.len())
-                .sample(sample, o),
-            );
-        }
-    } else if !held {
-        let temps = orphan_temps(dir)?;
-        if !temps.is_empty() {
-            let base = dir.root().join("shards");
-            out.push(
-                Finding::new(
-                    "KD-JNL-003",
-                    Severity::Warning,
-                    "journal",
-                    format!(
-                        "{} orphan temp files in the shards folder, no processor running",
-                        temps.len()
-                    ),
-                )
-                .fix("katalogr index")
-                .count(temps.len())
-                .sample(temps.iter().map(|p| rel_to(&base, p)), o),
-            );
-        }
-    }
-    done(out)
+    done(Vec::new())
 }
 
 fn quarantined(dir: &ProjectDir) -> Result<Vec<String>, String> {

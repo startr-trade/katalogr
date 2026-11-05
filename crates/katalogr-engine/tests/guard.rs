@@ -61,14 +61,9 @@ mod guard {
         let f = fixture();
         publish(&f.e);
         let rel = |p: &str| RelPath::new(p).unwrap();
-        assert!(f.e.dir().shard_path("r", &rel("ok.tx")).exists());
-        assert!(!f.e.dir().shard_path("r", &rel("bad.tx")).exists());
-        let shards = f.e.dir().root().join("shards/r");
-        for entry in std::fs::read_dir(shards).unwrap() {
-            let name = entry.unwrap().file_name().to_string_lossy().to_string();
-            assert!(!name.starts_with(".tmp-"), "leftover temp file {name}");
-        }
         let r = f.e.cache().read().unwrap();
+        assert!(r.file_revision("r", &rel("ok.tx")).unwrap().is_some());
+        assert!(r.file_revision("r", &rel("bad.tx")).unwrap().is_none());
         let names: Vec<String> = r
             .artifacts()
             .unwrap()
@@ -126,13 +121,9 @@ mod guard {
         for threads in [1, 8] {
             let f = fixture_threads(threads);
             publish(&f.e);
-            assert!(f.e.dir().shard_path("r", &rel("ok.tx")).exists());
-            assert!(!f.e.dir().shard_path("r", &rel("bad.tx")).exists());
-            for entry in std::fs::read_dir(f.e.dir().root().join("shards/r")).unwrap() {
-                let name = entry.unwrap().file_name().to_string_lossy().to_string();
-                assert!(!name.starts_with(".tmp-"), "leftover temp file {name}");
-            }
             let r = f.e.cache().read().unwrap();
+            assert!(r.file_revision("r", &rel("ok.tx")).unwrap().is_some());
+            assert!(r.file_revision("r", &rel("bad.tx")).unwrap().is_none());
             let names: Vec<String> = r
                 .artifacts()
                 .unwrap()

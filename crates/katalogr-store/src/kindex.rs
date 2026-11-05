@@ -395,6 +395,11 @@ impl ProjectDir {
         self.root.join(".cache")
     }
 
+    /// The root of the kindex repository this project lives in.
+    pub fn kindex_root(&self) -> &Utf8Path {
+        &self.kindex_root
+    }
+
     pub fn read_shard(&self, repo: &str, path: &RelPath) -> Result<Option<Fragment>, StoreError> {
         let p = self.shard_path(repo, path);
         match std::fs::read(&p) {

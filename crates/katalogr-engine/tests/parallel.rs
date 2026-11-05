@@ -5,7 +5,7 @@ mod support;
 use camino::{Utf8Path, Utf8PathBuf};
 use katalogr_engine::consistency::DEFAULT_BUDGET;
 use katalogr_engine::parallel::Parallelism;
-use katalogr_engine::queue::{Processor, find_orphan_temps};
+use katalogr_engine::queue::Processor;
 use katalogr_engine::registry::ExtensionRegistry;
 use katalogr_engine::{Engine, Scope, canonical_graph};
 use katalogr_store::Reader;
@@ -367,12 +367,7 @@ mod parallel {
                 }));
                 assert!(snap.file_revisions().unwrap().is_empty());
             }
-            let mut pr = Processor::try_acquire(&e).unwrap().unwrap();
-            pr.recover().unwrap();
-            drop(pr);
-            assert!(e.dir().list_shards().unwrap().is_empty());
-            let shards = p.kx.join("projects/p/shards");
-            assert!(find_orphan_temps(&shards).unwrap().is_empty(), "{threads}");
+            assert!(!p.kx.join("projects/p/shards").exists(), "{threads}");
             assert_eq!(
                 canonical_graph(&e.cache().read().unwrap()),
                 canonical_empty()

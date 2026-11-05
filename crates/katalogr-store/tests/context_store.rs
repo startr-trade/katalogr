@@ -140,7 +140,6 @@ mod context_store {
                 1,
             )
             .unwrap();
-            tx.set_publish_journal(&[("a".into(), "b".into())]).unwrap();
             tx.commit().unwrap();
         }
         let base_before = std::fs::read(p.cache_dir().join("index.redb")).unwrap();
@@ -155,7 +154,6 @@ mod context_store {
         let r = c.read().unwrap();
         assert!(r.file_revisions().unwrap().is_empty());
         assert!(r.pending_entries(None).unwrap().is_empty());
-        assert!(r.publish_journal().unwrap().is_empty());
         assert_eq!(r.meta("keep").unwrap().as_deref(), Some(&b"yes"[..]));
         assert_eq!(
             r.meta("layer_seed_commit").unwrap().as_deref(),

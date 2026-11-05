@@ -11,11 +11,9 @@ use crate::embed;
 use crate::error::EngineError;
 use crate::failpoint::fail;
 use crate::profiles::{self, ProfileSet};
-use camino::{Utf8Path, Utf8PathBuf};
 use katalogr_model::{ArtifactName, Id, Name, RelPath};
 use katalogr_store::{
-    ErrorRow, JournalEntry, PendingKey, RANK_CONTEXT, RANK_TOP_ENTRIES, RankTop, Reader, WriteTx,
-    pagerank,
+    ErrorRow, PendingKey, RANK_CONTEXT, RANK_TOP_ENTRIES, RankTop, Reader, WriteTx, pagerank,
 };
 use std::collections::BTreeSet;
 use std::fs::File;
@@ -42,20 +40,10 @@ impl<'a> Processor<'a> {
         )
     }
 
-    /// Replay a non-empty publish journal (idempotent): rename each temp file that still
-    /// exists onto its final name, then clear the journal.
-    pub fn recover(&mut self) -> Result<(), EngineError> {
-        let dir = self.engine.dir();
-        self.engine.cache().replay_journal(dir)?;
-        // The journal is empty now, so any `.tmp-*` shard file left is an orphan of a crash
-        // before the publish commit.
-        remove_orphan_temps(&dir.root().join("shards"))
-    }
-
     /// R-2/R-3. One write transaction: skip ids already in `seen`, assign the next sequence
     /// number of the event's context, record the event and set the path's pending entry to that
     /// number. A rescan is expanded here into one pending entry per path the registry handles
-    /// plus one per path that still has a shard. Inbox files are deleted after the commit.
+    /// plus one per path that still has a file revision. Inbox files are deleted after the commit.
     /// Returns the number of newly ingested events.
     pub fn ingest(&mut self) -> Result<usize, EngineError> {
         let inbox = Inbox::new(self.engine.dir());
@@ -118,7 +106,7 @@ impl<'a> Processor<'a> {
 
     /// Paths of a rescanned repository: every file the registry handles under its root that the
     /// repo's include and exclude globs admit, and
-    /// every path that has a shard (so vanished files are removed).
+    /// every path that has a file revision (so vanished files are removed).
     fn expand_rescan(
         &self,
         tx: &impl Reader,
@@ -153,8 +141,8 @@ impl<'a> Processor<'a> {
         Ok(out)
     }
 
-    /// Process up to `budget` pending paths, those in `scope` first, then publish them and
-    /// finish the publish (renames, journal clear). Returns the `worktree` watermark.
+    /// Process up to `budget` pending paths, those in `scope` first, then publish them.
+    /// Returns the `worktree` watermark.
     pub fn process(
         &mut self,
         scope: &Scope,
@@ -162,7 +150,6 @@ impl<'a> Processor<'a> {
         deadline: Instant,
     ) -> Result<Seq, EngineError> {
         let wm = self.process_to_commit(scope, budget, deadline)?;
-        self.recover()?;
         // ADR-0033: the rank is computed once, when this round leaves nothing pending. A
         // reader meanwhile finds a rank whose watermark is behind and computes live.
         if self
@@ -212,8 +199,8 @@ impl<'a> Processor<'a> {
         Ok(())
     }
 
-    /// The publish up to and including the commit; the renames and the journal clear are left
-    /// for [`Processor::recover`]. Exposed so tests can stop at that point.
+    /// The publish: one transaction holds the rows, file revisions, errors, watermark and
+    /// pending removals. Exposed so tests can stop before the rank refresh.
     #[doc(hidden)]
     pub fn process_to_commit(
         &mut self,
@@ -242,16 +229,6 @@ impl<'a> Processor<'a> {
             return Ok(Seq(engine.cache().read()?.watermark(Context::WORKTREE)?));
         }
 
-        // Shard bytes are already in temp files; they become visible only through the journal.
-        let mut journal: Vec<JournalEntry> = Vec::new();
-        for p in &out {
-            match &p.ready {
-                Ready::Replace { tmp, fin, .. } => journal.push((tmp.clone(), fin.clone())),
-                Ready::Delete { fin: Some(fin) } => journal.push((String::new(), fin.clone())),
-                _ => {}
-            }
-        }
-
         let mut tx = engine.cache().write()?;
         let rank_was_current = tx.rank_is_current(RANK_CONTEXT)?;
         let mut touched: BTreeSet<String> = BTreeSet::new();
@@ -271,7 +248,7 @@ impl<'a> Processor<'a> {
                     tx.put_file_revision(&key.repo, &key.path, &revision)?;
                     tx.put_index_errors(&key.repo, &key.path, &errors)?;
                 }
-                Ready::Delete { .. } => {
+                Ready::Delete => {
                     engine.stitcher().remove_artifact(
                         &mut tx,
                         &ArtifactName {
@@ -315,7 +292,6 @@ impl<'a> Processor<'a> {
             tx.prune_events(ctx, wm)?;
         }
         let stitch = stitch_started.elapsed();
-        tx.set_publish_journal(&journal)?;
         let wm = tx.watermark(Context::WORKTREE)?;
         // A publish that changed nothing the rank depends on keeps the stored rank, which then
         // reflects the new watermark; one that did drops it (in `commit`) for `refresh_rank`.
@@ -508,42 +484,4 @@ impl<'a> Processor<'a> {
         tx.commit()?;
         Ok(report.set)
     }
-}
-
-/// The `.tmp-*` files under `dir`, recursively, sorted. A missing directory has none.
-pub fn find_orphan_temps(dir: &Utf8Path) -> Result<Vec<Utf8PathBuf>, EngineError> {
-    let mut out = Vec::new();
-    collect_orphan_temps(dir, &mut out)?;
-    out.sort();
-    Ok(out)
-}
-
-fn collect_orphan_temps(dir: &Utf8Path, out: &mut Vec<Utf8PathBuf>) -> Result<(), EngineError> {
-    let rd = match std::fs::read_dir(dir) {
-        Ok(rd) => rd,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-        Err(e) => return Err(EngineError::io(dir, e)),
-    };
-    for e in rd {
-        let e = e.map_err(|e| EngineError::io(dir, e))?;
-        let Some(name) = e.file_name().to_str().map(str::to_string) else {
-            continue;
-        };
-        let path = dir.join(&name);
-        let ft = e.file_type().map_err(|e| EngineError::io(dir, e))?;
-        if ft.is_dir() {
-            collect_orphan_temps(&path, out)?;
-        } else if ft.is_file() && name.starts_with(".tmp-") {
-            out.push(path);
-        }
-    }
-    Ok(())
-}
-
-/// Delete every `.tmp-*` file under `dir`, recursively.
-fn remove_orphan_temps(dir: &Utf8Path) -> Result<(), EngineError> {
-    for path in find_orphan_temps(dir)? {
-        std::fs::remove_file(&path).map_err(|e| EngineError::io(&path, e))?;
-    }
-    Ok(())
 }

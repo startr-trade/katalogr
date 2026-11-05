@@ -509,7 +509,6 @@ impl Engine {
             }
             match held {
                 Some(mut p) => {
-                    p.recover()?;
                     p.ingest()?;
                     p.process(&scope, DEFAULT_BUDGET, deadline)?;
                     backoff = POLL_START;

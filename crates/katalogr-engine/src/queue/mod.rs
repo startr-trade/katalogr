@@ -6,7 +6,7 @@ mod plan;
 pub mod processor;
 
 pub use inbox::Inbox;
-pub use processor::{Processor, find_orphan_temps};
+pub use processor::Processor;
 
 use katalogr_model::RelPath;
 use serde::{Deserialize, Serialize};

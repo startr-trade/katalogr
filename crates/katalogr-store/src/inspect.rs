@@ -4,7 +4,7 @@
 //! rebuilds anything or quarantines a shard. It opens redb's read-only handle, reads one
 //! snapshot and closes it.
 
-use crate::cache::{CACHE_SCHEMA, Cache, JournalEntry, PathKey, PendingKey, ReadTx, Reader};
+use crate::cache::{CACHE_SCHEMA, Cache, PathKey, PendingKey, ReadTx, Reader};
 use crate::error::StoreError;
 use crate::kindex::ProjectDir;
 use redb::{DatabaseError, ReadableDatabase, StorageError};
@@ -40,8 +40,6 @@ pub struct InspectedTables {
     pub watermark: u64,
     /// `Reader::pending_entries(None)`.
     pub pending: Vec<(PendingKey, u64)>,
-    /// `Reader::publish_journal`.
-    pub journal: Vec<JournalEntry>,
     /// Every stored file revision, sorted by key.
     pub file_revisions: Vec<(PathKey, [u8; 32])>,
     /// Files with at least one index-error row, and the row count.
@@ -118,7 +116,6 @@ fn read_tables(tx: &ReadTx) -> Result<InspectedTables, StoreError> {
     Ok(InspectedTables {
         watermark: tx.watermark(crate::rank::RANK_CONTEXT)?,
         pending: tx.pending_entries(None)?,
-        journal: tx.publish_journal()?,
         file_revisions: tx.file_revisions()?,
         error_files: tx.index_error_files()?,
         profile_errors_json: tx.meta("profiles_errors")?,

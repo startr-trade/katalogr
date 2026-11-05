@@ -111,23 +111,8 @@ mod doctor {
         r.checks.iter().find(|c| c.area == area).unwrap().status
     }
 
-    /// Writes a publish journal into the cache (the way an interrupted publish leaves one) and
-    /// creates the temp file it names.
-    fn interrupt_publish(p: &P) {
-        let e = open_engine(&p.kx, &p.work);
-        let tmp = ".tmp-a.tx.kshard.json";
-        std::fs::write(e.dir().root().join("shards/r").join(tmp), "{}").unwrap();
-        let mut tx = e.cache().write().unwrap();
-        tx.set_publish_journal(&[
-            (
-                format!("shards/r/{tmp}"),
-                "shards/r/a.tx.kshard.json".to_string(),
-            ),
-            (String::new(), "shards/r/b.tx.kshard.json".to_string()),
-        ])
-        .unwrap();
-        tx.commit().unwrap();
-    }
+    /// The publish journal is gone (FEAT-094): a no-op until T7/T10 retire its tests.
+    fn interrupt_publish(_p: &P) {}
 
     /// Holds the project's processor lock the way a running processor does.
     fn hold_lock(p: &P) -> std::fs::File {

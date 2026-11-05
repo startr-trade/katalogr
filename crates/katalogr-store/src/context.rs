@@ -157,12 +157,7 @@ pub fn seed_layer(
             META_BASE_ERRORS,
             &serde_json::to_vec(&errored).map_err(|e| StoreError::Row(e.to_string()))?,
         )?;
-        for t in [
-            TableId::FileRevisions,
-            TableId::Pending,
-            TableId::Events,
-            TableId::Journal,
-        ] {
+        for t in [TableId::Pending, TableId::Events] {
             tx.clear_table(t)?;
         }
         // The commit the base reflected, when the caller did not name one.

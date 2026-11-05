@@ -14,7 +14,7 @@ use crate::error::StoreError;
 use crate::fan;
 use crate::kindex::ProjectDir;
 use crate::postings::{self, PostingBuf};
-use camino::{Utf8Path, Utf8PathBuf};
+use camino::Utf8PathBuf;
 use katalogr_model::{
     ArtifactName, Confidence, ContractName, ContractRole, Export, ExportKey, Fact, Fragment, Id,
     LinkKind, Name, OutRef, Provenance, RelPath, Span, SymbolName,
@@ -270,10 +270,6 @@ pub struct PendingKey {
     pub path: RelPath,
 }
 
-/// One publish rename: `(temp, final)`, both relative to the project directory. An empty temp
-/// name means "remove the final file".
-pub type JournalEntry = (String, String);
-
 // ---------------------------------------------------------------- keys
 
 pub(crate) fn lp(out: &mut Vec<u8>, s: &str) {
@@ -344,14 +340,6 @@ fn export_key(ns: Vid, key: &str) -> Vec<u8> {
     let mut out = export_prefix(ns);
     out.extend_from_slice(key.as_bytes());
     out
-}
-
-/// The distinct parent directories of the journal's final paths under `root`.
-fn journal_parents(root: &Utf8Path, entries: &[JournalEntry]) -> BTreeSet<Utf8PathBuf> {
-    entries
-        .iter()
-        .filter_map(|(_, fin)| root.join(fin).parent().map(Utf8Path::to_path_buf))
-        .collect()
 }
 
 /// Scan prefix of the `refs_by_key` rows of one export key: `vid(namespace) || lp(key)`. The
@@ -597,7 +585,6 @@ pub enum TableId {
     Events,
     Pending,
     Watermark,
-    Journal,
     ExtContext,
     Postings,
     DocOrd,
@@ -618,7 +605,7 @@ pub enum TableId {
 }
 
 impl TableId {
-    pub const ALL: [TableId; 33] = [
+    pub const ALL: [TableId; 32] = [
         TableId::Meta,
         TableId::FileRevisions,
         TableId::Artifacts,
@@ -634,7 +621,6 @@ impl TableId {
         TableId::Events,
         TableId::Pending,
         TableId::Watermark,
-        TableId::Journal,
         TableId::ExtContext,
         TableId::Postings,
         TableId::DocOrd,
@@ -690,7 +676,6 @@ impl TableId {
             TableId::Events => "events",
             TableId::Pending => "pending",
             TableId::Watermark => "watermark",
-            TableId::Journal => "journal",
             TableId::ExtContext => "ext_context",
             TableId::Postings => "postings",
             TableId::DocOrd => "doc_ord",
@@ -1950,15 +1935,6 @@ pub trait Reader {
         Ok(Some(out))
     }
 
-    /// The renames of a publish that has committed but not yet finished.
-    fn publish_journal(&self) -> Result<Vec<JournalEntry>, StoreError> {
-        Ok(self
-            .raw_get(TableId::Journal, &[])?
-            .map(|v| de(&v))
-            .transpose()?
-            .unwrap_or_default())
-    }
-
     /// The extension context of `(repo, extension id)`: its SHA-256 and its bytes.
     fn ext_context(
         &self,
@@ -2734,15 +2710,6 @@ impl WriteTx<'_> {
         self.put(TableId::Watermark, context.as_bytes(), &seq.to_le_bytes())
     }
 
-    /// An empty list clears the journal.
-    pub fn set_publish_journal(&mut self, entries: &[JournalEntry]) -> Result<(), StoreError> {
-        if entries.is_empty() {
-            self.del(TableId::Journal, &[])
-        } else {
-            self.put(TableId::Journal, &[], &ser(&entries)?)
-        }
-    }
-
     /// Stores the context of `(repo, extension id)` with its SHA-256.
     pub fn put_ext_context(
         &mut self,
@@ -3155,12 +3122,12 @@ impl Cache {
     /// compared with the hashes.
     fn after_open(
         &self,
-        dir: &ProjectDir,
-        stitch: &dyn Restitch,
-        deadline: Instant,
+        _dir: &ProjectDir,
+        _stitch: &dyn Restitch,
+        _deadline: Instant,
     ) -> Result<SyncReport, StoreError> {
-        self.replay_journal(dir)?;
-        self.sync(dir, stitch, deadline)
+        // Nothing to replay and no shard files to compare (FEAT-094); T5 removes this step.
+        Ok(SyncReport::default())
     }
 
     /// FEAT-080 R-1, R-6. A read-only handle beside any writer. Never writes, syncs or replays.
@@ -3259,52 +3226,6 @@ impl Cache {
             Handle::Reader(_) => return Err(StoreError::Busy),
         };
         Ok(WriteTx::new(txn))
-    }
-
-    /// Finish an interrupted publish (FEAT-047, ADR-0014): for each journal entry, rename the
-    /// temp file onto the final name when the temp file still exists (an empty temp name removes
-    /// the final file), fsync, then clear the journal. Idempotent. Returns the entries handled.
-    pub fn replay_journal(&self, dir: &ProjectDir) -> Result<usize, StoreError> {
-        let entries = self.read()?.publish_journal()?;
-        if entries.is_empty() {
-            return Ok(0);
-        }
-        #[cfg_attr(not(feature = "failpoints"), allow(unused_variables))]
-        for (i, (tmp, fin)) in entries.iter().enumerate() {
-            let to = dir.root().join(fin);
-            if tmp.is_empty() {
-                match std::fs::remove_file(&to) {
-                    Ok(()) => {}
-                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-                    Err(e) => return Err(StoreError::io(&to, e)),
-                }
-            } else {
-                let from = dir.root().join(tmp);
-                // The temp file was synced before the publish commit that wrote this entry.
-                if from.exists() {
-                    std::fs::rename(&from, &to).map_err(|e| StoreError::io(&from, e))?;
-                }
-            }
-            #[cfg(feature = "failpoints")]
-            if i == 0 {
-                crate::failpoint::hit("mid_renames");
-            }
-        }
-        // One sync per distinct directory, after the last rename and before the journal is
-        // cleared (ADR-0033). Entries already renamed by an interrupted replay count too.
-        for parent in journal_parents(dir.root(), &entries) {
-            if parent.is_dir() {
-                std::fs::File::open(&parent)
-                    .and_then(|f| f.sync_all())
-                    .map_err(|e| StoreError::io(&parent, e))?;
-            }
-        }
-        #[cfg(feature = "failpoints")]
-        crate::failpoint::hit("before_journal_clear");
-        let mut tx = self.write()?;
-        tx.set_publish_journal(&[])?;
-        tx.commit()?;
-        Ok(entries.len())
     }
 
     /// What the last `open_or_rebuild` did.
@@ -3460,96 +3381,6 @@ impl Cache {
         }
         Ok(())
     }
-
-    /// Bring the graph in line with the shard files: a shard whose provenance revision differs
-    /// from the stored file revision is decoded and stitched. Goes with the shards (FEAT-094 T5).
-    fn sync(
-        &self,
-        dir: &ProjectDir,
-        stitch: &dyn Restitch,
-        deadline: Instant,
-    ) -> Result<SyncReport, StoreError> {
-        let mut report = SyncReport::default();
-        let on_disk = dir.list_shards()?;
-        let mut tx = self.write()?;
-        let mut stale: BTreeSet<(String, RelPath)> =
-            tx.file_revisions()?.into_iter().map(|(k, _)| k).collect();
-
-        for (repo, path) in &on_disk {
-            stale.remove(&(repo.clone(), path.clone()));
-            if Instant::now() >= deadline {
-                report.deadline_hit = true;
-                break;
-            }
-            let file = dir.shard_path(repo, path);
-            let bytes = match std::fs::read(&file) {
-                Ok(b) => b,
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
-                Err(e) => return Err(StoreError::io(&file, e)),
-            };
-            report.hashed += 1;
-            let stored = tx.file_revision(repo, path)?;
-            match crate::shard::decode(&bytes) {
-                Ok(fragment) => {
-                    let hash: [u8; 32] =
-                        Sha256::digest(fragment.provenance.revision.as_bytes()).into();
-                    if stored == Some(hash) {
-                        continue;
-                    }
-                    let revision = fragment.provenance.revision.clone();
-                    stitch.replace_fragment(&mut tx, fragment)?;
-                    tx.put_file_revision(repo, path, &revision)?;
-                    tx.put_index_errors(repo, path, &[])?;
-                    report.replaced += 1;
-                }
-                Err(e) => {
-                    quarantine(dir, repo, path)?;
-                    // Whatever this shard contributed before is gone with it.
-                    if stored.is_some() {
-                        stitch.remove_artifact(
-                            &mut tx,
-                            &ArtifactName {
-                                repo: repo.clone(),
-                                path: path.clone(),
-                            },
-                        )?;
-                        tx.remove_file_revision(repo, path)?;
-                    }
-                    tx.put_index_errors(
-                        repo,
-                        path,
-                        &[ErrorRow {
-                            span: None,
-                            message: e.to_string(),
-                        }],
-                    )?;
-                    report.quarantined.push((repo.clone(), path.clone()));
-                }
-            }
-        }
-
-        if !report.deadline_hit {
-            // Only meaningful when every on-disk shard was visited.
-            for (repo, path) in stale {
-                if Instant::now() >= deadline {
-                    report.deadline_hit = true;
-                    break;
-                }
-                stitch.remove_artifact(
-                    &mut tx,
-                    &ArtifactName {
-                        repo: repo.clone(),
-                        path: path.clone(),
-                    },
-                )?;
-                tx.remove_file_revision(&repo, &path)?;
-                tx.put_index_errors(&repo, &path, &[])?;
-                report.removed += 1;
-            }
-        }
-        tx.commit()?;
-        Ok(report)
-    }
 }
 
 /// Create the tables and check `meta.cache_schema`. `false`: written by another schema. A cache
@@ -3583,20 +3414,6 @@ fn schema_current(database: &Database) -> Result<bool, StoreError> {
         tx.commit()?;
     }
     Ok(ok)
-}
-
-/// Moves an undecodable shard to `.cache/quarantine/<repo>/<path>`.
-fn quarantine(dir: &ProjectDir, repo: &str, path: &RelPath) -> Result<(), StoreError> {
-    let from = dir.shard_path(repo, path);
-    let to = dir.cache_dir().join("quarantine").join(repo).join(format!(
-        "{}{}",
-        path.as_str(),
-        crate::shard::SUFFIX
-    ));
-    if let Some(parent) = to.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| StoreError::io(parent, e))?;
-    }
-    std::fs::rename(&from, &to).map_err(|e| StoreError::io(&from, e))
 }
 
 #[cfg(test)]
@@ -3639,25 +3456,6 @@ mod tests {
             artifact: Id([a; 16]),
             index,
         }
-    }
-
-    #[test]
-    fn journal_parents_distinct() {
-        let root = Utf8Path::new("/kx/projects/p");
-        let entries: Vec<JournalEntry> = vec![
-            ("shards/r/.tmp-1".into(), "shards/r/a.json".into()),
-            ("shards/r/.tmp-2".into(), "shards/r/b.json".into()),
-            ("shards/r/sub/.tmp-3".into(), "shards/r/sub/c.json".into()),
-            (String::new(), "shards/r/sub/gone.json".into()),
-        ];
-        let parents = journal_parents(root, &entries);
-        let want: BTreeSet<Utf8PathBuf> =
-            ["/kx/projects/p/shards/r", "/kx/projects/p/shards/r/sub"]
-                .into_iter()
-                .map(Utf8PathBuf::from)
-                .collect();
-        assert_eq!(parents, want);
-        assert!(journal_parents(root, &[]).is_empty());
     }
 
     #[test]
