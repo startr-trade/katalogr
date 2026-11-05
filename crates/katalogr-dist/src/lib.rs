@@ -10,6 +10,7 @@ pub use docs_affected::{DEFAULT_DOCS_LIMIT, DocsAffectedParams};
 pub mod contexts;
 pub mod contract;
 pub use katalogr_query::{PositionAnswer, PositionRef, ViewQuery, WorkingSetSummary};
+pub mod doc_blocks;
 pub mod doctor;
 mod error;
 pub mod eval;
@@ -25,6 +26,7 @@ pub use test_extractor::extract_calls;
 mod threads;
 pub mod watch;
 pub mod working_set;
+mod views;
 
 use crate::contexts::ContextChoice;
 pub use claude::{
@@ -42,6 +44,7 @@ use katalogr_query::{
     WhyResult, cap,
 };
 pub use katalogr_query::{ReplaceResult, ShowResult};
+pub use katalogr_render as render;
 pub use setup::{ProjectCreated, kindex_init, project_init};
 pub use threads::{BATCH_BYTES_KEY, THREADS_ENV, THREADS_KEY, resolve_parallelism};
 
@@ -75,6 +78,14 @@ pub fn schemas() -> BTreeMap<&'static str, serde_json::Value> {
             "schema name {name} is registered twice"
         );
     }
+    assert!(
+        all.insert(
+            "render",
+            schemars::schema_for!(katalogr_query::Envelope<katalogr_render::ViewGraph>).to_value()
+        )
+        .is_none(),
+        "schema name render is registered twice"
+    );
     assert!(
         all.insert("doctor", doctor::schema()).is_none(),
         "schema name doctor is registered twice"

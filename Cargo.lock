@@ -1968,6 +1968,7 @@ dependencies = [
  "katalogr-ext-ts",
  "katalogr-model",
  "katalogr-query",
+ "katalogr-render",
  "katalogr-store",
  "regex",
  "schemars",
@@ -2163,6 +2164,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "katalogr-render"
+version = "0.1.0"
+dependencies = [
+ "layout-rs",
+ "schemars",
+ "serde",
+ "sha2",
+]
+
+[[package]]
 name = "katalogr-store"
 version = "0.1.0"
 dependencies = [
@@ -2180,6 +2191,12 @@ dependencies = [
  "tempfile",
  "thiserror",
 ]
+
+[[package]]
+name = "layout-rs"
+version = "0.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5b8b38bc67665e362eb770c6b6ae88b48d040d94a0a10c4904c37bc79d263b95"
 
 [[package]]
 name = "libc"

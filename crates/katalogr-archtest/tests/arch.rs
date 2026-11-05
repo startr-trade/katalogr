@@ -336,6 +336,30 @@ mod archtest {
         );
     }
 
+    /// R-14 (FEAT-032). `katalogr-render` is a library, not a core crate: the core list names
+    /// no render crate, and no core crate depends on it, whatever the kind of dependency.
+    #[test]
+    fn render_is_not_core() {
+        let md = metadata(false);
+        let mut failures = Vec::new();
+        if workspace_package(&md, "katalogr-render").is_none() {
+            failures.push("package katalogr-render not found".to_string());
+        }
+        for p in core_crates(&md) {
+            if p.name.as_str() == "katalogr-render" {
+                failures.push("katalogr-render must not be in core_crates".to_string());
+            }
+            if p.dependencies.iter().any(|d| d.name == "katalogr-render") {
+                failures.push(format!("{} must not depend on katalogr-render", p.name));
+            }
+        }
+        assert!(
+            failures.is_empty(),
+            "katalogr-render is in the core:\n{}",
+            failures.join("\n")
+        );
+    }
+
     #[test]
     fn wrappers_are_thin() {
         let md = metadata(false);

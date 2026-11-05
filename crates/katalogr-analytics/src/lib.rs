@@ -20,6 +20,7 @@ mod rationale;
 pub mod result;
 mod scc;
 mod schema;
+pub mod structure;
 #[cfg(test)]
 #[allow(dead_code)]
 mod testkit;

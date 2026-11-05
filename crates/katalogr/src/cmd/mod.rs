@@ -32,6 +32,8 @@ pub mod profiles;
 pub mod project;
 pub mod rationale;
 pub mod refs;
+pub mod render;
+pub mod render_doc;
 pub mod replace;
 pub mod search;
 pub mod session;

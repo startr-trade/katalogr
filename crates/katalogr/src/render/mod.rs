@@ -1040,6 +1040,35 @@ pub const COVERAGE: Shape<CoverageReport> = Shape {
     fails: never,
 };
 
+/// Render a view: the drawn text on stdout, or the graph in a JSON envelope. The text carries
+/// no `partial:` line on stdout, which is a diagram; it goes to stderr, and the diagram itself
+/// notes a partial view.
+pub fn view(
+    cli: &Cli,
+    reply: Reply<katalogr_dist::render::ViewGraph>,
+    draw: impl FnOnce(&katalogr_dist::render::ViewGraph) -> Result<String, katalogr_dist::DistError>,
+) -> Result<ExitCode, katalogr_dist::DistError> {
+    if cli.json {
+        return Ok(emit(&json::view(reply, cli.budget)));
+    }
+    let code = exit_for(&reply);
+    match reply.outcome {
+        Outcome::Found(g) => {
+            let text = draw(&g)?;
+            note_stale(&reply.report);
+            print!("{text}");
+            if !text.ends_with('\n') {
+                println!();
+            }
+            for p in &reply.partial {
+                eprintln!("{}", p.line());
+            }
+        }
+        other => other_outcomes(cli, &reply.report, other, None),
+    }
+    Ok(code)
+}
+
 /// Render an insight report as text or a JSON envelope. The budget trims whole `items`; the
 /// summary stays and the envelope records the truncation.
 pub fn insight<R>(cli: &Cli, reply: Reply<R>, command: &str, shape: &Shape<R>) -> ExitCode
