@@ -229,6 +229,44 @@ pub fn status_path_count(root: &Path) -> Result<usize, ScanError> {
     Ok(n)
 }
 
+/// Adds `/<rel>` to the checkout's `info/exclude` (the common dir's, for a linked worktree) unless
+/// `rel` is tracked or a line for it is already there; other lines are left alone. `Ok(true)`
+/// when a line was appended; `Ok(false)` for a plain directory or nothing to do.
+pub fn exclude_untracked(root: &Path, rel: &str) -> Result<bool, ScanError> {
+    if !root.join(".git").exists() {
+        return Ok(false);
+    }
+    let git = gix::open(root).map_err(|e| ScanError::RepoOpen {
+        path: root.display().to_string(),
+        message: e.to_string(),
+    })?;
+    let index = git.index_or_empty().map_err(diff_err)?;
+    if index.entry_by_path(rel.into()).is_some() {
+        return Ok(false);
+    }
+    let file = git.common_dir().join("info/exclude");
+    let old = match std::fs::read_to_string(&file) {
+        Ok(t) => t,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(e) => return Err(io_err(&file, e)),
+    };
+    let anchored = format!("/{rel}");
+    if old.lines().any(|l| l.trim() == rel || l.trim() == anchored) {
+        return Ok(false);
+    }
+    if let Some(dir) = file.parent() {
+        std::fs::create_dir_all(dir).map_err(|e| io_err(dir, e))?;
+    }
+    let mut text = old;
+    if !text.is_empty() && !text.ends_with('\n') {
+        text.push('\n');
+    }
+    text.push_str(&anchored);
+    text.push('\n');
+    std::fs::write(&file, text).map_err(|e| io_err(&file, e))?;
+    Ok(true)
+}
+
 /// The ignore stack of a checkout: every `.gitignore` in the tree, `.git/info/exclude` and
 /// `core.excludesFile`. Shared by the position's walk and by `scan::list_files`.
 pub(crate) fn excludes_stack<'r>(

@@ -91,6 +91,17 @@ pub fn project_init(
                 repo: repo.clone(),
             };
             marker::write(root, &m)?;
+            // An untracked marker would make the checkout's position dirty; ignored files do not
+            // count. A failure to exclude it is a warning only.
+            if let Err(e) = katalogr_engine::position::exclude_untracked(
+                root.as_std_path(),
+                marker::MARKER_FILE,
+            ) {
+                eprintln!(
+                    "warning: could not exclude {} from the position: {e}",
+                    marker::MARKER_FILE
+                );
+            }
             markers.push(root.join(marker::MARKER_FILE).into_std_path_buf());
         }
     }
