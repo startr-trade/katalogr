@@ -238,7 +238,9 @@ pub struct SearchHit {
 }
 
 /// Which way a link was followed.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, JsonSchema)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, JsonSchema,
+)]
 pub enum Direction {
     /// The link points from `from` to `to`.
     Forward,
