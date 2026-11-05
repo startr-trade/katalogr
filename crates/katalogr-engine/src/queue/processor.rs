@@ -13,8 +13,11 @@ use crate::failpoint::fail;
 use crate::profiles::{self, ProfileSet};
 use crate::scan;
 use camino::{Utf8Path, Utf8PathBuf};
-use katalogr_model::{ArtifactName, RelPath};
-use katalogr_store::{ErrorRow, JournalEntry, PendingKey, RANK_CONTEXT, Reader, WriteTx, pagerank};
+use katalogr_model::{ArtifactName, Id, Name, RelPath};
+use katalogr_store::{
+    ErrorRow, JournalEntry, PendingKey, RANK_CONTEXT, RANK_TOP_ENTRIES, RankTop, Reader, WriteTx,
+    pagerank,
+};
 use std::collections::BTreeSet;
 use std::fs::File;
 use std::time::Instant;
@@ -180,6 +183,18 @@ impl<'a> Processor<'a> {
         let ranked: Vec<_> = symbols.iter().map(|(id, _)| *id).zip(scores).collect();
         let wm = tx.watermark(RANK_CONTEXT)?;
         tx.store_rank(&ranked, wm)?;
+        // The head of the rank, in `map` order, for readers that need only the best symbols.
+        let mut top: Vec<(String, Id, f64)> = symbols
+            .iter()
+            .zip(&ranked)
+            .map(|((id, row), (_, score))| (row.name.canonical(), *id, *score))
+            .collect();
+        top.sort_by(|a, b| b.2.total_cmp(&a.2).then_with(|| a.0.cmp(&b.0)));
+        top.truncate(RANK_TOP_ENTRIES);
+        tx.store_rank_top(&RankTop {
+            total: symbols.len() as u64,
+            entries: top.into_iter().map(|(_, id, score)| (id, score)).collect(),
+        })?;
         tx.commit()?;
         self.engine.add_stats(IndexStats {
             rank_refreshes: 1,

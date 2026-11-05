@@ -1,7 +1,7 @@
 //! `map`: an outline of the most important symbols.
 
 use crate::diagnostic::{DIAG_TOP, DIAG_WEIGHTS, Diagnostic, RankSource, RoutingTrace};
-use crate::rank::{rank_cached_or_live_with_source, row_weight};
+use crate::rank::rank_cached_or_live_with_source;
 use crate::refs::weight_trace;
 use crate::result::MapEntry;
 use crate::search::round6;
@@ -24,9 +24,9 @@ pub fn map(tx: &impl Reader) -> Result<Vec<MapEntry>, StoreError> {
 /// symbols into `diag`. The answer does not depend on `diag`.
 pub fn map_traced(tx: &impl Reader, diag: &mut Diagnostic) -> Result<Vec<MapEntry>, StoreError> {
     let mut degree: BTreeMap<Id, f64> = BTreeMap::new();
-    for (key, row) in tx.links_all()? {
-        *degree.entry(key.to).or_default() += row_weight(&row);
-    }
+    tx.for_each_link(&mut |_, _, to, weight, _| {
+        *degree.entry(to).or_default() += weight;
+    })?;
     let (ranked, cached) = rank_cached_or_live_with_source(tx)?;
     if let Some(d) = diag.on() {
         d.routing = Some(RoutingTrace {
@@ -76,4 +76,28 @@ pub fn map_traced(tx: &impl Reader, diag: &mut Diagnostic) -> Result<Vec<MapEntr
             symbol,
         })
         .collect())
+}
+
+/// The start of [`map`], from the stored top of the rank, with `in_degree` 0.0: only for callers
+/// that do not read `in_degree`. Returns the number of symbols and the entries; `None` when the
+/// stored rank is not current or a row is missing, and the caller then uses [`map`].
+pub fn map_top(tx: &impl Reader) -> Result<Option<(u64, Vec<MapEntry>)>, StoreError> {
+    if !tx.rank_is_current(RANK_CONTEXT)? {
+        return Ok(None);
+    }
+    let Some(top) = tx.rank_top()? else {
+        return Ok(None);
+    };
+    let ids: Vec<Id> = top.entries.iter().map(|(id, _)| *id).collect();
+    let rows = tx.symbols_many(&ids)?;
+    let mut out = Vec::with_capacity(rows.len());
+    for (row, (_, score)) in rows.iter().zip(&top.entries) {
+        let Some(row) = row else { return Ok(None) };
+        out.push(MapEntry {
+            symbol: crate::resolve::hit(row),
+            rank: round6(*score),
+            in_degree: 0.0,
+        });
+    }
+    Ok(Some((top.total, out)))
 }

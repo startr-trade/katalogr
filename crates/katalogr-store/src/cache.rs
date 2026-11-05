@@ -10,7 +10,7 @@ use crate::kindex::ProjectDir;
 use camino::{Utf8Path, Utf8PathBuf};
 use katalogr_model::{
     ArtifactName, Confidence, ContractName, ContractRole, Export, ExportKey, Fact, Fragment, Id,
-    LinkKind, OutRef, Provenance, RelPath, Span, SymbolName,
+    LinkKind, Name, OutRef, Provenance, RelPath, Span, SymbolName,
 };
 use redb::{
     Database, DatabaseError, ReadTransaction, ReadableDatabase, ReadableTable, StorageError,
@@ -24,10 +24,16 @@ use std::ops::Bound;
 use std::time::{Duration, Instant};
 
 /// Stored in `meta`; a different number rebuilds the cache from the shards.
-pub const CACHE_SCHEMA: u32 = 11;
+pub const CACHE_SCHEMA: u32 = 12;
 
 /// `meta` key: the watermark the stored rank reflects.
 const RANK_WATERMARK_META: &str = "rank_watermark";
+
+/// `meta` key: the head of the stored rank (FEAT-076).
+const RANK_TOP_META: &str = "rank_top";
+
+/// How many entries of the rank's head are stored beside it.
+pub const RANK_TOP_ENTRIES: usize = 4096;
 
 // ---------------------------------------------------------------- rows
 
@@ -53,6 +59,25 @@ pub struct SymbolRow {
     pub kind: String,
     pub span: Span,
     pub facts: BTreeMap<String, Fact>,
+}
+
+/// A symbol without its facts, read without JSON (FEAT-076). `name` is the canonical name and
+/// `path` the path of the symbol's artifact.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SymbolCore {
+    pub name: String,
+    pub kind: String,
+    pub path: String,
+    pub artifact: Id,
+    pub span: Span,
+}
+
+/// The head of the stored rank: the symbol count and the best `RANK_TOP_ENTRIES` scores, by
+/// score descending then canonical name.
+#[derive(Clone, Debug, PartialEq)]
+pub struct RankTop {
+    pub total: u64,
+    pub entries: Vec<(Id, f64)>,
 }
 
 /// What a structural comparison needs of a symbol, read without building its whole row: the
@@ -265,6 +290,58 @@ pub type JournalEntry = (String, String);
 pub(crate) fn lp(out: &mut Vec<u8>, s: &str) {
     out.extend_from_slice(&(s.len() as u32).to_be_bytes());
     out.extend_from_slice(s.as_bytes());
+}
+
+/// The `symbol_core` key of a symbol: `lp(lowercased plain name) || id`.
+fn core_key(row: &SymbolRow, id: Id) -> Vec<u8> {
+    let plain = row.name.segments.last().map_or("", |s| s.name.as_str());
+    let mut k = Vec::new();
+    lp(&mut k, &plain.to_lowercase());
+    k.extend_from_slice(&id.0);
+    k
+}
+
+/// The `symbol_core` value of a symbol: `lp(canonical) || lp(kind) || lp(path) || artifact ||
+/// start_line, start_col, end_line, end_col` (big-endian u32).
+fn core_value(row: &SymbolRow) -> Vec<u8> {
+    let mut v = Vec::new();
+    lp(&mut v, &row.name.canonical());
+    lp(&mut v, &row.kind);
+    lp(&mut v, row.name.artifact.path.as_str());
+    v.extend_from_slice(&row.artifact.0);
+    for n in [
+        row.span.start_line,
+        row.span.start_col,
+        row.span.end_line,
+        row.span.end_col,
+    ] {
+        v.extend_from_slice(&n.to_be_bytes());
+    }
+    v
+}
+
+fn core_decode(b: &[u8]) -> Result<SymbolCore, StoreError> {
+    let bad = || StoreError::Row("bad symbol_core row".into());
+    let (name, rest) = split_lp(b).map_err(|_| bad())?;
+    let (kind, rest) = split_lp(rest).map_err(|_| bad())?;
+    let (path, rest) = split_lp(rest).map_err(|_| bad())?;
+    if rest.len() != 32 {
+        return Err(bad());
+    }
+    let artifact = Id(rest[..16].try_into().expect("16 bytes"));
+    let n = |i: usize| u32::from_be_bytes(rest[16 + i * 4..20 + i * 4].try_into().expect("4 bytes"));
+    Ok(SymbolCore {
+        name: name.to_string(),
+        kind: kind.to_string(),
+        path: path.to_string(),
+        artifact,
+        span: Span {
+            start_line: n(0),
+            start_col: n(1),
+            end_line: n(2),
+            end_col: n(3),
+        },
+    })
 }
 
 fn export_prefix(namespace: &str) -> Vec<u8> {
@@ -541,10 +618,11 @@ pub enum TableId {
     FanIn,
     ExportsByTarget,
     BoundRefsByKey,
+    SymbolCore,
 }
 
 impl TableId {
-    const ALL: [TableId; 27] = [
+    const ALL: [TableId; 28] = [
         TableId::Meta,
         TableId::ShardHashes,
         TableId::Artifacts,
@@ -572,10 +650,11 @@ impl TableId {
         TableId::FanIn,
         TableId::ExportsByTarget,
         TableId::BoundRefsByKey,
+        TableId::SymbolCore,
     ];
 
     /// The graph tables, in the order `dump_graph` reports them.
-    const GRAPH: [TableId; 14] = [
+    const GRAPH: [TableId; 15] = [
         TableId::Artifacts,
         TableId::Symbols,
         TableId::LinksOut,
@@ -590,6 +669,7 @@ impl TableId {
         TableId::FanIn,
         TableId::ExportsByTarget,
         TableId::BoundRefsByKey,
+        TableId::SymbolCore,
     ];
 
     fn name(self) -> &'static str {
@@ -621,6 +701,7 @@ impl TableId {
             TableId::FanIn => "fan_in",
             TableId::ExportsByTarget => "exports_by_target",
             TableId::BoundRefsByKey => "bound_refs_by_key",
+            TableId::SymbolCore => "symbol_core",
         }
     }
 
@@ -793,6 +874,130 @@ pub trait Reader {
             .into_iter()
             .map(|(k, v)| Ok((Id(id_bytes(&k)?), de(&v)?)))
             .collect()
+    }
+
+    /// Every symbol's core, sorted by id bytes, the order of [`Reader::symbols`] (FEAT-076).
+    fn symbol_cores(&self) -> Result<Vec<(Id, SymbolCore)>, StoreError> {
+        let mut out = Vec::new();
+        for (k, v) in self.raw_scan(TableId::SymbolCore, &[])? {
+            let id = Id(id_bytes(k.get(k.len().saturating_sub(16)..).unwrap_or(&[]))?);
+            out.push((id, core_decode(&v)?));
+        }
+        out.sort_by_key(|(id, _)| *id);
+        Ok(out)
+    }
+
+    /// Ids of the symbols whose lowercased plain name equals `lower`, in id order.
+    fn symbol_ids_by_plain_ci(&self, lower: &str) -> Result<Vec<Id>, StoreError> {
+        let mut prefix = Vec::new();
+        lp(&mut prefix, lower);
+        self.raw_scan_keys(TableId::SymbolCore, &prefix)?
+            .iter()
+            .map(|k| Ok(Id(id_bytes(&k[prefix.len()..])?)))
+            .collect()
+    }
+
+    /// Ids of the symbols whose lowercased plain name contains `lower`. Scans keys only.
+    fn symbol_ids_plain_contains(&self, lower: &str) -> Result<Vec<Id>, StoreError> {
+        let mut out = Vec::new();
+        for k in self.raw_scan_keys(TableId::SymbolCore, &[])? {
+            let (plain, rest) = split_lp(&k)?;
+            if plain.contains(lower) {
+                out.push(Id(id_bytes(rest)?));
+            }
+        }
+        Ok(out)
+    }
+
+    /// The stored top of the rank, or `None` when absent. The caller checks
+    /// [`Reader::rank_is_current`].
+    fn rank_top(&self) -> Result<Option<RankTop>, StoreError> {
+        let Some(v) = self.meta(RANK_TOP_META)? else {
+            return Ok(None);
+        };
+        let bad = || StoreError::Row("bad rank_top".into());
+        if v.len() < 8 || (v.len() - 8) % 24 != 0 {
+            return Err(bad());
+        }
+        let total = u64::from_le_bytes(v[..8].try_into().expect("8 bytes"));
+        let entries = v[8..]
+            .chunks_exact(24)
+            .map(|c| {
+                let id = Id(c[..16].try_into().expect("16 bytes"));
+                let bits = u64::from_le_bytes(c[16..].try_into().expect("8 bytes"));
+                (id, f64::from_bits(bits))
+            })
+            .collect();
+        Ok(Some(RankTop { total, entries }))
+    }
+
+    /// Calls `f(from, kind, to, weight, strong)` once per link row, in [`Reader::links_all`]
+    /// order, without decoding spans or provenance. `weight` equals [`crate::row_weight`] and
+    /// `strong` the analytics row strength of the expanded row.
+    fn for_each_link(&self, f: &mut dyn FnMut(Id, &str, Id, f64, bool)) -> Result<(), StoreError> {
+        let stored = self.raw_scan(TableId::LinksOut, &[])?;
+        let fans = self.raw_scan(TableId::FanOut, &[])?;
+        walk_links(self, &stored, &fans, f)
+    }
+
+    /// The distinct kinds in `links_out` and `fan_out` keys, decoding no value.
+    fn link_kinds(&self) -> Result<BTreeSet<String>, StoreError> {
+        let mut out = BTreeSet::new();
+        for t in [TableId::LinksOut, TableId::FanOut] {
+            let mut last: Option<Vec<u8>> = None;
+            for k in self.raw_scan_keys(t, &[])? {
+                let (kind, _) = split_lp(k.get(16..).ok_or_else(|| {
+                    StoreError::Row("malformed key".into())
+                })?)?;
+                if last.as_deref() != Some(kind.as_bytes()) {
+                    out.insert(kind.to_string());
+                    last = Some(kind.as_bytes().to_vec());
+                }
+            }
+        }
+        Ok(out)
+    }
+
+    /// Calls `f(from, kind, ref_index, resolved)` for every entry that came from a reference,
+    /// stored or fan row, per fan row and not per target. A fan row whose key has no target
+    /// calls nothing.
+    fn for_each_ref_entry(
+        &self,
+        f: &mut dyn FnMut(Id, &str, u32, bool),
+    ) -> Result<(), StoreError> {
+        for (k, v) in self.raw_scan(TableId::LinksOut, &[])? {
+            let from = Id(id_bytes(k.get(..16).unwrap_or(&[]))?);
+            let (kind, _) = split_lp(&k[16..])?;
+            let row: RawLinkRow = de(&v)?;
+            for e in &row.entries {
+                if let LinkOrigin::Ref(i) = e.origin {
+                    f(from, kind, i, entry_strong(e.confidence, e.fanout));
+                }
+            }
+        }
+        let mut counts: HashMap<ExportKey, usize> = HashMap::new();
+        for (k, v) in self.raw_scan(TableId::FanOut, &[])? {
+            let fk = fan::decode_fan_out_key(&k)?;
+            let n = match counts.get(&fk.key) {
+                Some(n) => *n,
+                None => {
+                    let n = self.export_count(&fk.key)?;
+                    counts.insert(fk.key.clone(), n);
+                    n
+                }
+            };
+            if n == 0 {
+                continue;
+            }
+            let n = u32::try_from(n).unwrap_or(u32::MAX);
+            let row: RawLinkRow = de(&v)?;
+            for e in &row.entries {
+                if let LinkOrigin::Ref(i) = e.origin {
+                    f(fk.from, &fk.kind.0, i, entry_strong(e.confidence, Some(n)));
+                }
+            }
+        }
+        Ok(())
     }
 
     /// The stored `links_out` row of `key`, without fan rows (FEAT-077). The stitcher uses only
@@ -1656,6 +1861,108 @@ fn decode_doc_len(v: &[u8]) -> Result<[u32; LEXICON_FIELDS], StoreError> {
     Ok(out)
 }
 
+/// Whether one link entry is strong: not inferred, and its fan-out at most one.
+fn entry_strong(confidence: Confidence, fanout: Option<u32>) -> bool {
+    confidence != Confidence::Inferred && fanout.is_none_or(|n| n <= 1)
+}
+
+/// The weight and strength of one encoded link row, without spans or provenance: the largest
+/// [`crate::link_weight`] of its entries and whether any entry is strong, each entry's fan-out
+/// replaced by `fanout_override` when given. The only row decoder the link walk uses.
+fn link_row_brief(v: &[u8], fanout_override: Option<u32>) -> Result<(f64, bool), StoreError> {
+    let row: RawLinkRow = de(v)?;
+    let mut weight = 0.0f64;
+    let mut strong = false;
+    for e in &row.entries {
+        let fanout = fanout_override.or(e.fanout);
+        let w = match (e.confidence, fanout) {
+            (Confidence::Inferred, Some(n)) if n > 1 => 1.0 / f64::from(n),
+            _ => 1.0,
+        };
+        weight = weight.max(w);
+        strong |= entry_strong(e.confidence, fanout);
+    }
+    Ok((weight, strong))
+}
+
+/// The `from || lp(kind)` prefix of a `links_out` or `fan_out` key.
+fn group_prefix(k: &[u8]) -> Result<&[u8], StoreError> {
+    let bad = || StoreError::Row("malformed key".into());
+    let len = u32::from_be_bytes(k.get(16..20).ok_or_else(bad)?.try_into().expect("4 bytes"));
+    k.get(..20 + len as usize).ok_or_else(bad)
+}
+
+/// Merges raw `links_out` and `fan_out` rows (each in key order) by `(from, kind)` group, in
+/// [`Reader::links_all`] order.
+fn walk_links(
+    tx: &(impl Reader + ?Sized),
+    stored: &[(Vec<u8>, Vec<u8>)],
+    fans: &[(Vec<u8>, Vec<u8>)],
+    f: &mut dyn FnMut(Id, &str, Id, f64, bool),
+) -> Result<(), StoreError> {
+    let (mut si, mut fi) = (0usize, 0usize);
+    let mut targets: HashMap<ExportKey, Vec<Id>> = HashMap::new();
+    let mut group: HashMap<Id, (f64, bool)> = HashMap::new();
+    while si < stored.len() || fi < fans.len() {
+        let sp = stored.get(si).map(|(k, _)| group_prefix(k)).transpose()?;
+        let fp = fans.get(fi).map(|(k, _)| group_prefix(k)).transpose()?;
+        let prefix = match (sp, fp) {
+            (Some(a), Some(b)) => a.min(b),
+            (Some(a), None) | (None, Some(a)) => a,
+            (None, None) => break,
+        };
+        let from = Id(id_bytes(&prefix[..16])?);
+        let (kind, _) = split_lp(&prefix[16..])?;
+        let s_end = si
+            + stored[si..]
+                .iter()
+                .take_while(|(k, _)| k.starts_with(prefix))
+                .count();
+        let f_end = fi
+            + fans[fi..]
+                .iter()
+                .take_while(|(k, _)| k.starts_with(prefix))
+                .count();
+        if fi == f_end {
+            for (k, v) in &stored[si..s_end] {
+                let to = Id(id_bytes(&k[prefix.len()..])?);
+                let (w, s) = link_row_brief(v, None)?;
+                f(from, kind, to, w, s);
+            }
+        } else {
+            group.clear();
+            for (k, v) in &stored[si..s_end] {
+                let to = Id(id_bytes(&k[prefix.len()..])?);
+                group.insert(to, link_row_brief(v, None)?);
+            }
+            for (k, v) in &fans[fi..f_end] {
+                let key = fan::decode_fan_out_key(k)?.key;
+                if !targets.contains_key(&key) {
+                    let t = tx.exports(&key)?;
+                    targets.insert(key.clone(), t);
+                }
+                let ts = &targets[&key];
+                let n = u32::try_from(ts.len()).unwrap_or(u32::MAX);
+                let (w, s) = link_row_brief(v, Some(n))?;
+                for to in ts {
+                    let e = group.entry(*to).or_insert((w, s));
+                    e.0 = e.0.max(w);
+                    e.1 |= s;
+                }
+            }
+            let mut ids: Vec<Id> = group.keys().copied().collect();
+            ids.sort();
+            for to in ids {
+                let (w, s) = group[&to];
+                f(from, kind, to, w, s);
+            }
+        }
+        si = s_end;
+        fi = f_end;
+    }
+    Ok(())
+}
+
 fn id_bytes(k: &[u8]) -> Result<[u8; 16], StoreError> {
     k.try_into()
         .map_err(|_| StoreError::Row("malformed key".into()))
@@ -1804,11 +2111,16 @@ impl WriteTx<'_> {
 
     pub fn put_symbol(&mut self, id: Id, row: &SymbolRow) -> Result<(), StoreError> {
         self.touch_symbol(id)?;
-        self.put(TableId::Symbols, &id.0, &ser(row)?)
+        self.put(TableId::Symbols, &id.0, &ser(row)?)?;
+        self.put(TableId::SymbolCore, &core_key(row, id), &core_value(row))
     }
 
     pub fn remove_symbol(&mut self, id: Id) -> Result<(), StoreError> {
         self.touch_symbol(id)?;
+        // The core row is keyed by the plain name, so the symbol is read to build its key.
+        if let Some(row) = self.symbol(id)? {
+            self.del(TableId::SymbolCore, &core_key(&row, id))?;
+        }
         self.del(TableId::Symbols, &id.0)
     }
 
@@ -2112,7 +2424,21 @@ impl WriteTx<'_> {
                     .map_err(db)?;
             }
         }
+        // The head of the previous rank no longer matches; `store_rank_top` writes the new one.
+        self.del(TableId::Meta, RANK_TOP_META.as_bytes())?;
         self.set_rank_watermark(watermark)
+    }
+
+    /// Store the head of the rank beside it (FEAT-076). Call after [`WriteTx::store_rank`], in
+    /// the same transaction; a reader accepts it only while the rank is current.
+    pub fn store_rank_top(&mut self, top: &RankTop) -> Result<(), StoreError> {
+        let mut v = Vec::with_capacity(8 + top.entries.len() * 24);
+        v.extend_from_slice(&top.total.to_le_bytes());
+        for (id, score) in &top.entries {
+            v.extend_from_slice(&id.0);
+            v.extend_from_slice(&score.to_bits().to_le_bytes());
+        }
+        self.set_meta(RANK_TOP_META, &v)
     }
 
     /// Record that the stored rank reflects `watermark`.
@@ -2332,6 +2658,29 @@ impl Cache {
         &self.report
     }
 
+    /// Compare the shard files with the stored hashes and stats on a read snapshot: true when
+    /// the sets are equal and every file's `(size, mtime)` equals the stored one, so `sync`
+    /// would change nothing. A shard stored without a stat counts as different.
+    fn shards_unchanged(&self, dir: &ProjectDir, on_disk: &[ShardKey]) -> Result<bool, StoreError> {
+        let rows = self.read()?.shard_hash_rows()?;
+        if rows.len() != on_disk.len() {
+            return Ok(false);
+        }
+        let stored: HashMap<&ShardKey, &Option<ShardStat>> =
+            rows.iter().map(|(k, _, st)| (k, st)).collect();
+        for key in on_disk {
+            let Some(Some(stat)) = stored.get(key).copied() else {
+                return Ok(false);
+            };
+            let file = dir.shard_path(&key.0, &key.1);
+            match std::fs::metadata(&file) {
+                Ok(m) if ShardStat::of(&m) == Some(*stat) => {}
+                _ => return Ok(false),
+            }
+        }
+        Ok(true)
+    }
+
     fn sync(
         &self,
         dir: &ProjectDir,
@@ -2340,6 +2689,9 @@ impl Cache {
     ) -> Result<SyncReport, StoreError> {
         let mut report = SyncReport::default();
         let on_disk = dir.list_shards()?;
+        if self.shards_unchanged(dir, &on_disk)? {
+            return Ok(report);
+        }
         let mut tx = self.write()?;
         let mut stale: BTreeSet<(String, RelPath)> =
             tx.shard_hashes()?.into_iter().map(|(k, _)| k).collect();
@@ -2435,8 +2787,26 @@ impl Cache {
     }
 }
 
-/// Create the tables and check `meta.cache_schema`. `false`: written by another schema.
+/// Create the tables and check `meta.cache_schema`. `false`: written by another schema. A cache
+/// that already holds every table and the current schema is only read (FEAT-076 R-7).
 fn schema_current(database: &Database) -> Result<bool, StoreError> {
+    {
+        let txn = database.begin_read().map_err(db)?;
+        let all_tables = TableId::ALL
+            .iter()
+            .all(|t| txn.open_table(t.def()).is_ok());
+        if all_tables {
+            let rx = ReadTx {
+                txn,
+                _cache: PhantomData,
+            };
+            match rx.meta("cache_schema")? {
+                Some(v) if v == CACHE_SCHEMA.to_le_bytes() => return Ok(true),
+                Some(_) => return Ok(false),
+                None => {}
+            }
+        }
+    }
     let txn = database.begin_write().map_err(db)?;
     let mut tx = WriteTx {
         txn,

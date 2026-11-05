@@ -1,7 +1,7 @@
 //! Claude Code wiring (FEAT-024): the generated `CLAUDE.md` block, the embedded skill and the
 //! SessionStart project map.
 
-use crate::{Consistency, DistError, Katalogr, Options, Outcome, Overrides};
+use crate::{Consistency, DistError, Katalogr, Options, Outcome, Overrides, Report};
 use katalogr_query::budget::estimate_tokens;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -207,13 +207,48 @@ impl Katalogr {
             timeout: Some(timeout),
             ..Options::default()
         };
-        let reply = self.query(&opts, |tx| Ok(Outcome::Found(katalogr_query::map(tx)?)))?;
-        let Outcome::Found(entries) = reply.outcome else {
+        // The head of the stored rank answers a normal budget; a stale or absent one, and a
+        // budget that reaches past it, use the whole map (FEAT-076 R-6).
+        let reply = self.query(&opts, |tx| match katalogr_query::map_top(tx)? {
+            Some((total, entries)) => Ok(Outcome::Found((total, entries, true))),
+            None => {
+                let entries = katalogr_query::map(tx)?;
+                Ok(Outcome::Found((entries.len() as u64, entries, false)))
+            }
+        })?;
+        let Outcome::Found((total, entries, from_top)) = reply.outcome else {
             return Ok(None);
         };
         if entries.is_empty() {
             return Ok(None);
         }
+        let (text, exhausted) = self.render_session_map(&reply.report, total, &entries, budget);
+        if from_top && exhausted && total > entries.len() as u64 {
+            let reply = self.query(&opts, |tx| Ok(Outcome::Found(katalogr_query::map(tx)?)))?;
+            let Outcome::Found(entries) = reply.outcome else {
+                return Ok(None);
+            };
+            if entries.is_empty() {
+                return Ok(None);
+            }
+            let total = entries.len() as u64;
+            return Ok(Some(
+                self.render_session_map(&reply.report, total, &entries, budget)
+                    .0,
+            ));
+        }
+        Ok(Some(text))
+    }
+
+    /// The session text for `entries`, the best of `total` symbols, and whether the budget used
+    /// every entry.
+    fn render_session_map(
+        &self,
+        report: &Report,
+        total: u64,
+        entries: &[katalogr_query::MapEntry],
+        budget: u64,
+    ) -> (String, bool) {
         let name = self.project.root().file_name().unwrap_or("");
         let repos: Vec<&str> = self
             .project
@@ -225,9 +260,9 @@ impl Katalogr {
         let header = format!(
             "katalogr: project {name} (repos: {}); index watermark {}, {} pending{}. Top symbols by PageRank:",
             repos.join(", "),
-            reply.report.watermark,
-            reply.report.pending,
-            if reply.report.stale { ", stale" } else { "" },
+            report.watermark,
+            report.pending,
+            if report.stale { ", stale" } else { "" },
         );
         let footer = "Ask the graph before reading files: use the katalogr skill (find, search, explain, show, refs, why).";
         let symbol_lines: Vec<String> = entries
@@ -270,11 +305,11 @@ impl Katalogr {
             (lines, shown)
         };
         let (mut lines, shown) = fill(vec![footer.to_string()]);
-        if shown < symbol_lines.len() {
+        let exhausted = shown == symbol_lines.len();
+        if shown < usize::try_from(total).unwrap_or(usize::MAX) {
             // Symbols were left out: say so, inside the budget, before the footer.
             let marker = format!(
-                "partial: capped at {budget} tokens (budget; {} symbols); {}",
-                symbol_lines.len(),
+                "partial: capped at {budget} tokens (budget; {total} symbols); {}",
                 katalogr_query::PARTIAL_NOTE
             );
             lines = fill(vec![marker, footer.to_string()]).0;
@@ -286,7 +321,7 @@ impl Katalogr {
         if text.chars().count() > max_chars {
             text = text.chars().take(max_chars).collect();
         }
-        Ok(Some(text))
+        (text, exhausted)
     }
 }
 

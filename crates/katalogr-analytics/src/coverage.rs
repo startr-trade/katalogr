@@ -5,7 +5,7 @@
 use crate::metrics::{Better, MetricSample, metric_key, round6};
 use crate::result::Itemized;
 use katalogr_model::{ExtractError, Id, RelPath};
-use katalogr_store::{LinkOrigin, Reader, RefId, StoreError};
+use katalogr_store::{Reader, RefId, StoreError};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
@@ -123,33 +123,33 @@ impl Itemized for CoverageReport {
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
-enum RefClass {
+pub(crate) enum RefClass {
     Resolved,
     Inferred,
 }
 
-/// The class of every linked reference: one `links_all()` scan; an entry that came from a
-/// reference is resolved when it is not inferred and its reference had at most one target,
-/// else inferred; the better class wins per `(from, kind, ref index)`.
+/// The class of every linked reference: one walk over the ref-origin entries; an entry that
+/// came from a reference is resolved when it is not inferred and its reference had at most one
+/// target, else inferred; the better class wins per `(from, kind, ref index)`.
 fn link_classes(tx: &impl Reader) -> Result<BTreeMap<(Id, String, u32), RefClass>, StoreError> {
+    classes_from(&mut |f| tx.for_each_ref_entry(f))
+}
+
+/// [`link_classes`] over the entries `walk` delivers as `(from, kind, ref index, resolved)`.
+pub(crate) fn classes_from(
+    walk: &mut dyn FnMut(&mut dyn FnMut(Id, &str, u32, bool)) -> Result<(), StoreError>,
+) -> Result<BTreeMap<(Id, String, u32), RefClass>, StoreError> {
     let mut out: BTreeMap<(Id, String, u32), RefClass> = BTreeMap::new();
-    for (key, row) in tx.links_all()? {
-        for e in &row.entries {
-            let LinkOrigin::Ref(i) = e.origin else {
-                continue;
-            };
-            let class = if e.confidence != katalogr_model::Confidence::Inferred
-                && e.fanout.is_none_or(|n| n <= 1)
-            {
-                RefClass::Resolved
-            } else {
-                RefClass::Inferred
-            };
-            out.entry((key.from, key.kind.0.clone(), i))
-                .and_modify(|c| *c = (*c).min(class))
-                .or_insert(class);
-        }
-    }
+    walk(&mut |from, kind, i, resolved| {
+        let class = if resolved {
+            RefClass::Resolved
+        } else {
+            RefClass::Inferred
+        };
+        out.entry((from, kind.to_string(), i))
+            .and_modify(|c| *c = (*c).min(class))
+            .or_insert(class);
+    })?;
     Ok(out)
 }
 

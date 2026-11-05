@@ -47,12 +47,17 @@ fn contract_hit(tx: &impl Reader, text: &str) -> Result<Option<SymbolHit>, Store
         .map(|row| contract_node_hit(&row.name.canonical())))
 }
 
-/// Every symbol, sorted by canonical name.
-pub(crate) fn all_hits(tx: &impl Reader) -> Result<Vec<(SymbolHit, String)>, StoreError> {
+/// The hits of the symbols with these ids, with their plain names, sorted by canonical name.
+/// An id that is not a symbol is dropped.
+pub(crate) fn hits_of(
+    tx: &impl Reader,
+    ids: &[Id],
+) -> Result<Vec<(SymbolHit, String)>, StoreError> {
     let mut out: Vec<(SymbolHit, String)> = tx
-        .symbols()?
+        .symbols_many(ids)?
         .into_iter()
-        .map(|(_, r)| (hit(&r), plain_name(&r).to_string()))
+        .flatten()
+        .map(|r| (hit(&r), plain_name(&r).to_string()))
         .collect();
     out.sort_by(|a, b| a.0.name.cmp(&b.0.name));
     Ok(out)
@@ -92,18 +97,26 @@ pub fn resolve_traced(
         record(diag, text, Some("contract"), 1, 1);
         return Ok(Resolution::One(h));
     }
-    let all = all_hits(tx)?;
+    // Every tier's candidates have a plain name that equals `text` ignoring case, except the
+    // canonical-name match, which is read by id.
     let lower = text.to_lowercase();
+    let mut all = hits_of(tx, &tx.symbol_ids_by_plain_ci(&lower)?)?;
+    let by_canonical = hits_of(tx, &[Id::of(text)])?
+        .into_iter()
+        .find(|(h, _)| h.name == text);
     for tier in 0..3 {
-        let mut found: Vec<SymbolHit> = all
-            .iter()
-            .filter(|(h, n)| match tier {
-                0 => h.name == text,
-                1 => n == text,
-                _ => n.to_lowercase() == lower,
-            })
-            .map(|(h, _)| h.clone())
-            .collect();
+        let mut found: Vec<SymbolHit> = match tier {
+            0 => by_canonical.iter().map(|(h, _)| h.clone()).collect(),
+            1 => all
+                .iter()
+                .filter(|(_, n)| n == text)
+                .map(|(h, _)| h.clone())
+                .collect(),
+            _ => std::mem::take(&mut all)
+                .into_iter()
+                .map(|(h, _)| h)
+                .collect(),
+        };
         let before = found.len();
         if !found.is_empty() {
             found = collapse_aliases(tx, found)?;
