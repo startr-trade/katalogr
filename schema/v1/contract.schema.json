@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "What this binary serves.",
+  "properties": {
+    "api": {
+      "description": "The path major of the HTTP API.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "capabilities": {
+      "description": "The capability names, sorted.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "contract": {
+      "description": "Raised by every additive change.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "katalogr": {
+      "description": "The crate version.",
+      "type": "string"
+    },
+    "position_format": {
+      "description": "The position format version.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "schema": {
+      "description": "The `--json` result schema version.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "view_format": {
+      "description": "The view-id format version.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "api",
+    "contract",
+    "schema",
+    "position_format",
+    "view_format",
+    "katalogr",
+    "capabilities"
+  ],
+  "title": "ContractInfo",
+  "type": "object"
+}

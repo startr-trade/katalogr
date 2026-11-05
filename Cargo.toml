@@ -61,4 +61,5 @@ regex = "1"
 rayon = "=1.12.0"
 sqlparser = { version = "=0.63.0", default-features = false, features = ["std", "visitor"] }
 rmcp = { version = "=3.5.0", default-features = false, features = ["server", "transport-io"] }
+tiny_http = { version = "=0.12.0", default-features = false }
 tokio = { version = "1.53", default-features = false, features = ["rt", "time", "sync", "io-std", "io-util", "macros"] }

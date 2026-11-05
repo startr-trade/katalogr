@@ -6,6 +6,7 @@ mod at;
 pub use at::position_without_board;
 mod claude;
 pub mod contexts;
+pub mod contract;
 pub use katalogr_query::{PositionAnswer, PositionRef, ViewQuery};
 pub mod doctor;
 mod error;
@@ -72,6 +73,10 @@ pub fn schemas() -> BTreeMap<&'static str, serde_json::Value> {
     assert!(
         all.insert("doctor", doctor::schema()).is_none(),
         "schema name doctor is registered twice"
+    );
+    assert!(
+        all.insert("contract", contract::schema()).is_none(),
+        "schema name contract is registered twice"
     );
     assert!(
         all.insert("position", katalogr_query::position_schema())

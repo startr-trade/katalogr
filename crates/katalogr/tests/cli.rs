@@ -840,6 +840,27 @@ mod cli {
             }
         }
     }
+
+    /// R-2 (FEAT-049): `katalogr contract --json` validates against its schema.
+    #[test]
+    fn contract_json_validates() {
+        let tmp = tempfile::tempdir().unwrap();
+        let out = katalogr(tmp.path(), &["--json", "contract"]);
+        assert_eq!(out.status.code(), Some(0), "{out:?}");
+        let v: Value = serde_json::from_slice(&out.stdout).expect("json");
+        let schema: Value = serde_json::from_str(
+            &std::fs::read_to_string(schema_dir().join("contract.schema.json")).unwrap(),
+        )
+        .unwrap();
+        validate(&schema, &schema, &v, "$").unwrap_or_else(|e| panic!("{e}\n{v}"));
+        assert_eq!(v["api"], 1);
+        assert_eq!(v["schema"], 1);
+        assert_eq!(v["katalogr"], env!("CARGO_PKG_VERSION"));
+        assert_eq!(
+            v["capabilities"],
+            serde_json::json!(["position", "view-id"])
+        );
+    }
 }
 
 mod query {
@@ -872,7 +893,7 @@ mod query {
     fn schemas_current() {
         let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../schema/v1");
         let fresh = katalogr_dist::schemas();
-        assert_eq!(fresh.len(), 24);
+        assert_eq!(fresh.len(), 25);
         for (name, schema) in fresh {
             let mut want = serde_json::to_string_pretty(&schema).unwrap();
             want.push('\n');

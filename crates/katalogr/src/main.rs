@@ -1,5 +1,7 @@
 //! The katalogr CLI: a thin wrapper over katalogr-dist (ADR-0010).
 
+#[cfg(feature = "api")]
+mod api;
 mod cli;
 mod cmd;
 mod exit;
@@ -7,6 +9,13 @@ mod exit;
 mod mcp;
 // Unit tests of the MCP wrapper, as crate-level modules named after what they test.
 mod render;
+// Unit tests of the API wrapper, likewise.
+#[cfg(all(test, feature = "api"))]
+#[path = "api/guard_tests.rs"]
+mod api_guard;
+#[cfg(all(test, feature = "api"))]
+#[path = "api/http_tests.rs"]
+mod api_http;
 #[cfg(all(test, feature = "mcp"))]
 #[path = "mcp/tools_tests.rs"]
 mod tools;
@@ -41,7 +50,23 @@ fn run(cli: &Cli) -> Result<ExitCode, DistError> {
             history,
         }) => cmd::index::run(cli, since.as_ref(), range.as_ref(), *full, *history),
         Some(Command::Status) => cmd::status::run(cli),
+        Some(Command::Contract) => cmd::contract::run(cli),
         Some(Command::Position { repo }) => cmd::position::run(cli, repo.as_deref()),
+        #[cfg(feature = "api")]
+        Some(Command::Api {
+            listen,
+            workers,
+            queue,
+            no_process,
+            cors_origin,
+        }) => cmd::api::run(
+            cli,
+            *listen,
+            *workers,
+            *queue,
+            *no_process,
+            cors_origin.clone(),
+        ),
         #[cfg(feature = "mcp")]
         Some(Command::Mcp {
             root,

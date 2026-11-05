@@ -262,12 +262,33 @@ pub enum Command {
     },
     /// Show the index watermark, pending changes and staleness.
     Status,
+    /// Show the contract this binary serves: versions and capabilities.
+    Contract,
     /// Show the checkout's position (commit plus a hash of uncommitted changes) and what the
     /// index reflects. Works without a project.
     Position {
         /// The repo to show (default: the marked repo).
         #[arg(long, value_name = "REPO")]
         repo: Option<String>,
+    },
+    /// Serve katalogr's read queries as a stateless HTTP/JSON API (OpenAPI at /api/v1/openapi.json).
+    #[cfg(feature = "api")]
+    Api {
+        /// Address to listen on; only loopback addresses are served.
+        #[arg(long, default_value = "127.0.0.1:7878", value_name = "ADDR")]
+        listen: std::net::SocketAddr,
+        /// Worker threads (default: the core count, at most 8).
+        #[arg(long, value_name = "N")]
+        workers: Option<usize>,
+        /// Requests that may wait for a worker; more get 503 (default: 64).
+        #[arg(long, value_name = "N")]
+        queue: Option<usize>,
+        /// A read never processes the queue (the hosted form).
+        #[arg(long)]
+        no_process: bool,
+        /// Send CORS headers for exactly this origin.
+        #[arg(long, value_name = "ORIGIN")]
+        cors_origin: Option<String>,
     },
     /// Serve katalogr's queries over MCP (stdio) for non-Claude agent hosts.
     #[cfg(feature = "mcp")]
