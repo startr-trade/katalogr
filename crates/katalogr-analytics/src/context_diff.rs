@@ -53,6 +53,12 @@ pub struct ContextConflicts {
     pub conflicts: Vec<String>,
 }
 
+/// `(referrer, kind, wanted)`.
+type DanglingKey = (String, String, Vec<String>);
+
+/// Per contract: its counts, and every `(symbol, role)` binding that names it.
+type Shapes = BTreeMap<Id, (String, BTreeSet<(Id, String)>)>;
+
 fn name_of(id: Id, readers: &[&dyn NameLookup]) -> String {
     readers
         .iter()
@@ -92,9 +98,7 @@ fn cut<T>(mut v: Vec<T>, limit: usize, partial: &mut Vec<Partial>) -> Vec<T> {
     v
 }
 
-fn dangling_all(
-    tx: &impl Reader,
-) -> Result<BTreeMap<(String, String, Vec<String>), DanglingRef>, StoreError> {
+fn dangling_all(tx: &impl Reader) -> Result<BTreeMap<DanglingKey, DanglingRef>, StoreError> {
     let mut kinds: Vec<&str> = katalogr_query::DANGLING_KINDS.to_vec();
     kinds.push(katalogr_query::DANGLING_CONTRACT);
     Ok(katalogr_query::dangling(tx, &kinds)?
@@ -191,10 +195,8 @@ pub fn context_diff(
 }
 
 /// A contract as the graph holds it: its counts and every binding that names it.
-fn contract_shapes(
-    tx: &impl Reader,
-) -> Result<BTreeMap<Id, (String, BTreeSet<(Id, String)>)>, StoreError> {
-    let mut out: BTreeMap<Id, (String, BTreeSet<(Id, String)>)> = BTreeMap::new();
+fn contract_shapes(tx: &impl Reader) -> Result<Shapes, StoreError> {
+    let mut out: Shapes = BTreeMap::new();
     for (id, row) in tx.contracts()? {
         let shape = format!("{}/{}/{}", row.providers, row.consumers, row.declarers);
         out.insert(id, (shape, BTreeSet::new()));
@@ -217,7 +219,7 @@ pub fn context_conflicts(
 ) -> Result<ContextConflicts, StoreError> {
     let sb = contract_shapes(base)?;
     fn changed(
-        sb: &BTreeMap<Id, (String, BTreeSet<(Id, String)>)>,
+        sb: &Shapes,
         base: &impl Reader,
         other: &impl Reader,
     ) -> Result<BTreeSet<String>, StoreError> {
