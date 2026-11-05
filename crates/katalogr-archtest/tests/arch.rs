@@ -756,8 +756,9 @@ mod archtest {
     ];
 
     /// The read calls an op row makes on the facade; each row makes exactly one.
-    const API_READ_CALLS: [&str; 25] = [
+    const API_READ_CALLS: [&str; 26] = [
         "find",
+        "view",
         "refs",
         "callers",
         "tests",

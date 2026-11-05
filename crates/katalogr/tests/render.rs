@@ -404,4 +404,36 @@ mod render {
         let (code, ..) = run_stdin(&repo, &["render", "filter", "--strict"], good.as_bytes());
         assert_eq!(code, 0);
     }
+
+    /// FEAT-088 R-2: a second render of a view is drawn from the stored view, in any format; it
+    /// is not a new computation.
+    #[test]
+    fn second_render_from_store() {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = project(tmp.path());
+        let views = tmp.path().join("kx/projects/demo/.cache/views");
+        assert!(!views.exists());
+        let first = ok(&repo, &["render", "structure", "--level", "file"]);
+        // The first render stored its view.
+        let mut stored = Vec::new();
+        for bucket in std::fs::read_dir(&views).unwrap().flatten() {
+            for f in std::fs::read_dir(bucket.path()).unwrap().flatten() {
+                stored.push(f.path());
+            }
+        }
+        assert_eq!(stored.len(), 1, "{stored:?}");
+        let again = ok(&repo, &["render", "structure", "--level", "file"]);
+        assert_eq!(again, first);
+        // Change the stored graph: the next render, in another format, shows the change.
+        let mut v: Value = serde_json::from_slice(&std::fs::read(&stored[0]).unwrap()).unwrap();
+        v["graph"]["nodes"][0]["label"] = "FROMSTORE".into();
+        std::fs::write(&stored[0], serde_json::to_vec(&v).unwrap()).unwrap();
+        for format in ["mermaid", "dot", "graphml"] {
+            let out = ok(
+                &repo,
+                &["render", "structure", "--level", "file", "--format", format],
+            );
+            assert!(out.contains("FROMSTORE"), "{format}: {out}");
+        }
+    }
 }

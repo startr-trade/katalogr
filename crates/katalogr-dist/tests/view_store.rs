@@ -2,7 +2,7 @@
 //! that read a project: `cargo test -p katalogr-dist --features test-extractor`.
 
 mod view_store {
-    use katalogr_dist::{Katalogr, Options, Overrides, ViewStore, kindex_init, project_init};
+    use katalogr_dist::{Katalogr, Overrides, ViewStore, kindex_init, project_init};
     use std::path::Path;
 
     /// An empty project `demo` with one repo `app`; its resolved handle.
@@ -126,8 +126,8 @@ mod view_store {
     #[cfg(feature = "test-extractor")]
     #[test]
     fn write_failure_still_answers() {
-        use katalogr_dist::Outcome;
         use katalogr_dist::render::ViewSpec;
+        use katalogr_dist::{Options, Outcome};
         let tmp = tempfile::tempdir().unwrap();
         let k = project(tmp.path());
         k.index(None, true, None, &Options::default()).unwrap();

@@ -22,7 +22,11 @@ mod views {
         assert_eq!(v["query"]["op"], "structure");
         assert_eq!(v["query"]["args"]["level"], "file");
         assert_eq!(v["pele"], "1.7.0");
-        assert!(v["graph"]["nodes"].as_array().is_some_and(|n| !n.is_empty()));
+        assert!(
+            v["graph"]["nodes"]
+                .as_array()
+                .is_some_and(|n| !n.is_empty())
+        );
         assert!(v.get("watermark").is_none());
         let text = ok(&repo, &["view", "structure", "--level", "file"]);
         assert_eq!(text.trim_end(), v["mermaid"].as_str().unwrap().trim_end());
@@ -95,10 +99,17 @@ mod views {
         let id = v["view_id"].as_str().unwrap().to_string();
         let mut doctored = v.clone();
         doctored["mermaid"] = "flowchart LR\n  old".into();
-        std::fs::write(stored_path(&kx, &id), serde_json::to_vec(&doctored).unwrap()).unwrap();
+        std::fs::write(
+            stored_path(&kx, &id),
+            serde_json::to_vec(&doctored).unwrap(),
+        )
+        .unwrap();
         let out = cli(&repo, &["view", "--fresh", "structure"]);
         assert_eq!(out.status.code(), Some(1), "{out:?}");
-        assert!(String::from_utf8_lossy(&out.stderr).contains(&id), "{out:?}");
+        assert!(
+            String::from_utf8_lossy(&out.stderr).contains(&id),
+            "{out:?}"
+        );
     }
 
     /// R-1. `--at` answers for a position; the answer reports that position.
@@ -112,11 +123,9 @@ mod views {
         assert_eq!(v["exact"], true, "{v}");
         assert_eq!(v["positions"][0]["commit"], pos["live"]["commit"]);
         // The same position, asked before the flags of the view, is the same answer.
-        let w: Value = serde_json::from_str(&ok(
-            &repo,
-            &["--json", "--at", &text, "view", "structure"],
-        ))
-        .unwrap();
+        let w: Value =
+            serde_json::from_str(&ok(&repo, &["--json", "--at", &text, "view", "structure"]))
+                .unwrap();
         assert_eq!(w["view_id"], v["view_id"]);
         // A position nobody holds is exit 6.
         let none = "0".repeat(40);
