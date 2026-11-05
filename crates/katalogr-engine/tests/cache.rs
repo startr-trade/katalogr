@@ -126,6 +126,68 @@ mod cache {
         assert_eq!(cache.report().replaced, 1);
     }
 
+    fn commits() -> u64 {
+        katalogr_store::cache::commits_on_this_thread()
+    }
+
+    #[test]
+    fn open_unchanged_writes_nothing() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = project(&tmp);
+        for (p, t) in [("a.tx", "sym fn A\n"), ("b.tx", "sym fn B\n")] {
+            dir.write_shard(&extract(p, t)).unwrap();
+        }
+        let first = commits();
+        drop(Cache::open_or_rebuild(&dir, &Stitcher::new(), soon()).unwrap());
+        assert!(commits() > first, "the cold open commits");
+        let settled = commits();
+        for i in 0..3 {
+            let cache = Cache::open_or_rebuild(&dir, &Stitcher::new(), soon()).unwrap();
+            assert_eq!(cache.report().hashed, 0);
+            assert_eq!(cache.report().replaced, 0);
+            assert_eq!(cache.report().removed, 0);
+            drop(cache);
+            assert_eq!(commits(), settled, "warm open {i} commits nothing");
+        }
+    }
+
+    #[test]
+    fn open_changed_shard_still_syncs() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = project(&tmp);
+        for (p, t) in [("a.tx", "sym fn A\n"), ("b.tx", "sym fn B\n")] {
+            dir.write_shard(&extract(p, t)).unwrap();
+        }
+        drop(Cache::open_or_rebuild(&dir, &Stitcher::new(), soon()).unwrap());
+
+        // A changed shard.
+        dir.write_shard(&extract("a.tx", "sym fn A\nsym fn A2\n"))
+            .unwrap();
+        let cache = Cache::open_or_rebuild(&dir, &Stitcher::new(), soon()).unwrap();
+        assert_eq!(cache.report().replaced, 1);
+        assert_eq!(cache.read().unwrap().symbols().unwrap().len(), 3);
+        drop(cache);
+
+        // A new shard.
+        dir.write_shard(&extract("c.tx", "sym fn C\n")).unwrap();
+        let cache = Cache::open_or_rebuild(&dir, &Stitcher::new(), soon()).unwrap();
+        assert_eq!(cache.report().replaced, 1);
+        assert_eq!(cache.read().unwrap().symbols().unwrap().len(), 4);
+        drop(cache);
+
+        // A removed shard.
+        std::fs::remove_file(dir.shard_path("r", &RelPath::new("b.tx").unwrap())).unwrap();
+        let cache = Cache::open_or_rebuild(&dir, &Stitcher::new(), soon()).unwrap();
+        assert_eq!(cache.report().removed, 1);
+        assert_eq!(cache.read().unwrap().symbols().unwrap().len(), 3);
+        drop(cache);
+
+        // Settled again: the next open writes nothing.
+        let before = commits();
+        drop(Cache::open_or_rebuild(&dir, &Stitcher::new(), soon()).unwrap());
+        assert_eq!(commits(), before);
+    }
+
     #[test]
     fn schema_8_cache_rebuilds() {
         let tmp = tempfile::tempdir().unwrap();

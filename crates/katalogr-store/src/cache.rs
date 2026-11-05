@@ -2452,8 +2452,20 @@ impl WriteTx<'_> {
         if self.rank_inputs_changed()? {
             self.del(TableId::Meta, RANK_WATERMARK_META.as_bytes())?;
         }
+        COMMITS.with(|c| c.set(c.get() + 1));
         self.txn.commit().map_err(db)
     }
+}
+
+thread_local! {
+    static COMMITS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+/// How many write transactions the calling thread has committed. For tests that check a read
+/// path writes nothing (FEAT-076 R-7).
+#[doc(hidden)]
+pub fn commits_on_this_thread() -> u64 {
+    COMMITS.with(std::cell::Cell::get)
 }
 
 // ---------------------------------------------------------------- cache

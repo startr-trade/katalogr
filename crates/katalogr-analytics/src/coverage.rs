@@ -153,6 +153,33 @@ pub(crate) fn classes_from(
     Ok(out)
 }
 
+/// The classes the old way: one expanded `links_all` scan. The reference of the tests.
+#[cfg(test)]
+pub(crate) fn link_classes_for_test(
+    tx: &impl Reader,
+) -> BTreeMap<(Id, String, u32), RefClass> {
+    use katalogr_store::LinkOrigin;
+    let mut out: BTreeMap<(Id, String, u32), RefClass> = BTreeMap::new();
+    for (key, row) in tx.links_all().unwrap() {
+        for e in &row.entries {
+            let LinkOrigin::Ref(i) = e.origin else {
+                continue;
+            };
+            let class = if e.confidence != katalogr_model::Confidence::Inferred
+                && e.fanout.is_none_or(|n| n <= 1)
+            {
+                RefClass::Resolved
+            } else {
+                RefClass::Inferred
+            };
+            out.entry((key.from, key.kind.0.clone(), i))
+                .and_modify(|c| *c = (*c).min(class))
+                .or_insert(class);
+        }
+    }
+    out
+}
+
 /// Text after the last `.` of the file name, lowercased, with a leading `.`; `(none)` without a
 /// dot. A name that is only a leading-dot name (`.gitignore`) is its own suffix.
 fn suffix_of(path: &RelPath) -> String {
