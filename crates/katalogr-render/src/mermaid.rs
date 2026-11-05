@@ -62,6 +62,10 @@ fn node_line(n: &ViewNode, indent: &str) -> String {
 
 fn edge_line(e: &ViewEdge) -> String {
     let arrow = if e.inferred { "-.->" } else { "-->" };
+    if e.kind.is_empty() {
+        // Pele rejects an empty edge label.
+        return format!("  {} {arrow} {}\n", e.from, e.to);
+    }
     format!("  {} {arrow}|\"{}\"| {}\n", e.from, escape(&e.kind), e.to)
 }
 
@@ -282,4 +286,15 @@ fn groups_draw_subgraphs_from_two() {
         vec![],
     );
     assert!(!to_mermaid(&one).contains("subgraph"));
+}
+
+#[test]
+fn empty_kind_has_no_label() {
+    let line = edge_line(&ViewEdge {
+        from: "a".to_string(),
+        to: "b".to_string(),
+        kind: String::new(),
+        inferred: false,
+    });
+    assert_eq!(line, "  a --> b\n");
 }
