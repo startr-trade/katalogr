@@ -24,6 +24,7 @@ mod diagnostic {
             &Overrides {
                 kindex: Some(kx.display().to_string()),
                 project: None,
+                ..Default::default()
             },
         )
         .unwrap();

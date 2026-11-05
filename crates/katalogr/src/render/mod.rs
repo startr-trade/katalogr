@@ -1056,6 +1056,35 @@ where
     code
 }
 
+/// A report that is a few sorted lines: JSON envelope with `--json`, else `lines`. `fails`
+/// makes a found report exit 1.
+pub fn plain<R: Serialize>(
+    cli: &Cli,
+    reply: Reply<R>,
+    _command: &str,
+    lines: fn(&R) -> Vec<String>,
+    fails: fn(&R) -> bool,
+) -> ExitCode {
+    if cli.json {
+        return emit(&json::plain(reply, fails));
+    }
+    let code = exit_for(&reply);
+    match reply.outcome {
+        Outcome::Found(r) => {
+            note_stale(&reply.report);
+            for l in lines(&r) {
+                println!("{l}");
+            }
+            print_partial(&reply.partial);
+            if code == ExitCode::Ok && fails(&r) {
+                return ExitCode::Error;
+            }
+        }
+        other => other_outcomes(cli, &reply.report, other, None),
+    }
+    code
+}
+
 /// The `doctor` report: JSON with `--json`, else one line per finding with its fix.
 pub fn doctor(cli: &Cli, r: &katalogr_dist::doctor::Report) -> ExitCode {
     if cli.json {

@@ -4,7 +4,6 @@ use crate::consistency::Engine;
 use crate::error::EngineError;
 use crate::profiles::ProfileSet;
 use crate::registry::ExtensionRegistry;
-use crate::scan;
 use katalogr_model::{Extractor, RelPath};
 
 /// Files of one repository on disk, split by whether a registered extension claims them.
@@ -43,12 +42,12 @@ pub fn census_with(
     repo: &str,
     profiles: &ProfileSet,
 ) -> Result<Option<Census>, EngineError> {
-    let Some(root) = engine.roots().get(repo) else {
+    let Some(source) = engine.source(repo) else {
         return Ok(None);
     };
     let (include, exclude) = engine.repo_filters(repo);
     let mut out = Census::default();
-    for p in scan::list_files(root.as_std_path(), &include, &exclude)? {
+    for p in source.list(&include, &exclude)? {
         match extractor_for(engine.registry(), profiles, &p) {
             Some(e) => out.claimed.push((p, e.id())),
             None => out.unclaimed.push(p),

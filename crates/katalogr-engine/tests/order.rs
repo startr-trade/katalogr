@@ -6,7 +6,7 @@ use camino::Utf8PathBuf;
 use katalogr_engine::{EventKind, NewEvent};
 use katalogr_model::RelPath;
 use proptest::prelude::*;
-use support::{drained_graph, fresh_index, init_project, open_engine_threads};
+use support::{cache_dump, drained_graph, fresh_index, init_project, open_engine_threads};
 
 const PATHS: [&str; 4] = ["a.tx", "b.tx", "sub/c.tx", "d.tx"];
 const CONTENTS: [&str; 5] = [
@@ -112,6 +112,67 @@ mod queue {
             replay in prop::collection::vec(0..PATHS.len(), 0..6),
         ) {
             order_independent(&steps, &replay, 4)?;
+        }
+    }
+
+    const SKIP_PATHS: [&str; 6] = ["a.tx", "b.tx", "c.tx", "d.tx", "e.tx", "f.tx"];
+    const SKIP_CONTENTS: [&str; 7] = [
+        "sym fn S\nexport k:a S\n",
+        "sym fn S\nexport k:a S\nexport k:b S\n",
+        "sym fn S\nref S calls k:a\n",
+        "sym fn S\nrefs S calls k:b k:a\nref S uses k:a\n",
+        "sym fn S\nboundref S consumes ch:x k:a\n",
+        "sym fn S\nsym fn T\nexport k:b T\nrefs S calls k:a k:b\n",
+        "sym fn S\n",
+    ];
+
+    fn run(steps: &[(usize, Option<usize>)], all: bool) -> support::CacheDump {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = Utf8PathBuf::from_path_buf(tmp.path().to_path_buf()).unwrap();
+        let work = root.join("work");
+        std::fs::create_dir_all(&work).unwrap();
+        let kx = root.join("kx");
+        init_project(&kx);
+        let e = open_engine_threads(&kx, &work, 1);
+        e.stitcher().set_resolve_all(all);
+        for (p, c) in steps {
+            let file = work.join(SKIP_PATHS[*p]);
+            let kind = match c {
+                Some(c) => {
+                    std::fs::write(&file, SKIP_CONTENTS[*c]).unwrap();
+                    EventKind::Changed
+                }
+                None => {
+                    let _ = std::fs::remove_file(&file);
+                    EventKind::Deleted
+                }
+            };
+            e.inbox()
+                .append(&NewEvent::file(
+                    "r",
+                    &RelPath::new(SKIP_PATHS[*p]).unwrap(),
+                    kind,
+                ))
+                .unwrap();
+            drained_graph(&e);
+        }
+        cache_dump(&e)
+            .into_iter()
+            .filter(|(n, _)| n != "shard_hashes")
+            .collect()
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(32))]
+
+        #[test]
+        fn fan_key_skip_equals_full_resolve(
+            steps in prop::collection::vec(
+                (0..SKIP_PATHS.len(), prop::option::weighted(0.85, 0..SKIP_CONTENTS.len())),
+                1..16,
+            ),
+        ) {
+            prop_assert_eq!(run(&steps, false), run(&steps, true));
         }
     }
 }

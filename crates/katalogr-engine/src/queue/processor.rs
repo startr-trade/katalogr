@@ -11,10 +11,12 @@ use crate::embed;
 use crate::error::EngineError;
 use crate::failpoint::fail;
 use crate::profiles::{self, ProfileSet};
-use crate::scan;
 use camino::{Utf8Path, Utf8PathBuf};
-use katalogr_model::{ArtifactName, RelPath};
-use katalogr_store::{ErrorRow, JournalEntry, PendingKey, RANK_CONTEXT, Reader, WriteTx, pagerank};
+use katalogr_model::{ArtifactName, Id, Name, RelPath};
+use katalogr_store::{
+    ErrorRow, JournalEntry, PendingKey, RANK_CONTEXT, RANK_TOP_ENTRIES, RankTop, Reader, WriteTx,
+    pagerank,
+};
 use std::collections::BTreeSet;
 use std::fs::File;
 use std::time::Instant;
@@ -123,13 +125,23 @@ impl<'a> Processor<'a> {
         ev: &ChangeEvent,
     ) -> Result<BTreeSet<RelPath>, EngineError> {
         let mut out = BTreeSet::new();
-        if let Some(root) = self.engine.roots().get(&ev.repo) {
+        if let Some(source) = self.engine.source(&ev.repo) {
             let (include, exclude) = self.engine.repo_filters(&ev.repo);
             let none = ProfileSet::empty();
             let profiles = self.profiles.as_ref().unwrap_or(&none);
-            for p in scan::list_files(root.as_std_path(), &include, &exclude)? {
+            for p in source.list(&include, &exclude)? {
                 if extractor_for(self.engine.registry(), profiles, &p).is_some() {
                     out.insert(p);
+                }
+            }
+        }
+        if self.engine.dir().is_layer() {
+            // A layer's `shard_hashes` holds only its delta, so every stored artifact counts.
+            for (_, row) in tx.artifacts()? {
+                let p = &row.provenance;
+                if p.repo == ev.repo && !p.path.as_str().starts_with(crate::history::HISTORY_PREFIX)
+                {
+                    out.insert(p.path.clone());
                 }
             }
         }
@@ -151,7 +163,17 @@ impl<'a> Processor<'a> {
     ) -> Result<Seq, EngineError> {
         let wm = self.process_to_commit(scope, budget, deadline)?;
         self.recover()?;
-        self.refresh_rank()?;
+        // ADR-0033: the rank is computed once, when this round leaves nothing pending. A
+        // reader meanwhile finds a rank whose watermark is behind and computes live.
+        if self
+            .engine
+            .cache()
+            .read()?
+            .pending_entries(None)?
+            .is_empty()
+        {
+            self.refresh_rank()?;
+        }
         Ok(wm)
     }
 
@@ -170,7 +192,23 @@ impl<'a> Processor<'a> {
         let ranked: Vec<_> = symbols.iter().map(|(id, _)| *id).zip(scores).collect();
         let wm = tx.watermark(RANK_CONTEXT)?;
         tx.store_rank(&ranked, wm)?;
+        // The head of the rank, in `map` order, for readers that need only the best symbols.
+        let mut top: Vec<(String, Id, f64)> = symbols
+            .iter()
+            .zip(&ranked)
+            .map(|((id, row), (_, score))| (row.name.canonical(), *id, *score))
+            .collect();
+        top.sort_by(|a, b| b.2.total_cmp(&a.2).then_with(|| a.0.cmp(&b.0)));
+        top.truncate(RANK_TOP_ENTRIES);
+        tx.store_rank_top(&RankTop {
+            total: symbols.len() as u64,
+            entries: top.into_iter().map(|(_, id, score)| (id, score)).collect(),
+        })?;
         tx.commit()?;
+        self.engine.add_stats(IndexStats {
+            rank_refreshes: 1,
+            ..IndexStats::default()
+        });
         Ok(())
     }
 
@@ -292,6 +330,7 @@ impl<'a> Processor<'a> {
             prepare,
             stitch,
             commit: commit_started.elapsed(),
+            rank_refreshes: 0,
         });
         fail!("after_publish_commit");
         Ok(Seq(wm))

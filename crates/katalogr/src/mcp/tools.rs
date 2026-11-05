@@ -67,6 +67,9 @@ const fn opt_int(name: &'static str, min: i64, default: i64) -> Arg {
 /// The `budget` argument every query tool takes.
 const BUDGET: Arg = opt("budget", Ty::Int(1));
 
+/// The `context` argument every query tool takes: `current`, `base` or an id (FEAT-043).
+const CONTEXT: Arg = opt("context", Ty::Str);
+
 /// A tool: its name, a description of at most 100 characters and its arguments.
 #[derive(Debug, Clone, Copy)]
 pub struct ToolSpec {
@@ -204,6 +207,7 @@ fn all_args(spec: &ToolSpec) -> Vec<Arg> {
     let mut v = spec.args.to_vec();
     if spec.query {
         v.push(BUDGET);
+        v.push(CONTEXT);
     }
     v
 }
@@ -421,7 +425,11 @@ pub fn call(cfg: &ServeConfig, name: &str, args: &Value) -> Result<JsonAnswer, U
     {
         return Ok(usage(message));
     }
-    let k = match Katalogr::resolve(&cfg.root, &cfg.overrides) {
+    let mut overrides = cfg.overrides.clone();
+    if let Some(c) = p.text("context") {
+        overrides.context = Some(c.to_string());
+    }
+    let k = match Katalogr::resolve(&cfg.root, &overrides) {
         Ok(k) => k,
         Err(e) => return Ok(render_json::error(&e)),
     };

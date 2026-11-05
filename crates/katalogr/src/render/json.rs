@@ -97,9 +97,12 @@ pub(super) fn set_packing(trace: &mut Option<Trace>, strings: &[String], budget:
     }
 }
 
-/// The exit code of a reply: ambiguity, no match, a stale file, or a timed-out wait.
+/// The exit code of a reply: ambiguity, no match, a stale file, or a timed-out wait. A timed-out
+/// wait is stale whatever the outcome, since a no-match or ambiguous answer may only reflect
+/// what was not indexed yet; the outcome stays in the output (FEAT-080 R-5).
 pub(super) fn exit_for<T>(reply: &Reply<T>) -> ExitCode {
     match &reply.outcome {
+        Outcome::Ambiguous(_) | Outcome::NoMatch(_) if reply.report.timed_out => ExitCode::Stale,
         Outcome::Ambiguous(_) => ExitCode::Ambiguous,
         Outcome::NoMatch(_) => ExitCode::NoMatch,
         Outcome::StaleFile(_) => ExitCode::Stale,
@@ -451,6 +454,24 @@ where
     }
 }
 
+/// A report with no items to trim: the envelope as it is. `fails` makes it exit 1.
+pub fn plain<R: Serialize>(reply: Reply<R>, fails: fn(&R) -> bool) -> JsonAnswer {
+    let exit = exit_for(&reply);
+    match reply.outcome {
+        Outcome::Found(r) => {
+            let failing = fails(&r);
+            let e = envelope(&reply.report, None, reply.partial, r, Vec::new(), None);
+            let exit = if exit == ExitCode::Ok && failing {
+                ExitCode::Error
+            } else {
+                exit
+            };
+            found(exit, &reply.report, line(&e))
+        }
+        other => other_outcome(exit, &reply.report, other, None, None),
+    }
+}
+
 /// `index` and `status`: stdout is `Report::to_json()`; exit Stale when the wait timed out.
 pub fn report(r: &Report) -> JsonAnswer {
     JsonAnswer {
@@ -546,4 +567,46 @@ pub fn profile_listing(l: &katalogr_dist::ProfileListing) -> String {
 /// The `profiles show` JSON line.
 pub fn profile_text(name: &str, text: &str) -> String {
     serde_json::json!({ "name": name, "text": text }).to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn reply(outcome: Outcome<()>, timed_out: bool) -> Reply<()> {
+        Reply {
+            outcome,
+            report: Report {
+                watermark: 1,
+                pending: u64::from(timed_out),
+                stale: timed_out,
+                timed_out,
+                queued: 0,
+                warnings: Vec::new(),
+                positions: Vec::new(),
+                exact: false,
+                view_id: None,
+                context: None,
+            },
+            diagnostic: None,
+            partial: Vec::new(),
+            folded: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn timed_out_no_match_exits_stale() {
+        let r = reply(Outcome::NoMatch("none".into()), true);
+        assert_eq!(exit_for(&r), ExitCode::Stale);
+        let r = reply(Outcome::NoMatch("none".into()), false);
+        assert_eq!(exit_for(&r), ExitCode::NoMatch);
+    }
+
+    #[test]
+    fn timed_out_ambiguous_exits_stale() {
+        let r = reply(Outcome::Ambiguous(Vec::new()), true);
+        assert_eq!(exit_for(&r), ExitCode::Stale);
+        let r = reply(Outcome::Ambiguous(Vec::new()), false);
+        assert_eq!(exit_for(&r), ExitCode::Ambiguous);
+    }
 }
