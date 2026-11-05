@@ -1,0 +1,107 @@
+name: Docs
+
+# Builds the mdBook under docs/ and publishes it to GitHub Pages.
+#
+# One-time repo setup before the first successful deploy:
+#   Settings -> Pages -> Build and deployment -> Source = "GitHub Actions".
+# Without that, actions/deploy-pages fails with "Pages site not found".
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "docs/**"
+      - ".github/workflows/docs.yml"
+  pull_request:
+    paths:
+      - "docs/**"
+      - ".github/workflows/docs.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One Pages deployment at a time, and never cancel one in flight.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+env:
+  # Pinned so a book that builds locally builds identically here.
+  MDBOOK_VERSION: "0.5.4"
+
+jobs:
+  build:
+    name: mdBook build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+
+      - name: Install mdBook
+        run: |
+          set -eu
+          mkdir -p "$HOME/.local/bin"
+          base="https://github.com/rust-lang/mdBook/releases/download"
+          curl -fsSL --proto '=https' --proto-redir '=https' \
+            "${base}/v${MDBOOK_VERSION}/mdbook-v${MDBOOK_VERSION}-x86_64-unknown-linux-gnu.tar.gz" \
+            | tar -xz -C "$HOME/.local/bin"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      # Every page must be reachable from the table of contents, and every entry must exist.
+      # mdbook itself only warns about an unlisted file.
+      - name: Every page is in the table of contents
+        run: |
+          set -eu
+          python3 - <<'PY'
+          import os, re, sys
+          src = "docs/src"
+          listed = set(re.findall(r"\]\(([^)#]+\.md)", open(f"{src}/SUMMARY.md").read()))
+          on_disk = {
+              os.path.relpath(os.path.join(r, f), src)
+              for r, _, fs in os.walk(src) for f in fs
+              if f.endswith(".md") and f != "SUMMARY.md"
+          }
+          problems = []
+          for p in sorted(listed - on_disk):
+              problems.append(f"SUMMARY lists {p}, which does not exist")
+          for p in sorted(on_disk - listed):
+              problems.append(f"{p} exists but is in no chapter")
+          for p in problems:
+              print(f"::error::{p}")
+          sys.exit(1 if problems else 0)
+          PY
+
+      - name: Build
+        run: mdbook build docs
+
+      - name: Configure Pages
+        if: github.event_name != 'pull_request'
+        uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
+
+      # `build-dir` defaults to `book` relative to book.toml -> docs/book.
+      - name: Upload Pages artifact
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: docs/book
+
+  deploy:
+    name: Deploy to GitHub Pages
+    needs: build
+    # A pull request builds the book — so a broken book fails the PR — but never deploys, and
+    # neither does a manual run on any branch but main .
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
