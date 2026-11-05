@@ -140,6 +140,13 @@ mod doc_impact {
                 origin: None,
                 binds: None,
             };
+            // As stitching leaves it: the artifact row holds the reference, and the unresolved
+            // row only points at its index.
+            let mut row = katalogr_store::Reader::artifact(tx, f.doc)
+                .unwrap()
+                .expect("the doc artifact");
+            row.refs = vec![r.clone()];
+            tx.put_artifact(f.doc, &row).unwrap();
             tx.put_unresolved(
                 RefId {
                     artifact: f.doc,
