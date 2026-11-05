@@ -26,7 +26,7 @@ pub(crate) enum Resolved {
 
 impl Katalogr {
     /// The repo a `--at` text is parsed for: the named context's, else the marked repo's.
-    fn at_repo(&self) -> Result<String, DistError> {
+    pub(crate) fn at_repo(&self) -> Result<String, DistError> {
         if let ContextChoice::Named(id) = &self.context
             && id.as_str() != ContextId::BASE
             && let Ok(m) = ContextManifest::read(self.project.layer(id).root())

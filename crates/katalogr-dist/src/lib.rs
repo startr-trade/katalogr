@@ -24,7 +24,10 @@ mod test_extractor;
 #[cfg(feature = "test-extractor")]
 pub use test_extractor::extract_calls;
 mod threads;
+mod view_store;
+pub use view_store::ViewStore;
 mod views;
+pub use views::{FreshCheck, ViewBytes};
 pub mod watch;
 pub mod working_set;
 

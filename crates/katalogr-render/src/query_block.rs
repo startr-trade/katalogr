@@ -274,6 +274,148 @@ impl ViewSpec {
     }
 }
 
+/// One argument of a view op, for the catalogue a client reads.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ArgInfo {
+    pub name: &'static str,
+    /// `string`, `integer`, `boolean` or `enum`.
+    pub ty: &'static str,
+    /// A positional argument is required; a flag never is.
+    pub required: bool,
+    pub default: Option<&'static str>,
+    /// The allowed words of an `enum`.
+    pub values: &'static [&'static str],
+}
+
+/// One view op and its arguments, positional first.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct OpInfo {
+    pub name: &'static str,
+    pub args: Vec<ArgInfo>,
+}
+
+/// Every view op, sorted by name, with its arguments (positional ones first, then flags in
+/// name order).
+pub fn catalogue() -> Vec<OpInfo> {
+    let mut out: Vec<OpInfo> = OPS
+        .iter()
+        .map(|op| {
+            let mut args: Vec<ArgInfo> = op
+                .positional
+                .iter()
+                .map(|name| ArgInfo {
+                    name,
+                    ty: "string",
+                    required: true,
+                    default: None,
+                    values: &[],
+                })
+                .collect();
+            let mut flags: Vec<&Flag> = op.flags.iter().collect();
+            flags.sort_by_key(|f| f.name);
+            args.extend(flags.into_iter().map(|f| ArgInfo {
+                name: f.name,
+                ty: match f.kind {
+                    Kind::Number => "integer",
+                    Kind::Word(_) => "enum",
+                    Kind::Text => "string",
+                    Kind::Switch => "boolean",
+                },
+                required: false,
+                default: Some(f.default),
+                values: match f.kind {
+                    Kind::Word(w) => w,
+                    _ => &[],
+                },
+            }));
+            OpInfo {
+                name: op.name,
+                args,
+            }
+        })
+        .collect();
+    out.sort_by_key(|o| o.name);
+    out
+}
+
+impl ViewSpec {
+    /// A spec from named arguments, as an HTTP query gives them: the op's positional
+    /// arguments are named (`symbol`, `from`, `to`). Unknown names, missing positionals and
+    /// bad values are errors; defaults are filled, so this equals what [`ViewSpec::parse`]
+    /// gives for the same question.
+    pub fn from_args(op: &str, given: &BTreeMap<String, String>) -> Result<ViewSpec, RenderError> {
+        let Some(info) = OPS.iter().find(|o| o.name == op) else {
+            let known: Vec<&str> = OPS.iter().map(|o| o.name).collect();
+            return bad(format!(
+                "unknown op `{op}`; known ops: {}",
+                known.join(", ")
+            ));
+        };
+        let mut args = BTreeMap::new();
+        for (name, raw) in given {
+            if info.positional.contains(&name.as_str()) {
+                if raw.is_empty() {
+                    return bad(format!("`{name}` wants a value"));
+                }
+                args.insert(name.clone(), raw.clone());
+            } else if let Some(flag) = info.flags.iter().find(|f| f.name == name) {
+                args.insert(name.clone(), value(flag, raw)?);
+            } else {
+                return bad(format!("unknown argument `{name}` for `{op}`"));
+            }
+        }
+        for name in info.positional {
+            if !args.contains_key(*name) {
+                return bad(format!("`{op}` needs `{name}`"));
+            }
+        }
+        for f in info.flags {
+            args.entry(f.name.to_string())
+                .or_insert_with(|| f.default.to_string());
+        }
+        Ok(ViewSpec {
+            op: info.name.to_string(),
+            args,
+        })
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn from_args_equals_parse() {
+    let given = |kv: &[(&str, &str)]| -> BTreeMap<String, String> {
+        kv.iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect()
+    };
+    assert_eq!(
+        ViewSpec::from_args("callers", &given(&[("symbol", "x"), ("depth", "3")])).unwrap(),
+        ViewSpec::parse("callers x --depth 3").unwrap()
+    );
+    assert_eq!(
+        ViewSpec::from_args("structure", &given(&[])).unwrap(),
+        ViewSpec::parse("structure").unwrap()
+    );
+    assert!(ViewSpec::from_args("path", &given(&[("from", "a")])).is_err());
+    assert!(ViewSpec::from_args("structure", &given(&[("nope", "1")])).is_err());
+    assert!(ViewSpec::from_args("structure", &given(&[("level", "x")])).is_err());
+    assert!(ViewSpec::from_args("nope", &given(&[])).is_err());
+}
+
+#[cfg(test)]
+#[test]
+fn catalogue_is_sorted_and_complete() {
+    let c = catalogue();
+    let names: Vec<&str> = c.iter().map(|o| o.name).collect();
+    assert_eq!(
+        names,
+        ["callers", "contracts", "cycles", "path", "structure"]
+    );
+    let path = c.iter().find(|o| o.name == "path").unwrap();
+    assert_eq!(path.args[0].name, "from");
+    assert!(path.args[0].required);
+}
+
 #[cfg(test)]
 fn args(spec: &ViewSpec) -> Vec<(&str, &str)> {
     spec.args
