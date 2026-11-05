@@ -36,6 +36,10 @@ required-features = ["mcp"]
 name = "api"
 required-features = ["api"]
 
+[[test]]
+name = "bench_api"
+required-features = ["api"]
+
 [dev-dependencies]
 # The `.tx` test extractor gives integration tests symbols to query.
 katalogr-dist = { workspace = true, features = ["test-extractor"] }
