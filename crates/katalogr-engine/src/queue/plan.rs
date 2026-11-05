@@ -258,6 +258,63 @@ pub(super) fn plan_one(env: &PlanEnv, key: &PendingKey) -> Result<Action, Engine
     }
 }
 
+/// Extract one file as the planner would, for a read that writes nothing. `Ok(None)` when no
+/// extractor handles `path`. The context is built from the engine's source of `repo`, the
+/// guests' contexts are read from a snapshot, and embeds and profiles are applied.
+pub fn extract_for_show(
+    engine: &Engine,
+    repo: &str,
+    path: &RelPath,
+    content: &[u8],
+    profiles: &ProfileSet,
+) -> Result<Option<katalogr_model::Extraction>, EngineError> {
+    let Some(extractor) = extractor_for(engine.registry(), profiles, path) else {
+        return Ok(None);
+    };
+    let ctx = context::build(engine, repo, extractor)?.unwrap_or_default();
+    let no_guests = GuestContexts::default();
+    let loaded;
+    let (guests, embed_sig) = if extractor.embeds() {
+        let snap = engine.cache().read()?;
+        loaded = GuestContexts::load(engine.registry(), &snap, repo, extractor.id())?;
+        (&loaded, embed::signature(engine.registry()))
+    } else {
+        (&no_guests, None)
+    };
+    let revision = context::revision_of(
+        &git_blob_id(content),
+        &context::RevisionFields {
+            extension: extractor.id(),
+            context: &ctx,
+            profile: profiles.hash_for(extractor.id()),
+            salt: extractor.revision_salt(),
+            embed: embed_sig,
+            guests: &guests.key_bytes(),
+        },
+    );
+    let mut out = extractor
+        .extract_full(&ExtractInput {
+            repo,
+            path,
+            revision: &revision,
+            content,
+            context: &ctx,
+        })
+        .map_err(|e| EngineError::Queue(format!("{path}: {e}")))?;
+    let more = embed::apply(
+        engine.registry(),
+        repo,
+        path,
+        extractor.id(),
+        &out.embedded,
+        guests,
+        &mut out.fragment,
+    );
+    out.errors.extend(more);
+    profiles.apply(&mut out.fragment);
+    Ok(Some(out))
+}
+
 /// A history path (`@history/<sha>`) names a commit, not a file: its fragment comes from the
 /// repository's history. A commit's fragment never changes, so a stored revision for `sha` is
 /// current.

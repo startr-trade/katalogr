@@ -6,6 +6,7 @@ mod plan;
 pub mod processor;
 
 pub use inbox::Inbox;
+pub use plan::extract_for_show;
 pub use processor::Processor;
 
 use katalogr_model::RelPath;
