@@ -15,7 +15,10 @@ pub fn run(cli: &Cli, location: &str, no_use: bool) -> Result<ExitCode, DistErro
         "why",
         &[
             ("location", location.to_string()),
-            ("use_limit", limit.map_or("none".to_string(), |n| n.to_string())),
+            (
+                "use_limit",
+                limit.map_or("none".to_string(), |n| n.to_string()),
+            ),
         ],
     );
     let reply = k.why(location, limit, &opts)?;

@@ -734,7 +734,7 @@ mod bench {
             ids.push(id);
             names.push(name);
         }
-        let mut call = |tx: &mut WriteTx, from: usize, to: usize| {
+        let call = |tx: &mut WriteTx, from: usize, to: usize| {
             tx.put_link(
                 &LinkKey {
                     from: ids[from],

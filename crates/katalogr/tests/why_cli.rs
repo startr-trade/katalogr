@@ -320,6 +320,82 @@ mod why_cli {
         assert!(note.starts_with("commit section omitted: "), "{v}");
     }
 
+    /// R-3. Every answer says what it read: positions per repo, and whether that is exact.
+    #[test]
+    fn answer_carries_position() {
+        let tmp = tempfile::tempdir().unwrap();
+        let code = setup(tmp.path(), true);
+        let head = git(&code, &["rev-parse", "HEAD"]).trim().to_string();
+        let v = json(&code, &["why", "src/a.tx:1"]);
+        assert_eq!(v["exact"], true, "{v}");
+        let positions = v["positions"].as_array().unwrap();
+        let repos: Vec<&str> = positions
+            .iter()
+            .map(|p| p["repo"].as_str().unwrap())
+            .collect();
+        assert_eq!(repos, ["board", "code"], "{v}");
+        let mine = positions.iter().find(|p| p["repo"] == "code").unwrap();
+        assert_eq!(mine["commit"], head.as_str());
+        // The marker file the project init wrote is untracked, so the checkout is not clean.
+        assert!(mine["dirty"].is_string(), "{v}");
+        // The board directory is not a git repository: it has no commit.
+        let board = positions.iter().find(|p| p["repo"] == "board").unwrap();
+        assert!(board["commit"].is_null(), "{v}");
+    }
+
+    /// R-3. `--at` the current position answers the same as the live read.
+    #[test]
+    fn at_position_answers() {
+        let tmp = tempfile::tempdir().unwrap();
+        let code = setup(tmp.path(), false);
+        let live = json(&code, &["why", "src/a.tx:1"]);
+        let head = git(&code, &["rev-parse", "HEAD"]).trim().to_string();
+        let at = json(&code, &["--at", &head, "why", "src/a.tx:1"]);
+        // The position's index holds no history, so only the code facts must agree.
+        assert_eq!(at["result"]["symbol"], live["result"]["symbol"]);
+        assert_eq!(at["result"]["used_by"], live["result"]["used_by"]);
+        // The commit is the same; the dirty part is what the checkout adds to it.
+        assert_eq!(at["positions"][0]["commit"], live["positions"][0]["commit"]);
+        assert!(at["positions"][0]["dirty"].is_null(), "{at}");
+        assert_eq!(at["exact"], true, "{at}");
+    }
+
+    /// R-3. A position nobody holds is exit 6, and says what is available.
+    #[test]
+    fn at_unavailable_exit_6() {
+        let tmp = tempfile::tempdir().unwrap();
+        let code = setup(tmp.path(), false);
+        let nowhere = "0".repeat(40);
+        let (c, out, err) = katalogr(&code, &["--json", "--at", &nowhere, "why", "src/a.tx:1"]);
+        assert_eq!(c, 6, "{out} {err}");
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(v["error"], "position-unavailable");
+        assert_eq!(v["wanted"], nowhere.as_str());
+        assert!(!v["available"].as_array().unwrap().is_empty(), "{v}");
+        let (c, out, err) = katalogr(&code, &["--at", &nowhere, "why", "src/a.tx:1"]);
+        assert_eq!((c, out.as_str()), (6, ""));
+        assert!(err.contains("position unavailable"), "{err}");
+    }
+
+    /// R-1. `why.use_limit` in the project settings sets how many callers are listed.
+    #[test]
+    fn use_limit_setting_applies() {
+        let tmp = tempfile::tempdir().unwrap();
+        let code = setup(tmp.path(), false);
+        let cfg = tmp.path().join("kx/projects/demo/config.yaml");
+        let text = std::fs::read_to_string(&cfg).unwrap();
+        let (head, _) = text.split_once("settings:").expect("settings key");
+        std::fs::write(&cfg, format!("{head}settings:\n  why.use_limit: 1\n")).unwrap();
+        let v = json(&code, &["why", "src/a.tx:1"]);
+        assert_eq!(
+            v["result"]["used_by"]["callers"].as_array().unwrap().len(),
+            1,
+            "{v}"
+        );
+        assert_eq!(v["result"]["used_by"]["callers_total"], 2);
+        assert_eq!(v["partial"][0]["cap"], "limit", "{v}");
+    }
+
     #[test]
     fn golden_contract_file() {
         let tmp = tempfile::tempdir().unwrap();

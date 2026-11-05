@@ -1,4 +1,5 @@
 {
+  "exact": true,
   "next": [
     "katalogr explain code:src/a.tx#fn:alpha",
     "katalogr show code:src/a.tx#fn:alpha",
@@ -6,6 +7,18 @@
     "kanbanr why src/a.tx:1"
   ],
   "pending": 0,
+  "positions": [
+    {
+      "commit": null,
+      "dirty": null,
+      "repo": "board"
+    },
+    {
+      "commit": "8ac937b5ea436e45cd3c4e1021993aa7960a4304",
+      "dirty": "0ab27beddb0ccfcc8d33687750823c61e9cf91ea9a24dea1f2c507ab5dcae03a",
+      "repo": "code"
+    }
+  ],
   "result": {
     "commits": [
       {
@@ -146,5 +159,6 @@
   "schema": 1,
   "stale": false,
   "truncated": null,
-  "watermark": 8
+  "view_id": "v1-bc4dda9ef9b3c8760ad9b627039a8f87",
+  "watermark": 9
 }
