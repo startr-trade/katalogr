@@ -260,36 +260,33 @@ fn blob_at(tree: &gix::Tree<'_>, path: &str) -> Result<Option<Vec<u8>>, ScanErro
     Ok(Some(obj.data.clone()))
 }
 
-/// Tracked paths whose working-tree state differs from the index or HEAD, from `git status`.
+/// Tracked paths whose working-tree or index state differs from HEAD, from gix status. Untracked
+/// files are left out.
 fn dirty_paths(repo_root: &std::path::Path) -> Result<Vec<String>, ScanError> {
-    let out = std::process::Command::new("git")
-        .current_dir(repo_root)
-        .args(["status", "--porcelain=v1", "-z", "--untracked-files=no"])
-        .output()
-        .map_err(|e| ScanError::Io {
-            path: repo_root.display().to_string(),
-            message: format!("cannot run git status: {e}"),
-        })?;
-    if !out.status.success() {
-        return Err(ScanError::Diff(format!(
-            "git status failed: {}",
-            String::from_utf8_lossy(&out.stderr).trim()
-        )));
-    }
+    use gix::bstr::BString;
+    let repo = gix::open(repo_root).map_err(|e| ScanError::RepoOpen {
+        path: repo_root.display().to_string(),
+        message: e.to_string(),
+    })?;
+    let iter = repo
+        .status(gix::progress::Discard)
+        .map_err(diff_err)?
+        .untracked_files(gix::status::UntrackedFiles::None)
+        .index_worktree_rewrites(None)
+        .tree_index_track_renames(gix::status::tree_index::TrackRenames::Disabled)
+        .into_iter(Vec::<BString>::new())
+        .map_err(diff_err)?;
     let mut paths = Vec::new();
-    let mut it = out.stdout.split(|b| *b == 0).filter(|e| !e.is_empty());
-    while let Some(entry) = it.next() {
-        if entry.len() < 4 {
-            continue;
-        }
-        if let Ok(p) = std::str::from_utf8(&entry[3..]) {
-            paths.push(p.to_string());
-        }
-        if matches!(entry[0], b'R' | b'C')
-            && let Some(orig) = it.next()
-            && let Ok(p) = std::str::from_utf8(orig)
-        {
-            paths.push(p.to_string());
+    for item in iter {
+        match item.map_err(diff_err)? {
+            gix::status::Item::IndexWorktree(gix::status::index_worktree::Item::Modification {
+                rela_path,
+                ..
+            }) => paths.push(rela_path.to_string()),
+            gix::status::Item::TreeIndex(change) => {
+                paths.push(change.location().to_string());
+            }
+            _ => {}
         }
     }
     Ok(paths)

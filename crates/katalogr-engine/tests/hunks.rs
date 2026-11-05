@@ -90,3 +90,47 @@ mod scan {
         }
     }
 }
+
+mod hunks_status {
+    use katalogr_engine::scan::{ChangeKind, changed_hunks};
+    use std::path::Path;
+    use std::process::Command;
+
+    fn git(root: &Path, args: &[&str]) {
+        assert!(
+            Command::new("git")
+                .current_dir(root)
+                .args(args)
+                .status()
+                .unwrap()
+                .success()
+        );
+    }
+
+    #[test]
+    fn staged_deleted_and_untracked() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        git(root, &["init", "-q"]);
+        git(root, &["config", "user.name", "Test"]);
+        git(root, &["config", "user.email", "test@example.com"]);
+        git(root, &["config", "commit.gpgsign", "false"]);
+        std::fs::write(root.join("a.tx"), "1\n2\n").unwrap();
+        std::fs::write(root.join("b.tx"), "x\n").unwrap();
+        git(root, &["add", "."]);
+        git(root, &["commit", "-q", "-m", "c1"]);
+        std::fs::write(root.join("a.tx"), "1\nTWO\n").unwrap();
+        git(root, &["add", "a.tx"]);
+        std::fs::remove_file(root.join("b.tx")).unwrap();
+        std::fs::write(root.join("untracked.tx"), "u\n").unwrap();
+        let v = changed_hunks(root, "HEAD", None).unwrap();
+        let got: Vec<_> = v.iter().map(|c| (c.path.as_str(), c.kind)).collect();
+        assert_eq!(
+            got,
+            [
+                ("a.tx", ChangeKind::Modified),
+                ("b.tx", ChangeKind::Deleted)
+            ]
+        );
+    }
+}
