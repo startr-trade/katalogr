@@ -263,6 +263,7 @@ mod partial {
                 n == "doctor.schema.json"
                     || n == "position.schema.json"
                     || n == "contract.schema.json"
+                    || n == "view.schema.json"
             }) {
                 continue;
             }
