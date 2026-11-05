@@ -98,6 +98,47 @@ mod bench {
         p
     }
 
+    /// FEAT-084 R-12: computing a view ID takes under 100 microseconds.
+    #[test]
+    #[ignore]
+    fn view_id_cost() {
+        use katalogr_query::{PositionRef, ViewQuery, view_id};
+        let positions: Vec<PositionRef> = (0..3)
+            .map(|i| PositionRef {
+                repo: format!("repo{i}"),
+                commit: Some("e410760849abb8cd9fa8fbba305f5dd5d96ba954".to_string()),
+                dirty: Some(
+                    "83ebb47e03fee94773edcd621a87f37980b3b408b96467062fcc87368f3260c7".to_string(),
+                ),
+            })
+            .collect();
+        let q = ViewQuery {
+            op: "search".to_string(),
+            args: [("terms", "rate code"), ("limit", "20"), ("budget", "400")]
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect(),
+        };
+        let facts = "0123456789abcdef".repeat(4);
+        let n = 20_000;
+        let mut sink = 0usize;
+        let t = Instant::now();
+        for _ in 0..n {
+            sink += view_id(
+                std::hint::black_box(&positions),
+                &facts,
+                std::hint::black_box(&q),
+            )
+            .len();
+        }
+        let us = t.elapsed().as_secs_f64() * 1e6 / n as f64;
+        println!(
+            "view_id_cost: {us:.2} us per ID (sink {sink}); load {}",
+            load().trim()
+        );
+        assert!(us < 100.0, "{us:.2} us is over the 100 us budget");
+    }
+
     /// FEAT-084 R-12: `read_position` adds at most 50 ms to a read on a 10k-file repo.
     #[test]
     #[ignore]

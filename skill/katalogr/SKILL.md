@@ -46,6 +46,7 @@ katalogr has already parsed this project into a graph of artifacts, symbols, con
 - `--budget <tokens>` caps output and says what was left out.
 - `--json` gives a versioned envelope with `watermark`, `pending`, `stale` and `next`.
 - `--consistency wait|wait-all|stale-ok` and `--timeout <s>` choose how fresh the answer must be. The CLI default is `wait`.
+- `--at <position>` answers for an exact position (a commit, or `commit+hash` of uncommitted changes); `katalogr position` prints the checkout's. An exact answer carries `positions` and a `view_id` that repeats.
 
 ## 3. Playbooks
 
@@ -97,6 +98,7 @@ katalogr has already parsed this project into a graph of artifacts, symbols, con
 | 3 | ambiguous: the candidates are on stdout | pick one and repeat with its full canonical name |
 | 4 | no match | rephrase: other words, a partial name with `find`, or `search` |
 | 5 | stale: the index is behind the files (or a wait timed out) | run `katalogr index`, or retry with `--consistency wait`; never trust a span from a stale answer |
+| 6 | `--at` named a position no context holds; stdout lists the positions that are held | repeat with one of them, or without `--at` |
 | 1 | error | read stderr |
 | 2 | usage or configuration | read stderr; `katalogr --help` |
 
