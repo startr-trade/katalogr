@@ -208,32 +208,27 @@ pub(super) fn plan_one(env: &PlanEnv, key: &PendingKey, seq: u64) -> Result<Acti
     };
     let pair = (key.repo.clone(), extractor.id());
     let ctx: Vec<u8> = env.contexts.get(&pair).cloned().unwrap_or_default();
-    // The profiles that can apply to this extension are part of what the shard depends on.
-    let mut keyed = ctx.clone();
-    if let Some(h) = profiles.hash_for(extractor.id()) {
-        keyed.extend_from_slice(&h);
-    }
-    // Revision key, in a fixed order: blob id, context, profile hash, revision salt, embed
-    // signature, guest key bytes. Every input takes part.
-    // An extension that changes what it extracts from unchanged input bumps its salt.
-    let salt = extractor.revision_salt();
-    if !salt.is_empty() {
-        keyed.extend_from_slice(b"salt:");
-        keyed.extend_from_slice(salt.as_bytes());
-    }
-    // A host's output also depends on the guest set and on each guest's projected context.
+    // The revision depends on, in a fixed order: blob id, extension id, context, profile hash,
+    // engine revision, revision salt, embed signature and guest key bytes. A host's output also
+    // depends on the guest set and on each guest's projected context.
     let no_guests = GuestContexts::default();
-    let guests = if extractor.embeds() {
+    let (guests, embed_sig, guest_bytes) = if extractor.embeds() {
         let g = env.guests.get(&pair).unwrap_or(&no_guests);
-        if let Some(sig) = env.embed_sig {
-            keyed.extend_from_slice(&sig);
-        }
-        keyed.extend_from_slice(&g.key_bytes());
-        g
+        (g, env.embed_sig, g.key_bytes())
     } else {
-        &no_guests
+        (&no_guests, None, Vec::new())
     };
-    let revision = context::revision(&git_blob_id(&content), &keyed);
+    let revision = context::revision_of(
+        &git_blob_id(&content),
+        &context::RevisionFields {
+            extension: extractor.id(),
+            context: &ctx,
+            profile: profiles.hash_for(extractor.id()),
+            salt: extractor.revision_salt(),
+            embed: embed_sig,
+            guests: &guest_bytes,
+        },
+    );
     if stored_revision.as_deref() == Some(revision.as_str()) {
         return Ok(Action::Skip);
     }
