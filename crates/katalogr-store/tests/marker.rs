@@ -3,9 +3,9 @@
 
 mod marker {
     use camino::{Utf8Path, Utf8PathBuf};
+    use katalogr_store::StoreError;
     use katalogr_store::kindex::ProjectName;
     use katalogr_store::marker::{self, Marker, Overrides};
-    use katalogr_store::StoreError;
 
     fn utf8(p: std::path::PathBuf) -> Utf8PathBuf {
         Utf8PathBuf::from_path_buf(std::fs::canonicalize(p).unwrap()).unwrap()
