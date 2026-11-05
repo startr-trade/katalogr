@@ -872,7 +872,7 @@ mod query {
     fn schemas_current() {
         let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../schema/v1");
         let fresh = katalogr_dist::schemas();
-        assert_eq!(fresh.len(), 23);
+        assert_eq!(fresh.len(), 24);
         for (name, schema) in fresh {
             let mut want = serde_json::to_string_pretty(&schema).unwrap();
             want.push('\n');
@@ -2132,6 +2132,61 @@ mod position {
         assert_eq!(code, 6);
         assert_eq!(out, "");
         assert!(err.contains("position unavailable"), "{err}");
+    }
+
+    /// R-10. `position` prints the live position and what the context's index reflects.
+    #[test]
+    fn command_prints_live_and_reflected() {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = committed_project(tmp.path());
+        let commit = head(&repo);
+        // Read once so the index records its position, then edit.
+        let first = json(&repo, &["--json", "find", "call"]);
+        let mut lib = std::fs::read(repo.join("lib.tx")).unwrap();
+        lib.extend_from_slice(b"sym fn extra\n");
+        std::fs::write(repo.join("lib.tx"), lib).unwrap();
+        let v = json(&repo, &["--json", "position"]);
+        assert_eq!(v["schema"], 1);
+        assert_eq!(v["live"]["repo"], "app");
+        assert_eq!(v["live"]["commit"], commit.as_str());
+        assert!(v["live"]["dirty"].is_string(), "{v}");
+        assert_eq!(v["text"], position_text(&v["live"]).as_str());
+        // The index still reflects the position of the first read.
+        assert_eq!(v["reflected"], first["positions"]);
+        assert_eq!(v["exact"], false);
+        // Text mode: the position first, then what is reflected.
+        let (code, out, _) = run_raw(&repo, &["position"]);
+        assert_eq!(code, 0);
+        let lines: Vec<&str> = out.lines().collect();
+        assert_eq!(lines[0], v["text"].as_str().unwrap());
+        assert!(lines[1].starts_with("reflects: "), "{out}");
+        // After a waiting read the index has caught up.
+        let _ = json(&repo, &["--json", "find", "call"]);
+        let v = json(&repo, &["--json", "position"]);
+        assert_eq!(v["exact"], true, "{v}");
+    }
+
+    /// R-10. With no project at all, the command still gives the checkout's position.
+    #[test]
+    fn command_works_without_board() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("plain-repo");
+        std::fs::create_dir_all(&dir).unwrap();
+        git(&dir, &["init", "-q"]);
+        git(&dir, &["config", "user.name", "Test"]);
+        git(&dir, &["config", "user.email", "test@example.com"]);
+        git(&dir, &["config", "commit.gpgsign", "false"]);
+        std::fs::write(dir.join("a.txt"), "one\n").unwrap();
+        git(&dir, &["add", "."]);
+        git(&dir, &["commit", "-q", "-m", "c1"]);
+        let v = json(&dir, &["--json", "position"]);
+        assert_eq!(v["live"]["commit"], head(&dir).as_str());
+        assert!(v["live"]["dirty"].is_null());
+        assert_eq!(v["text"], head(&dir).as_str());
+        assert!(v.get("reflected").is_none());
+        // Outside any checkout it is a usage error.
+        let (code, _, _) = run_raw(tmp.path(), &["position"]);
+        assert_eq!(code, 2);
     }
 
     /// R-3. A repo that is not this context's checkout reports the commit the base reflects and

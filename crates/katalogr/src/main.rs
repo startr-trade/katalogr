@@ -41,6 +41,7 @@ fn run(cli: &Cli) -> Result<ExitCode, DistError> {
             history,
         }) => cmd::index::run(cli, since.as_ref(), range.as_ref(), *full, *history),
         Some(Command::Status) => cmd::status::run(cli),
+        Some(Command::Position { repo }) => cmd::position::run(cli, repo.as_deref()),
         #[cfg(feature = "mcp")]
         Some(Command::Mcp {
             root,

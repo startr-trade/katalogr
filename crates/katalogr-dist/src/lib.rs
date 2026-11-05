@@ -3,9 +3,10 @@
 //! All behaviour of the command-line wrapper lives here; the wrapper parses, calls and renders.
 
 mod at;
+pub use at::position_without_board;
 mod claude;
 pub mod contexts;
-pub use katalogr_query::{PositionRef, ViewQuery};
+pub use katalogr_query::{PositionAnswer, PositionRef, ViewQuery};
 pub mod doctor;
 mod error;
 pub mod eval;

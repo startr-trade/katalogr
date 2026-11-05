@@ -1033,3 +1033,10 @@ impl crate::consistency::Engine {
         Ok(h.finalize().iter().map(|b| format!("{b:02x}")).collect())
     }
 }
+
+/// The working-tree root of the git repository that holds `dir`, if there is one.
+pub fn checkout_root(dir: &Path) -> Option<std::path::PathBuf> {
+    gix::discover(dir)
+        .ok()
+        .and_then(|r| r.workdir().map(Path::to_path_buf))
+}

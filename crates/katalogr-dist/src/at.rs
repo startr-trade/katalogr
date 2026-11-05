@@ -130,3 +130,59 @@ impl Katalogr {
         })
     }
 }
+
+impl Katalogr {
+    /// FEAT-084 `katalogr position`: the position of `repo` (default: the marked repo) as it is
+    /// now, and what this context's index reflects (read without waiting or reconciling).
+    pub fn position(
+        &self,
+        repo: Option<&str>,
+        opts: &crate::Options,
+    ) -> Result<katalogr_query::PositionAnswer, DistError> {
+        let repo = match repo {
+            Some(r) => r.to_string(),
+            None => self.at_repo()?,
+        };
+        if !self.roots.contains_key(&repo) {
+            return Err(crate::unknown_root(&repo));
+        }
+        let timeout = opts.timeout()?;
+        let deadline = Instant::now() + timeout;
+        let engine = self.engine_for(crate::Consistency::StaleOk, deadline)?;
+        let live = engine.live_position(&repo)?;
+        let report = self.read(&engine, crate::Consistency::StaleOk, timeout, 0, Vec::new())?;
+        let reflected: Vec<PositionRef> = report.positions;
+        let exact = reflected.iter().any(|p| p == &live) && !report.stale;
+        Ok(katalogr_query::PositionAnswer {
+            schema: katalogr_query::RESULT_SCHEMA_VERSION,
+            text: live.text(),
+            live,
+            reflected,
+            exact,
+        })
+    }
+}
+
+/// `katalogr position` with no board: the position of the git checkout that holds `dir`, named
+/// after its directory, with nothing reflected.
+pub fn position_without_board(
+    dir: &std::path::Path,
+) -> Result<katalogr_query::PositionAnswer, DistError> {
+    let root = katalogr_engine::position::checkout_root(dir)
+        .ok_or_else(|| DistError::usage("not inside a git checkout, and no project was found"))?;
+    let name = root
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("repo")
+        .to_string();
+    let live = katalogr_engine::position::read_position(&name, &root, &["**".to_string()], &[])
+        .map_err(|e| DistError::usage(e.to_string()))?
+        .position;
+    Ok(katalogr_query::PositionAnswer {
+        schema: katalogr_query::RESULT_SCHEMA_VERSION,
+        text: live.text(),
+        live,
+        reflected: Vec::new(),
+        exact: false,
+    })
+}

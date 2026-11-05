@@ -262,6 +262,13 @@ pub enum Command {
     },
     /// Show the index watermark, pending changes and staleness.
     Status,
+    /// Show the checkout's position (commit plus a hash of uncommitted changes) and what the
+    /// index reflects. Works without a project.
+    Position {
+        /// The repo to show (default: the marked repo).
+        #[arg(long, value_name = "REPO")]
+        repo: Option<String>,
+    },
     /// Serve katalogr's queries over MCP (stdio) for non-Claude agent hosts.
     #[cfg(feature = "mcp")]
     Mcp {

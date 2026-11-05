@@ -124,3 +124,19 @@ pub fn view_id(positions: &[PositionRef], facts: &str, q: &ViewQuery) -> String 
     let hex: String = digest.iter().map(|b| format!("{b:02x}")).collect();
     format!("v1-{}", &hex[..32])
 }
+
+/// What `katalogr position --json` prints (FEAT-084).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, JsonSchema)]
+pub struct PositionAnswer {
+    pub schema: u32,
+    /// The checkout's position as it is now.
+    pub live: PositionRef,
+    /// `live` in text form.
+    pub text: String,
+    /// What the context's index reflects, per repo; empty when no board is found or nothing is
+    /// recorded yet.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub reflected: Vec<PositionRef>,
+    /// The index reflects the live position exactly.
+    pub exact: bool,
+}
