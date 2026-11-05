@@ -9,7 +9,7 @@ mod docs_affected;
 pub use docs_affected::{DEFAULT_DOCS_LIMIT, DocsAffectedParams};
 pub mod contexts;
 pub mod contract;
-pub use katalogr_query::{PositionAnswer, PositionRef, ViewQuery};
+pub use katalogr_query::{PositionAnswer, PositionRef, ViewQuery, WorkingSetSummary};
 pub mod doctor;
 mod error;
 pub mod eval;
@@ -23,6 +23,8 @@ mod test_extractor;
 #[cfg(feature = "test-extractor")]
 pub use test_extractor::extract_calls;
 mod threads;
+pub mod watch;
+pub mod working_set;
 
 use crate::contexts::ContextChoice;
 pub use claude::{
@@ -180,6 +182,20 @@ pub struct Options {
     pub at: Option<String>,
     /// The question, for the answer's view ID (FEAT-084). `None`: no ID is computed.
     pub view: Option<katalogr_query::ViewQuery>,
+    /// Ranking of `search` and `map` (FEAT-039). The library default is neutral; the CLI asks
+    /// for [`Ranking::Default`] unless `--neutral` or `--at` is given.
+    pub ranking: Ranking,
+}
+
+/// How `search` and `map` order their answers (FEAT-039).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Ranking {
+    /// Boost the working set: dirty, recent, branch and item paths.
+    Default,
+    /// Order by relevance alone, as before. Always used under `--at`, in `eval` and by the
+    /// library unless asked otherwise.
+    #[default]
+    Neutral,
 }
 
 impl Options {
@@ -204,6 +220,8 @@ pub struct Report {
     pub warnings: Vec<String>,
     /// What the index reflects, one entry per repo sorted by repo (FEAT-084).
     pub positions: Vec<katalogr_query::PositionRef>,
+    /// The working set that reordered a `search` or `map` answer (FEAT-039).
+    pub working_set: Option<katalogr_query::WorkingSetSummary>,
     /// Nothing was pending and every checkout's position was unchanged across the read.
     pub exact: bool,
     /// The ID of this answer; set only on an exact answer to a question that has one.
@@ -241,6 +259,9 @@ pub struct Katalogr {
     context: contexts::ContextChoice,
     /// Warnings raised while choosing a context, handed out with the next report.
     notes: std::sync::Mutex<Vec<String>>,
+    /// View-ID arguments a read added while it ran (the working-set hash), taken by
+    /// `finish_report`.
+    view_extra: std::sync::Mutex<Vec<(String, String)>>,
 }
 
 /// Profiles embedded in the binary, applied before the project's own: `(file name, text)`.
@@ -358,6 +379,20 @@ pub struct Reply<T> {
     pub partial: Vec<Partial>,
     /// Folds of a `refs` or `callers` answer; empty for every other command and with `expand`.
     pub folded: Vec<Fold>,
+}
+
+/// What a `search` or `map` read learned about its working set.
+#[derive(Default)]
+struct WsRun {
+    summary: Option<katalogr_query::WorkingSetSummary>,
+    warnings: Vec<String>,
+}
+
+impl WsRun {
+    fn finish(self, report: &mut Report) {
+        report.working_set = self.summary;
+        report.warnings.extend(self.warnings);
+    }
 }
 
 fn found_or_none(items: Vec<SymbolHit>, text: &str) -> Outcome<Vec<SymbolHit>> {
@@ -516,6 +551,7 @@ impl Katalogr {
             roots,
             context,
             notes: std::sync::Mutex::new(Vec::new()),
+            view_extra: std::sync::Mutex::new(Vec::new()),
         })
     }
 
@@ -899,6 +935,7 @@ impl Katalogr {
                         exact: false,
                         view_id: None,
                         context: None,
+                        working_set: None,
                     },
                     diagnostic: None,
                     partial: Vec::new(),
@@ -964,6 +1001,7 @@ impl Katalogr {
                 exact: a.exact,
                 view_id: None,
                 context: None,
+                working_set: None,
             },
             diagnostic: diag.finish(),
         })
@@ -982,7 +1020,13 @@ impl Katalogr {
         view: Option<&katalogr_query::ViewQuery>,
     ) {
         report.view_id = None;
-        let Some(view) = view else { return };
+        let extra = std::mem::take(&mut *self.view_extra.lock().expect("view_extra lock"));
+        let merged = view.map(|v| {
+            let mut v = v.clone();
+            v.args.extend(extra);
+            v
+        });
+        let Some(view) = merged.as_ref() else { return };
         if !report.exact {
             return;
         }
@@ -1182,9 +1226,42 @@ impl Katalogr {
 
     /// All symbols by PageRank.
     pub fn map(&self, opts: &Options) -> Result<Reply<Vec<MapEntry>>, DistError> {
-        self.query_traced(opts, |tx, diag| {
-            Ok(Outcome::Found(katalogr_query::map_traced(tx, diag)?))
-        })
+        let mut ws = WsRun::default();
+        let mut reply = self.query_traced(opts, |tx, diag| {
+            let boost = self.ws_boost(opts, tx, &mut ws);
+            Ok(Outcome::Found(katalogr_query::map_boosted_traced(
+                tx,
+                boost.as_ref(),
+                diag,
+            )?))
+        })?;
+        ws.finish(&mut reply.report);
+        Ok(reply)
+    }
+
+    /// The working-set boost for a `search` or `map` read, or `None` when ranking is neutral,
+    /// the read is `--at`, or the set is empty. Records the set's summary and view-ID arguments
+    /// in `run` and in `view_extra`.
+    fn ws_boost(
+        &self,
+        opts: &Options,
+        tx: &ReadTx,
+        run: &mut WsRun,
+    ) -> Option<katalogr_query::Boost> {
+        if opts.ranking != Ranking::Default || opts.at.is_some() {
+            return None;
+        }
+        let ((set, warnings), item) = self.working_set_with(tx);
+        run.warnings = warnings;
+        let boost = katalogr_query::Boost::new(&set, self.working_set_weights())?;
+        let mut summary = set.counts();
+        summary.item = item;
+        run.summary = Some(summary);
+        self.view_extra.lock().expect("view_extra lock").extend([
+            ("ranking".to_string(), "working-set".to_string()),
+            ("working_set".to_string(), set.hash()),
+        ]);
+        Some(boost)
     }
 
     /// The best `limit` symbols for the words in `terms` (BM25 over names, docs, sections and
@@ -1213,9 +1290,17 @@ impl Katalogr {
         }
         // One extra hit tells whether the limit cut the answer.
         let mut partial = Vec::new();
+        let mut ws = WsRun::default();
         let mut reply = self.query_traced(opts, |tx, diag| {
-            let mut hits =
-                katalogr_query::search_with_traced(tx, terms, limit.saturating_add(1), p, diag)?;
+            let boost = self.ws_boost(opts, tx, &mut ws);
+            let mut hits = katalogr_query::search_boosted_traced(
+                tx,
+                terms,
+                limit.saturating_add(1),
+                p,
+                boost.as_ref(),
+                diag,
+            )?;
             if hits.len() > limit {
                 hits.truncate(limit);
                 partial.push(Partial::new(cap::LIMIT, limit as u64, limit as u64, None));
@@ -1227,6 +1312,7 @@ impl Katalogr {
             })
         })?;
         reply.partial = partial;
+        ws.finish(&mut reply.report);
         Ok(reply)
     }
 
@@ -1552,6 +1638,7 @@ impl Katalogr {
             exact: a.exact,
             view_id: None,
             context: None,
+            working_set: None,
         })
     }
 }

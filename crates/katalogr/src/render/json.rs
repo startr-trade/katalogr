@@ -70,6 +70,7 @@ pub(super) fn envelope<T>(
         exact: report.exact,
         view_id: report.view_id.clone(),
         context: report.context.clone(),
+        working_set: report.working_set.clone(),
     }
 }
 
@@ -619,6 +620,7 @@ mod tests {
                 exact: false,
                 view_id: None,
                 context: None,
+                working_set: None,
             },
             diagnostic: None,
             partial: Vec::new(),

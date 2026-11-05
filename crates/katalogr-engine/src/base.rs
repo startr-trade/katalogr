@@ -117,6 +117,14 @@ pub fn resolve_commit(repo_root: &Path, rev: &str) -> Result<String, ScanError> 
     Ok(commit.id().to_hex().to_string())
 }
 
+/// The short name of the branch `HEAD` is on, or `None` when `HEAD` is detached or unborn, or
+/// the directory is no repository.
+pub fn head_branch(repo_root: &Path) -> Option<String> {
+    let r = open(repo_root).ok()?;
+    let name = r.head_name().ok().flatten()?;
+    Some(name.shorten().to_string())
+}
+
 /// The merge-base of two revisions as lower-case hex; `None` when they share no history.
 pub fn merge_base(repo_root: &Path, a: &str, b: &str) -> Result<Option<String>, ScanError> {
     let repo = open(repo_root)?;

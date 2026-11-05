@@ -488,4 +488,104 @@ mod eval {
         assert_eq!(a.1, b.1);
         assert!(!a.1.is_empty());
     }
+
+    /// FEAT-039 R-8. `fixtures/eval/working-set` holds three modules with equal lexical hits.
+    /// Neutral ranking orders them by name; with the target's file in the working set, the
+    /// default ranking puts the target first.
+    #[test]
+    fn working_set_set_improves_over_neutral() {
+        let set = fixtures().join("working-set");
+        let golden = std::fs::read_to_string(set.join("working-set.yaml")).unwrap();
+        // The golden file is flat enough to read by line: each query's input and its grade-3
+        // evidence name.
+        let inputs: Vec<&str> = golden
+            .lines()
+            .filter_map(|l| l.trim().strip_prefix("input: "))
+            .collect();
+        let target = golden
+            .lines()
+            .find_map(|l| l.split("name: \"").nth(1))
+            .and_then(|r| r.split('"').next())
+            .unwrap()
+            .to_string();
+        let tmp = tempfile::tempdir().unwrap();
+        let base = std::fs::canonicalize(tmp.path()).unwrap();
+        let app = base.join("app");
+        copy_dir(&set.join("repos/app"), &app);
+        let git = |args: &[&str]| {
+            let out = Command::new("git")
+                .current_dir(&app)
+                .args([
+                    "-c",
+                    "user.name=Example Author",
+                    "-c",
+                    "user.email=a@example.test",
+                ])
+                .args([
+                    "-c",
+                    "commit.gpgsign=false",
+                    "-c",
+                    "init.defaultBranch=main",
+                ])
+                .args(args)
+                .output()
+                .unwrap();
+            assert!(out.status.success(), "git {args:?}");
+        };
+        git(&["init", "-q"]);
+        git(&["add", "-A"]);
+        git(&["commit", "-q", "-m", "initial"]);
+        let kx = base.join("kx");
+        let (c, _, e) = run_in(&base, &["kindex", "init", kx.to_str().unwrap()]);
+        assert_eq!(c, 0, "{e}");
+        let spec = format!("app={}", app.display());
+        let (c, _, e) = run_in(
+            &base,
+            &[
+                "--kindex",
+                kx.to_str().unwrap(),
+                "project",
+                "init",
+                "demo",
+                "--repo",
+                &spec,
+                "--mark",
+            ],
+        );
+        assert_eq!(c, 0, "{e}");
+        let (c, _, e) = run_in(&app, &["index", "--full"]);
+        assert_eq!(c, 0, "{e}");
+        // The target's file is being edited.
+        let mut text = std::fs::read_to_string(app.join("src/charlie.rs")).unwrap();
+        text.push_str("// in progress\n");
+        std::fs::write(app.join("src/charlie.rs"), text).unwrap();
+
+        let rank_of = |args: &[&str], want: &str| -> usize {
+            let mut full = vec!["--json", "search"];
+            full.extend_from_slice(args);
+            let (c, out, e) = run_in(&app, &full);
+            assert_eq!(c, 0, "{e}");
+            let v: Value = serde_json::from_str(&out).unwrap();
+            v["result"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .position(|h| h["symbol"]["name"] == want)
+                .map(|i| i + 1)
+                .unwrap_or(usize::MAX)
+        };
+        assert!(!inputs.is_empty());
+        for input in inputs {
+            let words: Vec<&str> = input.split_whitespace().collect();
+            let mut neutral = words.clone();
+            neutral.push("--neutral");
+            let (default_rank, neutral_rank) =
+                (rank_of(&words, &target), rank_of(&neutral, &target));
+            assert!(
+                default_rank < neutral_rank,
+                "{input}: default {default_rank}, neutral {neutral_rank}"
+            );
+            assert_eq!(default_rank, 1, "{input}");
+        }
+    }
 }

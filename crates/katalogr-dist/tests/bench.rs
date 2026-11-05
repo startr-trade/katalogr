@@ -185,6 +185,105 @@ mod bench {
         assert!(ms <= 50.0, "{ms:.1} ms is over the 50 ms budget");
     }
 
+    /// FEAT-039 R-12: an idle `watch` tick on a 10k-file repo costs under 5% of one core at the
+    /// default 2 s interval, that is under 100 ms of CPU per tick. Ticks run here every 100 ms
+    /// so the run is short; the cost per tick is what is compared with the budget. Not run by
+    /// the author: run it in release, alone, under the heavy-job lock:
+    /// `flock ~/.cache/heavy-build.lock cargo test -p katalogr-dist --release --test bench
+    /// watch_tick_cost -- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn watch_tick_cost() {
+        use katalogr_dist::watch::{WatchTick, watch};
+        use katalogr_dist::{Katalogr, Overrides, kindex_init, project_init};
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        let base = std::env::var("KATALOGR_SCRATCH")
+            .unwrap_or_else(|_| "/home/dev/.cache/katalogr-scratch/FEAT-039".to_string());
+        std::fs::create_dir_all(&base).unwrap();
+        let dir = tempfile::tempdir_in(&base).unwrap();
+        let root = std::fs::canonicalize(dir.path()).unwrap();
+        let repo = root.join("app");
+        // Files no extension reads, so the first tick has nothing to extract.
+        for d in 0..100 {
+            let sub = repo.join(format!("d{d:03}"));
+            std::fs::create_dir_all(&sub).unwrap();
+            for f in 0..100 {
+                std::fs::write(sub.join(format!("f{f:03}.dat")), format!("file {d} {f}\n"))
+                    .unwrap();
+            }
+        }
+        let git = |args: &[&str]| {
+            let st = std::process::Command::new("git")
+                .current_dir(&repo)
+                .args(args)
+                .env("GIT_CONFIG_GLOBAL", "/dev/null")
+                .env("GIT_CONFIG_SYSTEM", "/dev/null")
+                .status()
+                .unwrap();
+            assert!(st.success());
+        };
+        git(&["init", "-q"]);
+        git(&["add", "."]);
+        git(&[
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@example.invalid",
+            "commit",
+            "-q",
+            "-m",
+            "x",
+        ]);
+        let kx = root.join("kx");
+        kindex_init(&kx).unwrap();
+        project_init(&kx, "demo", vec![("app".into(), repo.clone())], true).unwrap();
+        let k = Katalogr::resolve(
+            &repo,
+            &Overrides {
+                kindex: Some(kx.display().to_string()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        // Files younger than the stat cache by under 2 s are read again (the racy rule).
+        std::thread::sleep(Duration::from_secs(3));
+
+        let stop = AtomicBool::new(false);
+        let load_before = load();
+        let (mut idle, mut cpu_start, mut wall_start) = (0u32, 0.0, None);
+        let mut cpu_total = 0.0;
+        let mut wall_total = 0.0;
+        watch(&k, Duration::from_millis(100), &stop, &mut |t| match t {
+            WatchTick::Idle => {
+                if idle == 0 {
+                    cpu_start = cpu_secs();
+                    wall_start = Some(Instant::now());
+                }
+                idle += 1;
+                if idle == 31 {
+                    cpu_total = cpu_secs() - cpu_start;
+                    wall_total = wall_start.unwrap().elapsed().as_secs_f64();
+                    stop.store(true, Ordering::Relaxed);
+                }
+            }
+            WatchTick::Processed { .. } => {}
+            WatchTick::Failed(e) => panic!("tick failed: {e}"),
+        })
+        .unwrap();
+        // 30 intervals separate the first idle tick from the 31st; each interval holds one tick
+        // and 100 ms of sleep, which costs no CPU.
+        let per_tick = cpu_total / 30.0;
+        let core_pct = per_tick / 2.0 * 100.0;
+        println!(
+            "watch_tick_cost: {:.1} ms CPU per idle tick ({:.2}% of one core at 2 s); {wall_total:.2} s wall for 30 ticks; load {load_before} -> {}",
+            per_tick * 1e3,
+            core_pct,
+            load()
+        );
+        assert!(core_pct < 5.0, "{core_pct:.2}% of a core exceeds 5%");
+    }
+
     /// Times `read_position` on an existing clean checkout named by `KATALOGR_POSITION_ROOT`
     /// (a read-only clone is fine). Budget 250 ms for a 35k-file checkout.
     #[test]

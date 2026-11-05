@@ -51,6 +51,7 @@ fn run(cli: &Cli) -> Result<ExitCode, DistError> {
         }) => cmd::index::run(cli, since.as_ref(), range.as_ref(), *full, *history),
         Some(Command::Status) => cmd::status::run(cli),
         Some(Command::Contract) => cmd::contract::run(cli),
+        Some(Command::Watch { interval }) => cmd::watch::run(cli, *interval),
         Some(Command::Position { repo }) => cmd::position::run(cli, repo.as_deref()),
         #[cfg(feature = "api")]
         Some(Command::Api {
@@ -152,12 +153,16 @@ fn run(cli: &Cli) -> Result<ExitCode, DistError> {
         }) => cmd::callers::run(cli, text, *depth, *expand),
         Some(Command::Tests { text, depth, cases }) => cmd::tests::run(cli, text, *depth, *cases),
         Some(Command::Why { location, no_use }) => cmd::why::run(cli, location, *no_use),
-        Some(Command::Map { diagnostic }) => cmd::map::run(cli, *diagnostic),
+        Some(Command::Map {
+            diagnostic,
+            neutral,
+        }) => cmd::map::run(cli, *diagnostic, *neutral),
         Some(Command::Search {
             terms,
             limit,
             diagnostic,
-        }) => cmd::search::run(cli, terms, *limit, *diagnostic),
+            neutral,
+        }) => cmd::search::run(cli, terms, *limit, *diagnostic, *neutral),
         Some(Command::Show { symbol, signature }) => cmd::show::run(cli, symbol, *signature),
         Some(Command::Path { from, to, max_len }) => cmd::path::run(cli, from, to, *max_len),
         Some(Command::Explain { symbol, per_side }) => cmd::explain::run(cli, symbol, *per_side),

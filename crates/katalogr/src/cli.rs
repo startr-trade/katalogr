@@ -176,6 +176,9 @@ pub enum Command {
         /// Also explain the answer: a bounded trace in the JSON `diagnostic` field, or on stderr.
         #[arg(long)]
         diagnostic: bool,
+        /// Order by rank alone, without favouring the working set.
+        #[arg(long)]
+        neutral: bool,
     },
     /// Rank symbols by BM25 over names, docs, sections and contract keys.
     Search {
@@ -188,6 +191,9 @@ pub enum Command {
         /// Also explain the answer: a bounded trace in the JSON `diagnostic` field, or on stderr.
         #[arg(long)]
         diagnostic: bool,
+        /// Order by relevance alone, without favouring the working set.
+        #[arg(long)]
+        neutral: bool,
     },
     /// Print a symbol's lines (or, with --signature, its signature and doc).
     Show {
@@ -292,6 +298,13 @@ pub enum Command {
         /// Send CORS headers for exactly this origin.
         #[arg(long, value_name = "ORIGIN")]
         cors_origin: Option<String>,
+    },
+    /// Keep the index fresh for edits made outside Claude: poll the checkout's position and
+    /// reindex when it changes. Runs until interrupted.
+    Watch {
+        /// Seconds between polls, 0.1 to 3600 (default: the `watch.interval` setting, else 2).
+        #[arg(long, value_name = "SECONDS")]
+        interval: Option<f64>,
     },
     /// Serve katalogr's queries over MCP (stdio) for non-Claude agent hosts.
     #[cfg(feature = "mcp")]
@@ -580,6 +593,8 @@ pub enum HookAction {
     PreRead,
     /// PostToolUse for Grep and Glob: add index facts about the names searched for.
     PostSearch,
+    /// PostToolUse for Edit and Write: queue and reindex the edited file.
+    PostEdit,
 }
 
 #[derive(Debug, Subcommand)]

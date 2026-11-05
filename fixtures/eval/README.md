@@ -7,6 +7,10 @@ golden sets and baselines about real repositories live only in the project's kin
 - `core/golden.yaml`: one repository (`repos/app`: Rust, TypeScript, Markdown), 24 queries.
 - `cross/golden.yaml`: two repositories (`repos/svc`, `repos/ui`) linked through a WASM export
   contract, 10 queries.
+- `working-set/working-set.yaml`: one repository (`repos/app`), 2 queries whose target ties with two other
+  files on every lexical score. It is not named `golden.yaml`, so a run over `fixtures/eval` leaves it out
+  and the baseline is unaffected; run it with `--sets fixtures/eval/working-set`. The test
+  `eval::working_set_set_improves_over_neutral` checks it against a working set (FEAT-039).
 - `baseline.json`: the checked-in baseline the CI gate compares against.
 
 ## Golden set format 1

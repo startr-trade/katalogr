@@ -484,6 +484,10 @@ pub struct Envelope<T> {
     /// The context the answer was read from, when it names one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub context: Option<String>,
+    /// `search` and `map` only (FEAT-039): the working set that reordered this answer. Absent
+    /// when ranking was neutral or the set was empty.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub working_set: Option<crate::working_set::WorkingSetSummary>,
 }
 
 #[cfg(test)]

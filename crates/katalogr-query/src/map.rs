@@ -23,6 +23,17 @@ pub fn map(tx: &impl Reader) -> Result<Vec<MapEntry>, StoreError> {
 /// What [`map`] does, recording the rank source and the heaviest incoming links of the top
 /// symbols into `diag`. The answer does not depend on `diag`.
 pub fn map_traced(tx: &impl Reader, diag: &mut Diagnostic) -> Result<Vec<MapEntry>, StoreError> {
+    map_boosted_traced(tx, None, diag)
+}
+
+/// [`map_traced`] ordered by rank times the working-set boost (FEAT-039). Equal boosted values
+/// keep today's order. The printed `rank` stays the true PageRank. `None` is exactly
+/// [`map_traced`].
+pub fn map_boosted_traced(
+    tx: &impl Reader,
+    boost: Option<&crate::working_set::Boost>,
+    diag: &mut Diagnostic,
+) -> Result<Vec<MapEntry>, StoreError> {
     let mut degree: BTreeMap<Id, f64> = BTreeMap::new();
     tx.for_each_link(&mut |_, _, to, weight, _| {
         *degree.entry(to).or_default() += weight;
@@ -67,6 +78,24 @@ pub fn map_traced(tx: &impl Reader, diag: &mut Diagnostic) -> Result<Vec<MapEntr
             d.cap(&mut links, DIAG_WEIGHTS, "weights");
             d.weights.extend(links);
         }
+    }
+    let mut ranked = ranked;
+    if let Some(b) = boost {
+        let artifact: BTreeMap<String, Id> = tx
+            .symbol_cores()?
+            .into_iter()
+            .map(|(_, c)| (c.name, c.artifact))
+            .collect();
+        let key = |s: &crate::result::SymbolHit, score: f64| {
+            artifact.get(&s.name).map_or(score, |a| b.apply(score, *a))
+        };
+        // Stable: ties keep the order the rank gave.
+        let mut keyed: Vec<(f64, (crate::result::SymbolHit, f64))> = ranked
+            .into_iter()
+            .map(|(s, score)| (key(&s, score), (s, score)))
+            .collect();
+        keyed.sort_by(|a, b| b.0.total_cmp(&a.0));
+        ranked = keyed.into_iter().map(|(_, e)| e).collect();
     }
     Ok(ranked
         .into_iter()

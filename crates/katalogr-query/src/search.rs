@@ -101,6 +101,20 @@ pub fn search_with_traced(
     p: &SearchParams,
     diag: &mut Diagnostic,
 ) -> Result<Vec<SearchHit>, StoreError> {
+    search_boosted_traced(tx, terms, limit, p, None, diag)
+}
+
+/// [`search_with_traced`] with the working-set boost (FEAT-039): each score is multiplied by its
+/// artifact's tier weight before the sort and the limit, so the candidate set is unchanged. The
+/// printed score stays the true BM25 score. `None` is exactly [`search_with_traced`].
+pub fn search_boosted_traced(
+    tx: &impl Reader,
+    terms: &str,
+    limit: usize,
+    p: &SearchParams,
+    boost: Option<&crate::working_set::Boost>,
+    diag: &mut Diagnostic,
+) -> Result<Vec<SearchHit>, StoreError> {
     let mut query: Vec<String> = Vec::new();
     for t in tokenize(terms) {
         if !query.contains(&t) {
@@ -242,7 +256,7 @@ pub fn search_with_traced(
             .collect();
         matched.retain(|m| !m.2 || !exact.contains(&(m.0, m.1)));
         hits.push((
-            a.score,
+            boost.map_or(a.score, |b| b.apply(a.score, row.artifact)),
             id,
             SearchHit {
                 symbol: hit(&row),

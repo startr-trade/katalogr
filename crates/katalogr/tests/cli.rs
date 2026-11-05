@@ -50,6 +50,18 @@ mod cli {
         String::from_utf8(out.stdout).expect("utf8 stdout")
     }
 
+    #[test]
+    fn watch_bad_interval_exit_2() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (_kx, repo) = setup(tmp.path());
+        for bad in ["0.05", "3601", "-1", "0"] {
+            let out = katalogr(&repo, &["watch", "--interval", bad]);
+            assert_eq!(out.status.code(), Some(2), "{bad}: {out:?}");
+        }
+        let out = katalogr(&repo, &["watch", "--interval", "abc"]);
+        assert_eq!(out.status.code(), Some(2), "{out:?}");
+    }
+
     /// A kindex and a project `demo` with one marked repo `app` holding a file.
     pub fn setup(tmp: &Path) -> (PathBuf, PathBuf) {
         let kx = tmp.join("kx");
@@ -1969,6 +1981,26 @@ mod claude {
         assert_eq!(code, 0);
         assert_eq!(out.lines().count(), 1, "{out}");
         assert!(out.contains("katalogr project init"), "{out}");
+    }
+
+    /// FEAT-039 R-9: the session text says which context and position the index reflects.
+    #[test]
+    fn session_start_names_freshness() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (_kx, repo) = query_project(tmp.path());
+        let (code, out, err) = run_raw(&repo, &["session-start"]);
+        assert_eq!(code, 0, "{err}");
+        let line = out
+            .lines()
+            .find(|l| l.starts_with("freshness: "))
+            .unwrap_or_else(|| panic!("no freshness line:\n{out}"));
+        assert!(line.contains("context current"), "{line}");
+        assert!(line.contains("index at app "), "{line}");
+        assert!(line.ends_with("0 pending."), "{line}");
+        assert_eq!(
+            out.lines().filter(|l| l.starts_with("freshness: ")).count(),
+            1
+        );
     }
 
     #[test]

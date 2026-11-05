@@ -309,8 +309,19 @@ fn tests(k: &Katalogr, a: &Args, o: &Options) -> JsonAnswer {
 
 fn why(k: &Katalogr, a: &Args, o: &Options) -> JsonAnswer {
     let location = a.str("location");
-    let o = q(o, a, "why", &[("location", location.to_string())]);
-    answer(k.why(location, &o), |r| render_json::why(r, a.budget()))
+    let limit = k.why_use_limit();
+    let o = q(
+        o,
+        a,
+        "why",
+        &[
+            ("location", location.to_string()),
+            ("use_limit", limit.to_string()),
+        ],
+    );
+    answer(k.why(location, Some(limit), &o), |r| {
+        render_json::why(r, a.budget())
+    })
 }
 
 fn explain(k: &Katalogr, a: &Args, o: &Options) -> JsonAnswer {
