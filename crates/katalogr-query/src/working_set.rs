@@ -106,7 +106,7 @@ impl WorkingSet {
             h.update(path.as_str().as_bytes());
             h.update([0]);
             h.update(tier.name().as_bytes());
-            h.update([b'\n']);
+            h.update(b"\n");
         }
         h.finalize().iter().map(|b| format!("{b:02x}")).collect()
     }
