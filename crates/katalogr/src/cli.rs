@@ -464,6 +464,17 @@ pub enum ContextAction {
         #[arg(long, value_name = "NAME")]
         repo: Option<String>,
     },
+    /// Compare two contexts' graphs: links, dangling references and measures that differ.
+    Diff {
+        /// `base`, `current` or an id from `context list`.
+        a: String,
+        b: String,
+        /// Entries per list.
+        #[arg(long, default_value_t = 50, value_name = "N")]
+        limit: usize,
+    },
+    /// Contracts that both contexts changed against the base. Exits 1 when there are any.
+    Conflicts { a: String, b: String },
     /// Remove contexts down to `contexts.max` (default 8): missing checkouts first, then the
     /// least recently used. Never the base, the current context or one in use.
     Prune {

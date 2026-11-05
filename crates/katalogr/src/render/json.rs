@@ -447,6 +447,24 @@ where
     }
 }
 
+/// A report with no items to trim: the envelope as it is. `fails` makes it exit 1.
+pub fn plain<R: Serialize>(reply: Reply<R>, fails: fn(&R) -> bool) -> JsonAnswer {
+    let exit = exit_for(&reply);
+    match reply.outcome {
+        Outcome::Found(r) => {
+            let failing = fails(&r);
+            let e = envelope(&reply.report, None, reply.partial, r, Vec::new(), None);
+            let exit = if exit == ExitCode::Ok && failing {
+                ExitCode::Error
+            } else {
+                exit
+            };
+            found(exit, &reply.report, line(&e))
+        }
+        other => other_outcome(exit, &reply.report, other, None, None),
+    }
+}
+
 /// `index` and `status`: stdout is `Report::to_json()`; exit Stale when the wait timed out.
 pub fn report(r: &Report) -> JsonAnswer {
     JsonAnswer {

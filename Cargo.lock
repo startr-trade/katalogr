@@ -1798,6 +1798,8 @@ dependencies = [
  "katalogr-acceptance",
  "katalogr-bench",
  "katalogr-dist",
+ "katalogr-model",
+ "katalogr-store",
  "rmcp",
  "serde_json",
  "tempfile",

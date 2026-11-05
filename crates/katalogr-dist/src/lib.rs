@@ -496,10 +496,21 @@ impl Katalogr {
 
     /// An engine over `dir`: the base, or one of its layers.
     fn engine_on(&self, dir: ProjectDir, deadline: Instant) -> Result<Engine, DistError> {
-        let mut engine = Engine::open(dir, build_registry(), self.roots.clone(), deadline)?;
+        // A checkout context reads its own checkout, whichever one this command runs in.
+        let manifest = dir
+            .is_layer()
+            .then(|| katalogr_store::ContextManifest::read(dir.root()).ok())
+            .flatten();
+        let mut roots = self.roots.clone();
+        if let Some(m) = &manifest
+            && m.kind == katalogr_store::ContextKind::Checkout
+            && let Some(root) = &m.root
+        {
+            roots.insert(m.repo.clone(), root.clone());
+        }
+        let mut engine = Engine::open(dir, build_registry(), roots, deadline)?;
         // A commit context reads git objects at its commit, never the disk.
-        if engine.dir().is_layer()
-            && let Ok(m) = katalogr_store::ContextManifest::read(engine.dir().root())
+        if let Some(m) = manifest
             && m.kind == katalogr_store::ContextKind::Commit
             && let (Some(commit), Some(root)) = (m.commit.clone(), self.roots.get(&m.repo))
         {

@@ -7,6 +7,8 @@ use serde_json::json;
 use crate::cli::{Cli, ContextAction};
 use crate::cmd::{options, resolve};
 use crate::exit::ExitCode;
+use crate::render;
+use katalogr_dist::analytics::context_diff::{ContextConflicts, ContextDiff};
 
 fn to_json(i: &ContextInfo) -> serde_json::Value {
     json!({
@@ -75,6 +77,26 @@ pub fn run(cli: &Cli, action: &ContextAction) -> Result<ExitCode, DistError> {
             }
             Ok(ExitCode::Ok)
         }
+        ContextAction::Diff { a, b, limit } => {
+            let reply = k.context_diff(a, b, *limit, &options(cli))?;
+            Ok(render::plain(
+                cli,
+                reply,
+                "context-diff",
+                diff_lines,
+                |_| false,
+            ))
+        }
+        ContextAction::Conflicts { a, b } => {
+            let reply = k.context_conflicts(a, b, &options(cli))?;
+            Ok(render::plain(
+                cli,
+                reply,
+                "context-conflicts",
+                conflict_lines,
+                |c| !c.conflicts.is_empty(),
+            ))
+        }
         ContextAction::Prune { keep } => {
             let keep = keep.unwrap_or_else(|| k.contexts_max());
             let removed = k.context_prune(keep)?;
@@ -89,4 +111,41 @@ pub fn run(cli: &Cli, action: &ContextAction) -> Result<ExitCode, DistError> {
             Ok(ExitCode::Ok)
         }
     }
+}
+
+fn diff_lines(d: &ContextDiff) -> Vec<String> {
+    let mut out = Vec::new();
+    for l in &d.links_added {
+        out.push(format!("+ {} {} {}", l.from, l.kind, l.to));
+    }
+    for l in &d.links_removed {
+        out.push(format!("- {} {} {}", l.from, l.kind, l.to));
+    }
+    for x in &d.dangling_added {
+        out.push(format!(
+            "+ dangling {} {} wants {}",
+            x.from.name,
+            x.kind,
+            x.wanted.join(", ")
+        ));
+    }
+    for x in &d.dangling_removed {
+        out.push(format!(
+            "- dangling {} {} wants {}",
+            x.from.name,
+            x.kind,
+            x.wanted.join(", ")
+        ));
+    }
+    for m in &d.metrics {
+        out.push(format!("{} {} -> {} ({:+})", m.name, m.a, m.b, m.delta));
+    }
+    out
+}
+
+fn conflict_lines(c: &ContextConflicts) -> Vec<String> {
+    c.conflicts
+        .iter()
+        .map(|n| format!("conflict {n}"))
+        .collect()
 }

@@ -1,7 +1,9 @@
 //! Contexts on the `Katalogr` facade: the base and its advance (FEAT-043).
 
-use crate::{Consistency, DistError, Katalogr, Options, Report};
+use crate::{Consistency, DistError, Katalogr, Options, Outcome, Reply, Report};
 use camino::Utf8Path;
+use katalogr_analytics::context_diff::{ContextConflicts, ContextDiff};
+use katalogr_engine::Engine;
 use katalogr_engine::base::{branch_tip, default_branch, plan_base_advance, resolve_commit};
 use katalogr_engine::queue::Inbox;
 use katalogr_engine::queue::lock::lock_until;
@@ -260,6 +262,95 @@ impl Katalogr {
         }
     }
 
+    /// Snapshots of several contexts (`base`, `current` or an id), each drained first. A context
+    /// named twice is opened once. Returns the report that covers them all.
+    fn snapshots(
+        &self,
+        names: &[&str],
+        o: &Options,
+    ) -> Result<(Vec<Engine>, Vec<usize>, Report), DistError> {
+        let timeout = o.timeout()?;
+        let deadline = Instant::now() + timeout;
+        let mut engines: Vec<Engine> = Vec::new();
+        let mut roots: Vec<camino::Utf8PathBuf> = Vec::new();
+        let mut which = Vec::new();
+        for n in names {
+            let dir = self.layer_dir_for(&ContextChoice::parse(n)?, deadline)?;
+            match roots.iter().position(|r| r == dir.root()) {
+                Some(i) => which.push(i),
+                None => {
+                    roots.push(dir.root().to_owned());
+                    engines.push(self.engine_on(dir, deadline)?);
+                    which.push(engines.len() - 1);
+                }
+            }
+        }
+        let consistency = o.consistency.unwrap_or(Consistency::Wait);
+        let mut report: Option<Report> = None;
+        for e in &engines {
+            let r = self.read(e, consistency, timeout, 0, Vec::new())?;
+            report = Some(match report {
+                None => r,
+                Some(mut acc) => {
+                    acc.watermark = acc.watermark.max(r.watermark);
+                    acc.pending += r.pending;
+                    acc.stale |= r.stale;
+                    acc.timed_out |= r.timed_out;
+                    acc.warnings.extend(r.warnings);
+                    acc
+                }
+            });
+        }
+        Ok((engines, which, report.expect("at least one context")))
+    }
+
+    /// What differs between contexts `a` and `b` (`base`, `current` or an id).
+    pub fn context_diff(
+        &self,
+        a: &str,
+        b: &str,
+        limit: usize,
+        o: &Options,
+    ) -> Result<Reply<ContextDiff>, DistError> {
+        let (engines, which, report) = self.snapshots(&[a, b], o)?;
+        let (ra, rb) = (
+            engines[which[0]].cache().read()?,
+            engines[which[1]].cache().read()?,
+        );
+        let diff = katalogr_analytics::context_diff::context_diff(&ra, &rb, limit)?;
+        let partial = diff.partial.clone();
+        Ok(Reply {
+            outcome: Outcome::Found(diff),
+            report,
+            diagnostic: None,
+            partial,
+            folded: Vec::new(),
+        })
+    }
+
+    /// The contracts both `a` and `b` changed against the base.
+    pub fn context_conflicts(
+        &self,
+        a: &str,
+        b: &str,
+        o: &Options,
+    ) -> Result<Reply<ContextConflicts>, DistError> {
+        let (engines, which, report) = self.snapshots(&["base", a, b], o)?;
+        let (rbase, ra, rb) = (
+            engines[which[0]].cache().read()?,
+            engines[which[1]].cache().read()?,
+            engines[which[2]].cache().read()?,
+        );
+        let c = katalogr_analytics::context_diff::context_conflicts(&rbase, &ra, &rb)?;
+        Ok(Reply {
+            outcome: Outcome::Found(c),
+            report,
+            diagnostic: None,
+            partial: Vec::new(),
+            folded: Vec::new(),
+        })
+    }
+
     pub(crate) fn take_notes(&self) -> Vec<String> {
         std::mem::take(&mut *self.notes.lock().expect("notes lock"))
     }
@@ -272,7 +363,15 @@ impl Katalogr {
     /// and does not exist yet. A busy base never hangs a read: when its lock cannot be taken
     /// by `deadline` the answer comes from the base, with a warning naming the context.
     pub(crate) fn layer_dir(&self, deadline: Instant) -> Result<ProjectDir, DistError> {
-        let id = match &self.context {
+        self.layer_dir_for(&self.context, deadline)
+    }
+
+    pub(crate) fn layer_dir_for(
+        &self,
+        choice: &ContextChoice,
+        deadline: Instant,
+    ) -> Result<ProjectDir, DistError> {
+        let id = match choice {
             ContextChoice::Base => return Ok(self.project.clone()),
             ContextChoice::Named(id) => {
                 if id.as_str() == ContextId::BASE {
