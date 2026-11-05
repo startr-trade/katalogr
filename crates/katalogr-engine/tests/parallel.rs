@@ -132,6 +132,56 @@ mod parallel {
         }
     }
 
+    /// FEAT-093 R-8. Many files that share keys, with fan rows and bound references: shards,
+    /// graph and the whole cache, rank included, do not depend on the thread count.
+    #[test]
+    fn fan_heavy_one_vs_eight_threads_identical() {
+        let files: Vec<(String, String)> = (0..300)
+            .map(|i| {
+                // Every file names the hubs; a tenth of the files export each, so the hubs
+                // hold fan rows and change often, and bound references follow them.
+                let hub = if i % 10 == 0 {
+                    format!("export shared:hub F{i}\n")
+                } else if i % 10 == 5 {
+                    format!("export shared:hub2 F{i}\nexport shared:hub G{i}\n")
+                } else {
+                    String::new()
+                };
+                let text = format!(
+                    "sym fn F{i}\nsym fn G{i}\nexport shared:k{} G{i}\n{hub}\
+                     refs G{i} calls shared:k{} shared:hub\nref F{i} calls shared:k{}\n\
+                     ref F{i} uses shared:hub2\n",
+                    i % 12,
+                    (i + 5) % 12,
+                    i % 12
+                );
+                let text = if i % 3 == 0 {
+                    format!("{text}boundref G{i} consumes res:r{} shared:hub\n", i % 9)
+                } else {
+                    text
+                };
+                (format!("d{}/h{i}.tx", i % 5), text)
+            })
+            .collect();
+        let one = index_at(&files, 1);
+        let many = index_at(&files, 8);
+        assert!(
+            one.2
+                .iter()
+                .any(|(n, rows)| n == "fan_out" && !rows.is_empty()),
+            "fan rows exist"
+        );
+        assert!(
+            one.2
+                .iter()
+                .any(|(n, rows)| n == "rank" && !rows.is_empty()),
+            "rank is part of the dump"
+        );
+        assert!(one.0 == many.0, "shard bytes differ");
+        assert_eq!(one.1, many.1, "canonical graph");
+        assert!(one.2 == many.2, "cache dump differs");
+    }
+
     fn tree() -> impl Strategy<Value = Vec<(String, String)>> {
         let file = (0usize..30, 0usize..6, 0usize..6, 0usize..4).prop_map(|(i, k, r, b)| {
             let text = format!(

@@ -6,6 +6,7 @@ use crate::parallel::Parallelism;
 use crate::profiles::{self, LoadReport, ProfileSet};
 use crate::queue::{Context, Inbox, Processor, Seq};
 use crate::registry::ExtensionRegistry;
+use crate::source::FileSource;
 use crate::stitch::Stitcher;
 use camino::Utf8PathBuf;
 use katalogr_model::RelPath;
@@ -76,6 +77,8 @@ pub struct IndexStats {
     /// The stitch loop inside the publish transaction.
     pub stitch: Duration,
     pub commit: Duration,
+    /// Rank computations since the engine opened (ADR-0033: one per drained queue).
+    pub rank_refreshes: u64,
 }
 
 /// A project's index with its queue: cache, extractors and stitcher.
@@ -85,6 +88,8 @@ pub struct Engine {
     registry: ExtensionRegistry,
     stitcher: Stitcher,
     roots: BTreeMap<String, Utf8PathBuf>,
+    /// How each repo's files are read; `Disk` of the root unless replaced.
+    sources: BTreeMap<String, FileSource>,
     /// Per repo `(include, exclude)` globs; a repo not listed uses the defaults.
     filters: BTreeMap<String, (Vec<String>, Vec<String>)>,
     /// Embedded profiles: `(file name, text)`, applied before the project's own.
@@ -107,18 +112,67 @@ impl Engine {
     ) -> Result<Engine, EngineError> {
         let stitcher = Stitcher::new();
         let cache = Cache::open_or_rebuild(&dir, &stitcher, deadline)?;
-        Ok(Engine {
+        Ok(Engine::with_cache(dir, cache, stitcher, registry, roots))
+    }
+
+    /// FEAT-080 R-3. As [`Engine::open`], but a cache held by another writer fails at once with
+    /// `StoreError::Busy` instead of waiting; a free cache is opened and synced against `deadline`.
+    pub fn open_try(
+        dir: ProjectDir,
+        registry: ExtensionRegistry,
+        roots: BTreeMap<String, Utf8PathBuf>,
+        deadline: Instant,
+    ) -> Result<Engine, EngineError> {
+        let stitcher = Stitcher::new();
+        let cache = Cache::open_or_rebuild_busy(&dir, &stitcher, Instant::now(), deadline)?;
+        Ok(Engine::with_cache(dir, cache, stitcher, registry, roots))
+    }
+
+    /// FEAT-080 R-1. As [`Engine::open`] on a read-only handle: never writes, syncs or replays,
+    /// and takes no lock. `Ok(None)` when the cache cannot be read that way (no file, other
+    /// schema, tables not yet created, repair needed or running, a corrupt header, or a target
+    /// without byte-range locks); the caller then uses [`Engine::open`].
+    pub fn open_reader(
+        dir: ProjectDir,
+        registry: ExtensionRegistry,
+        roots: BTreeMap<String, Utf8PathBuf>,
+    ) -> Result<Option<Engine>, EngineError> {
+        let Some(cache) = Cache::open_reader(&dir)? else {
+            return Ok(None);
+        };
+        Ok(Some(Engine::with_cache(
+            dir,
+            cache,
+            Stitcher::new(),
+            registry,
+            roots,
+        )))
+    }
+
+    fn with_cache(
+        dir: ProjectDir,
+        cache: Cache,
+        stitcher: Stitcher,
+        registry: ExtensionRegistry,
+        roots: BTreeMap<String, Utf8PathBuf>,
+    ) -> Engine {
+        let sources = roots
+            .iter()
+            .map(|(r, p)| (r.clone(), FileSource::Disk(p.clone())))
+            .collect();
+        Engine {
             dir,
             cache,
             registry,
             stitcher,
             roots,
+            sources,
             filters: BTreeMap::new(),
             builtin_profiles: Vec::new(),
             parallelism: Parallelism::from_cores(),
             pool: OnceLock::new(),
             stats: Mutex::new(IndexStats::default()),
-        })
+        }
     }
 
     /// Set before the first `process`; later calls replace the setting and drop a built pool.
@@ -162,6 +216,7 @@ impl Engine {
         g.prepare += s.prepare;
         g.stitch += s.stitch;
         g.commit += s.commit;
+        g.rank_refreshes += s.rank_refreshes;
     }
 
     /// Set the built-in profiles, as `(file name, text)` pairs.
@@ -209,7 +264,7 @@ impl Engine {
             .collect();
         let normalisers = self.registry().normalisers();
         Ok(ProfileSet::load_full(
-            self.dir().root(),
+            self.dir().project_root(),
             &builtins,
             &previous,
             &normalisers,
@@ -236,6 +291,16 @@ impl Engine {
     #[doc(hidden)]
     pub fn set_fan_rows_from(&self, n: u32) {
         self.stitcher.set_fan_rows_from(n);
+    }
+
+    /// Replace how a repo is read. The default is `Disk` of the repo's root.
+    pub fn set_source(&mut self, repo: &str, s: FileSource) {
+        self.sources.insert(repo.to_string(), s);
+    }
+
+    /// How a repo's files are read; `None` for a repo with no root here.
+    pub fn source(&self, repo: &str) -> Option<&FileSource> {
+        self.sources.get(repo)
     }
 
     pub fn roots(&self) -> &BTreeMap<String, Utf8PathBuf> {
@@ -288,6 +353,7 @@ impl Engine {
         };
         let mut backoff = POLL_START;
         if o.consistency != Consistency::StaleOk
+            && !self.cache.is_reader()
             && let Some(mut p) = Processor::try_acquire(self)?
         {
             // A changed profile queues the files it can affect before pending is counted.
@@ -309,7 +375,25 @@ impl Engine {
                 });
             }
             drop(snap);
-            match Processor::try_acquire(self)? {
+            let mut held = Processor::try_acquire(self)?;
+            if self.cache.is_reader() {
+                // FEAT-080 R-4. Another process holds the writer; take over only when it is gone.
+                held = match held {
+                    Some(p)
+                        if self
+                            .cache
+                            .try_upgrade(&self.dir, &self.stitcher, deadline)? =>
+                    {
+                        let mut p = p;
+                        // What a reader skipped at the start.
+                        p.refresh_embed_signature()?;
+                        p.refresh_profiles()?;
+                        Some(p)
+                    }
+                    _ => None,
+                };
+            }
+            match held {
                 Some(mut p) => {
                     p.recover()?;
                     p.ingest()?;

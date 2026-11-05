@@ -94,6 +94,7 @@ fn index_set(
         &Overrides {
             kindex: Some(kx.display().to_string()),
             project: Some(project),
+            ..Default::default()
         },
     )?;
     let report = k.index(

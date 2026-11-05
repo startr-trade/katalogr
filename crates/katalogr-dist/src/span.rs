@@ -246,11 +246,10 @@ impl Katalogr {
         }
 
         let rel = RelPath::new(&t.symbol.path).map_err(|e| DistError::usage(e.to_string()))?;
-        katalogr_engine::queue::Inbox::new(&self.project).append(&NewEvent::file(
-            &t.repo,
-            &rel,
-            EventKind::Changed,
-        ))?;
+        katalogr_engine::queue::Inbox::new(
+            &self.layer_dir(std::time::Instant::now() + std::time::Duration::from_secs(30))?,
+        )
+        .append(&NewEvent::file(&t.repo, &rel, EventKind::Changed))?;
         let count = new_lines.len() as u32;
         Ok(Outcome::Found(ReplaceResult {
             symbol: t.symbol.clone(),
