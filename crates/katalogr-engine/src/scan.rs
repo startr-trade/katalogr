@@ -138,6 +138,163 @@ fn tree_of<'r>(repo: &'r gix::Repository, rev: &str) -> Result<gix::Tree<'r>, Sc
     commit.tree().map_err(|e| bad(&e))
 }
 
+/// How a file differs between two versions.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum ChangeKind {
+    Added,
+    Modified,
+    Deleted,
+}
+
+/// One changed file, with line ranges in the new version (1-based, inclusive); empty ranges for
+/// an added or deleted file.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct FileChange {
+    pub path: RelPath,
+    pub kind: ChangeKind,
+    pub ranges: Vec<(u32, u32)>,
+}
+
+/// Files changed from revision `from` to revision `to`, with the changed line ranges of each
+/// (histogram diff, as `history` does). A `to` of `None` reads the working tree, so uncommitted
+/// changes of tracked files count. Rename tracking is off; output is sorted by path.
+pub fn changed_hunks(
+    repo_root: &std::path::Path,
+    from: &str,
+    to: Option<&str>,
+) -> Result<Vec<FileChange>, ScanError> {
+    let repo = gix::open(repo_root).map_err(|e| ScanError::RepoOpen {
+        path: repo_root.display().to_string(),
+        message: e.to_string(),
+    })?;
+    let from_tree = tree_of(&repo, from)?;
+    let to_tree = tree_of(&repo, to.unwrap_or("HEAD"))?;
+    let mut paths: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    for c in changed_paths_between(&from_tree, &to_tree)? {
+        paths.insert(c);
+    }
+    if to.is_none() {
+        paths.extend(dirty_paths(repo_root)?);
+    }
+    let mut out = Vec::new();
+    for path in paths {
+        let old = blob_at(&from_tree, &path)?;
+        let new = match to {
+            Some(_) => blob_at(&to_tree, &path)?,
+            None => match std::fs::read(repo_root.join(&path)) {
+                Ok(b) => Some(b),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+                Err(e) => {
+                    return Err(ScanError::Io {
+                        path,
+                        message: e.to_string(),
+                    });
+                }
+            },
+        };
+        let (kind, ranges) = match (old, new) {
+            (None, None) => continue,
+            (None, Some(_)) => (ChangeKind::Added, Vec::new()),
+            (Some(_), None) => (ChangeKind::Deleted, Vec::new()),
+            (Some(o), Some(n)) => {
+                if o == n {
+                    continue;
+                }
+                (ChangeKind::Modified, crate::history::line_ranges(&o, &n))
+            }
+        };
+        out.push(FileChange {
+            path: rel(&path)?,
+            kind,
+            ranges,
+        });
+    }
+    out.sort_by(|a, b| a.path.cmp(&b.path));
+    Ok(out)
+}
+
+fn changed_paths_between(
+    from: &gix::Tree<'_>,
+    to: &gix::Tree<'_>,
+) -> Result<Vec<String>, ScanError> {
+    let mut out = Vec::new();
+    let mut platform = from.changes().map_err(diff_err)?;
+    platform.options(|o| {
+        o.track_rewrites(None);
+    });
+    platform
+        .for_each_to_obtain_tree(to, |change| {
+            match change {
+                Change::Addition {
+                    location,
+                    entry_mode,
+                    ..
+                }
+                | Change::Deletion {
+                    location,
+                    entry_mode,
+                    ..
+                }
+                | Change::Modification {
+                    location,
+                    entry_mode,
+                    ..
+                } if !entry_mode.is_tree() => out.push(location.to_string()),
+                _ => {}
+            }
+            Ok(std::ops::ControlFlow::Continue(()))
+        })
+        .map_err(diff_err)?;
+    Ok(out)
+}
+
+/// The content of the blob at `path` in `tree`, if there is one.
+fn blob_at(tree: &gix::Tree<'_>, path: &str) -> Result<Option<Vec<u8>>, ScanError> {
+    let Some(entry) = tree.clone().lookup_entry_by_path(path).map_err(diff_err)? else {
+        return Ok(None);
+    };
+    if !entry.mode().is_blob() {
+        return Ok(None);
+    }
+    let obj = entry.object().map_err(diff_err)?;
+    Ok(Some(obj.data.clone()))
+}
+
+/// Tracked paths whose working-tree state differs from the index or HEAD, from `git status`.
+fn dirty_paths(repo_root: &std::path::Path) -> Result<Vec<String>, ScanError> {
+    let out = std::process::Command::new("git")
+        .current_dir(repo_root)
+        .args(["status", "--porcelain=v1", "-z", "--untracked-files=no"])
+        .output()
+        .map_err(|e| ScanError::Io {
+            path: repo_root.display().to_string(),
+            message: format!("cannot run git status: {e}"),
+        })?;
+    if !out.status.success() {
+        return Err(ScanError::Diff(format!(
+            "git status failed: {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        )));
+    }
+    let mut paths = Vec::new();
+    let mut it = out.stdout.split(|b| *b == 0).filter(|e| !e.is_empty());
+    while let Some(entry) = it.next() {
+        if entry.len() < 4 {
+            continue;
+        }
+        if let Ok(p) = std::str::from_utf8(&entry[3..]) {
+            paths.push(p.to_string());
+        }
+        if matches!(entry[0], b'R' | b'C')
+            && let Some(orig) = it.next()
+            && let Ok(p) = std::str::from_utf8(orig)
+        {
+            paths.push(p.to_string());
+        }
+    }
+    Ok(paths)
+}
+
 /// Every regular file under `repo_root` (the `.git` directory is never entered, symbolic links
 /// are skipped) whose repo-relative path matches an `include` glob and no `exclude` glob.
 /// Paths that are not UTF-8 or not valid [`RelPath`]s are skipped. Output is sorted by path.
