@@ -11,3 +11,4 @@ rust-version.workspace = true
 serde.workspace = true
 schemars.workspace = true
 sha2.workspace = true
+layout-rs = "=0.1.3"
