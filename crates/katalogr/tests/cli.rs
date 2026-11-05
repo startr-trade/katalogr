@@ -875,11 +875,12 @@ mod cli {
         .unwrap();
         validate(&schema, &schema, &v, "$").unwrap_or_else(|e| panic!("{e}\n{v}"));
         assert_eq!(v["api"], 1);
+        assert_eq!(v["contract"], 2);
         assert_eq!(v["schema"], 1);
         assert_eq!(v["katalogr"], env!("CARGO_PKG_VERSION"));
         assert_eq!(
             v["capabilities"],
-            serde_json::json!(["position", "view-id"])
+            serde_json::json!(["docs-affected", "position", "view-id"])
         );
     }
 
