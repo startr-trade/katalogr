@@ -366,13 +366,14 @@ fn post_edit(
     if found != repo {
         return allow(format!("ignore {rel}: outside the current checkout"));
     }
-    let cache = k.project.cache_dir().into_std_path_buf();
+    let layer = k.layer_dir(deadline)?;
+    let cache = layer.cache_dir().into_std_path_buf();
     if let Err(e) = append_edit(&cache, &rel, cfg.recent_max) {
         log(&cache, &format!("post-edit edit log: {e}"));
     }
-    let inbox = katalogr_engine::queue::Inbox::new(&k.project);
-    inbox.append(&NewEvent::file(repo, &rel, EventKind::Changed))?;
-    let engine = k.engine(deadline)?;
+    // The one notify path: the same call `katalogr notify` makes.
+    k.notify(&[rel.as_str().to_string()], false)?;
+    let engine = k.engine_for(EngineConsistency::Wait, deadline)?;
     let left = deadline.saturating_duration_since(Instant::now());
     let answer = engine.with_consistency(
         &QueryOptions {
@@ -612,7 +613,7 @@ impl Katalogr {
         Ok(n)
     }
 
-    fn base_branch_setting(&self, repo: &str) -> Option<String> {
+    pub(crate) fn base_branch_setting(&self, repo: &str) -> Option<String> {
         self.project
             .config()
             .settings
