@@ -39,7 +39,7 @@ mod ci {
     /// Runner labels that GitHub has retired must not appear in the release workflow (R-11).
     #[test]
     fn release_runners_current() {
-        const RETIRED: [&str; 3] = ["macos-11", "macos-12", "macos-13"];
+        const RETIRED: [&str; 4] = ["macos-11", "macos-12", "macos-13", "macos-14"];
         let path =
             Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.github/workflows/release.yml");
         let text = std::fs::read_to_string(&path).expect("read release.yml");
