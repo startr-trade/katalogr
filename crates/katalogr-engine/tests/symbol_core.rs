@@ -252,6 +252,9 @@ struct Spy<'a, R: Reader> {
 }
 
 impl<R: Reader> Reader for Spy<'_, R> {
+    fn memo(&self) -> &katalogr_store::Memo {
+        self.inner.memo()
+    }
     fn raw_get(&self, t: TableId, key: &[u8]) -> Result<Option<Vec<u8>>, StoreError> {
         self.inner.raw_get(t, key)
     }

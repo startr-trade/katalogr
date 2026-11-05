@@ -731,6 +731,8 @@ pub fn cache_dump(e: &Engine) -> CacheDump {
         ("doc_len", TableId::DocLen),
         ("lexicon_stats", TableId::LexiconStats),
         ("shard_hashes", TableId::ShardHashes),
+        ("vocab", TableId::Vocab),
+        ("prov", TableId::Prov),
         ("rank", TableId::Rank),
     ] {
         out.push((name.to_string(), r.raw_scan(t, &[]).unwrap()));

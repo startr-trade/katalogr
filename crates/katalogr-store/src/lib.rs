@@ -2,9 +2,8 @@
 
 pub mod blob;
 pub mod cache;
-// Not wired into the cache yet: FEAT-075 T5 switches the tables to it.
-#[allow(dead_code)]
 mod codec;
+mod dict;
 pub mod error;
 #[cfg(feature = "failpoints")]
 pub mod failpoint;
@@ -23,6 +22,8 @@ pub use cache::{
     Posting, RANK_TOP_ENTRIES, RankTop, ReadTx, Reader, RefId, Restitch, ShardStat, Snapshot,
     SymbolBrief, SymbolCore, SymbolRow, SyncReport, WriteTx,
 };
+#[doc(hidden)]
+pub use dict::Memo;
 pub use error::StoreError;
 pub use guard::{GuardError, needles_from, scan_for_absolute, scan_for_absolute_with};
 pub use inspect::{CacheInspection, InspectedTables, OpenCache};
