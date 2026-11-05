@@ -576,7 +576,7 @@ pub fn call(cfg: &ServeConfig, name: &str, args: &Value) -> Result<JsonAnswer, U
             )
         }
         "status" => answer(Katalogr::status(&k, &cfg.options), |r| {
-            render_json::report(&r)
+            render_json::status(&r, k.context_name())
         }),
         _ => return Err(UnknownTool),
     };
