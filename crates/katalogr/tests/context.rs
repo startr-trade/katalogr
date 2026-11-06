@@ -558,36 +558,42 @@ mod context {
         drop(held);
     }
 
-    /// FEAT-095 R-2. `context add --commit` that has not drained is reported, not a quiet success.
+    /// FEAT-095 R-2. `context add --commit` that has not drained is reported, not a quiet
+    /// success. Not timing-based: the context's processor lock is held, so it cannot drain.
     #[test]
     fn add_commit_reports_undrained() {
-        let big: Vec<(String, String)> = (0..400)
-            .map(|i| (format!("f{i}.tx"), format!("sym fn Item{i}\n")))
-            .collect();
-        let refs: Vec<(&str, &str)> = big.iter().map(|(n, t)| (n.as_str(), t.as_str())).collect();
-        let p = project(&refs, true);
+        use fs4::FileExt;
+        let p = project(&FILES, true);
         let head = git(&p.repo, &["rev-parse", "HEAD"]);
         let k = katalogr(&p.repo, ContextChoice::Base);
+        let quick = Options {
+            timeout: Some(0.3),
+            ..Options::default()
+        };
+        // Drained: the first add succeeds.
+        let info = k
+            .context_add_commit("app", &head, &Options::default())
+            .unwrap();
+        let id = katalogr_store::ContextId::for_commit("app", &head);
+        let layer = k.project().layer(&id);
+        // Something is queued in the context, and a process holds its lock.
+        katalogr_engine::queue::Inbox::new(&layer)
+            .append(&katalogr_engine::NewEvent::rescan("app"))
+            .unwrap();
+        let held = std::fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .write(true)
+            .open(layer.root().join(".cache/processor.lock"))
+            .unwrap();
+        FileExt::try_lock(&held).unwrap();
         let err = k
-            .context_add_commit(
-                "app",
-                &head,
-                &Options {
-                    timeout: Some(0.001),
-                    ..Options::default()
-                },
-            )
-            .expect_err("a context that cannot drain in time is reported");
+            .context_add_commit("app", &head, &quick)
+            .expect_err("a context that has not drained is reported");
         assert_eq!(err.refused_exit(), Some(5), "{err}");
-        // Given time, the same call succeeds.
-        k.context_add_commit(
-            "app",
-            &head,
-            &Options {
-                timeout: Some(120.0),
-                ..Options::default()
-            },
-        )
-        .expect("drains when given time");
+        drop(held);
+        // Released, it drains.
+        k.context_add_commit("app", &head, &Options::default())
+            .unwrap();
     }
 }
