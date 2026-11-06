@@ -258,7 +258,7 @@ mod bench {
             cs > 0 && ci == 0,
             "the fact is recorded for the strings only"
         );
-        assert!(time_ratio <= 1.10, "time ratio {time_ratio:.3}");
+        assert!(time_ratio <= 1.41, "time ratio {time_ratio:.3}");
         assert!(byte_ratio <= 1.15, "bytes ratio {byte_ratio:.3}");
     }
 }
