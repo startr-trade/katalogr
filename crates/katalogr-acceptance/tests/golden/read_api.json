@@ -16650,6 +16650,4560 @@
       "unresolved": [],
       "unresolved_refs": []
     },
+    "deps/cargo-lock": {
+      "artifacts": [
+        [
+          "4c6fde57671996772685c134b42dc6ab",
+          {
+            "exports": [
+              {
+                "key": {
+                  "key": "fx:Cargo.lock",
+                  "namespace": "file"
+                },
+                "target": "4c6fde57671996772685c134b42dc6ab"
+              },
+              {
+                "key": {
+                  "key": "alpha-lib",
+                  "namespace": "rs-package"
+                },
+                "target": "db64eb092da1d6648e268aabe3494c3f"
+              },
+              {
+                "key": {
+                  "key": "gamma-lib",
+                  "namespace": "rs-package"
+                },
+                "target": "aca8b6114fbdcb71eb96829edbe76bca"
+              }
+            ],
+            "extension": "deps",
+            "facts": {
+              "ecosystem": {
+                "Str": "cargo"
+              },
+              "lockfile_format": {
+                "Str": "3"
+              }
+            },
+            "name": "fx:Cargo.lock",
+            "provenance": {
+              "path": "Cargo.lock",
+              "repo": "fx",
+              "revision": "91bd161b71db822c1553a1f82018903a0f290e6f+5e852224e4abc0bb"
+            },
+            "refs": [],
+            "symbols": [
+              "4c24143e1597e3fe3d8678610f776b15",
+              "aca8b6114fbdcb71eb96829edbe76bca",
+              "b2303388e24eb6519b47753f7b99d4bc",
+              "ba33773b52234ea31605b09200d73c68",
+              "daa6f56d05af48b5f5e935c721145691",
+              "db64eb092da1d6648e268aabe3494c3f"
+            ]
+          }
+        ]
+      ],
+      "bindings_of": [
+        [
+          "4c6fde57671996772685c134b42dc6ab",
+          []
+        ]
+      ],
+      "cached_rank": {
+        "4c24143e1597e3fe3d8678610f776b15": "3fc2afa64e7b5418",
+        "aca8b6114fbdcb71eb96829edbe76bca": "3fba39e4ebe80faa",
+        "b2303388e24eb6519b47753f7b99d4bc": "3fba39e4ebe80faa",
+        "ba33773b52234ea31605b09200d73c68": "3fd6db941452fa0b",
+        "daa6f56d05af48b5f5e935c721145691": "3fc8425a2702a05a",
+        "db64eb092da1d6648e268aabe3494c3f": "3fba39e4ebe80faa"
+      },
+      "canonical_graph": "{\"extension\":\"deps\",\"facts\":{\"ecosystem\":{\"Str\":\"cargo\"},\"lockfile_format\":{\"Str\":\"3\"}},\"name\":\"fx:Cargo.lock\",\"node\":\"artifact\",\"revision\":\"91bd161b71db822c1553a1f82018903a0f290e6f+5e852224e4abc0bb\"}\n{\"artifact\":\"fx:Cargo.lock\",\"facts\":{\"version\":{\"Str\":\"0.1.0\"}},\"kind\":\"package_member\",\"name\":\"fx:Cargo.lock#member:app\",\"node\":\"symbol\",\"span\":{\"end_col\":1,\"end_line\":25,\"start_col\":1,\"start_line\":18}}\n{\"artifact\":\"fx:Cargo.lock\",\"facts\":{\"ecosystem\":{\"Str\":\"cargo\"}},\"kind\":\"package_external\",\"name\":\"fx:Cargo.lock#package:alpha-lib\",\"node\":\"symbol\",\"span\":{\"end_col\":1,\"end_line\":12,\"start_col\":1,\"start_line\":5}}\n{\"artifact\":\"fx:Cargo.lock\",\"facts\":{\"source\":{\"Str\":\"registry+https://registry.example/index\"},\"version\":{\"Str\":\"1.0.0\"}},\"kind\":\"package_version\",\"name\":\"fx:Cargo.lock#package:alpha-lib/version:1.0.0\",\"node\":\"symbol\",\"span\":{\"end_col\":1,\"end_line\":12,\"start_col\":1,\"start_line\":5}}\n{\"artifact\":\"fx:Cargo.lock\",\"facts\":{\"source\":{\"Str\":\"registry+https://registry.example/index\"},\"version\":{\"Str\":\"2.0.0\"}},\"kind\":\"package_version\",\"name\":\"fx:Cargo.lock#package:alpha-lib/version:2.0.0\",\"node\":\"symbol\",\"span\":{\"end_col\":1,\"end_line\":17,\"start_col\":1,\"start_line\":13}}\n{\"artifact\":\"fx:Cargo.lock\",\"facts\":{\"ecosystem\":{\"Str\":\"cargo\"}},\"kind\":\"package_external\",\"name\":\"fx:Cargo.lock#package:gamma-lib\",\"node\":\"symbol\",\"span\":{\"end_col\":82,\"end_line\":29,\"start_col\":1,\"start_line\":26}}\n{\"artifact\":\"fx:Cargo.lock\",\"facts\":{\"source\":{\"Str\":\"git+https://git.example/org/gamma?rev=abc123#abc123\"},\"version\":{\"Str\":\"0.3.1\"}},\"kind\":\"package_version\",\"name\":\"fx:Cargo.lock#package:gamma-lib/version:0.3.1\",\"node\":\"symbol\",\"span\":{\"end_col\":82,\"end_line\":29,\"start_col\":1,\"start_line\":26}}\n{\"confidence\":\"Extracted\",\"from\":\"fx:Cargo.lock#member:app\",\"kind\":\"depends-on\",\"link\":true,\"origin\":\"intra\",\"revision\":\"91bd161b71db822c1553a1f82018903a0f290e6f+5e852224e4abc0bb\",\"span\":{\"end_col\":1,\"end_line\":25,\"start_col\":1,\"start_line\":18},\"to\":\"fx:Cargo.lock#package:alpha-lib/version:2.0.0\"}\n{\"confidence\":\"Extracted\",\"from\":\"fx:Cargo.lock#member:app\",\"kind\":\"depends-on\",\"link\":true,\"origin\":\"intra\",\"revision\":\"91bd161b71db822c1553a1f82018903a0f290e6f+5e852224e4abc0bb\",\"span\":{\"end_col\":1,\"end_line\":25,\"start_col\":1,\"start_line\":18},\"to\":\"fx:Cargo.lock#package:gamma-lib/version:0.3.1\"}\n{\"confidence\":\"Extracted\",\"from\":\"fx:Cargo.lock#package:alpha-lib\",\"kind\":\"has-version\",\"link\":true,\"origin\":\"intra\",\"revision\":\"91bd161b71db822c1553a1f82018903a0f290e6f+5e852224e4abc0bb\",\"span\":{\"end_col\":1,\"end_line\":12,\"start_col\":1,\"start_line\":5},\"to\":\"fx:Cargo.lock#package:alpha-lib/version:1.0.0\"}\n{\"confidence\":\"Extracted\",\"from\":\"fx:Cargo.lock#package:alpha-lib\",\"kind\":\"has-version\",\"link\":true,\"origin\":\"intra\",\"revision\":\"91bd161b71db822c1553a1f82018903a0f290e6f+5e852224e4abc0bb\",\"span\":{\"end_col\":1,\"end_line\":17,\"start_col\":1,\"start_line\":13},\"to\":\"fx:Cargo.lock#package:alpha-lib/version:2.0.0\"}\n{\"confidence\":\"Extracted\",\"from\":\"fx:Cargo.lock#package:alpha-lib/version:1.0.0\",\"kind\":\"depends-on\",\"link\":true,\"origin\":\"intra\",\"revision\":\"91bd161b71db822c1553a1f82018903a0f290e6f+5e852224e4abc0bb\",\"span\":{\"end_col\":1,\"end_line\":12,\"start_col\":1,\"start_line\":5},\"to\":\"fx:Cargo.lock#package:gamma-lib/version:0.3.1\"}\n{\"confidence\":\"Extracted\",\"from\":\"fx:Cargo.lock#package:gamma-lib\",\"kind\":\"has-version\",\"link\":true,\"origin\":\"intra\",\"revision\":\"91bd161b71db822c1553a1f82018903a0f290e6f+5e852224e4abc0bb\",\"span\":{\"end_col\":82,\"end_line\":29,\"start_col\":1,\"start_line\":26},\"to\":\"fx:Cargo.lock#package:gamma-lib/version:0.3.1\"}\n",
+      "contract": [],
+      "contracts": [],
+      "doc_len": [
+        [
+          "4c24143e1597e3fe3d8678610f776b15",
+          [
+            4,
+            0,
+            0,
+            0
+          ]
+        ],
+        [
+          "aca8b6114fbdcb71eb96829edbe76bca",
+          [
+            3,
+            0,
+            0,
+            3
+          ]
+        ],
+        [
+          "b2303388e24eb6519b47753f7b99d4bc",
+          [
+            1,
+            0,
+            0,
+            0
+          ]
+        ],
+        [
+          "ba33773b52234ea31605b09200d73c68",
+          [
+            4,
+            0,
+            0,
+            0
+          ]
+        ],
+        [
+          "daa6f56d05af48b5f5e935c721145691",
+          [
+            4,
+            0,
+            0,
+            0
+          ]
+        ],
+        [
+          "db64eb092da1d6648e268aabe3494c3f",
+          [
+            3,
+            0,
+            0,
+            3
+          ]
+        ]
+      ],
+      "exports_in": {
+        "file": [
+          [
+            {
+              "key": "fx:Cargo.lock",
+              "namespace": "file"
+            },
+            [
+              "4c6fde57671996772685c134b42dc6ab"
+            ]
+          ]
+        ],
+        "rs-package": [
+          [
+            {
+              "key": "alpha-lib",
+              "namespace": "rs-package"
+            },
+            [
+              "db64eb092da1d6648e268aabe3494c3f"
+            ]
+          ],
+          [
+            {
+              "key": "gamma-lib",
+              "namespace": "rs-package"
+            },
+            [
+              "aca8b6114fbdcb71eb96829edbe76bca"
+            ]
+          ]
+        ]
+      },
+      "file_revisions": [
+        [
+          [
+            "fx",
+            "Cargo.lock"
+          ],
+          [
+            234,
+            214,
+            68,
+            160,
+            196,
+            115,
+            31,
+            89,
+            134,
+            102,
+            22,
+            172,
+            151,
+            120,
+            83,
+            125,
+            58,
+            196,
+            108,
+            152,
+            55,
+            111,
+            243,
+            188,
+            68,
+            129,
+            96,
+            92,
+            99,
+            163,
+            71,
+            167
+          ]
+        ]
+      ],
+      "in_degrees": {
+        "4c24143e1597e3fe3d8678610f776b15": 1,
+        "ba33773b52234ea31605b09200d73c68": 3,
+        "daa6f56d05af48b5f5e935c721145691": 2
+      },
+      "index_errors_all": [],
+      "lexicon_stats": {
+        "docs": 6,
+        "total_len": [
+          19,
+          0,
+          0,
+          6
+        ]
+      },
+      "link_briefs_many": [
+        {
+          "confidence": "Extracted",
+          "weight": "3ff0000000000000"
+        },
+        {
+          "confidence": "Extracted",
+          "weight": "3ff0000000000000"
+        },
+        {
+          "confidence": "Extracted",
+          "weight": "3ff0000000000000"
+        },
+        {
+          "confidence": "Extracted",
+          "weight": "3ff0000000000000"
+        },
+        {
+          "confidence": "Extracted",
+          "weight": "3ff0000000000000"
+        },
+        {
+          "confidence": "Extracted",
+          "weight": "3ff0000000000000"
+        }
+      ],
+      "links_all": [
+        [
+          [
+            "4c24143e1597e3fe3d8678610f776b15",
+            "depends-on",
+            "ba33773b52234ea31605b09200d73c68"
+          ],
+          {
+            "entries": [
+              {
+                "confidence": "Extracted",
+                "fanout": null,
+                "origin": "Intra",
+                "provenance": {
+                  "path": "Cargo.lock",
+                  "repo": "fx",
+                  "revision": "91bd161b71db822c1553a1f82018903a0f290e6f+5e852224e4abc0bb"
+                },
+                "span": {
+                  "end_col": 1,
+                  "end_line": 12,
+                  "start_col": 1,
+                  "start_line": 5
+                }
+              }
+            ]
+          }
+        ],
+        [
+          [
+            "aca8b6114fbdcb71eb96829edbe76bca",
+            "has-version",
+            "ba33773b52234ea31605b09200d73c68"
+          ],
+          {
+            "entries": [
+              {
+                "confidence": "Extracted",
+                "fanout": null,
+                "origin": "Intra",
+                "provenance": {
+                  "path": "Cargo.lock",
+                  "repo": "fx",
+                  "revision": "91bd161b71db822c1553a1f82018903a0f290e6f+5e852224e4abc0bb"
+                },
+                "span": {
+                  "end_col": 82,
+                  "end_line": 29,
+                  "start_col": 1,
+                  "start_line": 26
+                }
+              }
+            ]
+          }
+        ],
+        [
+          [
+            "b2303388e24eb6519b47753f7b99d4bc",
+            "depends-on",
+            "ba33773b52234ea31605b09200d73c68"
+          ],
+          {
+            "entries": [
+              {
+                "confidence": "Extracted",
+                "fanout": null,
+                "origin": "Intra",
+                "provenance": {
+                  "path": "Cargo.lock",
+                  "repo": "fx",
+                  "revision": "91bd161b71db822c1553a1f82018903a0f290e6f+5e852224e4abc0bb"
+                },
+                "span": {
+                  "end_col": 1,
+                  "end_line": 25,
+                  "start_col": 1,
+                  "start_line": 18
+                }
+              }
+            ]
+          }
+        ],
+        [
+          [
+            "b2303388e24eb6519b47753f7b99d4bc",
+            "depends-on",
+            "daa6f56d05af48b5f5e935c721145691"
+          ],
+          {
+            "entries": [
+              {
+                "confidence": "Extracted",
+                "fanout": null,
+                "origin": "Intra",
+                "provenance": {
+                  "path": "Cargo.lock",
+                  "repo": "fx",
+                  "revision": "91bd161b71db822c1553a1f82018903a0f290e6f+5e852224e4abc0bb"
+                },
+                "span": {
+                  "end_col": 1,
+                  "end_line": 25,
+                  "start_col": 1,
+                  "start_line": 18
+                }
+              }
+            ]
+          }
+        ],
+        [
+          [
+            "db64eb092da1d6648e268aabe3494c3f",
+            "has-version",
+            "4c24143e1597e3fe3d8678610f776b15"
+          ],
+          {
+            "entries": [
+              {
+                "confidence": "Extracted",
+                "fanout": null,
+                "origin": "Intra",
+                "provenance": {
+                  "path": "Cargo.lock",
+                  "repo": "fx",
+                  "revision": "91bd161b71db822c1553a1f82018903a0f290e6f+5e852224e4abc0bb"
+                },
+                "span": {
+                  "end_col": 1,
+                  "end_line": 12,
+                  "start_col": 1,
+                  "start_line": 5
+                }
+              }
+            ]
+          }
+        ],
+        [
+          [
+            "db64eb092da1d6648e268aabe3494c3f",
+            "has-version",
+            "daa6f56d05af48b5f5e935c721145691"
+          ],
+          {
+            "entries": [
+              {
+                "confidence": "Extracted",
+                "fanout": null,
+                "origin": "Intra",
+                "provenance": {
+                  "path": "Cargo.lock",
+                  "repo": "fx",
+                  "revision": "91bd161b71db822c1553a1f82018903a0f290e6f+5e852224e4abc0bb"
+                },
+                "span": {
+                  "end_col": 1,
+                  "end_line": 17,
+                  "start_col": 1,
+                  "start_line": 13
+                }
+              }
+            ]
+          }
+        ]
+      ],
+      "per_id": [
+        {
+          "id": "4c24143e1597e3fe3d8678610f776b15",
+          "link_keys_out": {
+            "depends-on": [
+              [
+                "4c24143e1597e3fe3d8678610f776b15",
+                "depends-on",
+                "ba33773b52234ea31605b09200d73c68"
+              ]
+            ],
+            "has-version": []
+          },
+          "links_in": [
+            [
+              "db64eb092da1d6648e268aabe3494c3f",
+              "has-version",
+              "4c24143e1597e3fe3d8678610f776b15"
+            ]
+          ],
+          "links_out": [
+            [
+              [
+                "4c24143e1597e3fe3d8678610f776b15",
+                "depends-on",
+                "ba33773b52234ea31605b09200d73c68"
+              ],
+              {
+                "entries": [
+                  {
+                    "confidence": "Extracted",
+                    "fanout": null,
+                    "origin": "Intra",
+                    "provenance": {
+                      "path": "Cargo.lock",
+                      "repo": "fx",
+                      "revision": "91bd161b71db822c1553a1f82018903a0f290e6f+5e852224e4abc0bb"
+                    },
+                    "span": {
+                      "end_col": 1,
+                      "end_line": 12,
+                      "start_col": 1,
+                      "start_line": 5
+                    }
+                  }
+                ]
+              }
+            ]
+          ]
+        },
+        {
+          "id": "4c6fde57671996772685c134b42dc6ab",
+          "link_keys_out": {
+            "depends-on": [],
+            "has-version": []
+          },
+          "links_in": [],
+          "links_out": []
+        },
+        {
+          "id": "aca8b6114fbdcb71eb96829edbe76bca",
+          "link_keys_out": {
+            "depends-on": [],
+            "has-version": [
+              [
+                "aca8b6114fbdcb71eb96829edbe76bca",
+                "has-version",
+                "ba33773b52234ea31605b09200d73c68"
+              ]
+            ]
+          },
+          "links_in": [],
+          "links_out": [
+            [
+              [
+                "aca8b6114fbdcb71eb96829edbe76bca",
+                "has-version",
+                "ba33773b52234ea31605b09200d73c68"
+              ],
+              {
+                "entries": [
+                  {
+                    "confidence": "Extracted",
+                    "fanout": null,
+                    "origin": "Intra",
+                    "provenance": {
+                      "path": "Cargo.lock",
+                      "repo": "fx",
+                      "revision": "91bd161b71db822c1553a1f82018903a0f290e6f+5e852224e4abc0bb"
+                    },
+                    "span": {
+                      "end_col": 82,
+                      "end_line": 29,
+                      "start_col": 1,
+                      "start_line": 26
+                    }
+                  }
+                ]
+              }
+            ]
+          ]
+        },
+        {
+          "id": "b2303388e24eb6519b47753f7b99d4bc",
+          "link_keys_out": {
+            "depends-on": [
+              [
+                "b2303388e24eb6519b47753f7b99d4bc",
+                "depends-on",
+                "ba33773b52234ea31605b09200d73c68"
+              ],
+              [
+                "b2303388e24eb6519b47753f7b99d4bc",
+                "depends-on",
+                "daa6f56d05af48b5f5e935c721145691"
+              ]
+            ],
+            "has-version": []
+          },
+          "links_in": [],
+          "links_out": [
+            [
+              [
+                "b2303388e24eb6519b47753f7b99d4bc",
+                "depends-on",
+                "ba33773b52234ea31605b09200d73c68"
+              ],
+              {
+                "entries": [
+                  {
+                    "confidence": "Extracted",
+                    "fanout": null,
+                    "origin": "Intra",
+                    "provenance": {
+                      "path": "Cargo.lock",
+                      "repo": "fx",
+                      "revision": "91bd161b71db822c1553a1f82018903a0f290e6f+5e852224e4abc0bb"
+                    },
+                    "span": {
+                      "end_col": 1,
+                      "end_line": 25,
+                      "start_col": 1,
+                      "start_line": 18
+                    }
+                  }
+                ]
+              }
+            ],
+            [
+              [
+                "b2303388e24eb6519b47753f7b99d4bc",
+                "depends-on",
+                "daa6f56d05af48b5f5e935c721145691"
+              ],
+              {
+                "entries": [
+                  {
+                    "confidence": "Extracted",
+                    "fanout": null,
+                    "origin": "Intra",
+                    "provenance": {
+                      "path": "Cargo.lock",
+                      "repo": "fx",
+                      "revision": "91bd161b71db822c1553a1f82018903a0f290e6f+5e852224e4abc0bb"
+                    },
+                    "span": {
+                      "end_col": 1,
+                      "end_line": 25,
+                      "start_col": 1,
+                      "start_line": 18
+                    }
+                  }
+                ]
+              }
+            ]
+          ]
+        },
+        {
+          "id": "ba33773b52234ea31605b09200d73c68",
+          "link_keys_out": {
+            "depends-on": [],
+            "has-version": []
+          },
+          "links_in": [
+            [
+              "4c24143e1597e3fe3d8678610f776b15",
+              "depends-on",
+              "ba33773b52234ea31605b09200d73c68"
+            ],
+            [
+              "b2303388e24eb6519b47753f7b99d4bc",
+              "depends-on",
+              "ba33773b52234ea31605b09200d73c68"
+            ],
+            [
+              "aca8b6114fbdcb71eb96829edbe76bca",
+              "has-version",
+              "ba33773b52234ea31605b09200d73c68"
+            ]
+          ],
+          "links_out": []
+        },
+        {
+          "id": "daa6f56d05af48b5f5e935c721145691",
+          "link_keys_out": {
+            "depends-on": [],
+            "has-version": []
+          },
+          "links_in": [
+            [
+              "b2303388e24eb6519b47753f7b99d4bc",
+              "depends-on",
+              "daa6f56d05af48b5f5e935c721145691"
+            ],
+            [
+              "db64eb092da1d6648e268aabe3494c3f",
+              "has-version",
+              "daa6f56d05af48b5f5e935c721145691"
+            ]
+          ],
+          "links_out": []
+        },
+        {
+          "id": "db64eb092da1d6648e268aabe3494c3f",
+          "link_keys_out": {
+            "depends-on": [],
+            "has-version": [
+              [
+                "db64eb092da1d6648e268aabe3494c3f",
+                "has-version",
+                "4c24143e1597e3fe3d8678610f776b15"
+              ],
+              [
+                "db64eb092da1d6648e268aabe3494c3f",
+                "has-version",
+                "daa6f56d05af48b5f5e935c721145691"
+              ]
+            ]
+          },
+          "links_in": [],
+          "links_out": [
+            [
+              [
+                "db64eb092da1d6648e268aabe3494c3f",
+                "has-version",
+                "4c24143e1597e3fe3d8678610f776b15"
+              ],
+              {
+                "entries": [
+                  {
+                    "confidence": "Extracted",
+                    "fanout": null,
+                    "origin": "Intra",
+                    "provenance": {
+                      "path": "Cargo.lock",
+                      "repo": "fx",
+                      "revision": "91bd161b71db822c1553a1f82018903a0f290e6f+5e852224e4abc0bb"
+                    },
+                    "span": {
+                      "end_col": 1,
+                      "end_line": 12,
+                      "start_col": 1,
+                      "start_line": 5
+                    }
+                  }
+                ]
+              }
+            ],
+            [
+              [
+                "db64eb092da1d6648e268aabe3494c3f",
+                "has-version",
+                "daa6f56d05af48b5f5e935c721145691"
+              ],
+              {
+                "entries": [
+                  {
+                    "confidence": "Extracted",
+                    "fanout": null,
+                    "origin": "Intra",
+                    "provenance": {
+                      "path": "Cargo.lock",
+                      "repo": "fx",
+                      "revision": "91bd161b71db822c1553a1f82018903a0f290e6f+5e852224e4abc0bb"
+                    },
+                    "span": {
+                      "end_col": 1,
+                      "end_line": 17,
+                      "start_col": 1,
+                      "start_line": 13
+                    }
+                  }
+                ]
+              }
+            ]
+          ]
+        }
+      ],
+      "per_key": [
+        {
+          "exports": [
+            "4c6fde57671996772685c134b42dc6ab"
+          ],
+          "key": {
+            "key": "fx:Cargo.lock",
+            "namespace": "file"
+          },
+          "refs_by_key": []
+        },
+        {
+          "exports": [
+            "db64eb092da1d6648e268aabe3494c3f"
+          ],
+          "key": {
+            "key": "alpha-lib",
+            "namespace": "rs-package"
+          },
+          "refs_by_key": []
+        },
+        {
+          "exports": [
+            "aca8b6114fbdcb71eb96829edbe76bca"
+          ],
+          "key": {
+            "key": "gamma-lib",
+            "namespace": "rs-package"
+          },
+          "refs_by_key": []
+        }
+      ],
+      "postings": [
+        [
+          "0",
+          [
+            [
+              0,
+              "4c24143e1597e3fe3d8678610f776b15",
+              2
+            ],
+            [
+              0,
+              "ba33773b52234ea31605b09200d73c68",
+              1
+            ],
+            [
+              0,
+              "daa6f56d05af48b5f5e935c721145691",
+              2
+            ]
+          ]
+        ],
+        [
+          "1",
+          [
+            [
+              0,
+              "4c24143e1597e3fe3d8678610f776b15",
+              1
+            ],
+            [
+              0,
+              "ba33773b52234ea31605b09200d73c68",
+              1
+            ]
+          ]
+        ],
+        [
+          "2",
+          [
+            [
+              0,
+              "daa6f56d05af48b5f5e935c721145691",
+              1
+            ]
+          ]
+        ],
+        [
+          "3",
+          [
+            [
+              0,
+              "ba33773b52234ea31605b09200d73c68",
+              1
+            ]
+          ]
+        ],
+        [
+          "alpha",
+          [
+            [
+              0,
+              "db64eb092da1d6648e268aabe3494c3f",
+              1
+            ],
+            [
+              3,
+              "db64eb092da1d6648e268aabe3494c3f",
+              1
+            ]
+          ]
+        ],
+        [
+          "app",
+          [
+            [
+              0,
+              "b2303388e24eb6519b47753f7b99d4bc",
+              1
+            ]
+          ]
+        ],
+        [
+          "cargo",
+          []
+        ],
+        [
+          "fx",
+          []
+        ],
+        [
+          "fxcargolockmemberapp",
+          []
+        ],
+        [
+          "fxcargolockpackagealphalib",
+          []
+        ],
+        [
+          "fxcargolockpackagealphalibversion100",
+          []
+        ],
+        [
+          "fxcargolockpackagealphalibversion200",
+          []
+        ],
+        [
+          "fxcargolockpackagegammalib",
+          []
+        ],
+        [
+          "fxcargolockpackagegammalibversion031",
+          []
+        ],
+        [
+          "gamma",
+          [
+            [
+              0,
+              "aca8b6114fbdcb71eb96829edbe76bca",
+              1
+            ],
+            [
+              3,
+              "aca8b6114fbdcb71eb96829edbe76bca",
+              1
+            ]
+          ]
+        ],
+        [
+          "lib",
+          [
+            [
+              0,
+              "aca8b6114fbdcb71eb96829edbe76bca",
+              1
+            ],
+            [
+              0,
+              "db64eb092da1d6648e268aabe3494c3f",
+              1
+            ],
+            [
+              3,
+              "aca8b6114fbdcb71eb96829edbe76bca",
+              1
+            ],
+            [
+              3,
+              "db64eb092da1d6648e268aabe3494c3f",
+              1
+            ]
+          ]
+        ],
+        [
+          "lock",
+          []
+        ],
+        [
+          "member",
+          []
+        ],
+        [
+          "package",
+          []
+        ],
+        [
+          "version",
+          []
+        ]
+      ],
+      "postings_prefix": [
+        [
+          "alp",
+          [
+            [
+              "alpha",
+              [
+                [
+                  0,
+                  "db64eb092da1d6648e268aabe3494c3f",
+                  1
+                ],
+                [
+                  3,
+                  "db64eb092da1d6648e268aabe3494c3f",
+                  1
+                ]
+              ]
+            ],
+            [
+              "alphalib",
+              [
+                [
+                  0,
+                  "db64eb092da1d6648e268aabe3494c3f",
+                  1
+                ],
+                [
+                  3,
+                  "db64eb092da1d6648e268aabe3494c3f",
+                  1
+                ]
+              ]
+            ]
+          ]
+        ],
+        [
+          "app",
+          []
+        ],
+        [
+          "car",
+          []
+        ],
+        [
+          "fxc",
+          []
+        ],
+        [
+          "gam",
+          [
+            [
+              "gamma",
+              [
+                [
+                  0,
+                  "aca8b6114fbdcb71eb96829edbe76bca",
+                  1
+                ],
+                [
+                  3,
+                  "aca8b6114fbdcb71eb96829edbe76bca",
+                  1
+                ]
+              ]
+            ],
+            [
+              "gammalib",
+              [
+                [
+                  0,
+                  "aca8b6114fbdcb71eb96829edbe76bca",
+                  1
+                ],
+                [
+                  3,
+                  "aca8b6114fbdcb71eb96829edbe76bca",
+                  1
+                ]
+              ]
+            ]
+          ]
+        ],
+        [
+          "lib",
+          []
+        ],
+        [
+          "loc",
+          []
+        ],
+        [
+          "mem",
+          []
+        ],
+        [
+          "pac",
+          []
+        ],
+        [
+          "ver",
+          []
+        ]
+      ],
+      "symbol_briefs_many": [
+        {
+          "facts": {
+            "source": {
+              "Str": "registry+https://registry.example/index"
+            },
+            "version": {
+              "Str": "1.0.0"
+            }
+          },
+          "leaf": "1.0.0"
+        },
+        null,
+        {
+          "facts": {
+            "ecosystem": {
+              "Str": "cargo"
+            }
+          },
+          "leaf": "gamma-lib"
+        },
+        {
+          "facts": {
+            "version": {
+              "Str": "0.1.0"
+            }
+          },
+          "leaf": "app"
+        },
+        {
+          "facts": {
+            "source": {
+              "Str": "git+https://git.example/org/gamma?rev=abc123#abc123"
+            },
+            "version": {
+              "Str": "0.3.1"
+            }
+          },
+          "leaf": "0.3.1"
+        },
+        {
+          "facts": {
+            "source": {
+              "Str": "registry+https://registry.example/index"
+            },
+            "version": {
+              "Str": "2.0.0"
+            }
+          },
+          "leaf": "2.0.0"
+        },
+        {
+          "facts": {
+            "ecosystem": {
+              "Str": "cargo"
+            }
+          },
+          "leaf": "alpha-lib"
+        }
+      ],
+      "symbols": [
+        [
+          "4c24143e1597e3fe3d8678610f776b15",
+          {
+            "artifact": "4c6fde57671996772685c134b42dc6ab",
+            "facts": {
+              "source": {
+                "Str": "registry+https://registry.example/index"
+              },
+              "version": {
+                "Str": "1.0.0"
+              }
+            },
+            "kind": "package_version",
+            "name": "fx:Cargo.lock#package:alpha-lib/version:1.0.0",
+            "span": {
+              "end_col": 1,
+              "end_line": 12,
+              "start_col": 1,
+              "start_line": 5
+            }
+          }
+        ],
+        [
+          "aca8b6114fbdcb71eb96829edbe76bca",
+          {
+            "artifact": "4c6fde57671996772685c134b42dc6ab",
+            "facts": {
+              "ecosystem": {
+                "Str": "cargo"
+              }
+            },
+            "kind": "package_external",
+            "name": "fx:Cargo.lock#package:gamma-lib",
+            "span": {
+              "end_col": 82,
+              "end_line": 29,
+              "start_col": 1,
+              "start_line": 26
+            }
+          }
+        ],
+        [
+          "b2303388e24eb6519b47753f7b99d4bc",
+          {
+            "artifact": "4c6fde57671996772685c134b42dc6ab",
+            "facts": {
+              "version": {
+                "Str": "0.1.0"
+              }
+            },
+            "kind": "package_member",
+            "name": "fx:Cargo.lock#member:app",
+            "span": {
+              "end_col": 1,
+              "end_line": 25,
+              "start_col": 1,
+              "start_line": 18
+            }
+          }
+        ],
+        [
+          "ba33773b52234ea31605b09200d73c68",
+          {
+            "artifact": "4c6fde57671996772685c134b42dc6ab",
+            "facts": {
+              "source": {
+                "Str": "git+https://git.example/org/gamma?rev=abc123#abc123"
+              },
+              "version": {
+                "Str": "0.3.1"
+              }
+            },
+            "kind": "package_version",
+            "name": "fx:Cargo.lock#package:gamma-lib/version:0.3.1",
+            "span": {
+              "end_col": 82,
+              "end_line": 29,
+              "start_col": 1,
+              "start_line": 26
+            }
+          }
+        ],
+        [
+          "daa6f56d05af48b5f5e935c721145691",
+          {
+            "artifact": "4c6fde57671996772685c134b42dc6ab",
+            "facts": {
+              "source": {
+                "Str": "registry+https://registry.example/index"
+              },
+              "version": {
+                "Str": "2.0.0"
+              }
+            },
+            "kind": "package_version",
+            "name": "fx:Cargo.lock#package:alpha-lib/version:2.0.0",
+            "span": {
+              "end_col": 1,
+              "end_line": 17,
+              "start_col": 1,
+              "start_line": 13
+            }
+          }
+        ],
+        [
+          "db64eb092da1d6648e268aabe3494c3f",
+          {
+            "artifact": "4c6fde57671996772685c134b42dc6ab",
+            "facts": {
+              "ecosystem": {
+                "Str": "cargo"
+              }
+            },
+            "kind": "package_external",
+            "name": "fx:Cargo.lock#package:alpha-lib",
+            "span": {
+              "end_col": 1,
+              "end_line": 12,
+              "start_col": 1,
+              "start_line": 5
+            }
+          }
+        ]
+      ],
+      "symbols_many": [
+        {
+          "artifact": "4c6fde57671996772685c134b42dc6ab",
+          "facts": {
+            "source": {
+              "Str": "registry+https://registry.example/index"
+            },
+            "version": {
+              "Str": "1.0.0"
+            }
+          },
+          "kind": "package_version",
+          "name": "fx:Cargo.lock#package:alpha-lib/version:1.0.0",
+          "span": {
+            "end_col": 1,
+            "end_line": 12,
+            "start_col": 1,
+            "start_line": 5
+          }
+        },
+        null,
+        {
+          "artifact": "4c6fde57671996772685c134b42dc6ab",
+          "facts": {
+            "ecosystem": {
+              "Str": "cargo"
+            }
+          },
+          "kind": "package_external",
+          "name": "fx:Cargo.lock#package:gamma-lib",
+          "span": {
+            "end_col": 82,
+            "end_line": 29,
+            "start_col": 1,
+            "start_line": 26
+          }
+        },
+        {
+          "artifact": "4c6fde57671996772685c134b42dc6ab",
+          "facts": {
+            "version": {
+              "Str": "0.1.0"
+            }
+          },
+          "kind": "package_member",
+          "name": "fx:Cargo.lock#member:app",
+          "span": {
+            "end_col": 1,
+            "end_line": 25,
+            "start_col": 1,
+            "start_line": 18
+          }
+        },
+        {
+          "artifact": "4c6fde57671996772685c134b42dc6ab",
+          "facts": {
+            "source": {
+              "Str": "git+https://git.example/org/gamma?rev=abc123#abc123"
+            },
+            "version": {
+              "Str": "0.3.1"
+            }
+          },
+          "kind": "package_version",
+          "name": "fx:Cargo.lock#package:gamma-lib/version:0.3.1",
+          "span": {
+            "end_col": 82,
+            "end_line": 29,
+            "start_col": 1,
+            "start_line": 26
+          }
+        },
+        {
+          "artifact": "4c6fde57671996772685c134b42dc6ab",
+          "facts": {
+            "source": {
+              "Str": "registry+https://registry.example/index"
+            },
+            "version": {
+              "Str": "2.0.0"
+            }
+          },
+          "kind": "package_version",
+          "name": "fx:Cargo.lock#package:alpha-lib/version:2.0.0",
+          "span": {
+            "end_col": 1,
+            "end_line": 17,
+            "start_col": 1,
+            "start_line": 13
+          }
+        },
+        {
+          "artifact": "4c6fde57671996772685c134b42dc6ab",
+          "facts": {
+            "ecosystem": {
+              "Str": "cargo"
+            }
+          },
+          "kind": "package_external",
+          "name": "fx:Cargo.lock#package:alpha-lib",
+          "span": {
+            "end_col": 1,
+            "end_line": 12,
+            "start_col": 1,
+            "start_line": 5
+          }
+        }
+      ],
+      "unresolved": [],
+      "unresolved_refs": []
+    },
+    "deps/npm-lock": {
+      "artifacts": [
+        [
+          "8de82a12aa05ef4a8eb01fe567654e7d",
+          {
+            "exports": [
+              {
+                "key": {
+                  "key": "fx:package-lock.json",
+                  "namespace": "file"
+                },
+                "target": "8de82a12aa05ef4a8eb01fe567654e7d"
+              },
+              {
+                "key": {
+                  "key": "@scope/beta",
+                  "namespace": "ts-package"
+                },
+                "target": "9bfab489a2ff9233be5b5627e79cd065"
+              },
+              {
+                "key": {
+                  "key": "alpha-lib",
+                  "namespace": "ts-package"
+                },
+                "target": "7a19efd0425736fdd12eb41efb778978"
+              },
+              {
+                "key": {
+                  "key": "gamma-dev",
+                  "namespace": "ts-package"
+                },
+                "target": "cdc46a293863754c4adad26576c7abd9"
+              }
+            ],
+            "extension": "deps",
+            "facts": {
+              "ecosystem": {
+                "Str": "npm"
+              },
+              "lockfile_format": {
+                "Str": "3"
+              }
+            },
+            "name": "fx:package-lock.json",
+            "provenance": {
+              "path": "package-lock.json",
+              "repo": "fx",
+              "revision": "090284e912616678aa4b746d2d8f2e7bb1a15882+5e852224e4abc0bb"
+            },
+            "refs": [],
+            "symbols": [
+              "0c8083b2d8b4a8a6b6e1f77043bb631b",
+              "351fb36c411cc13c57575624252b830f",
+              "3e0f5c512704232c7133c063ddd889ed",
+              "7a19efd0425736fdd12eb41efb778978",
+              "9bfab489a2ff9233be5b5627e79cd065",
+              "a892e0478ca3b205fb77efd6d2dadf96",
+              "cdc46a293863754c4adad26576c7abd9",
+              "e84bd5db33240054029301d0dbd5dc7d"
+            ]
+          }
+        ]
+      ],
+      "bindings_of": [
+        [
+          "8de82a12aa05ef4a8eb01fe567654e7d",
+          []
+        ]
+      ],
+      "cached_rank": {
+        "0c8083b2d8b4a8a6b6e1f77043bb631b": "3fc4aa7e94474bfe",
+        "351fb36c411cc13c57575624252b830f": "3fb35fd6ab02d764",
+        "3e0f5c512704232c7133c063ddd889ed": "3fc4aa7e94474bfe",
+        "7a19efd0425736fdd12eb41efb778978": "3fb35fd6ab02d764",
+        "9bfab489a2ff9233be5b5627e79cd065": "3fb35fd6ab02d764",
+        "a892e0478ca3b205fb77efd6d2dadf96": "3fc08c875cbd17e1",
+        "cdc46a293863754c4adad26576c7abd9": "3fb35fd6ab02d764",
+        "e84bd5db33240054029301d0dbd5dc7d": "3fcf5ece24aea154"
+      },
+      "canonical_graph": "{\"extension\":\"deps\",\"facts\":{\"ecosystem\":{\"Str\":\"npm\"},\"lockfile_format\":{\"Str\":\"3\"}},\"name\":\"fx:package-lock.json\",\"node\":\"artifact\",\"revision\":\"090284e912616678aa4b746d2d8f2e7bb1a15882+5e852224e4abc0bb\"}\n{\"artifact\":\"fx:package-lock.json\",\"facts\":{\"version\":{\"Str\":\"1.0.0\"}},\"kind\":\"package_member\",\"name\":\"fx:package-lock.json#member:demo-app\",\"node\":\"symbol\",\"span\":{\"end_col\":6,\"end_line\":17,\"start_col\":1,\"start_line\":7}}\n{\"artifact\":\"fx:package-lock.json\",\"facts\":{\"ecosystem\":{\"Str\":\"npm\"}},\"kind\":\"package_external\",\"name\":\"fx:package-lock.json#package:@scope%2Fbeta\",\"node\":\"symbol\",\"span\":{\"end_col\":6,\"end_line\":24,\"start_col\":1,\"start_line\":18}}\n{\"artifact\":\"fx:package-lock.json\",\"facts\":{\"source\":{\"Str\":\"https://registry.example/@scope/beta/-/beta-2.0.0.tgz\"},\"version\":{\"Str\":\"2.0.0\"}},\"kind\":\"package_version\",\"name\":\"fx:package-lock.json#package:@scope%2Fbeta/version:2.0.0\",\"node\":\"symbol\",\"span\":{\"end_col\":6,\"end_line\":24,\"start_col\":1,\"start_line\":18}}\n{\"artifact\":\"fx:package-lock.json\",\"facts\":{\"ecosystem\":{\"Str\":\"npm\"}},\"kind\":\"package_external\",\"name\":\"fx:package-lock.json#package:alpha-lib\",\"node\":\"symbol\",\"span\":{\"end_col\":6,\"end_line\":32,\"start_col\":1,\"start_line\":29}}\n{\"artifact\":\"fx:package-lock.json\",\"facts\":{\"source\":{\"Str\":\"https://registry.example/alpha-lib/-/alpha-lib-1.4.0.tgz\"},\"version\":{\"Str\":\"1.4.0\"}},\"kind\":\"package_version\",\"name\":\"fx:package-lock.json#package:alpha-lib/version:1.4.0\",\"node\":\"symbol\",\"span\":{\"end_col\":6,\"end_line\":32,\"start_col\":1,\"start_line\":29}}\n{\"artifact\":\"fx:package-lock.json\",\"facts\":{\"source\":{\"Str\":\"https://registry.example/alpha-lib/-/alpha-lib-2.1.0.tgz\"},\"version\":{\"Str\":\"2.1.0\"}},\"kind\":\"package_version\",\"name\":\"fx:package-lock.json#package:alpha-lib/version:2.1.0\",\"node\":\"symbol\",\"span\":{\"end_col\":6,\"end_line\":28,\"start_col\":1,\"start_line\":25}}\n{\"artifact\":\"fx:package-lock.json\",\"facts\":{\"ecosystem\":{\"Str\":\"npm\"}},\"kind\":\"package_external\",\"name\":\"fx:package-lock.json#package:gamma-dev\",\"node\":\"symbol\",\"span\":{\"end_col\":5,\"end_line\":37,\"start_col\":1,\"start_line\":33}}\n{\"artifact\":\"fx:package-lock.json\",\"facts\":{\"dev\":{\"Bool\":true},\"source\":{\"Str\":\"https://registry.example/gamma-dev/-/gamma-dev-3.0.0.tgz\"},\"version\":{\"Str\":\"3.0.0\"}},\"kind\":\"package_version\",\"name\":\"fx:package-lock.json#package:gamma-dev/version:3.0.0\",\"node\":\"symbol\",\"span\":{\"end_col\":5,\"end_line\":37,\"start_col\":1,\"start_line\":33}}\n{\"confidence\":\"Extracted\",\"from\":\"fx:package-lock.json#member:demo-app\",\"kind\":\"depends-on\",\"link\":true,\"origin\":\"intra\",\"revision\":\"090284e912616678aa4b746d2d8f2e7bb1a15882+5e852224e4abc0bb\",\"span\":{\"end_col\":6,\"end_line\":17,\"start_col\":1,\"start_line\":7},\"to\":\"fx:package-lock.json#package:@scope%2Fbeta/version:2.0.0\"}\n{\"confidence\":\"Extracted\",\"from\":\"fx:package-lock.json#member:demo-app\",\"kind\":\"depends-on\",\"link\":true,\"origin\":\"intra\",\"revision\":\"090284e912616678aa4b746d2d8f2e7bb1a15882+5e852224e4abc0bb\",\"span\":{\"end_col\":6,\"end_line\":17,\"start_col\":1,\"start_line\":7},\"to\":\"fx:package-lock.json#package:alpha-lib/version:1.4.0\"}\n{\"confidence\":\"Extracted\",\"from\":\"fx:package-lock.json#member:demo-app\",\"kind\":\"depends-on\",\"link\":true,\"origin\":\"intra\",\"revision\":\"090284e912616678aa4b746d2d8f2e7bb1a15882+5e852224e4abc0bb\",\"span\":{\"end_col\":6,\"end_line\":17,\"start_col\":1,\"start_line\":7},\"to\":\"fx:package-lock.json#package:gamma-dev/version:3.0.0\"}\n{\"confidence\":\"Extracted\",\"from\":\"fx:package-lock.json#package:@scope%2Fbeta\",\"kind\":\"has-version\",\"link\":true,\"origin\":\"intra\",\"revision\":\"090284e912616678aa4b746d2d8f2e7bb1a15882+5e852224e4abc0bb\",\"span\":{\"end_col\":6,\"end_line\":24,\"start_col\":1,\"start_line\":18},\"to\":\"fx:package-lock.json#package:@scope%2Fbeta/version:2.0.0\"}\n{\"confidence\":\"Extracted\",\"from\":\"fx:package-lock.json#package:@scope%2Fbeta/version:2.0.0\",\"kind\":\"depends-on\",\"link\":true,\"origin\":\"intra\",\"revision\":\"090284e912616678aa4b746d2d8f2e7bb1a15882+5e852224e4abc0bb\",\"span\":{\"end_col\":6,\"end_line\":24,\"start_col\":1,\"start_line\":18},\"to\":\"fx:package-lock.json#package:alpha-lib/version:2.1.0\"}\n{\"confidence\":\"Extracted\",\"from\":\"fx:package-lock.json#package:alpha-lib\",\"kind\":\"has-version\",\"link\":true,\"origin\":\"intra\",\"revision\":\"090284e912616678aa4b746d2d8f2e7bb1a15882+5e852224e4abc0bb\",\"span\":{\"end_col\":6,\"end_line\":32,\"start_col\":1,\"start_line\":29},\"to\":\"fx:package-lock.json#package:alpha-lib/version:1.4.0\"}\n{\"confidence\":\"Extracted\",\"from\":\"fx:package-lock.json#package:alpha-lib\",\"kind\":\"has-version\",\"link\":true,\"origin\":\"intra\",\"revision\":\"090284e912616678aa4b746d2d8f2e7bb1a15882+5e852224e4abc0bb\",\"span\":{\"end_col\":6,\"end_line\":28,\"start_col\":1,\"start_line\":25},\"to\":\"fx:package-lock.json#package:alpha-lib/version:2.1.0\"}\n{\"confidence\":\"Extracted\",\"from\":\"fx:package-lock.json#package:gamma-dev\",\"kind\":\"has-version\",\"link\":true,\"origin\":\"intra\",\"revision\":\"090284e912616678aa4b746d2d8f2e7bb1a15882+5e852224e4abc0bb\",\"span\":{\"end_col\":5,\"end_line\":37,\"start_col\":1,\"start_line\":33},\"to\":\"fx:package-lock.json#package:gamma-dev/version:3.0.0\"}\n",
+      "contract": [],
+      "contracts": [],
+      "doc_len": [
+        [
+          "0c8083b2d8b4a8a6b6e1f77043bb631b",
+          [
+            4,
+            0,
+            0,
+            0
+          ]
+        ],
+        [
+          "351fb36c411cc13c57575624252b830f",
+          [
+            3,
+            0,
+            0,
+            0
+          ]
+        ],
+        [
+          "3e0f5c512704232c7133c063ddd889ed",
+          [
+            4,
+            0,
+            0,
+            0
+          ]
+        ],
+        [
+          "7a19efd0425736fdd12eb41efb778978",
+          [
+            3,
+            0,
+            0,
+            3
+          ]
+        ],
+        [
+          "9bfab489a2ff9233be5b5627e79cd065",
+          [
+            3,
+            0,
+            0,
+            3
+          ]
+        ],
+        [
+          "a892e0478ca3b205fb77efd6d2dadf96",
+          [
+            4,
+            0,
+            0,
+            0
+          ]
+        ],
+        [
+          "cdc46a293863754c4adad26576c7abd9",
+          [
+            3,
+            0,
+            0,
+            3
+          ]
+        ],
+        [
+          "e84bd5db33240054029301d0dbd5dc7d",
+          [
+            4,
+            0,
+            0,
+            0
+          ]
+        ]
+      ],
+      "exports_in": {
+        "file": [
+          [
+            {
+              "key": "fx:package-lock.json",
+              "namespace": "file"
+            },
+            [
+              "8de82a12aa05ef4a8eb01fe567654e7d"
+            ]
+          ]
+        ],
+        "ts-package": [
+          [
+            {
+              "key": "@scope/beta",
+              "namespace": "ts-package"
+            },
+            [
+              "9bfab489a2ff9233be5b5627e79cd065"
+            ]
+          ],
+          [
+            {
+              "key": "alpha-lib",
+              "namespace": "ts-package"
+            },
+            [
+              "7a19efd0425736fdd12eb41efb778978"
+            ]
+          ],
+          [
+            {
+              "key": "gamma-dev",
+              "namespace": "ts-package"
+            },
+            [
+              "cdc46a293863754c4adad26576c7abd9"
+            ]
+          ]
+        ]
+      },
+      "file_revisions": [
+        [
+          [
+            "fx",
+            "package-lock.json"
+          ],
+          [
+            254,
+            62,
+            179,
+            110,
+            9,
+            73,
+            102,
+            166,
+            41,
+            210,
+            148,
+            6,
+            22,
+            70,
+            187,
+            95,
+            13,
+            65,
+            75,
+            29,
+            145,
+            28,
+            196,
+            39,
+            21,
+            63,
+            122,
+            16,
+            247,
+            0,
+            223,
+            37
+          ]
+        ]
+      ],
+      "in_degrees": {
+        "0c8083b2d8b4a8a6b6e1f77043bb631b": 2,
+        "3e0f5c512704232c7133c063ddd889ed": 2,
+        "a892e0478ca3b205fb77efd6d2dadf96": 2,
+        "e84bd5db33240054029301d0dbd5dc7d": 2
+      },
+      "index_errors_all": [],
+      "lexicon_stats": {
+        "docs": 8,
+        "total_len": [
+          28,
+          0,
+          0,
+          9
+        ]
+      },
+      "link_briefs_many": [
+        {
+          "confidence": "Extracted",
+          "weight": "3ff0000000000000"
+        },
+        {
+          "confidence": "Extracted",
+          "weight": "3ff0000000000000"
+        },
+        {
+          "confidence": "Extracted",
+          "weight": "3ff0000000000000"
+        },
+        {
+          "confidence": "Extracted",
+          "weight": "3ff0000000000000"
+        },
+        {
+          "confidence": "Extracted",
+          "weight": "3ff0000000000000"
+        },
+        {
+          "confidence": "Extracted",
+          "weight": "3ff0000000000000"
+        },
+        {
+          "confidence": "Extracted",
+          "weight": "3ff0000000000000"
+        },
+        {
+          "confidence": "Extracted",
+          "weight": "3ff0000000000000"
+        }
+      ],
+      "links_all": [
+        [
+          [
+            "0c8083b2d8b4a8a6b6e1f77043bb631b",
+            "depends-on",
+            "e84bd5db33240054029301d0dbd5dc7d"
+          ],
+          {
+            "entries": [
+              {
+                "confidence": "Extracted",
+                "fanout": null,
+                "origin": "Intra",
+                "provenance": {
+                  "path": "package-lock.json",
+                  "repo": "fx",
+                  "revision": "090284e912616678aa4b746d2d8f2e7bb1a15882+5e852224e4abc0bb"
+                },
+                "span": {
+                  "end_col": 6,
+                  "end_line": 24,
+                  "start_col": 1,
+                  "start_line": 18
+                }
+              }
+            ]
+          }
+        ],
+        [
+          [
+            "351fb36c411cc13c57575624252b830f",
+            "depends-on",
+            "0c8083b2d8b4a8a6b6e1f77043bb631b"
+          ],
+          {
+            "entries": [
+              {
+                "confidence": "Extracted",
+                "fanout": null,
+                "origin": "Intra",
+                "provenance": {
+                  "path": "package-lock.json",
+                  "repo": "fx",
+                  "revision": "090284e912616678aa4b746d2d8f2e7bb1a15882+5e852224e4abc0bb"
+                },
+                "span": {
+                  "end_col": 6,
+                  "end_line": 17,
+                  "start_col": 1,
+                  "start_line": 7
+                }
+              }
+            ]
+          }
+        ],
+        [
+          [
+            "351fb36c411cc13c57575624252b830f",
+            "depends-on",
+            "3e0f5c512704232c7133c063ddd889ed"
+          ],
+          {
+            "entries": [
+              {
+                "confidence": "Extracted",
+                "fanout": null,
+                "origin": "Intra",
+                "provenance": {
+                  "path": "package-lock.json",
+                  "repo": "fx",
+                  "revision": "090284e912616678aa4b746d2d8f2e7bb1a15882+5e852224e4abc0bb"
+                },
+                "span": {
+                  "end_col": 6,
+                  "end_line": 17,
+                  "start_col": 1,
+                  "start_line": 7
+                }
+              }
+            ]
+          }
+        ],
+        [
+          [
+            "351fb36c411cc13c57575624252b830f",
+            "depends-on",
+            "a892e0478ca3b205fb77efd6d2dadf96"
+          ],
+          {
+            "entries": [
+              {
+                "confidence": "Extracted",
+                "fanout": null,
+                "origin": "Intra",
+                "provenance": {
+                  "path": "package-lock.json",
+                  "repo": "fx",
+                  "revision": "090284e912616678aa4b746d2d8f2e7bb1a15882+5e852224e4abc0bb"
+                },
+                "span": {
+                  "end_col": 6,
+                  "end_line": 17,
+                  "start_col": 1,
+                  "start_line": 7
+                }
+              }
+            ]
+          }
+        ],
+        [
+          [
+            "7a19efd0425736fdd12eb41efb778978",
+            "has-version",
+            "a892e0478ca3b205fb77efd6d2dadf96"
+          ],
+          {
+            "entries": [
+              {
+                "confidence": "Extracted",
+                "fanout": null,
+                "origin": "Intra",
+                "provenance": {
+                  "path": "package-lock.json",
+                  "repo": "fx",
+                  "revision": "090284e912616678aa4b746d2d8f2e7bb1a15882+5e852224e4abc0bb"
+                },
+                "span": {
+                  "end_col": 6,
+                  "end_line": 32,
+                  "start_col": 1,
+                  "start_line": 29
+                }
+              }
+            ]
+          }
+        ],
+        [
+          [
+            "7a19efd0425736fdd12eb41efb778978",
+            "has-version",
+            "e84bd5db33240054029301d0dbd5dc7d"
+          ],
+          {
+            "entries": [
+              {
+                "confidence": "Extracted",
+                "fanout": null,
+                "origin": "Intra",
+                "provenance": {
+                  "path": "package-lock.json",
+                  "repo": "fx",
+                  "revision": "090284e912616678aa4b746d2d8f2e7bb1a15882+5e852224e4abc0bb"
+                },
+                "span": {
+                  "end_col": 6,
+                  "end_line": 28,
+                  "start_col": 1,
+                  "start_line": 25
+                }
+              }
+            ]
+          }
+        ],
+        [
+          [
+            "9bfab489a2ff9233be5b5627e79cd065",
+            "has-version",
+            "0c8083b2d8b4a8a6b6e1f77043bb631b"
+          ],
+          {
+            "entries": [
+              {
+                "confidence": "Extracted",
+                "fanout": null,
+                "origin": "Intra",
+                "provenance": {
+                  "path": "package-lock.json",
+                  "repo": "fx",
+                  "revision": "090284e912616678aa4b746d2d8f2e7bb1a15882+5e852224e4abc0bb"
+                },
+                "span": {
+                  "end_col": 6,
+                  "end_line": 24,
+                  "start_col": 1,
+                  "start_line": 18
+                }
+              }
+            ]
+          }
+        ],
+        [
+          [
+            "cdc46a293863754c4adad26576c7abd9",
+            "has-version",
+            "3e0f5c512704232c7133c063ddd889ed"
+          ],
+          {
+            "entries": [
+              {
+                "confidence": "Extracted",
+                "fanout": null,
+                "origin": "Intra",
+                "provenance": {
+                  "path": "package-lock.json",
+                  "repo": "fx",
+                  "revision": "090284e912616678aa4b746d2d8f2e7bb1a15882+5e852224e4abc0bb"
+                },
+                "span": {
+                  "end_col": 5,
+                  "end_line": 37,
+                  "start_col": 1,
+                  "start_line": 33
+                }
+              }
+            ]
+          }
+        ]
+      ],
+      "per_id": [
+        {
+          "id": "0c8083b2d8b4a8a6b6e1f77043bb631b",
+          "link_keys_out": {
+            "depends-on": [
+              [
+                "0c8083b2d8b4a8a6b6e1f77043bb631b",
+                "depends-on",
+                "e84bd5db33240054029301d0dbd5dc7d"
+              ]
+            ],
+            "has-version": []
+          },
+          "links_in": [
+            [
+              "351fb36c411cc13c57575624252b830f",
+              "depends-on",
+              "0c8083b2d8b4a8a6b6e1f77043bb631b"
+            ],
+            [
+              "9bfab489a2ff9233be5b5627e79cd065",
+              "has-version",
+              "0c8083b2d8b4a8a6b6e1f77043bb631b"
+            ]
+          ],
+          "links_out": [
+            [
+              [
+                "0c8083b2d8b4a8a6b6e1f77043bb631b",
+                "depends-on",
+                "e84bd5db33240054029301d0dbd5dc7d"
+              ],
+              {
+                "entries": [
+                  {
+                    "confidence": "Extracted",
+                    "fanout": null,
+                    "origin": "Intra",
+                    "provenance": {
+                      "path": "package-lock.json",
+                      "repo": "fx",
+                      "revision": "090284e912616678aa4b746d2d8f2e7bb1a15882+5e852224e4abc0bb"
+                    },
+                    "span": {
+                      "end_col": 6,
+                      "end_line": 24,
+                      "start_col": 1,
+                      "start_line": 18
+                    }
+                  }
+                ]
+              }
+            ]
+          ]
+        },
+        {
+          "id": "351fb36c411cc13c57575624252b830f",
+          "link_keys_out": {
+            "depends-on": [
+              [
+                "351fb36c411cc13c57575624252b830f",
+                "depends-on",
+                "0c8083b2d8b4a8a6b6e1f77043bb631b"
+              ],
+              [
+                "351fb36c411cc13c57575624252b830f",
+                "depends-on",
+                "3e0f5c512704232c7133c063ddd889ed"
+              ],
+              [
+                "351fb36c411cc13c57575624252b830f",
+                "depends-on",
+                "a892e0478ca3b205fb77efd6d2dadf96"
+              ]
+            ],
+            "has-version": []
+          },
+          "links_in": [],
+          "links_out": [
+            [
+              [
+                "351fb36c411cc13c57575624252b830f",
+                "depends-on",
+                "0c8083b2d8b4a8a6b6e1f77043bb631b"
+              ],
+              {
+                "entries": [
+                  {
+                    "confidence": "Extracted",
+                    "fanout": null,
+                    "origin": "Intra",
+                    "provenance": {
+                      "path": "package-lock.json",
+                      "repo": "fx",
+                      "revision": "090284e912616678aa4b746d2d8f2e7bb1a15882+5e852224e4abc0bb"
+                    },
+                    "span": {
+                      "end_col": 6,
+                      "end_line": 17,
+                      "start_col": 1,
+                      "start_line": 7
+                    }
+                  }
+                ]
+              }
+            ],
+            [
+              [
+                "351fb36c411cc13c57575624252b830f",
+                "depends-on",
+                "3e0f5c512704232c7133c063ddd889ed"
+              ],
+              {
+                "entries": [
+                  {
+                    "confidence": "Extracted",
+                    "fanout": null,
+                    "origin": "Intra",
+                    "provenance": {
+                      "path": "package-lock.json",
+                      "repo": "fx",
+                      "revision": "090284e912616678aa4b746d2d8f2e7bb1a15882+5e852224e4abc0bb"
+                    },
+                    "span": {
+                      "end_col": 6,
+                      "end_line": 17,
+                      "start_col": 1,
+                      "start_line": 7
+                    }
+                  }
+                ]
+              }
+            ],
+            [
+              [
+                "351fb36c411cc13c57575624252b830f",
+                "depends-on",
+                "a892e0478ca3b205fb77efd6d2dadf96"
+              ],
+              {
+                "entries": [
+                  {
+                    "confidence": "Extracted",
+                    "fanout": null,
+                    "origin": "Intra",
+                    "provenance": {
+                      "path": "package-lock.json",
+                      "repo": "fx",
+                      "revision": "090284e912616678aa4b746d2d8f2e7bb1a15882+5e852224e4abc0bb"
+                    },
+                    "span": {
+                      "end_col": 6,
+                      "end_line": 17,
+                      "start_col": 1,
+                      "start_line": 7
+                    }
+                  }
+                ]
+              }
+            ]
+          ]
+        },
+        {
+          "id": "3e0f5c512704232c7133c063ddd889ed",
+          "link_keys_out": {
+            "depends-on": [],
+            "has-version": []
+          },
+          "links_in": [
+            [
+              "351fb36c411cc13c57575624252b830f",
+              "depends-on",
+              "3e0f5c512704232c7133c063ddd889ed"
+            ],
+            [
+              "cdc46a293863754c4adad26576c7abd9",
+              "has-version",
+              "3e0f5c512704232c7133c063ddd889ed"
+            ]
+          ],
+          "links_out": []
+        },
+        {
+          "id": "7a19efd0425736fdd12eb41efb778978",
+          "link_keys_out": {
+            "depends-on": [],
+            "has-version": [
+              [
+                "7a19efd0425736fdd12eb41efb778978",
+                "has-version",
+                "a892e0478ca3b205fb77efd6d2dadf96"
+              ],
+              [
+                "7a19efd0425736fdd12eb41efb778978",
+                "has-version",
+                "e84bd5db33240054029301d0dbd5dc7d"
+              ]
+            ]
+          },
+          "links_in": [],
+          "links_out": [
+            [
+              [
+                "7a19efd0425736fdd12eb41efb778978",
+                "has-version",
+                "a892e0478ca3b205fb77efd6d2dadf96"
+              ],
+              {
+                "entries": [
+                  {
+                    "confidence": "Extracted",
+                    "fanout": null,
+                    "origin": "Intra",
+                    "provenance": {
+                      "path": "package-lock.json",
+                      "repo": "fx",
+                      "revision": "090284e912616678aa4b746d2d8f2e7bb1a15882+5e852224e4abc0bb"
+                    },
+                    "span": {
+                      "end_col": 6,
+                      "end_line": 32,
+                      "start_col": 1,
+                      "start_line": 29
+                    }
+                  }
+                ]
+              }
+            ],
+            [
+              [
+                "7a19efd0425736fdd12eb41efb778978",
+                "has-version",
+                "e84bd5db33240054029301d0dbd5dc7d"
+              ],
+              {
+                "entries": [
+                  {
+                    "confidence": "Extracted",
+                    "fanout": null,
+                    "origin": "Intra",
+                    "provenance": {
+                      "path": "package-lock.json",
+                      "repo": "fx",
+                      "revision": "090284e912616678aa4b746d2d8f2e7bb1a15882+5e852224e4abc0bb"
+                    },
+                    "span": {
+                      "end_col": 6,
+                      "end_line": 28,
+                      "start_col": 1,
+                      "start_line": 25
+                    }
+                  }
+                ]
+              }
+            ]
+          ]
+        },
+        {
+          "id": "8de82a12aa05ef4a8eb01fe567654e7d",
+          "link_keys_out": {
+            "depends-on": [],
+            "has-version": []
+          },
+          "links_in": [],
+          "links_out": []
+        },
+        {
+          "id": "9bfab489a2ff9233be5b5627e79cd065",
+          "link_keys_out": {
+            "depends-on": [],
+            "has-version": [
+              [
+                "9bfab489a2ff9233be5b5627e79cd065",
+                "has-version",
+                "0c8083b2d8b4a8a6b6e1f77043bb631b"
+              ]
+            ]
+          },
+          "links_in": [],
+          "links_out": [
+            [
+              [
+                "9bfab489a2ff9233be5b5627e79cd065",
+                "has-version",
+                "0c8083b2d8b4a8a6b6e1f77043bb631b"
+              ],
+              {
+                "entries": [
+                  {
+                    "confidence": "Extracted",
+                    "fanout": null,
+                    "origin": "Intra",
+                    "provenance": {
+                      "path": "package-lock.json",
+                      "repo": "fx",
+                      "revision": "090284e912616678aa4b746d2d8f2e7bb1a15882+5e852224e4abc0bb"
+                    },
+                    "span": {
+                      "end_col": 6,
+                      "end_line": 24,
+                      "start_col": 1,
+                      "start_line": 18
+                    }
+                  }
+                ]
+              }
+            ]
+          ]
+        },
+        {
+          "id": "a892e0478ca3b205fb77efd6d2dadf96",
+          "link_keys_out": {
+            "depends-on": [],
+            "has-version": []
+          },
+          "links_in": [
+            [
+              "351fb36c411cc13c57575624252b830f",
+              "depends-on",
+              "a892e0478ca3b205fb77efd6d2dadf96"
+            ],
+            [
+              "7a19efd0425736fdd12eb41efb778978",
+              "has-version",
+              "a892e0478ca3b205fb77efd6d2dadf96"
+            ]
+          ],
+          "links_out": []
+        },
+        {
+          "id": "cdc46a293863754c4adad26576c7abd9",
+          "link_keys_out": {
+            "depends-on": [],
+            "has-version": [
+              [
+                "cdc46a293863754c4adad26576c7abd9",
+                "has-version",
+                "3e0f5c512704232c7133c063ddd889ed"
+              ]
+            ]
+          },
+          "links_in": [],
+          "links_out": [
+            [
+              [
+                "cdc46a293863754c4adad26576c7abd9",
+                "has-version",
+                "3e0f5c512704232c7133c063ddd889ed"
+              ],
+              {
+                "entries": [
+                  {
+                    "confidence": "Extracted",
+                    "fanout": null,
+                    "origin": "Intra",
+                    "provenance": {
+                      "path": "package-lock.json",
+                      "repo": "fx",
+                      "revision": "090284e912616678aa4b746d2d8f2e7bb1a15882+5e852224e4abc0bb"
+                    },
+                    "span": {
+                      "end_col": 5,
+                      "end_line": 37,
+                      "start_col": 1,
+                      "start_line": 33
+                    }
+                  }
+                ]
+              }
+            ]
+          ]
+        },
+        {
+          "id": "e84bd5db33240054029301d0dbd5dc7d",
+          "link_keys_out": {
+            "depends-on": [],
+            "has-version": []
+          },
+          "links_in": [
+            [
+              "0c8083b2d8b4a8a6b6e1f77043bb631b",
+              "depends-on",
+              "e84bd5db33240054029301d0dbd5dc7d"
+            ],
+            [
+              "7a19efd0425736fdd12eb41efb778978",
+              "has-version",
+              "e84bd5db33240054029301d0dbd5dc7d"
+            ]
+          ],
+          "links_out": []
+        }
+      ],
+      "per_key": [
+        {
+          "exports": [
+            "8de82a12aa05ef4a8eb01fe567654e7d"
+          ],
+          "key": {
+            "key": "fx:package-lock.json",
+            "namespace": "file"
+          },
+          "refs_by_key": []
+        },
+        {
+          "exports": [
+            "9bfab489a2ff9233be5b5627e79cd065"
+          ],
+          "key": {
+            "key": "@scope/beta",
+            "namespace": "ts-package"
+          },
+          "refs_by_key": []
+        },
+        {
+          "exports": [
+            "7a19efd0425736fdd12eb41efb778978"
+          ],
+          "key": {
+            "key": "alpha-lib",
+            "namespace": "ts-package"
+          },
+          "refs_by_key": []
+        },
+        {
+          "exports": [
+            "cdc46a293863754c4adad26576c7abd9"
+          ],
+          "key": {
+            "key": "gamma-dev",
+            "namespace": "ts-package"
+          },
+          "refs_by_key": []
+        }
+      ],
+      "postings": [
+        [
+          "0",
+          [
+            [
+              0,
+              "0c8083b2d8b4a8a6b6e1f77043bb631b",
+              2
+            ],
+            [
+              0,
+              "3e0f5c512704232c7133c063ddd889ed",
+              2
+            ],
+            [
+              0,
+              "a892e0478ca3b205fb77efd6d2dadf96",
+              1
+            ],
+            [
+              0,
+              "e84bd5db33240054029301d0dbd5dc7d",
+              1
+            ]
+          ]
+        ],
+        [
+          "1",
+          [
+            [
+              0,
+              "a892e0478ca3b205fb77efd6d2dadf96",
+              1
+            ],
+            [
+              0,
+              "e84bd5db33240054029301d0dbd5dc7d",
+              1
+            ]
+          ]
+        ],
+        [
+          "2",
+          [
+            [
+              0,
+              "0c8083b2d8b4a8a6b6e1f77043bb631b",
+              1
+            ],
+            [
+              0,
+              "e84bd5db33240054029301d0dbd5dc7d",
+              1
+            ]
+          ]
+        ],
+        [
+          "3",
+          [
+            [
+              0,
+              "3e0f5c512704232c7133c063ddd889ed",
+              1
+            ]
+          ]
+        ],
+        [
+          "4",
+          [
+            [
+              0,
+              "a892e0478ca3b205fb77efd6d2dadf96",
+              1
+            ]
+          ]
+        ],
+        [
+          "alpha",
+          [
+            [
+              0,
+              "7a19efd0425736fdd12eb41efb778978",
+              1
+            ],
+            [
+              3,
+              "7a19efd0425736fdd12eb41efb778978",
+              1
+            ]
+          ]
+        ],
+        [
+          "app",
+          [
+            [
+              0,
+              "351fb36c411cc13c57575624252b830f",
+              1
+            ]
+          ]
+        ],
+        [
+          "demo",
+          [
+            [
+              0,
+              "351fb36c411cc13c57575624252b830f",
+              1
+            ]
+          ]
+        ],
+        [
+          "dev",
+          [
+            [
+              0,
+              "cdc46a293863754c4adad26576c7abd9",
+              1
+            ],
+            [
+              3,
+              "cdc46a293863754c4adad26576c7abd9",
+              1
+            ]
+          ]
+        ],
+        [
+          "fbeta",
+          []
+        ],
+        [
+          "fx",
+          []
+        ],
+        [
+          "fxpackagelockjsonmemberdemoapp",
+          []
+        ],
+        [
+          "fxpackagelockjsonpackagealphalib",
+          []
+        ],
+        [
+          "fxpackagelockjsonpackagealphalibversion140",
+          []
+        ],
+        [
+          "fxpackagelockjsonpackagealphalibversion210",
+          []
+        ],
+        [
+          "fxpackagelockjsonpackagegammadev",
+          []
+        ],
+        [
+          "fxpackagelockjsonpackagegammadevversion300",
+          []
+        ],
+        [
+          "fxpackagelockjsonpackagescope2fbeta",
+          []
+        ],
+        [
+          "fxpackagelockjsonpackagescope2fbetaversion200",
+          []
+        ],
+        [
+          "gamma",
+          [
+            [
+              0,
+              "cdc46a293863754c4adad26576c7abd9",
+              1
+            ],
+            [
+              3,
+              "cdc46a293863754c4adad26576c7abd9",
+              1
+            ]
+          ]
+        ],
+        [
+          "json",
+          []
+        ],
+        [
+          "lib",
+          [
+            [
+              0,
+              "7a19efd0425736fdd12eb41efb778978",
+              1
+            ],
+            [
+              3,
+              "7a19efd0425736fdd12eb41efb778978",
+              1
+            ]
+          ]
+        ],
+        [
+          "lock",
+          []
+        ],
+        [
+          "member",
+          []
+        ],
+        [
+          "package",
+          []
+        ],
+        [
+          "scope",
+          [
+            [
+              0,
+              "9bfab489a2ff9233be5b5627e79cd065",
+              1
+            ],
+            [
+              3,
+              "9bfab489a2ff9233be5b5627e79cd065",
+              1
+            ]
+          ]
+        ],
+        [
+          "version",
+          []
+        ]
+      ],
+      "postings_prefix": [
+        [
+          "alp",
+          [
+            [
+              "alpha",
+              [
+                [
+                  0,
+                  "7a19efd0425736fdd12eb41efb778978",
+                  1
+                ],
+                [
+                  3,
+                  "7a19efd0425736fdd12eb41efb778978",
+                  1
+                ]
+              ]
+            ],
+            [
+              "alphalib",
+              [
+                [
+                  0,
+                  "7a19efd0425736fdd12eb41efb778978",
+                  1
+                ],
+                [
+                  3,
+                  "7a19efd0425736fdd12eb41efb778978",
+                  1
+                ]
+              ]
+            ]
+          ]
+        ],
+        [
+          "app",
+          []
+        ],
+        [
+          "dem",
+          [
+            [
+              "demo",
+              [
+                [
+                  0,
+                  "351fb36c411cc13c57575624252b830f",
+                  1
+                ]
+              ]
+            ],
+            [
+              "demoapp",
+              [
+                [
+                  0,
+                  "351fb36c411cc13c57575624252b830f",
+                  1
+                ]
+              ]
+            ]
+          ]
+        ],
+        [
+          "dev",
+          []
+        ],
+        [
+          "fbe",
+          []
+        ],
+        [
+          "fxp",
+          []
+        ],
+        [
+          "gam",
+          [
+            [
+              "gamma",
+              [
+                [
+                  0,
+                  "cdc46a293863754c4adad26576c7abd9",
+                  1
+                ],
+                [
+                  3,
+                  "cdc46a293863754c4adad26576c7abd9",
+                  1
+                ]
+              ]
+            ],
+            [
+              "gammadev",
+              [
+                [
+                  0,
+                  "cdc46a293863754c4adad26576c7abd9",
+                  1
+                ],
+                [
+                  3,
+                  "cdc46a293863754c4adad26576c7abd9",
+                  1
+                ]
+              ]
+            ]
+          ]
+        ],
+        [
+          "jso",
+          []
+        ],
+        [
+          "lib",
+          []
+        ],
+        [
+          "loc",
+          []
+        ],
+        [
+          "mem",
+          []
+        ],
+        [
+          "pac",
+          []
+        ],
+        [
+          "sco",
+          [
+            [
+              "scope",
+              [
+                [
+                  0,
+                  "9bfab489a2ff9233be5b5627e79cd065",
+                  1
+                ],
+                [
+                  3,
+                  "9bfab489a2ff9233be5b5627e79cd065",
+                  1
+                ]
+              ]
+            ],
+            [
+              "scopebeta",
+              [
+                [
+                  0,
+                  "9bfab489a2ff9233be5b5627e79cd065",
+                  1
+                ],
+                [
+                  3,
+                  "9bfab489a2ff9233be5b5627e79cd065",
+                  1
+                ]
+              ]
+            ]
+          ]
+        ],
+        [
+          "ver",
+          []
+        ]
+      ],
+      "symbol_briefs_many": [
+        {
+          "facts": {
+            "source": {
+              "Str": "https://registry.example/@scope/beta/-/beta-2.0.0.tgz"
+            },
+            "version": {
+              "Str": "2.0.0"
+            }
+          },
+          "leaf": "2.0.0"
+        },
+        {
+          "facts": {
+            "version": {
+              "Str": "1.0.0"
+            }
+          },
+          "leaf": "demo-app"
+        },
+        {
+          "facts": {
+            "dev": {
+              "Bool": true
+            },
+            "source": {
+              "Str": "https://registry.example/gamma-dev/-/gamma-dev-3.0.0.tgz"
+            },
+            "version": {
+              "Str": "3.0.0"
+            }
+          },
+          "leaf": "3.0.0"
+        },
+        {
+          "facts": {
+            "ecosystem": {
+              "Str": "npm"
+            }
+          },
+          "leaf": "alpha-lib"
+        },
+        null,
+        {
+          "facts": {
+            "ecosystem": {
+              "Str": "npm"
+            }
+          },
+          "leaf": "@scope/beta"
+        },
+        {
+          "facts": {
+            "source": {
+              "Str": "https://registry.example/alpha-lib/-/alpha-lib-1.4.0.tgz"
+            },
+            "version": {
+              "Str": "1.4.0"
+            }
+          },
+          "leaf": "1.4.0"
+        },
+        {
+          "facts": {
+            "ecosystem": {
+              "Str": "npm"
+            }
+          },
+          "leaf": "gamma-dev"
+        },
+        {
+          "facts": {
+            "source": {
+              "Str": "https://registry.example/alpha-lib/-/alpha-lib-2.1.0.tgz"
+            },
+            "version": {
+              "Str": "2.1.0"
+            }
+          },
+          "leaf": "2.1.0"
+        }
+      ],
+      "symbols": [
+        [
+          "0c8083b2d8b4a8a6b6e1f77043bb631b",
+          {
+            "artifact": "8de82a12aa05ef4a8eb01fe567654e7d",
+            "facts": {
+              "source": {
+                "Str": "https://registry.example/@scope/beta/-/beta-2.0.0.tgz"
+              },
+              "version": {
+                "Str": "2.0.0"
+              }
+            },
+            "kind": "package_version",
+            "name": "fx:package-lock.json#package:@scope%2Fbeta/version:2.0.0",
+            "span": {
+              "end_col": 6,
+              "end_line": 24,
+              "start_col": 1,
+              "start_line": 18
+            }
+          }
+        ],
+        [
+          "351fb36c411cc13c57575624252b830f",
+          {
+            "artifact": "8de82a12aa05ef4a8eb01fe567654e7d",
+            "facts": {
+              "version": {
+                "Str": "1.0.0"
+              }
+            },
+            "kind": "package_member",
+            "name": "fx:package-lock.json#member:demo-app",
+            "span": {
+              "end_col": 6,
+              "end_line": 17,
+              "start_col": 1,
+              "start_line": 7
+            }
+          }
+        ],
+        [
+          "3e0f5c512704232c7133c063ddd889ed",
+          {
+            "artifact": "8de82a12aa05ef4a8eb01fe567654e7d",
+            "facts": {
+              "dev": {
+                "Bool": true
+              },
+              "source": {
+                "Str": "https://registry.example/gamma-dev/-/gamma-dev-3.0.0.tgz"
+              },
+              "version": {
+                "Str": "3.0.0"
+              }
+            },
+            "kind": "package_version",
+            "name": "fx:package-lock.json#package:gamma-dev/version:3.0.0",
+            "span": {
+              "end_col": 5,
+              "end_line": 37,
+              "start_col": 1,
+              "start_line": 33
+            }
+          }
+        ],
+        [
+          "7a19efd0425736fdd12eb41efb778978",
+          {
+            "artifact": "8de82a12aa05ef4a8eb01fe567654e7d",
+            "facts": {
+              "ecosystem": {
+                "Str": "npm"
+              }
+            },
+            "kind": "package_external",
+            "name": "fx:package-lock.json#package:alpha-lib",
+            "span": {
+              "end_col": 6,
+              "end_line": 32,
+              "start_col": 1,
+              "start_line": 29
+            }
+          }
+        ],
+        [
+          "9bfab489a2ff9233be5b5627e79cd065",
+          {
+            "artifact": "8de82a12aa05ef4a8eb01fe567654e7d",
+            "facts": {
+              "ecosystem": {
+                "Str": "npm"
+              }
+            },
+            "kind": "package_external",
+            "name": "fx:package-lock.json#package:@scope%2Fbeta",
+            "span": {
+              "end_col": 6,
+              "end_line": 24,
+              "start_col": 1,
+              "start_line": 18
+            }
+          }
+        ],
+        [
+          "a892e0478ca3b205fb77efd6d2dadf96",
+          {
+            "artifact": "8de82a12aa05ef4a8eb01fe567654e7d",
+            "facts": {
+              "source": {
+                "Str": "https://registry.example/alpha-lib/-/alpha-lib-1.4.0.tgz"
+              },
+              "version": {
+                "Str": "1.4.0"
+              }
+            },
+            "kind": "package_version",
+            "name": "fx:package-lock.json#package:alpha-lib/version:1.4.0",
+            "span": {
+              "end_col": 6,
+              "end_line": 32,
+              "start_col": 1,
+              "start_line": 29
+            }
+          }
+        ],
+        [
+          "cdc46a293863754c4adad26576c7abd9",
+          {
+            "artifact": "8de82a12aa05ef4a8eb01fe567654e7d",
+            "facts": {
+              "ecosystem": {
+                "Str": "npm"
+              }
+            },
+            "kind": "package_external",
+            "name": "fx:package-lock.json#package:gamma-dev",
+            "span": {
+              "end_col": 5,
+              "end_line": 37,
+              "start_col": 1,
+              "start_line": 33
+            }
+          }
+        ],
+        [
+          "e84bd5db33240054029301d0dbd5dc7d",
+          {
+            "artifact": "8de82a12aa05ef4a8eb01fe567654e7d",
+            "facts": {
+              "source": {
+                "Str": "https://registry.example/alpha-lib/-/alpha-lib-2.1.0.tgz"
+              },
+              "version": {
+                "Str": "2.1.0"
+              }
+            },
+            "kind": "package_version",
+            "name": "fx:package-lock.json#package:alpha-lib/version:2.1.0",
+            "span": {
+              "end_col": 6,
+              "end_line": 28,
+              "start_col": 1,
+              "start_line": 25
+            }
+          }
+        ]
+      ],
+      "symbols_many": [
+        {
+          "artifact": "8de82a12aa05ef4a8eb01fe567654e7d",
+          "facts": {
+            "source": {
+              "Str": "https://registry.example/@scope/beta/-/beta-2.0.0.tgz"
+            },
+            "version": {
+              "Str": "2.0.0"
+            }
+          },
+          "kind": "package_version",
+          "name": "fx:package-lock.json#package:@scope%2Fbeta/version:2.0.0",
+          "span": {
+            "end_col": 6,
+            "end_line": 24,
+            "start_col": 1,
+            "start_line": 18
+          }
+        },
+        {
+          "artifact": "8de82a12aa05ef4a8eb01fe567654e7d",
+          "facts": {
+            "version": {
+              "Str": "1.0.0"
+            }
+          },
+          "kind": "package_member",
+          "name": "fx:package-lock.json#member:demo-app",
+          "span": {
+            "end_col": 6,
+            "end_line": 17,
+            "start_col": 1,
+            "start_line": 7
+          }
+        },
+        {
+          "artifact": "8de82a12aa05ef4a8eb01fe567654e7d",
+          "facts": {
+            "dev": {
+              "Bool": true
+            },
+            "source": {
+              "Str": "https://registry.example/gamma-dev/-/gamma-dev-3.0.0.tgz"
+            },
+            "version": {
+              "Str": "3.0.0"
+            }
+          },
+          "kind": "package_version",
+          "name": "fx:package-lock.json#package:gamma-dev/version:3.0.0",
+          "span": {
+            "end_col": 5,
+            "end_line": 37,
+            "start_col": 1,
+            "start_line": 33
+          }
+        },
+        {
+          "artifact": "8de82a12aa05ef4a8eb01fe567654e7d",
+          "facts": {
+            "ecosystem": {
+              "Str": "npm"
+            }
+          },
+          "kind": "package_external",
+          "name": "fx:package-lock.json#package:alpha-lib",
+          "span": {
+            "end_col": 6,
+            "end_line": 32,
+            "start_col": 1,
+            "start_line": 29
+          }
+        },
+        null,
+        {
+          "artifact": "8de82a12aa05ef4a8eb01fe567654e7d",
+          "facts": {
+            "ecosystem": {
+              "Str": "npm"
+            }
+          },
+          "kind": "package_external",
+          "name": "fx:package-lock.json#package:@scope%2Fbeta",
+          "span": {
+            "end_col": 6,
+            "end_line": 24,
+            "start_col": 1,
+            "start_line": 18
+          }
+        },
+        {
+          "artifact": "8de82a12aa05ef4a8eb01fe567654e7d",
+          "facts": {
+            "source": {
+              "Str": "https://registry.example/alpha-lib/-/alpha-lib-1.4.0.tgz"
+            },
+            "version": {
+              "Str": "1.4.0"
+            }
+          },
+          "kind": "package_version",
+          "name": "fx:package-lock.json#package:alpha-lib/version:1.4.0",
+          "span": {
+            "end_col": 6,
+            "end_line": 32,
+            "start_col": 1,
+            "start_line": 29
+          }
+        },
+        {
+          "artifact": "8de82a12aa05ef4a8eb01fe567654e7d",
+          "facts": {
+            "ecosystem": {
+              "Str": "npm"
+            }
+          },
+          "kind": "package_external",
+          "name": "fx:package-lock.json#package:gamma-dev",
+          "span": {
+            "end_col": 5,
+            "end_line": 37,
+            "start_col": 1,
+            "start_line": 33
+          }
+        },
+        {
+          "artifact": "8de82a12aa05ef4a8eb01fe567654e7d",
+          "facts": {
+            "source": {
+              "Str": "https://registry.example/alpha-lib/-/alpha-lib-2.1.0.tgz"
+            },
+            "version": {
+              "Str": "2.1.0"
+            }
+          },
+          "kind": "package_version",
+          "name": "fx:package-lock.json#package:alpha-lib/version:2.1.0",
+          "span": {
+            "end_col": 6,
+            "end_line": 28,
+            "start_col": 1,
+            "start_line": 25
+          }
+        }
+      ],
+      "unresolved": [],
+      "unresolved_refs": []
+    },
+    "deps/pnpm-lock": {
+      "artifacts": [
+        [
+          "d30efcf5f2d38fc201d5fd91ff399535",
+          {
+            "exports": [
+              {
+                "key": {
+                  "key": "fx:pnpm-lock.yaml",
+                  "namespace": "file"
+                },
+                "target": "d30efcf5f2d38fc201d5fd91ff399535"
+              },
+              {
+                "key": {
+                  "key": "@scope/beta",
+                  "namespace": "ts-package"
+                },
+                "target": "1cd9ca79729b2ec05a5458e037270f43"
+              },
+              {
+                "key": {
+                  "key": "alpha-lib",
+                  "namespace": "ts-package"
+                },
+                "target": "b50f54653ef4a28fc613fab5f67c5847"
+              },
+              {
+                "key": {
+                  "key": "gamma",
+                  "namespace": "ts-package"
+                },
+                "target": "db1f9f7496cfcd2f5c81704f0a5acf05"
+              }
+            ],
+            "extension": "deps",
+            "facts": {
+              "ecosystem": {
+                "Str": "npm"
+              },
+              "lockfile_format": {
+                "Str": "9.0"
+              }
+            },
+            "name": "fx:pnpm-lock.yaml",
+            "provenance": {
+              "path": "pnpm-lock.yaml",
+              "repo": "fx",
+              "revision": "fb8a0f153e7ad788c23d3ab0ec1df973aee0c263+5e852224e4abc0bb"
+            },
+            "refs": [],
+            "symbols": [
+              "061e9572b84a91fdc8400263368fef16",
+              "1cd9ca79729b2ec05a5458e037270f43",
+              "1fbe4483d34c7348411a10541ebae725",
+              "8d41a9fd9c2fd22565070ebcc85e964d",
+              "a2289b66c66f03af7a7f10a7b39a222b",
+              "b50f54653ef4a28fc613fab5f67c5847",
+              "db1f9f7496cfcd2f5c81704f0a5acf05"
+            ]
+          }
+        ]
+      ],
+      "bindings_of": [
+        [
+          "d30efcf5f2d38fc201d5fd91ff399535",
+          []
+        ]
+      ],
+      "cached_rank": {
+        "061e9572b84a91fdc8400263368fef16": "3fc79c29d2cdafef",
+        "1cd9ca79729b2ec05a5458e037270f43": "3fb4c18cdb148748",
+        "1fbe4483d34c7348411a10541ebae725": "3fcd3bcdaaa40eb4",
+        "8d41a9fd9c2fd22565070ebcc85e964d": "3fb4c18cdb148748",
+        "a2289b66c66f03af7a7f10a7b39a222b": "3fd0d27766329966",
+        "b50f54653ef4a28fc613fab5f67c5847": "3fb4c18cdb148748",
+        "db1f9f7496cfcd2f5c81704f0a5acf05": "3fb4c18cdb148748"
+      },
+      "canonical_graph": "{\"extension\":\"deps\",\"facts\":{\"ecosystem\":{\"Str\":\"npm\"},\"lockfile_format\":{\"Str\":\"9.0\"}},\"name\":\"fx:pnpm-lock.yaml\",\"node\":\"artifact\",\"revision\":\"fb8a0f153e7ad788c23d3ab0ec1df973aee0c263+5e852224e4abc0bb\"}\n{\"artifact\":\"fx:pnpm-lock.yaml\",\"facts\":{},\"kind\":\"package_member\",\"name\":\"fx:pnpm-lock.yaml#member:root\",\"node\":\"symbol\",\"span\":{\"end_col\":1,\"end_line\":38,\"start_col\":1,\"start_line\":1}}\n{\"artifact\":\"fx:pnpm-lock.yaml\",\"facts\":{\"ecosystem\":{\"Str\":\"npm\"}},\"kind\":\"package_external\",\"name\":\"fx:pnpm-lock.yaml#package:@scope%2Fbeta\",\"node\":\"symbol\",\"span\":{\"end_col\":87,\"end_line\":20,\"start_col\":1,\"start_line\":19}}\n{\"artifact\":\"fx:pnpm-lock.yaml\",\"facts\":{\"source\":{\"Str\":\"https://registry.example/beta-2.0.0.tgz\"},\"version\":{\"Str\":\"2.0.0\"}},\"kind\":\"package_version\",\"name\":\"fx:pnpm-lock.yaml#package:@scope%2Fbeta/version:2.0.0\",\"node\":\"symbol\",\"span\":{\"end_col\":87,\"end_line\":20,\"start_col\":1,\"start_line\":19}}\n{\"artifact\":\"fx:pnpm-lock.yaml\",\"facts\":{\"ecosystem\":{\"Str\":\"npm\"}},\"kind\":\"package_external\",\"name\":\"fx:pnpm-lock.yaml#package:alpha-lib\",\"node\":\"symbol\",\"span\":{\"end_col\":37,\"end_line\":23,\"start_col\":1,\"start_line\":22}}\n{\"artifact\":\"fx:pnpm-lock.yaml\",\"facts\":{\"version\":{\"Str\":\"1.4.0\"}},\"kind\":\"package_version\",\"name\":\"fx:pnpm-lock.yaml#package:alpha-lib/version:1.4.0\",\"node\":\"symbol\",\"span\":{\"end_col\":37,\"end_line\":23,\"start_col\":1,\"start_line\":22}}\n{\"artifact\":\"fx:pnpm-lock.yaml\",\"facts\":{\"ecosystem\":{\"Str\":\"npm\"}},\"kind\":\"package_external\",\"name\":\"fx:pnpm-lock.yaml#package:gamma\",\"node\":\"symbol\",\"span\":{\"end_col\":37,\"end_line\":26,\"start_col\":1,\"start_line\":25}}\n{\"artifact\":\"fx:pnpm-lock.yaml\",\"facts\":{\"version\":{\"Str\":\"3.0.0\"}},\"kind\":\"package_version\",\"name\":\"fx:pnpm-lock.yaml#package:gamma/version:3.0.0\",\"node\":\"symbol\",\"span\":{\"end_col\":37,\"end_line\":26,\"start_col\":1,\"start_line\":25}}\n{\"confidence\":\"Extracted\",\"from\":\"fx:pnpm-lock.yaml#member:root\",\"kind\":\"depends-on\",\"link\":true,\"origin\":\"intra\",\"revision\":\"fb8a0f153e7ad788c23d3ab0ec1df973aee0c263+5e852224e4abc0bb\",\"span\":{\"end_col\":1,\"end_line\":38,\"start_col\":1,\"start_line\":1},\"to\":\"fx:pnpm-lock.yaml#package:@scope%2Fbeta/version:2.0.0\"}\n{\"confidence\":\"Extracted\",\"from\":\"fx:pnpm-lock.yaml#member:root\",\"kind\":\"depends-on\",\"link\":true,\"origin\":\"intra\",\"revision\":\"fb8a0f153e7ad788c23d3ab0ec1df973aee0c263+5e852224e4abc0bb\",\"span\":{\"end_col\":1,\"end_line\":38,\"start_col\":1,\"start_line\":1},\"to\":\"fx:pnpm-lock.yaml#package:alpha-lib/version:1.4.0\"}\n{\"confidence\":\"Extracted\",\"from\":\"fx:pnpm-lock.yaml#package:@scope%2Fbeta\",\"kind\":\"has-version\",\"link\":true,\"origin\":\"intra\",\"revision\":\"fb8a0f153e7ad788c23d3ab0ec1df973aee0c263+5e852224e4abc0bb\",\"span\":{\"end_col\":87,\"end_line\":20,\"start_col\":1,\"start_line\":19},\"to\":\"fx:pnpm-lock.yaml#package:@scope%2Fbeta/version:2.0.0\"}\n{\"confidence\":\"Extracted\",\"from\":\"fx:pnpm-lock.yaml#package:@scope%2Fbeta/version:2.0.0\",\"kind\":\"depends-on\",\"link\":true,\"origin\":\"intra\",\"revision\":\"fb8a0f153e7ad788c23d3ab0ec1df973aee0c263+5e852224e4abc0bb\",\"span\":{\"end_col\":87,\"end_line\":20,\"start_col\":1,\"start_line\":19},\"to\":\"fx:pnpm-lock.yaml#package:alpha-lib/version:1.4.0\"}\n{\"confidence\":\"Extracted\",\"from\":\"fx:pnpm-lock.yaml#package:@scope%2Fbeta/version:2.0.0\",\"kind\":\"depends-on\",\"link\":true,\"origin\":\"intra\",\"revision\":\"fb8a0f153e7ad788c23d3ab0ec1df973aee0c263+5e852224e4abc0bb\",\"span\":{\"end_col\":87,\"end_line\":20,\"start_col\":1,\"start_line\":19},\"to\":\"fx:pnpm-lock.yaml#package:gamma/version:3.0.0\"}\n{\"confidence\":\"Extracted\",\"from\":\"fx:pnpm-lock.yaml#package:alpha-lib\",\"kind\":\"has-version\",\"link\":true,\"origin\":\"intra\",\"revision\":\"fb8a0f153e7ad788c23d3ab0ec1df973aee0c263+5e852224e4abc0bb\",\"span\":{\"end_col\":37,\"end_line\":23,\"start_col\":1,\"start_line\":22},\"to\":\"fx:pnpm-lock.yaml#package:alpha-lib/version:1.4.0\"}\n{\"confidence\":\"Extracted\",\"from\":\"fx:pnpm-lock.yaml#package:gamma\",\"kind\":\"has-version\",\"link\":true,\"origin\":\"intra\",\"revision\":\"fb8a0f153e7ad788c23d3ab0ec1df973aee0c263+5e852224e4abc0bb\",\"span\":{\"end_col\":37,\"end_line\":26,\"start_col\":1,\"start_line\":25},\"to\":\"fx:pnpm-lock.yaml#package:gamma/version:3.0.0\"}\n",
+      "contract": [],
+      "contracts": [],
+      "doc_len": [
+        [
+          "061e9572b84a91fdc8400263368fef16",
+          [
+            4,
+            0,
+            0,
+            0
+          ]
+        ],
+        [
+          "1cd9ca79729b2ec05a5458e037270f43",
+          [
+            3,
+            0,
+            0,
+            3
+          ]
+        ],
+        [
+          "1fbe4483d34c7348411a10541ebae725",
+          [
+            4,
+            0,
+            0,
+            0
+          ]
+        ],
+        [
+          "8d41a9fd9c2fd22565070ebcc85e964d",
+          [
+            1,
+            0,
+            0,
+            0
+          ]
+        ],
+        [
+          "a2289b66c66f03af7a7f10a7b39a222b",
+          [
+            4,
+            0,
+            0,
+            0
+          ]
+        ],
+        [
+          "b50f54653ef4a28fc613fab5f67c5847",
+          [
+            3,
+            0,
+            0,
+            3
+          ]
+        ],
+        [
+          "db1f9f7496cfcd2f5c81704f0a5acf05",
+          [
+            1,
+            0,
+            0,
+            1
+          ]
+        ]
+      ],
+      "exports_in": {
+        "file": [
+          [
+            {
+              "key": "fx:pnpm-lock.yaml",
+              "namespace": "file"
+            },
+            [
+              "d30efcf5f2d38fc201d5fd91ff399535"
+            ]
+          ]
+        ],
+        "ts-package": [
+          [
+            {
+              "key": "@scope/beta",
+              "namespace": "ts-package"
+            },
+            [
+              "1cd9ca79729b2ec05a5458e037270f43"
+            ]
+          ],
+          [
+            {
+              "key": "alpha-lib",
+              "namespace": "ts-package"
+            },
+            [
+              "b50f54653ef4a28fc613fab5f67c5847"
+            ]
+          ],
+          [
+            {
+              "key": "gamma",
+              "namespace": "ts-package"
+            },
+            [
+              "db1f9f7496cfcd2f5c81704f0a5acf05"
+            ]
+          ]
+        ]
+      },
+      "file_revisions": [
+        [
+          [
+            "fx",
+            "pnpm-lock.yaml"
+          ],
+          [
+            206,
+            59,
+            217,
+            172,
+            171,
+            31,
+            213,
+            227,
+            32,
+            2,
+            172,
+            67,
+            42,
+            33,
+            33,
+            146,
+            211,
+            38,
+            92,
+            66,
+            74,
+            177,
+            180,
+            119,
+            164,
+            70,
+            152,
+            240,
+            36,
+            181,
+            211,
+            179
+          ]
+        ]
+      ],
+      "in_degrees": {
+        "061e9572b84a91fdc8400263368fef16": 2,
+        "1fbe4483d34c7348411a10541ebae725": 2,
+        "a2289b66c66f03af7a7f10a7b39a222b": 3
+      },
+      "index_errors_all": [],
+      "lexicon_stats": {
+        "docs": 7,
+        "total_len": [
+          20,
+          0,
+          0,
+          7
+        ]
+      },
+      "link_briefs_many": [
+        {
+          "confidence": "Extracted",
+          "weight": "3ff0000000000000"
+        },
+        {
+          "confidence": "Extracted",
+          "weight": "3ff0000000000000"
+        },
+        {
+          "confidence": "Extracted",
+          "weight": "3ff0000000000000"
+        },
+        {
+          "confidence": "Extracted",
+          "weight": "3ff0000000000000"
+        },
+        {
+          "confidence": "Extracted",
+          "weight": "3ff0000000000000"
+        },
+        {
+          "confidence": "Extracted",
+          "weight": "3ff0000000000000"
+        },
+        {
+          "confidence": "Extracted",
+          "weight": "3ff0000000000000"
+        }
+      ],
+      "links_all": [
+        [
+          [
+            "061e9572b84a91fdc8400263368fef16",
+            "depends-on",
+            "1fbe4483d34c7348411a10541ebae725"
+          ],
+          {
+            "entries": [
+              {
+                "confidence": "Extracted",
+                "fanout": null,
+                "origin": "Intra",
+                "provenance": {
+                  "path": "pnpm-lock.yaml",
+                  "repo": "fx",
+                  "revision": "fb8a0f153e7ad788c23d3ab0ec1df973aee0c263+5e852224e4abc0bb"
+                },
+                "span": {
+                  "end_col": 87,
+                  "end_line": 20,
+                  "start_col": 1,
+                  "start_line": 19
+                }
+              }
+            ]
+          }
+        ],
+        [
+          [
+            "061e9572b84a91fdc8400263368fef16",
+            "depends-on",
+            "a2289b66c66f03af7a7f10a7b39a222b"
+          ],
+          {
+            "entries": [
+              {
+                "confidence": "Extracted",
+                "fanout": null,
+                "origin": "Intra",
+                "provenance": {
+                  "path": "pnpm-lock.yaml",
+                  "repo": "fx",
+                  "revision": "fb8a0f153e7ad788c23d3ab0ec1df973aee0c263+5e852224e4abc0bb"
+                },
+                "span": {
+                  "end_col": 87,
+                  "end_line": 20,
+                  "start_col": 1,
+                  "start_line": 19
+                }
+              }
+            ]
+          }
+        ],
+        [
+          [
+            "1cd9ca79729b2ec05a5458e037270f43",
+            "has-version",
+            "061e9572b84a91fdc8400263368fef16"
+          ],
+          {
+            "entries": [
+              {
+                "confidence": "Extracted",
+                "fanout": null,
+                "origin": "Intra",
+                "provenance": {
+                  "path": "pnpm-lock.yaml",
+                  "repo": "fx",
+                  "revision": "fb8a0f153e7ad788c23d3ab0ec1df973aee0c263+5e852224e4abc0bb"
+                },
+                "span": {
+                  "end_col": 87,
+                  "end_line": 20,
+                  "start_col": 1,
+                  "start_line": 19
+                }
+              }
+            ]
+          }
+        ],
+        [
+          [
+            "8d41a9fd9c2fd22565070ebcc85e964d",
+            "depends-on",
+            "061e9572b84a91fdc8400263368fef16"
+          ],
+          {
+            "entries": [
+              {
+                "confidence": "Extracted",
+                "fanout": null,
+                "origin": "Intra",
+                "provenance": {
+                  "path": "pnpm-lock.yaml",
+                  "repo": "fx",
+                  "revision": "fb8a0f153e7ad788c23d3ab0ec1df973aee0c263+5e852224e4abc0bb"
+                },
+                "span": {
+                  "end_col": 1,
+                  "end_line": 38,
+                  "start_col": 1,
+                  "start_line": 1
+                }
+              }
+            ]
+          }
+        ],
+        [
+          [
+            "8d41a9fd9c2fd22565070ebcc85e964d",
+            "depends-on",
+            "a2289b66c66f03af7a7f10a7b39a222b"
+          ],
+          {
+            "entries": [
+              {
+                "confidence": "Extracted",
+                "fanout": null,
+                "origin": "Intra",
+                "provenance": {
+                  "path": "pnpm-lock.yaml",
+                  "repo": "fx",
+                  "revision": "fb8a0f153e7ad788c23d3ab0ec1df973aee0c263+5e852224e4abc0bb"
+                },
+                "span": {
+                  "end_col": 1,
+                  "end_line": 38,
+                  "start_col": 1,
+                  "start_line": 1
+                }
+              }
+            ]
+          }
+        ],
+        [
+          [
+            "b50f54653ef4a28fc613fab5f67c5847",
+            "has-version",
+            "a2289b66c66f03af7a7f10a7b39a222b"
+          ],
+          {
+            "entries": [
+              {
+                "confidence": "Extracted",
+                "fanout": null,
+                "origin": "Intra",
+                "provenance": {
+                  "path": "pnpm-lock.yaml",
+                  "repo": "fx",
+                  "revision": "fb8a0f153e7ad788c23d3ab0ec1df973aee0c263+5e852224e4abc0bb"
+                },
+                "span": {
+                  "end_col": 37,
+                  "end_line": 23,
+                  "start_col": 1,
+                  "start_line": 22
+                }
+              }
+            ]
+          }
+        ],
+        [
+          [
+            "db1f9f7496cfcd2f5c81704f0a5acf05",
+            "has-version",
+            "1fbe4483d34c7348411a10541ebae725"
+          ],
+          {
+            "entries": [
+              {
+                "confidence": "Extracted",
+                "fanout": null,
+                "origin": "Intra",
+                "provenance": {
+                  "path": "pnpm-lock.yaml",
+                  "repo": "fx",
+                  "revision": "fb8a0f153e7ad788c23d3ab0ec1df973aee0c263+5e852224e4abc0bb"
+                },
+                "span": {
+                  "end_col": 37,
+                  "end_line": 26,
+                  "start_col": 1,
+                  "start_line": 25
+                }
+              }
+            ]
+          }
+        ]
+      ],
+      "per_id": [
+        {
+          "id": "061e9572b84a91fdc8400263368fef16",
+          "link_keys_out": {
+            "depends-on": [
+              [
+                "061e9572b84a91fdc8400263368fef16",
+                "depends-on",
+                "1fbe4483d34c7348411a10541ebae725"
+              ],
+              [
+                "061e9572b84a91fdc8400263368fef16",
+                "depends-on",
+                "a2289b66c66f03af7a7f10a7b39a222b"
+              ]
+            ],
+            "has-version": []
+          },
+          "links_in": [
+            [
+              "8d41a9fd9c2fd22565070ebcc85e964d",
+              "depends-on",
+              "061e9572b84a91fdc8400263368fef16"
+            ],
+            [
+              "1cd9ca79729b2ec05a5458e037270f43",
+              "has-version",
+              "061e9572b84a91fdc8400263368fef16"
+            ]
+          ],
+          "links_out": [
+            [
+              [
+                "061e9572b84a91fdc8400263368fef16",
+                "depends-on",
+                "1fbe4483d34c7348411a10541ebae725"
+              ],
+              {
+                "entries": [
+                  {
+                    "confidence": "Extracted",
+                    "fanout": null,
+                    "origin": "Intra",
+                    "provenance": {
+                      "path": "pnpm-lock.yaml",
+                      "repo": "fx",
+                      "revision": "fb8a0f153e7ad788c23d3ab0ec1df973aee0c263+5e852224e4abc0bb"
+                    },
+                    "span": {
+                      "end_col": 87,
+                      "end_line": 20,
+                      "start_col": 1,
+                      "start_line": 19
+                    }
+                  }
+                ]
+              }
+            ],
+            [
+              [
+                "061e9572b84a91fdc8400263368fef16",
+                "depends-on",
+                "a2289b66c66f03af7a7f10a7b39a222b"
+              ],
+              {
+                "entries": [
+                  {
+                    "confidence": "Extracted",
+                    "fanout": null,
+                    "origin": "Intra",
+                    "provenance": {
+                      "path": "pnpm-lock.yaml",
+                      "repo": "fx",
+                      "revision": "fb8a0f153e7ad788c23d3ab0ec1df973aee0c263+5e852224e4abc0bb"
+                    },
+                    "span": {
+                      "end_col": 87,
+                      "end_line": 20,
+                      "start_col": 1,
+                      "start_line": 19
+                    }
+                  }
+                ]
+              }
+            ]
+          ]
+        },
+        {
+          "id": "1cd9ca79729b2ec05a5458e037270f43",
+          "link_keys_out": {
+            "depends-on": [],
+            "has-version": [
+              [
+                "1cd9ca79729b2ec05a5458e037270f43",
+                "has-version",
+                "061e9572b84a91fdc8400263368fef16"
+              ]
+            ]
+          },
+          "links_in": [],
+          "links_out": [
+            [
+              [
+                "1cd9ca79729b2ec05a5458e037270f43",
+                "has-version",
+                "061e9572b84a91fdc8400263368fef16"
+              ],
+              {
+                "entries": [
+                  {
+                    "confidence": "Extracted",
+                    "fanout": null,
+                    "origin": "Intra",
+                    "provenance": {
+                      "path": "pnpm-lock.yaml",
+                      "repo": "fx",
+                      "revision": "fb8a0f153e7ad788c23d3ab0ec1df973aee0c263+5e852224e4abc0bb"
+                    },
+                    "span": {
+                      "end_col": 87,
+                      "end_line": 20,
+                      "start_col": 1,
+                      "start_line": 19
+                    }
+                  }
+                ]
+              }
+            ]
+          ]
+        },
+        {
+          "id": "1fbe4483d34c7348411a10541ebae725",
+          "link_keys_out": {
+            "depends-on": [],
+            "has-version": []
+          },
+          "links_in": [
+            [
+              "061e9572b84a91fdc8400263368fef16",
+              "depends-on",
+              "1fbe4483d34c7348411a10541ebae725"
+            ],
+            [
+              "db1f9f7496cfcd2f5c81704f0a5acf05",
+              "has-version",
+              "1fbe4483d34c7348411a10541ebae725"
+            ]
+          ],
+          "links_out": []
+        },
+        {
+          "id": "8d41a9fd9c2fd22565070ebcc85e964d",
+          "link_keys_out": {
+            "depends-on": [
+              [
+                "8d41a9fd9c2fd22565070ebcc85e964d",
+                "depends-on",
+                "061e9572b84a91fdc8400263368fef16"
+              ],
+              [
+                "8d41a9fd9c2fd22565070ebcc85e964d",
+                "depends-on",
+                "a2289b66c66f03af7a7f10a7b39a222b"
+              ]
+            ],
+            "has-version": []
+          },
+          "links_in": [],
+          "links_out": [
+            [
+              [
+                "8d41a9fd9c2fd22565070ebcc85e964d",
+                "depends-on",
+                "061e9572b84a91fdc8400263368fef16"
+              ],
+              {
+                "entries": [
+                  {
+                    "confidence": "Extracted",
+                    "fanout": null,
+                    "origin": "Intra",
+                    "provenance": {
+                      "path": "pnpm-lock.yaml",
+                      "repo": "fx",
+                      "revision": "fb8a0f153e7ad788c23d3ab0ec1df973aee0c263+5e852224e4abc0bb"
+                    },
+                    "span": {
+                      "end_col": 1,
+                      "end_line": 38,
+                      "start_col": 1,
+                      "start_line": 1
+                    }
+                  }
+                ]
+              }
+            ],
+            [
+              [
+                "8d41a9fd9c2fd22565070ebcc85e964d",
+                "depends-on",
+                "a2289b66c66f03af7a7f10a7b39a222b"
+              ],
+              {
+                "entries": [
+                  {
+                    "confidence": "Extracted",
+                    "fanout": null,
+                    "origin": "Intra",
+                    "provenance": {
+                      "path": "pnpm-lock.yaml",
+                      "repo": "fx",
+                      "revision": "fb8a0f153e7ad788c23d3ab0ec1df973aee0c263+5e852224e4abc0bb"
+                    },
+                    "span": {
+                      "end_col": 1,
+                      "end_line": 38,
+                      "start_col": 1,
+                      "start_line": 1
+                    }
+                  }
+                ]
+              }
+            ]
+          ]
+        },
+        {
+          "id": "a2289b66c66f03af7a7f10a7b39a222b",
+          "link_keys_out": {
+            "depends-on": [],
+            "has-version": []
+          },
+          "links_in": [
+            [
+              "061e9572b84a91fdc8400263368fef16",
+              "depends-on",
+              "a2289b66c66f03af7a7f10a7b39a222b"
+            ],
+            [
+              "8d41a9fd9c2fd22565070ebcc85e964d",
+              "depends-on",
+              "a2289b66c66f03af7a7f10a7b39a222b"
+            ],
+            [
+              "b50f54653ef4a28fc613fab5f67c5847",
+              "has-version",
+              "a2289b66c66f03af7a7f10a7b39a222b"
+            ]
+          ],
+          "links_out": []
+        },
+        {
+          "id": "b50f54653ef4a28fc613fab5f67c5847",
+          "link_keys_out": {
+            "depends-on": [],
+            "has-version": [
+              [
+                "b50f54653ef4a28fc613fab5f67c5847",
+                "has-version",
+                "a2289b66c66f03af7a7f10a7b39a222b"
+              ]
+            ]
+          },
+          "links_in": [],
+          "links_out": [
+            [
+              [
+                "b50f54653ef4a28fc613fab5f67c5847",
+                "has-version",
+                "a2289b66c66f03af7a7f10a7b39a222b"
+              ],
+              {
+                "entries": [
+                  {
+                    "confidence": "Extracted",
+                    "fanout": null,
+                    "origin": "Intra",
+                    "provenance": {
+                      "path": "pnpm-lock.yaml",
+                      "repo": "fx",
+                      "revision": "fb8a0f153e7ad788c23d3ab0ec1df973aee0c263+5e852224e4abc0bb"
+                    },
+                    "span": {
+                      "end_col": 37,
+                      "end_line": 23,
+                      "start_col": 1,
+                      "start_line": 22
+                    }
+                  }
+                ]
+              }
+            ]
+          ]
+        },
+        {
+          "id": "d30efcf5f2d38fc201d5fd91ff399535",
+          "link_keys_out": {
+            "depends-on": [],
+            "has-version": []
+          },
+          "links_in": [],
+          "links_out": []
+        },
+        {
+          "id": "db1f9f7496cfcd2f5c81704f0a5acf05",
+          "link_keys_out": {
+            "depends-on": [],
+            "has-version": [
+              [
+                "db1f9f7496cfcd2f5c81704f0a5acf05",
+                "has-version",
+                "1fbe4483d34c7348411a10541ebae725"
+              ]
+            ]
+          },
+          "links_in": [],
+          "links_out": [
+            [
+              [
+                "db1f9f7496cfcd2f5c81704f0a5acf05",
+                "has-version",
+                "1fbe4483d34c7348411a10541ebae725"
+              ],
+              {
+                "entries": [
+                  {
+                    "confidence": "Extracted",
+                    "fanout": null,
+                    "origin": "Intra",
+                    "provenance": {
+                      "path": "pnpm-lock.yaml",
+                      "repo": "fx",
+                      "revision": "fb8a0f153e7ad788c23d3ab0ec1df973aee0c263+5e852224e4abc0bb"
+                    },
+                    "span": {
+                      "end_col": 37,
+                      "end_line": 26,
+                      "start_col": 1,
+                      "start_line": 25
+                    }
+                  }
+                ]
+              }
+            ]
+          ]
+        }
+      ],
+      "per_key": [
+        {
+          "exports": [
+            "d30efcf5f2d38fc201d5fd91ff399535"
+          ],
+          "key": {
+            "key": "fx:pnpm-lock.yaml",
+            "namespace": "file"
+          },
+          "refs_by_key": []
+        },
+        {
+          "exports": [
+            "1cd9ca79729b2ec05a5458e037270f43"
+          ],
+          "key": {
+            "key": "@scope/beta",
+            "namespace": "ts-package"
+          },
+          "refs_by_key": []
+        },
+        {
+          "exports": [
+            "b50f54653ef4a28fc613fab5f67c5847"
+          ],
+          "key": {
+            "key": "alpha-lib",
+            "namespace": "ts-package"
+          },
+          "refs_by_key": []
+        },
+        {
+          "exports": [
+            "db1f9f7496cfcd2f5c81704f0a5acf05"
+          ],
+          "key": {
+            "key": "gamma",
+            "namespace": "ts-package"
+          },
+          "refs_by_key": []
+        }
+      ],
+      "postings": [
+        [
+          "0",
+          [
+            [
+              0,
+              "061e9572b84a91fdc8400263368fef16",
+              2
+            ],
+            [
+              0,
+              "1fbe4483d34c7348411a10541ebae725",
+              2
+            ],
+            [
+              0,
+              "a2289b66c66f03af7a7f10a7b39a222b",
+              1
+            ]
+          ]
+        ],
+        [
+          "1",
+          [
+            [
+              0,
+              "a2289b66c66f03af7a7f10a7b39a222b",
+              1
+            ]
+          ]
+        ],
+        [
+          "2",
+          [
+            [
+              0,
+              "061e9572b84a91fdc8400263368fef16",
+              1
+            ]
+          ]
+        ],
+        [
+          "3",
+          [
+            [
+              0,
+              "1fbe4483d34c7348411a10541ebae725",
+              1
+            ]
+          ]
+        ],
+        [
+          "4",
+          [
+            [
+              0,
+              "a2289b66c66f03af7a7f10a7b39a222b",
+              1
+            ]
+          ]
+        ],
+        [
+          "alpha",
+          [
+            [
+              0,
+              "b50f54653ef4a28fc613fab5f67c5847",
+              1
+            ],
+            [
+              3,
+              "b50f54653ef4a28fc613fab5f67c5847",
+              1
+            ]
+          ]
+        ],
+        [
+          "fbeta",
+          []
+        ],
+        [
+          "fx",
+          []
+        ],
+        [
+          "fxpnpmlockyamlmemberroot",
+          []
+        ],
+        [
+          "fxpnpmlockyamlpackagealphalib",
+          []
+        ],
+        [
+          "fxpnpmlockyamlpackagealphalibversion140",
+          []
+        ],
+        [
+          "fxpnpmlockyamlpackagegamma",
+          []
+        ],
+        [
+          "fxpnpmlockyamlpackagegammaversion300",
+          []
+        ],
+        [
+          "fxpnpmlockyamlpackagescope2fbeta",
+          []
+        ],
+        [
+          "fxpnpmlockyamlpackagescope2fbetaversion200",
+          []
+        ],
+        [
+          "gamma",
+          [
+            [
+              0,
+              "db1f9f7496cfcd2f5c81704f0a5acf05",
+              1
+            ],
+            [
+              3,
+              "db1f9f7496cfcd2f5c81704f0a5acf05",
+              1
+            ]
+          ]
+        ],
+        [
+          "lib",
+          [
+            [
+              0,
+              "b50f54653ef4a28fc613fab5f67c5847",
+              1
+            ],
+            [
+              3,
+              "b50f54653ef4a28fc613fab5f67c5847",
+              1
+            ]
+          ]
+        ],
+        [
+          "lock",
+          []
+        ],
+        [
+          "member",
+          []
+        ],
+        [
+          "package",
+          []
+        ],
+        [
+          "pnpm",
+          []
+        ],
+        [
+          "root",
+          [
+            [
+              0,
+              "8d41a9fd9c2fd22565070ebcc85e964d",
+              1
+            ]
+          ]
+        ],
+        [
+          "scope",
+          [
+            [
+              0,
+              "1cd9ca79729b2ec05a5458e037270f43",
+              1
+            ],
+            [
+              3,
+              "1cd9ca79729b2ec05a5458e037270f43",
+              1
+            ]
+          ]
+        ],
+        [
+          "version",
+          []
+        ],
+        [
+          "yaml",
+          []
+        ]
+      ],
+      "postings_prefix": [
+        [
+          "alp",
+          [
+            [
+              "alpha",
+              [
+                [
+                  0,
+                  "b50f54653ef4a28fc613fab5f67c5847",
+                  1
+                ],
+                [
+                  3,
+                  "b50f54653ef4a28fc613fab5f67c5847",
+                  1
+                ]
+              ]
+            ],
+            [
+              "alphalib",
+              [
+                [
+                  0,
+                  "b50f54653ef4a28fc613fab5f67c5847",
+                  1
+                ],
+                [
+                  3,
+                  "b50f54653ef4a28fc613fab5f67c5847",
+                  1
+                ]
+              ]
+            ]
+          ]
+        ],
+        [
+          "fbe",
+          []
+        ],
+        [
+          "fxp",
+          []
+        ],
+        [
+          "gam",
+          [
+            [
+              "gamma",
+              [
+                [
+                  0,
+                  "db1f9f7496cfcd2f5c81704f0a5acf05",
+                  1
+                ],
+                [
+                  3,
+                  "db1f9f7496cfcd2f5c81704f0a5acf05",
+                  1
+                ]
+              ]
+            ]
+          ]
+        ],
+        [
+          "lib",
+          []
+        ],
+        [
+          "loc",
+          []
+        ],
+        [
+          "mem",
+          []
+        ],
+        [
+          "pac",
+          []
+        ],
+        [
+          "pnp",
+          []
+        ],
+        [
+          "roo",
+          [
+            [
+              "root",
+              [
+                [
+                  0,
+                  "8d41a9fd9c2fd22565070ebcc85e964d",
+                  1
+                ]
+              ]
+            ]
+          ]
+        ],
+        [
+          "sco",
+          [
+            [
+              "scope",
+              [
+                [
+                  0,
+                  "1cd9ca79729b2ec05a5458e037270f43",
+                  1
+                ],
+                [
+                  3,
+                  "1cd9ca79729b2ec05a5458e037270f43",
+                  1
+                ]
+              ]
+            ],
+            [
+              "scopebeta",
+              [
+                [
+                  0,
+                  "1cd9ca79729b2ec05a5458e037270f43",
+                  1
+                ],
+                [
+                  3,
+                  "1cd9ca79729b2ec05a5458e037270f43",
+                  1
+                ]
+              ]
+            ]
+          ]
+        ],
+        [
+          "ver",
+          []
+        ],
+        [
+          "yam",
+          []
+        ]
+      ],
+      "symbol_briefs_many": [
+        {
+          "facts": {
+            "source": {
+              "Str": "https://registry.example/beta-2.0.0.tgz"
+            },
+            "version": {
+              "Str": "2.0.0"
+            }
+          },
+          "leaf": "2.0.0"
+        },
+        {
+          "facts": {
+            "ecosystem": {
+              "Str": "npm"
+            }
+          },
+          "leaf": "@scope/beta"
+        },
+        {
+          "facts": {
+            "version": {
+              "Str": "3.0.0"
+            }
+          },
+          "leaf": "3.0.0"
+        },
+        {
+          "facts": {},
+          "leaf": "root"
+        },
+        {
+          "facts": {
+            "version": {
+              "Str": "1.4.0"
+            }
+          },
+          "leaf": "1.4.0"
+        },
+        {
+          "facts": {
+            "ecosystem": {
+              "Str": "npm"
+            }
+          },
+          "leaf": "alpha-lib"
+        },
+        null,
+        {
+          "facts": {
+            "ecosystem": {
+              "Str": "npm"
+            }
+          },
+          "leaf": "gamma"
+        }
+      ],
+      "symbols": [
+        [
+          "061e9572b84a91fdc8400263368fef16",
+          {
+            "artifact": "d30efcf5f2d38fc201d5fd91ff399535",
+            "facts": {
+              "source": {
+                "Str": "https://registry.example/beta-2.0.0.tgz"
+              },
+              "version": {
+                "Str": "2.0.0"
+              }
+            },
+            "kind": "package_version",
+            "name": "fx:pnpm-lock.yaml#package:@scope%2Fbeta/version:2.0.0",
+            "span": {
+              "end_col": 87,
+              "end_line": 20,
+              "start_col": 1,
+              "start_line": 19
+            }
+          }
+        ],
+        [
+          "1cd9ca79729b2ec05a5458e037270f43",
+          {
+            "artifact": "d30efcf5f2d38fc201d5fd91ff399535",
+            "facts": {
+              "ecosystem": {
+                "Str": "npm"
+              }
+            },
+            "kind": "package_external",
+            "name": "fx:pnpm-lock.yaml#package:@scope%2Fbeta",
+            "span": {
+              "end_col": 87,
+              "end_line": 20,
+              "start_col": 1,
+              "start_line": 19
+            }
+          }
+        ],
+        [
+          "1fbe4483d34c7348411a10541ebae725",
+          {
+            "artifact": "d30efcf5f2d38fc201d5fd91ff399535",
+            "facts": {
+              "version": {
+                "Str": "3.0.0"
+              }
+            },
+            "kind": "package_version",
+            "name": "fx:pnpm-lock.yaml#package:gamma/version:3.0.0",
+            "span": {
+              "end_col": 37,
+              "end_line": 26,
+              "start_col": 1,
+              "start_line": 25
+            }
+          }
+        ],
+        [
+          "8d41a9fd9c2fd22565070ebcc85e964d",
+          {
+            "artifact": "d30efcf5f2d38fc201d5fd91ff399535",
+            "facts": {},
+            "kind": "package_member",
+            "name": "fx:pnpm-lock.yaml#member:root",
+            "span": {
+              "end_col": 1,
+              "end_line": 38,
+              "start_col": 1,
+              "start_line": 1
+            }
+          }
+        ],
+        [
+          "a2289b66c66f03af7a7f10a7b39a222b",
+          {
+            "artifact": "d30efcf5f2d38fc201d5fd91ff399535",
+            "facts": {
+              "version": {
+                "Str": "1.4.0"
+              }
+            },
+            "kind": "package_version",
+            "name": "fx:pnpm-lock.yaml#package:alpha-lib/version:1.4.0",
+            "span": {
+              "end_col": 37,
+              "end_line": 23,
+              "start_col": 1,
+              "start_line": 22
+            }
+          }
+        ],
+        [
+          "b50f54653ef4a28fc613fab5f67c5847",
+          {
+            "artifact": "d30efcf5f2d38fc201d5fd91ff399535",
+            "facts": {
+              "ecosystem": {
+                "Str": "npm"
+              }
+            },
+            "kind": "package_external",
+            "name": "fx:pnpm-lock.yaml#package:alpha-lib",
+            "span": {
+              "end_col": 37,
+              "end_line": 23,
+              "start_col": 1,
+              "start_line": 22
+            }
+          }
+        ],
+        [
+          "db1f9f7496cfcd2f5c81704f0a5acf05",
+          {
+            "artifact": "d30efcf5f2d38fc201d5fd91ff399535",
+            "facts": {
+              "ecosystem": {
+                "Str": "npm"
+              }
+            },
+            "kind": "package_external",
+            "name": "fx:pnpm-lock.yaml#package:gamma",
+            "span": {
+              "end_col": 37,
+              "end_line": 26,
+              "start_col": 1,
+              "start_line": 25
+            }
+          }
+        ]
+      ],
+      "symbols_many": [
+        {
+          "artifact": "d30efcf5f2d38fc201d5fd91ff399535",
+          "facts": {
+            "source": {
+              "Str": "https://registry.example/beta-2.0.0.tgz"
+            },
+            "version": {
+              "Str": "2.0.0"
+            }
+          },
+          "kind": "package_version",
+          "name": "fx:pnpm-lock.yaml#package:@scope%2Fbeta/version:2.0.0",
+          "span": {
+            "end_col": 87,
+            "end_line": 20,
+            "start_col": 1,
+            "start_line": 19
+          }
+        },
+        {
+          "artifact": "d30efcf5f2d38fc201d5fd91ff399535",
+          "facts": {
+            "ecosystem": {
+              "Str": "npm"
+            }
+          },
+          "kind": "package_external",
+          "name": "fx:pnpm-lock.yaml#package:@scope%2Fbeta",
+          "span": {
+            "end_col": 87,
+            "end_line": 20,
+            "start_col": 1,
+            "start_line": 19
+          }
+        },
+        {
+          "artifact": "d30efcf5f2d38fc201d5fd91ff399535",
+          "facts": {
+            "version": {
+              "Str": "3.0.0"
+            }
+          },
+          "kind": "package_version",
+          "name": "fx:pnpm-lock.yaml#package:gamma/version:3.0.0",
+          "span": {
+            "end_col": 37,
+            "end_line": 26,
+            "start_col": 1,
+            "start_line": 25
+          }
+        },
+        {
+          "artifact": "d30efcf5f2d38fc201d5fd91ff399535",
+          "facts": {},
+          "kind": "package_member",
+          "name": "fx:pnpm-lock.yaml#member:root",
+          "span": {
+            "end_col": 1,
+            "end_line": 38,
+            "start_col": 1,
+            "start_line": 1
+          }
+        },
+        {
+          "artifact": "d30efcf5f2d38fc201d5fd91ff399535",
+          "facts": {
+            "version": {
+              "Str": "1.4.0"
+            }
+          },
+          "kind": "package_version",
+          "name": "fx:pnpm-lock.yaml#package:alpha-lib/version:1.4.0",
+          "span": {
+            "end_col": 37,
+            "end_line": 23,
+            "start_col": 1,
+            "start_line": 22
+          }
+        },
+        {
+          "artifact": "d30efcf5f2d38fc201d5fd91ff399535",
+          "facts": {
+            "ecosystem": {
+              "Str": "npm"
+            }
+          },
+          "kind": "package_external",
+          "name": "fx:pnpm-lock.yaml#package:alpha-lib",
+          "span": {
+            "end_col": 37,
+            "end_line": 23,
+            "start_col": 1,
+            "start_line": 22
+          }
+        },
+        null,
+        {
+          "artifact": "d30efcf5f2d38fc201d5fd91ff399535",
+          "facts": {
+            "ecosystem": {
+              "Str": "npm"
+            }
+          },
+          "kind": "package_external",
+          "name": "fx:pnpm-lock.yaml#package:gamma",
+          "span": {
+            "end_col": 37,
+            "end_line": 26,
+            "start_col": 1,
+            "start_line": 25
+          }
+        }
+      ],
+      "unresolved": [],
+      "unresolved_refs": []
+    },
     "eval/core": {
       "artifacts": [
         [
