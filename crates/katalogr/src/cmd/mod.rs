@@ -19,6 +19,7 @@ pub mod find;
 pub mod hook;
 pub mod hooks;
 pub mod hubs;
+pub mod impact;
 pub mod index;
 pub mod kindex;
 pub mod map;
