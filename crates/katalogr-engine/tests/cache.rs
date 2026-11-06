@@ -121,8 +121,7 @@ mod cache {
 
     fn digest(fx: &Fx) -> String {
         let cache = fx.cache();
-        let d = cache.read().unwrap().index_digest().unwrap();
-        d
+        cache.read().unwrap().index_digest().unwrap()
     }
 
     #[test]
