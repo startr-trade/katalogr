@@ -10,6 +10,7 @@ mod changes;
 mod claude;
 mod docs_affected;
 mod impact;
+mod lineage;
 pub use docs_affected::{DEFAULT_DOCS_LIMIT, DocsAffectedParams};
 pub use impact::ImpactInput;
 pub mod contexts;
@@ -469,6 +470,21 @@ pub(crate) fn on_target_traced<T>(
         Resolution::Ambiguous(c) => Outcome::Ambiguous(c),
         Resolution::None => Outcome::NoMatch(format!("no symbol matches {text:?}")),
     })
+}
+
+/// Extension id to its code kinds, for the extensions that declare any.
+pub(crate) fn registry_code_kinds()
+-> std::collections::BTreeMap<String, std::collections::BTreeSet<String>> {
+    build_registry()
+        .extractors()
+        .map(|e| {
+            (
+                e.id().to_string(),
+                e.code_kinds().iter().map(|k| k.to_string()).collect(),
+            )
+        })
+        .filter(|(_, kinds): &(String, std::collections::BTreeSet<String>)| !kinds.is_empty())
+        .collect()
 }
 
 /// Resolve `text` to one symbol and run `f` on it; several or no matches end the query.
@@ -1674,16 +1690,7 @@ impl Katalogr {
         mut opts: DeadCodeOptions,
         o: &Options,
     ) -> Result<Reply<DeadCodeReport>, DistError> {
-        opts.code_kinds = build_registry()
-            .extractors()
-            .map(|e| {
-                (
-                    e.id().to_string(),
-                    e.code_kinds().iter().map(|k| k.to_string()).collect(),
-                )
-            })
-            .filter(|(_, kinds): &(String, std::collections::BTreeSet<String>)| !kinds.is_empty())
-            .collect();
+        opts.code_kinds = registry_code_kinds();
         let mut reply = self.query(o, |tx| {
             Ok(Outcome::Found(katalogr_analytics::dead_code(tx, &opts)?))
         })?;
