@@ -9,6 +9,9 @@ use katalogr_model::Id;
 use katalogr_store::{PAGERANK_DAMPING, PAGERANK_ITERATIONS, RANK_CONTEXT, Reader, StoreError};
 use std::collections::BTreeMap;
 
+/// The kind of a field symbol, which `map` leaves out.
+const FIELD_KIND: &str = "field";
+
 fn round2(x: f64) -> f64 {
     (x * 100.0).round() / 100.0
 }
@@ -97,8 +100,11 @@ pub fn map_boosted_traced(
         keyed.sort_by(|a, b| b.0.total_cmp(&a.0));
         ranked = keyed.into_iter().map(|(_, e)| e).collect();
     }
+    // A field is part of its owner, and the map lists code to read: fields stay in the rank
+    // (they are graph nodes, so other ranks do not change) but are not listed.
     Ok(ranked
         .into_iter()
+        .filter(|(symbol, _)| symbol.kind != FIELD_KIND)
         .map(|(symbol, score)| MapEntry {
             in_degree: round2(degree.get(&Id::of(&symbol.name)).copied().unwrap_or(0.0)),
             rank: round6(score),
@@ -122,6 +128,9 @@ pub fn map_top(tx: &impl Reader) -> Result<Option<(u64, Vec<MapEntry>)>, StoreEr
     let mut out = Vec::with_capacity(rows.len());
     for (row, (_, score)) in rows.iter().zip(&top.entries) {
         let Some(row) = row else { return Ok(None) };
+        if row.kind == FIELD_KIND {
+            continue;
+        }
         out.push(MapEntry {
             symbol: crate::resolve::hit(row),
             rank: round6(*score),
@@ -143,6 +152,9 @@ pub fn map_top_behind(tx: &impl Reader) -> Result<Option<(u64, Vec<MapEntry>)>, 
     let mut out = Vec::with_capacity(rows.len());
     for (row, (_, score)) in rows.iter().zip(&top.entries) {
         let Some(row) = row else { continue };
+        if row.kind == FIELD_KIND {
+            continue;
+        }
         out.push(MapEntry {
             symbol: crate::resolve::hit(row),
             rank: round6(*score),
