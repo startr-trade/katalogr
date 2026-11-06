@@ -1,1 +1,26 @@
-{"format":1,"wait_seconds":10,"views":[]}
+{"format":1,"wait_seconds":10,"views":[
+ {"id":"graph","title":"Graph explorer","link":true,"nav":true,"kind":"graph","needs":null,"absent":null},
+ {"id":"service-map","title":"Service map","link":true,"nav":true,"kind":"service-map","needs":null,"absent":null},
+ {"id":"impact","title":"Impact","link":true,"nav":true,"kind":"panels","needs":"impact",
+  "absent":"Impact analysis isn't in this version of katalogr. This page shows it once a release adds it. The link will keep working."},
+ {"id":"health","title":"Health","link":false,"nav":true,"kind":"panels","needs":null,"absent":null,"panels":[
+  {"id":"hubs","title":"Hubs","needs":null,"absent":null,"op":"hubs","params":{"limit":"20"},"rows":"result.items","empty":"No hubs in this index.",
+   "columns":[{"title":"Node","path":"node.name","symbol_link":true},{"title":"Degree","path":"degree"},{"title":"In","path":"in_degree"},{"title":"Out","path":"out_degree"},{"title":"Rank","path":"rank"}]},
+  {"id":"cycles","title":"Cycles","needs":null,"absent":null,"op":"cycles","params":{"limit":"20"},"rows":"result.items","empty":"No dependency cycles in this index.",
+   "columns":[{"title":"Size","path":"size"},{"title":"Confidence","path":"confidence"},{"title":"Members","path":"members","join":"name"}]},
+  {"id":"communities","title":"Communities","needs":null,"absent":null,"op":"communities","params":{"limit":"20"},"rows":"result.items","empty":"No communities found in this index.",
+   "columns":[{"title":"Label","path":"label.name","symbol_link":true},{"title":"Size","path":"size"},{"title":"Files","path":"files"},{"title":"Cohesion","path":"cohesion"},{"title":"Folder","path":"dir"}]},
+  {"id":"dead-code","title":"Dead code candidates","needs":null,"absent":null,"op":"dead-code","params":{"limit":"20"},"rows":"result.items","empty":"No dead code candidates in this index.",
+   "columns":[{"title":"Symbol","path":"symbol.name","symbol_link":true},{"title":"File","path":"symbol.path"},{"title":"Class","path":"class"},{"title":"Confidence","path":"confidence"},{"title":"Incoming","path":"incoming"}]},
+  {"id":"coverage","title":"Coverage","needs":null,"absent":null,"op":"coverage","params":{},"rows":"result.by_extension","empty":"Nothing is indexed yet.",
+   "columns":[{"title":"Extension","path":"extension"},{"title":"Files","path":"counts.files_indexed"},{"title":"References","path":"counts.refs_total"},{"title":"Unresolved","path":"counts.refs_unresolved"},{"title":"Parse errors","path":"counts.parse_errors"}]},
+  {"id":"hotspots","title":"Hotspots and change coupling","needs":"git-history","absent":"Hotspots and change coupling aren't in this version of katalogr."},
+  {"id":"drift","title":"Drift","needs":"drift","absent":"Drift checks aren't in this version of katalogr."},
+  {"id":"rules","title":"Rule violations","needs":"rules","absent":"Architecture rules aren't in this version of katalogr."},
+  {"id":"trends","title":"Trends","needs":"metrics","absent":"Stored metric samples aren't in this version of katalogr."}]},
+ {"id":"dependencies","title":"Dependencies and vulnerabilities","link":false,"nav":true,"kind":"panels","needs":"dependencies",
+  "absent":"Dependency and vulnerability data isn't in this version of katalogr."},
+ {"id":"type-lineage","title":"Type lineage","link":false,"nav":true,"kind":"panels","needs":"type-lineage",
+  "absent":"Type lineage isn't in this version of katalogr."},
+ {"id":"symbol","title":"Symbol","link":false,"nav":false,"kind":"symbol","needs":null,"absent":null},
+ {"id":"search","title":"Search","link":false,"nav":false,"kind":"search","needs":null,"absent":null}]}
