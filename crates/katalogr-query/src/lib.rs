@@ -14,6 +14,7 @@ mod explain;
 mod find;
 pub mod fold;
 mod hints;
+pub mod impact;
 mod map;
 mod mirror;
 mod path;
@@ -46,6 +47,11 @@ pub use explain::explain;
 pub use find::find;
 pub use fold::{FOLD_FROM, FOLD_SHOWN, Folded};
 pub use hints::{HintSource, hints};
+pub use impact::{
+    DEFAULT_IMPACT_DEPTH, DEFAULT_IMPACT_LIMIT, IMPACT_SKIPPED_KINDS, ImpactContract, ImpactGroup,
+    ImpactHit, ImpactOptions, ImpactReport, ImpactSeed, SEED_BROKEN_REF, SEED_CONTRACT,
+    SEED_CONTRACT_CONSUMERS, SEED_FILE, SEED_ITEM, SEED_SYMBOL, Seed, impact,
+};
 pub use map::{map, map_boosted_traced, map_top, map_top_behind, map_traced};
 pub use mirror::mirror_drift;
 pub use path::path;
