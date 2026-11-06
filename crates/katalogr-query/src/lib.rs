@@ -8,6 +8,7 @@ pub mod budget;
 mod callers;
 mod contract_map;
 mod dangling;
+mod deps;
 pub mod diagnostic;
 pub mod doc_impact;
 mod explain;
@@ -37,6 +38,7 @@ pub mod working_set;
 pub use callers::{CallersAnswer, callers, callers_folded};
 pub use contract_map::{ContractEnds, ContractMap, contract_map};
 pub use dangling::{CONTRACT_KIND as DANGLING_CONTRACT, DEFAULT_KINDS as DANGLING_KINDS, dangling};
+pub use deps::{DepHit, DepsOptions, deps};
 pub use diagnostic::{
     DIAG_PACK, DIAG_REFS, DIAG_TERMS, DIAG_TOP, DIAG_WEIGHTS, Diagnostic, ExpandedTerm, FoldTrace,
     PackEntry, PackTrace, PartTrace, PrefixTrace, RankSource, RankTrace, RoutingTrace, TermTrace,

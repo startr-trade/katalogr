@@ -2292,6 +2292,7 @@ dependencies = [
  "camino",
  "katalogr-engine",
  "katalogr-ext-data",
+ "katalogr-ext-deps",
  "katalogr-ext-kanbanr",
  "katalogr-ext-md",
  "katalogr-ext-openapi",
@@ -2366,6 +2367,7 @@ dependencies = [
  "katalogr-analytics",
  "katalogr-engine",
  "katalogr-ext-data",
+ "katalogr-ext-deps",
  "katalogr-ext-kanbanr",
  "katalogr-ext-md",
  "katalogr-ext-openapi",
@@ -2427,6 +2429,17 @@ dependencies = [
  "saphyr-parser",
  "serde_json",
  "tempfile",
+]
+
+[[package]]
+name = "katalogr-ext-deps"
+version = "0.1.0"
+dependencies = [
+ "katalogr-model",
+ "katalogr-store",
+ "serde_json",
+ "serde_yaml_ng",
+ "toml",
 ]
 
 [[package]]

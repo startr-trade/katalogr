@@ -100,6 +100,11 @@ fn run(cli: &Cli) -> Result<ExitCode, DistError> {
         Some(Command::Audit { action }) => cmd::audit::run(cli, action),
         Some(Command::Snapshot { action }) => cmd::snapshot::run(cli, action),
         Some(Command::Dangling { kind }) => cmd::dangling::run(cli, kind),
+        Some(Command::Deps {
+            package,
+            limit,
+            used_by_limit,
+        }) => cmd::deps::run(cli, package.as_deref(), *limit, *used_by_limit),
         Some(Command::DocsAffected { since, kind, limit }) => {
             cmd::docs_affected::run(cli, since.as_deref(), kind, *limit)
         }
