@@ -447,6 +447,7 @@ fn execute(shared: &Shared, op: &Op, args: &Args) -> JsonAnswer {
         at: args.opt("at").map(str::to_string),
         view: None,
         ranking: katalogr_dist::Ranking::Neutral,
+        fresh: false,
     };
     let waits = mode != Consistency::StaleOk;
     let gate;

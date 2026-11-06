@@ -151,6 +151,7 @@ pub fn options_with(cli: &Cli, diagnostic: bool) -> Options {
         at: cli.at.clone(),
         view: None,
         ranking: katalogr_dist::Ranking::Neutral,
+        fresh: false,
     }
 }
 

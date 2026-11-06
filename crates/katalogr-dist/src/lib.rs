@@ -5,7 +5,7 @@
 mod answers;
 mod at;
 mod audit;
-pub use answers::{StoredQuery, validity};
+pub use answers::{AnswerCounters, AnswerRequest, StoredQuery, validity};
 pub use at::position_without_board;
 pub use audit::{AuditOutcome, AuditRecord, PositionText};
 mod changes;
@@ -226,6 +226,9 @@ pub struct Options {
     /// Ranking of `search` and `map` (FEAT-039). The library default is neutral; the CLI asks
     /// for [`Ranking::Default`] unless `--neutral` or `--at` is given.
     pub ranking: Ranking,
+    /// Recompute instead of reading a stored answer; the result is still written (`--fresh`,
+    /// FEAT-096).
+    pub fresh: bool,
 }
 
 /// How `search` and `map` order their answers (FEAT-039).
@@ -305,6 +308,8 @@ pub struct Katalogr {
     view_extra: std::sync::Mutex<Vec<(String, String)>>,
     /// Snapshot folders the timeline reads, from `Overrides::snapshot_dirs`.
     snapshot_dirs: Vec<PathBuf>,
+    /// Stored answers: the build they are valid for, the store and the counts (FEAT-096).
+    answers: answers::AnswerState,
 }
 
 /// Profiles embedded in the binary, applied before the project's own: `(file name, text)`.
@@ -609,6 +614,7 @@ impl Katalogr {
             notes: std::sync::Mutex::new(Vec::new()),
             view_extra: std::sync::Mutex::new(Vec::new()),
             snapshot_dirs: overrides.snapshot_dirs.clone(),
+            answers: answers::AnswerState::default(),
         })
     }
 
@@ -1354,6 +1360,9 @@ impl Katalogr {
     /// All symbols by PageRank.
     pub fn map(&self, opts: &Options) -> Result<Reply<Vec<MapEntry>>, DistError> {
         let _extra = self.extra_scope();
+        if !opts.diagnostic && opts.at.is_none() {
+            return self.map_stored(opts);
+        }
         let mut ws = WsRun::default();
         let mut reply = self.query_traced(opts, |tx, diag| {
             let boost = self.ws_boost(opts, tx, &mut ws);
@@ -1364,6 +1373,60 @@ impl Katalogr {
             )?))
         })?;
         ws.finish(&mut reply.report);
+        Ok(reply)
+    }
+
+    /// `map` through the stored answers. The working set that boosts the ranking is part of the
+    /// question, so it joins the key; it is read at most once, whichever path asks first.
+    fn map_stored(&self, opts: &Options) -> Result<Reply<Vec<MapEntry>>, DistError> {
+        struct Boosted {
+            read: bool,
+            boost: Option<katalogr_query::Boost>,
+            ws: WsRun,
+        }
+        let state = std::cell::RefCell::new(Boosted {
+            read: false,
+            boost: None,
+            ws: WsRun::default(),
+        });
+        let read = |tx: &ReadTx| {
+            let mut st = state.borrow_mut();
+            if !st.read {
+                st.read = true;
+                let mut ws = WsRun::default();
+                st.boost = self.ws_boost(opts, tx, &mut ws);
+                st.ws = ws;
+            }
+        };
+        let mut reply = self.stored(
+            opts,
+            &answers::StoredQuery::Map,
+            |tx| {
+                read(tx);
+                // What `ws_boost` added to the question joins the key.
+                let args = self
+                    .view_extra
+                    .lock()
+                    .expect("view_extra lock")
+                    .iter()
+                    .cloned()
+                    .collect();
+                Some(answers::Extra {
+                    inputs: BTreeMap::new(),
+                    args,
+                })
+            },
+            |tx| {
+                read(tx);
+                let st = state.borrow();
+                Ok(Outcome::Found(katalogr_query::map_boosted_traced(
+                    tx,
+                    st.boost.as_ref(),
+                    &mut Diagnostic::off(),
+                )?))
+            },
+        )?;
+        state.into_inner().ws.finish(&mut reply.report);
         Ok(reply)
     }
 
@@ -1546,11 +1609,32 @@ impl Katalogr {
         }
     }
 
+    /// A read of a whole-graph command through the stored answers (FEAT-096). A read at another
+    /// position (`--at`) is computed as before.
+    fn stored<T: serde::Serialize + serde::de::DeserializeOwned>(
+        &self,
+        o: &Options,
+        q: &answers::StoredQuery,
+        extra: impl FnOnce(&ReadTx) -> Option<answers::Extra>,
+        f: impl FnOnce(&ReadTx) -> Result<Outcome<T>, StoreError>,
+    ) -> Result<Reply<T>, DistError> {
+        if o.at.is_some() {
+            return self.query(o, f);
+        }
+        let timeout = o.timeout()?;
+        let consistency = o.consistency.unwrap_or(Consistency::Wait);
+        let engine = self.engine_for(consistency, Instant::now() + timeout)?;
+        self.query_stored(&engine, o, q, extra, f)
+    }
+
     /// Hubs: the nodes with the highest weighted degree.
     pub fn hubs(&self, opts: &HubOptions, o: &Options) -> Result<Reply<HubReport>, DistError> {
-        let mut reply = self.query(o, |tx| {
-            Ok(Outcome::Found(katalogr_analytics::hubs(tx, opts)?))
-        })?;
+        let mut reply = self.stored(
+            o,
+            &answers::StoredQuery::Hubs(opts.clone()),
+            |_| Some(answers::Extra::default()),
+            |tx| Ok(Outcome::Found(katalogr_analytics::hubs(tx, opts)?)),
+        )?;
         if let Outcome::Found(r) = &reply.outcome {
             reply.partial = limit_partial(opts.limit, r.items.len(), None);
         }
@@ -1563,9 +1647,12 @@ impl Katalogr {
         opts: &CommunityOptions,
         o: &Options,
     ) -> Result<Reply<CommunityReport>, DistError> {
-        let mut reply = self.query(o, |tx| {
-            Ok(Outcome::Found(katalogr_analytics::communities(tx, opts)?))
-        })?;
+        let mut reply = self.stored(
+            o,
+            &answers::StoredQuery::Communities(opts.clone()),
+            |_| Some(answers::Extra::default()),
+            |tx| Ok(Outcome::Found(katalogr_analytics::communities(tx, opts)?)),
+        )?;
         if let Outcome::Found(r) = &reply.outcome {
             reply.partial = limit_partial(opts.limit, r.items.len(), Some(r.communities_total));
             let shown: usize = r.items.iter().map(|c| c.top.len()).sum();
@@ -1588,9 +1675,12 @@ impl Katalogr {
         opts: &CycleOptions,
         o: &Options,
     ) -> Result<Reply<CycleReport>, DistError> {
-        let mut reply = self.query(o, |tx| {
-            Ok(Outcome::Found(katalogr_analytics::cycles(tx, opts)?))
-        })?;
+        let mut reply = self.stored(
+            o,
+            &answers::StoredQuery::Cycles(opts.clone()),
+            |_| Some(answers::Extra::default()),
+            |tx| Ok(Outcome::Found(katalogr_analytics::cycles(tx, opts)?)),
+        )?;
         if let Outcome::Found(r) = &reply.outcome {
             reply.partial = limit_partial(opts.limit, r.items.len(), Some(r.cycles_total));
             let shown: usize = r.items.iter().map(|c| c.members.len()).sum();
@@ -1665,9 +1755,32 @@ impl Katalogr {
             repo: opts.repo.clone(),
             suffix_top: opts.suffix_top,
         };
-        self.query_on(&engine, o, |tx| {
-            Ok(Outcome::Found(katalogr_analytics::coverage(tx, &input)?))
-        })
+        let run = |tx: &ReadTx| Ok(Outcome::Found(katalogr_analytics::coverage(tx, &input)?));
+        if o.at.is_some() {
+            return self.query_on(&engine, o, run);
+        }
+        // The census walks the disk, so the listing it saw is an input of the stored answer.
+        let named: Vec<String> = self
+            .project
+            .config()
+            .repos
+            .iter()
+            .filter(|r| opts.repo.as_deref().is_none_or(|w| w == r.name))
+            .map(|r| r.name.clone())
+            .collect();
+        let listing = answers::listing_digest(&engine, &named)?;
+        self.query_stored(
+            &engine,
+            o,
+            &answers::StoredQuery::Coverage(opts.clone()),
+            |_| {
+                Some(answers::Extra {
+                    inputs: BTreeMap::from([("listing".to_string(), listing)]),
+                    args: BTreeMap::new(),
+                })
+            },
+            run,
+        )
     }
 
     /// Dead-code candidates. Fills `opts.code_kinds` from the registered extensions first.
@@ -1686,9 +1799,17 @@ impl Katalogr {
             })
             .filter(|(_, kinds): &(String, std::collections::BTreeSet<String>)| !kinds.is_empty())
             .collect();
-        let mut reply = self.query(o, |tx| {
-            Ok(Outcome::Found(katalogr_analytics::dead_code(tx, &opts)?))
-        })?;
+        // The question as asked: the code kinds come from the registry, which the build covers.
+        let asked = answers::StoredQuery::DeadCode(DeadCodeOptions {
+            code_kinds: BTreeMap::new(),
+            ..opts.clone()
+        });
+        let mut reply = self.stored(
+            o,
+            &asked,
+            |_| Some(answers::Extra::default()),
+            |tx| Ok(Outcome::Found(katalogr_analytics::dead_code(tx, &opts)?)),
+        )?;
         if let Outcome::Found(r) = &reply.outcome {
             reply.partial = limit_partial(opts.limit, r.items.len(), Some(r.candidates_total));
         }
