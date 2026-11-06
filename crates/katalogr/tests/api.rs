@@ -661,6 +661,9 @@ mod api {
             "answers",
             // Prints one file's extracted text for a person, writing nothing (FEAT-094 R-13).
             "shard",
+            // Builds, stores and prints a diff report between two positions (FEAT-095); it has no
+            // route, and its report is its own type, not an envelope.
+            "diff",
             // Draws a view for a person; the generated views are `view`, served under
             // `/api/v1/views/`.
             "render",
