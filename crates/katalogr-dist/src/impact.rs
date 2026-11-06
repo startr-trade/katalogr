@@ -44,6 +44,7 @@ impl Katalogr {
         iopts: &ImpactOptions,
         opts: &Options,
     ) -> Result<Reply<ImpactReport>, DistError> {
+        let _extra = self.extra_scope();
         let mut opts = opts.clone();
         let mut base: Option<String> = None;
         let plan = match input {

@@ -198,6 +198,23 @@ mod impact_dist {
     }
 
     #[test]
+    fn failed_range_leaves_no_extra() {
+        let w = world();
+        commit_edit(&w, "sym fn A", "sym  fn A");
+        let k = open(&w);
+        let fresh = ask(&k, &ImpactInput::Symbol("A"), &view()).unwrap();
+        assert!(fresh.report.view_id.is_some());
+        // A range whose head is unknown fails after the base commit is known... and one whose
+        // head is not held ends the read before the report is finished.
+        let e = ask(&k, &ImpactInput::Range("HEAD~1..no-such-rev"), &view());
+        assert!(e.is_err());
+        let r = ask(&k, &ImpactInput::Range("HEAD~1..HEAD~1"), &view());
+        drop(r);
+        let again = ask(&k, &ImpactInput::Symbol("A"), &view()).unwrap();
+        assert_eq!(fresh.report.view_id, again.report.view_id);
+    }
+
+    #[test]
     fn unknown_item_is_no_match() {
         let w = world();
         let k = open(&w);
