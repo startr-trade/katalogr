@@ -14,6 +14,7 @@ use katalogr_query::ViewQuery;
 use katalogr_store::{
     AnswerStore, DirAnswerStore, ProjectDir, PutOutcome, ReadTx, Reader, StoreError, StoredAnswer,
 };
+use schemars::JsonSchema;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use sha2::{Digest, Sha256};
@@ -444,4 +445,232 @@ impl Katalogr {
         self.finish_report(engine, &mut reply.report, envelope_view.as_ref());
         Ok(reply)
     }
+}
+
+// ---------------------------------------------------------------- check, stats, prune
+
+/// A stored entry that differs from a fresh computation.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
+pub struct AnswerMismatch {
+    pub view_id: String,
+    pub op: String,
+    /// Byte offset of the first difference.
+    pub first_difference: u64,
+}
+
+/// What `answers check` found.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
+pub struct AnswerCheckReport {
+    pub schema: u32,
+    /// False when the checkout's position could not be held for the check.
+    pub exact: bool,
+    pub checked: u64,
+    pub matched: u64,
+    pub mismatched: Vec<AnswerMismatch>,
+    pub skipped_other_position: u64,
+    pub skipped_other_validity: u64,
+    pub skipped_unknown_op: u64,
+    pub removed: u64,
+}
+
+/// What `answers stats` found.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
+pub struct AnswerStats {
+    pub schema: u32,
+    pub entries: u64,
+    pub bytes: u64,
+    pub by_op: BTreeMap<String, u64>,
+    pub max_mib: u64,
+}
+
+/// `schema` of both reports.
+pub const ANSWERS_SCHEMA: u32 = 1;
+
+fn first_difference(a: &[u8], b: &[u8]) -> u64 {
+    a.iter()
+        .zip(b)
+        .position(|(x, y)| x != y)
+        .unwrap_or(a.len().min(b.len())) as u64
+}
+
+impl Katalogr {
+    /// The fresh payload bytes of a stored query, for `answers_check`. `None` when the question
+    /// has no answer to compare (no match).
+    fn fresh_payload(
+        &self,
+        engine: &Engine,
+        tx: &ReadTx,
+        q: &StoredQuery,
+    ) -> Result<Option<Vec<u8>>, DistError> {
+        let bytes = |v: &dyn erased::Ser| v.to_bytes();
+        Ok(Some(match q {
+            StoredQuery::Hubs(o) => bytes(&katalogr_analytics::hubs(tx, o)?),
+            StoredQuery::Communities(o) => bytes(&katalogr_analytics::communities(tx, o)?),
+            StoredQuery::Cycles(o) => bytes(&katalogr_analytics::cycles(tx, o)?),
+            StoredQuery::DeadCode(o) => {
+                let mut o = o.clone();
+                o.code_kinds = crate::registry_code_kinds();
+                bytes(&katalogr_analytics::dead_code(tx, &o)?)
+            }
+            StoredQuery::Map => bytes(&katalogr_query::map_boosted_traced(
+                tx,
+                None,
+                &mut katalogr_query::Diagnostic::off(),
+            )?),
+            StoredQuery::Coverage(o) => {
+                let parts = self.coverage_parts(engine, o)?;
+                bytes(&crate::coverage_run(engine, o, &parts, tx)?)
+            }
+        }))
+    }
+
+    /// Compare every stored entry that belongs to this position and build with a fresh
+    /// computation. `repair` removes the entries that differ.
+    pub fn answers_check(
+        &self,
+        limit: Option<usize>,
+        repair: bool,
+        o: &Options,
+    ) -> Result<AnswerCheckReport, DistError> {
+        let timeout = o.timeout()?;
+        let consistency = o.consistency.unwrap_or(Consistency::Wait);
+        let engine = self.engine_for(consistency, std::time::Instant::now() + timeout)?;
+        let store = self.answer_store();
+        let build = self.answers.build.clone();
+        let a = engine.with_consistency_state(
+            &QueryOptions {
+                consistency: consistency.into(),
+                timeout,
+                scope: Scope::Project,
+            },
+            |tx, st| -> Result<AnswerCheckReport, DistError> {
+                let mut rep = AnswerCheckReport {
+                    schema: ANSWERS_SCHEMA,
+                    exact: st.exact,
+                    checked: 0,
+                    matched: 0,
+                    mismatched: Vec::new(),
+                    skipped_other_position: 0,
+                    skipped_other_validity: 0,
+                    skipped_unknown_op: 0,
+                    removed: 0,
+                };
+                if !st.exact {
+                    return Ok(rep);
+                }
+                let facts = engine.facts_version(tx)?;
+                let index = tx.index_digest()?;
+                let mut listings = store.list()?;
+                listings.sort_by(|a, b| a.header.view_id.cmp(&b.header.view_id));
+                for l in listings.into_iter().take(limit.unwrap_or(usize::MAX)) {
+                    let h = &l.header;
+                    let vq = ViewQuery {
+                        op: h.op.clone(),
+                        args: h.args.clone(),
+                    };
+                    let known = StoredQuery::from_view_query(&vq)
+                        // A map read under a working-set boost cannot be recomputed here.
+                        .filter(|q| q.to_view_query() == vq);
+                    let Some(q) = known else {
+                        rep.skipped_unknown_op += 1;
+                        continue;
+                    };
+                    if katalogr_query::view_id(&st.positions, &facts, &vq) != h.view_id {
+                        rep.skipped_other_position += 1;
+                        continue;
+                    }
+                    let mut inputs = BTreeMap::from([("index".to_string(), index.clone())]);
+                    if let StoredQuery::Coverage(c) = &q {
+                        let named: Vec<String> = self
+                            .project
+                            .config()
+                            .repos
+                            .iter()
+                            .filter(|r| c.repo.as_deref().is_none_or(|w| w == r.name))
+                            .map(|r| r.name.clone())
+                            .collect();
+                        inputs.insert("listing".into(), listing_digest(&engine, &named)?);
+                    }
+                    let same = build
+                        .as_deref()
+                        .is_some_and(|b| validity(b, &inputs) == h.validity);
+                    if !same {
+                        rep.skipped_other_validity += 1;
+                        continue;
+                    }
+                    let Some(stored) = store.get(&h.view_id)? else {
+                        continue;
+                    };
+                    let Some(fresh) = self.fresh_payload(&engine, tx, &q)? else {
+                        continue;
+                    };
+                    rep.checked += 1;
+                    if fresh == stored.payload {
+                        rep.matched += 1;
+                    } else {
+                        rep.mismatched.push(AnswerMismatch {
+                            view_id: h.view_id.clone(),
+                            op: h.op.clone(),
+                            first_difference: first_difference(&fresh, &stored.payload),
+                        });
+                        if repair {
+                            store.remove(&h.view_id)?;
+                            rep.removed += 1;
+                        }
+                    }
+                }
+                Ok(rep)
+            },
+        )?;
+        a.value
+    }
+
+    /// How many entries, how many bytes, by op.
+    pub fn answers_stats(&self) -> Result<AnswerStats, DistError> {
+        let mut stats = AnswerStats {
+            schema: ANSWERS_SCHEMA,
+            entries: 0,
+            bytes: 0,
+            by_op: BTreeMap::new(),
+            max_mib: self.answers_max_mib(),
+        };
+        for l in self.answer_store().list()? {
+            stats.entries += 1;
+            stats.bytes += l.bytes;
+            *stats.by_op.entry(l.header.op).or_insert(0) += 1;
+        }
+        Ok(stats)
+    }
+
+    /// Remove the oldest entries until at most `max_mib` remain; `max_mib` defaults to the
+    /// setting.
+    pub fn answers_prune(
+        &self,
+        max_mib: Option<u64>,
+    ) -> Result<katalogr_store::PruneReport, DistError> {
+        let mib = max_mib.unwrap_or_else(|| self.answers_max_mib());
+        Ok(self.answer_store().prune(mib.saturating_mul(1 << 20))?)
+    }
+}
+
+/// Serialising behind a trait object, so `fresh_payload` can turn any report into bytes.
+mod erased {
+    pub trait Ser {
+        fn to_bytes(&self) -> Vec<u8>;
+    }
+    impl<T: serde::Serialize> Ser for T {
+        fn to_bytes(&self) -> Vec<u8> {
+            serde_json::to_vec(self).expect("a report serialises")
+        }
+    }
+}
+
+/// The JSON Schema of an [`AnswerCheckReport`].
+pub fn check_schema() -> serde_json::Value {
+    schemars::schema_for!(AnswerCheckReport).to_value()
+}
+
+/// The JSON Schema of an [`AnswerStats`].
+pub fn stats_schema() -> serde_json::Value {
+    schemars::schema_for!(AnswerStats).to_value()
 }

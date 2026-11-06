@@ -5,7 +5,10 @@
 mod answers;
 mod at;
 mod audit;
-pub use answers::{AnswerCounters, AnswerRequest, StoredQuery, validity};
+pub use answers::{
+    AnswerCheckReport, AnswerCounters, AnswerMismatch, AnswerRequest, AnswerStats, StoredQuery,
+    validity,
+};
 pub use at::position_without_board;
 pub use audit::{AuditOutcome, AuditRecord, PositionText};
 mod changes;
@@ -121,6 +124,16 @@ pub fn schemas() -> BTreeMap<&'static str, serde_json::Value> {
     assert!(
         all.insert("contract", contract::schema()).is_none(),
         "schema name contract is registered twice"
+    );
+    assert!(
+        all.insert("answers-check", answers::check_schema())
+            .is_none(),
+        "schema name answers-check is registered twice"
+    );
+    assert!(
+        all.insert("answers-stats", answers::stats_schema())
+            .is_none(),
+        "schema name answers-stats is registered twice"
     );
     assert!(
         all.insert("position", katalogr_query::position_schema())
@@ -361,6 +374,52 @@ fn builtin_profiles() -> Vec<(String, String)> {
     BUILTIN_PROFILES
         .iter()
         .map(|(n, t)| (n.to_string(), t.to_string()))
+        .collect()
+}
+
+/// What a coverage report takes from the disk (see `Katalogr::coverage_parts`).
+pub(crate) struct CoverageParts {
+    profiles: katalogr_engine::profiles::ProfileSet,
+    unclaimed: BTreeMap<String, Vec<RelPath>>,
+    roots_missing: Vec<String>,
+}
+
+/// The report of `opts` over one snapshot, with the disk side already read.
+pub(crate) fn coverage_run(
+    engine: &Engine,
+    opts: &CoverageOptions,
+    parts: &CoverageParts,
+    tx: &ReadTx,
+) -> Result<CoverageReport, StoreError> {
+    let registry = engine.registry();
+    let language = |ext: &str, path: &RelPath| match registry.by_id(ext) {
+        Some(e) => e.language(path).to_string(),
+        None => ext.to_string(),
+    };
+    let claim = |path: &RelPath| claim_for(registry, &parts.profiles, path);
+    let input = CoverageInput {
+        language: &language,
+        claim: &claim,
+        unclaimed: parts.unclaimed.clone(),
+        roots_missing: parts.roots_missing.clone(),
+        exclude_prefixes: vec![HISTORY_PREFIX.to_string()],
+        repo: opts.repo.clone(),
+        suffix_top: opts.suffix_top,
+    };
+    katalogr_analytics::coverage(tx, &input)
+}
+
+/// Extension id to its code kinds, from the registry (dead-code's `code_kinds`).
+pub(crate) fn registry_code_kinds() -> BTreeMap<String, std::collections::BTreeSet<String>> {
+    build_registry()
+        .extractors()
+        .map(|e| {
+            (
+                e.id().to_string(),
+                e.code_kinds().iter().map(|k| k.to_string()).collect(),
+            )
+        })
+        .filter(|(_, kinds): &(String, std::collections::BTreeSet<String>)| !kinds.is_empty())
         .collect()
 }
 
@@ -1726,36 +1785,8 @@ impl Katalogr {
         let timeout = o.timeout()?;
         let consistency = o.consistency.unwrap_or(Consistency::Wait);
         let engine = self.engine_for(consistency, Instant::now() + timeout)?;
-        let profiles = engine.routing_profiles()?;
-        let mut unclaimed = BTreeMap::new();
-        let mut roots_missing = Vec::new();
-        for repo in repos {
-            if opts.repo.as_deref().is_some_and(|r| r != repo) {
-                continue;
-            }
-            match katalogr_engine::census::census_with(&engine, repo, &profiles)? {
-                Some(c) => {
-                    unclaimed.insert(repo.to_string(), c.unclaimed);
-                }
-                None => roots_missing.push(repo.to_string()),
-            }
-        }
-        let registry = engine.registry();
-        let language = |ext: &str, path: &RelPath| match registry.by_id(ext) {
-            Some(e) => e.language(path).to_string(),
-            None => ext.to_string(),
-        };
-        let claim = |path: &RelPath| claim_for(registry, &profiles, path);
-        let input = CoverageInput {
-            language: &language,
-            claim: &claim,
-            unclaimed,
-            roots_missing,
-            exclude_prefixes: vec![HISTORY_PREFIX.to_string()],
-            repo: opts.repo.clone(),
-            suffix_top: opts.suffix_top,
-        };
-        let run = |tx: &ReadTx| Ok(Outcome::Found(katalogr_analytics::coverage(tx, &input)?));
+        let parts = self.coverage_parts(&engine, opts)?;
+        let run = |tx: &ReadTx| Ok(Outcome::Found(coverage_run(&engine, opts, &parts, tx)?));
         if o.at.is_some() {
             return self.query_on(&engine, o, run);
         }
@@ -1783,22 +1814,42 @@ impl Katalogr {
         )
     }
 
+    /// The disk side of a coverage report: the profiles, the files no extension claims and the
+    /// repos with no root here. Walks each repository root once.
+    pub(crate) fn coverage_parts(
+        &self,
+        engine: &Engine,
+        opts: &CoverageOptions,
+    ) -> Result<CoverageParts, DistError> {
+        let profiles = engine.routing_profiles()?;
+        let mut unclaimed = BTreeMap::new();
+        let mut roots_missing = Vec::new();
+        for r in &self.project.config().repos {
+            let repo = r.name.as_str();
+            if opts.repo.as_deref().is_some_and(|w| w != repo) {
+                continue;
+            }
+            match katalogr_engine::census::census_with(engine, repo, &profiles)? {
+                Some(c) => {
+                    unclaimed.insert(repo.to_string(), c.unclaimed);
+                }
+                None => roots_missing.push(repo.to_string()),
+            }
+        }
+        Ok(CoverageParts {
+            profiles,
+            unclaimed,
+            roots_missing,
+        })
+    }
+
     /// Dead-code candidates. Fills `opts.code_kinds` from the registered extensions first.
     pub fn dead_code(
         &self,
         mut opts: DeadCodeOptions,
         o: &Options,
     ) -> Result<Reply<DeadCodeReport>, DistError> {
-        opts.code_kinds = build_registry()
-            .extractors()
-            .map(|e| {
-                (
-                    e.id().to_string(),
-                    e.code_kinds().iter().map(|k| k.to_string()).collect(),
-                )
-            })
-            .filter(|(_, kinds): &(String, std::collections::BTreeSet<String>)| !kinds.is_empty())
-            .collect();
+        opts.code_kinds = registry_code_kinds();
         // The question as asked: the code kinds come from the registry, which the build covers.
         let asked = answers::StoredQuery::DeadCode(DeadCodeOptions {
             code_kinds: BTreeMap::new(),

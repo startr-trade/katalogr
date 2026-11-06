@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "What `answers stats` found.",
+  "properties": {
+    "by_op": {
+      "additionalProperties": {
+        "format": "uint64",
+        "minimum": 0,
+        "type": "integer"
+      },
+      "type": "object"
+    },
+    "bytes": {
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "entries": {
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "max_mib": {
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "schema": {
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "schema",
+    "entries",
+    "bytes",
+    "by_op",
+    "max_mib"
+  ],
+  "title": "AnswerStats",
+  "type": "object"
+}

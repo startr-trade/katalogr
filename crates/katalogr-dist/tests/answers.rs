@@ -1034,4 +1034,109 @@ mod answers {
         assert_eq!(c.hits, before.hits);
         assert_eq!(c.misses, before.misses + 1);
     }
+
+    // ------------------------------------------------------------------ check, stats, prune
+
+    fn entry_path(f: &Fx, op: &str) -> PathBuf {
+        let e = f.entries().into_iter().find(|e| e.header.op == op).unwrap();
+        f.answers_dir()
+            .join(&e.header.view_id[3..5])
+            .join(format!("{}.answer", e.header.view_id))
+    }
+
+    /// Change one digit of the payload, keeping its length.
+    fn tamper(path: &Path) {
+        let mut bytes = std::fs::read(path).unwrap();
+        let at = bytes.iter().position(|b| *b == b'\n').unwrap() + 1;
+        let d = bytes[at..]
+            .iter()
+            .position(|b| b.is_ascii_digit() && *b != b'9')
+            .unwrap()
+            + at;
+        bytes[d] += 1;
+        std::fs::write(path, bytes).unwrap();
+    }
+
+    #[test]
+    fn check_clean() {
+        let f = fx();
+        run_all(&f.k, &opts());
+        f.k.coverage(&CoverageOptions::default(), &opts()).unwrap();
+        let r = f.k.answers_check(None, false, &opts()).unwrap();
+        assert!(r.exact);
+        assert_eq!((r.checked, r.matched), (6, 6), "{r:?}");
+        assert!(r.mismatched.is_empty());
+        assert_eq!(
+            (
+                r.skipped_other_position,
+                r.skipped_other_validity,
+                r.skipped_unknown_op
+            ),
+            (0, 0, 0)
+        );
+        let limited = f.k.answers_check(Some(2), false, &opts()).unwrap();
+        assert_eq!(limited.checked, 2);
+        let stats = f.k.answers_stats().unwrap();
+        assert_eq!(stats.entries, 6);
+        assert_eq!(stats.by_op["hubs"], 1);
+        assert_eq!(stats.max_mib, 256);
+    }
+
+    #[test]
+    fn check_finds_tampered_entry() {
+        let f = fx();
+        run_all(&f.k, &opts());
+        tamper(&entry_path(&f, "cycles"));
+        let r = f.k.answers_check(None, false, &opts()).unwrap();
+        assert_eq!((r.checked, r.matched), (5, 4), "{r:?}");
+        assert_eq!(r.mismatched.len(), 1);
+        assert_eq!(r.mismatched[0].op, "cycles");
+        assert!(r.mismatched[0].first_difference > 0);
+        assert_eq!(r.removed, 0);
+        // The entry is still there and still served: check does not repair on its own.
+        assert_eq!(f.entries().len(), 5);
+    }
+
+    #[test]
+    fn check_skips_other_position() {
+        let f = fx();
+        run_all(&f.k, &opts());
+        std::fs::write(
+            f.repo.join("h.tx"),
+            "sym fn other\nsym fn more\nlink other calls hub\n",
+        )
+        .unwrap();
+        f.commit("c2");
+        let r = f.k.answers_check(None, false, &opts()).unwrap();
+        assert!(r.exact);
+        assert_eq!(r.checked, 0, "{r:?}");
+        assert_eq!(r.skipped_other_position, 5);
+        // Another build's entries are skipped for their validity.
+        let mut other = f.fresh_facade(None);
+        other.set_answer_build(Some("b2".into()));
+        other.hubs(&hub_opts(), &opts()).unwrap();
+        let r = f.k.answers_check(None, false, &opts()).unwrap();
+        assert_eq!(r.skipped_other_validity, 1, "{r:?}");
+        assert_eq!(r.checked, 0);
+    }
+
+    #[test]
+    fn check_repair_removes_mismatch() {
+        let f = fx();
+        run_all(&f.k, &opts());
+        tamper(&entry_path(&f, "hubs"));
+        let r = f.k.answers_check(None, true, &opts()).unwrap();
+        assert_eq!(r.mismatched.len(), 1);
+        assert_eq!(r.removed, 1);
+        assert_eq!(f.entries().len(), 4);
+        let again = f.k.answers_check(None, false, &opts()).unwrap();
+        assert!(again.mismatched.is_empty());
+        assert_eq!((again.checked, again.matched), (4, 4));
+        // The next read computes and stores it again.
+        f.k.hubs(&hub_opts(), &opts()).unwrap();
+        assert_eq!(f.entries().len(), 5);
+        let pruned = f.k.answers_prune(Some(0)).unwrap();
+        assert_eq!(pruned.removed, 5);
+        assert!(f.entries().is_empty());
+    }
 }
