@@ -760,7 +760,7 @@ mod archtest {
     ];
 
     /// The read calls an op row makes on the facade; each row makes exactly one.
-    const API_READ_CALLS: [&str; 27] = [
+    const API_READ_CALLS: [&str; 29] = [
         "find",
         "view",
         "refs",
@@ -788,6 +788,8 @@ mod archtest {
         "context_diff",
         "context_conflicts",
         "doctor",
+        "timeline",
+        "stored_view",
     ];
 
     #[derive(Default)]

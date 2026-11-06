@@ -170,10 +170,6 @@ mod web {
         let backend = HttpBackend { addr: s.addr };
         for (hash, sentence) in [
             (
-                "#/impact",
-                "Impact analysis isn't in this version of katalogr.",
-            ),
-            (
                 "#/dependencies",
                 "Dependency and vulnerability data isn't in this version of katalogr.",
             ),

@@ -15,7 +15,14 @@ pub const POSITION_FORMAT: u32 = 1;
 pub const VIEW_FORMAT: u32 = 1;
 /// The capabilities this binary has, sorted. Later items add names here and raise
 /// [`CONTRACT_VERSION`].
-pub const CAPABILITIES: &[&str] = &["docs-affected", "impact", "position", "timeline", "view-id", "views"];
+pub const CAPABILITIES: &[&str] = &[
+    "docs-affected",
+    "impact",
+    "position",
+    "timeline",
+    "view-id",
+    "views",
+];
 
 /// Reported by a process that serves pages. Never in [`CAPABILITIES`].
 pub const WEB_CAPABILITY: &str = "web-view";
