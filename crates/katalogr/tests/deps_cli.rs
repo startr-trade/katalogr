@@ -216,4 +216,60 @@ mod deps_cli {
         let text = ok(&repo, &["deps", "--limit", "2"]);
         assert!(text.contains("partial: capped at 2"), "{text}");
     }
+
+    /// R-10. `deps --limit 1000` over 20,000 version nodes. Budget: 500 ms. Run in release under
+    /// the shared heavy-job lock; the corpus is under `~/.cache/katalogr-scratch/FEAT-007/` and
+    /// removed afterwards.
+    #[test]
+    #[ignore]
+    fn deps_command_20k_entries() {
+        let home = std::env::var("HOME").unwrap();
+        let root = Path::new(&home).join(".cache/katalogr-scratch/FEAT-007");
+        let _ = std::fs::remove_dir_all(&root);
+        let repo = root.join("app");
+        std::fs::create_dir_all(&repo).unwrap();
+        let mut lock = String::from("version = 3\n");
+        for i in 0..20_000 {
+            lock.push_str(&format!(
+                "\n[[package]]\nname = \"pkg-{i}\"\nversion = \"1.{}.0\"\nsource = \"registry+https://registry.example/index\"\n",
+                i % 7
+            ));
+        }
+        std::fs::write(repo.join("Cargo.lock"), lock).unwrap();
+        let kx = root.join("kx");
+        ok(&root, &["kindex", "init", kx.to_str().unwrap()]);
+        let spec = format!("app={}", repo.display());
+        ok(
+            &root,
+            &[
+                "--kindex",
+                kx.to_str().unwrap(),
+                "project",
+                "init",
+                "demo",
+                "--repo",
+                &spec,
+                "--mark",
+            ],
+        );
+        ok(&repo, &["index"]);
+        let mut best = std::time::Duration::MAX;
+        for _ in 0..5 {
+            let t = std::time::Instant::now();
+            let out = ok(&repo, &["deps", "--limit", "1000", "--json"]);
+            best = best.min(t.elapsed());
+            let v: Value = serde_json::from_str(&out).unwrap();
+            assert_eq!(v["result"].as_array().unwrap().len(), 1000);
+        }
+        let load = std::fs::read_to_string("/proc/loadavg").unwrap_or_default();
+        println!(
+            "bench::deps_command_20k_entries: best of 5 {best:?}, process start included (load {})",
+            load.trim()
+        );
+        let _ = std::fs::remove_dir_all(&root);
+        assert!(
+            best < std::time::Duration::from_millis(500),
+            "took {best:?}"
+        );
+    }
 }
