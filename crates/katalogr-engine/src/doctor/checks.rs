@@ -314,13 +314,37 @@ pub(crate) fn profiles(dir: &ProjectDir, tables: &InspectedTables) -> CheckResul
     done(out)
 }
 
-/// KD-GIT-001 to 003. Skipped with `--skip-git`.
+/// KD-GIT-001 to 003 and KD-SNP-001. Skipped with `--skip-git`.
 pub(crate) fn git(dir: &ProjectDir, o: &DoctorOptions) -> CheckResult {
     if o.skip_git {
         return Ok(Ran::Skipped);
     }
     let state = dir.git_state().map_err(|e| store_kind(&e))?;
     let mut out = Vec::new();
+    // KD-SNP-001: a snapshot holds the code's symbol names, so git must not hold it.
+    let tracked = dir.tracked_snapshots().map_err(|e| store_kind(&e))?;
+    if !tracked.is_empty() {
+        // Only the project folder of each file is named, never the file.
+        let folders: std::collections::BTreeSet<String> = tracked
+            .iter()
+            .map(|p| p.split('/').take(2).collect::<Vec<_>>().join("/"))
+            .map(|f| if f.contains('/') { f } else { ".".to_string() })
+            .collect();
+        out.push(
+            Finding::new(
+                "KD-SNP-001",
+                Severity::Error,
+                "git",
+                format!(
+                    "{} snapshot file(s) are tracked by git in the kindex (under {})",
+                    tracked.len(),
+                    folders.into_iter().collect::<Vec<_>>().join(", ")
+                ),
+            )
+            .fix("git -C <kindex-dir> rm --cached <file> && git -C <kindex-dir> commit -m \"remove snapshot\"; git history still holds the file")
+            .count(tracked.len()),
+        );
+    }
     match state {
         GitState::NotARepo => out.push(
             Finding::new(

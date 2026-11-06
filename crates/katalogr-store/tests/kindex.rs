@@ -135,6 +135,37 @@ mod kindex {
     }
 
     #[test]
+    fn new_kindex_ignores_snapshots() {
+        let t = tempfile::tempdir().unwrap();
+        let r = root(&t);
+        let k = Kindex::init(&r).unwrap();
+        let p = k.create_project(&pname("demo"), cfg()).unwrap();
+        let file = p.root().join("graph.ksnap");
+        std::fs::write(&file, b"x").unwrap();
+        let ignored = |path: &str| {
+            std::process::Command::new("git")
+                .current_dir(&r)
+                .args(["check-ignore", "-q", path])
+                .env("GIT_CONFIG_GLOBAL", "/dev/null")
+                .env("GIT_CONFIG_SYSTEM", "/dev/null")
+                .status()
+                .unwrap()
+                .success()
+        };
+        assert!(ignored("projects/demo/graph.ksnap"));
+        assert!(ignored("anywhere/else/graph.ksnap"));
+        assert!(!ignored("projects/demo/config.yaml"));
+        assert!(
+            std::fs::read_to_string(r.join(".gitignore"))
+                .unwrap()
+                .lines()
+                .any(|l| l == "*.ksnap")
+        );
+        // Nothing tracked yet.
+        assert!(p.tracked_snapshots().unwrap().is_empty());
+    }
+
+    #[test]
     fn init_creates_project_layout() {
         let t = tempfile::tempdir().unwrap();
         let r = root(&t);
@@ -142,7 +173,7 @@ mod kindex {
         assert!(r.join(".git").exists());
         assert_eq!(
             std::fs::read_to_string(r.join(".gitignore")).unwrap(),
-            "projects/*/.cache/\nprojects/*/shards/\n"
+            "projects/*/.cache/\nprojects/*/shards/\n*.ksnap\n"
         );
         let p = k.create_project(&pname("demo"), cfg()).unwrap();
         for d in ["profiles", ".cache"] {
@@ -161,7 +192,7 @@ mod kindex {
         Kindex::init(&r).unwrap();
         assert_eq!(
             std::fs::read_to_string(r.join(".gitignore")).unwrap(),
-            "projects/*/.cache/\nprojects/*/shards/\n"
+            "projects/*/.cache/\nprojects/*/shards/\n*.ksnap\n"
         );
         let again = Kindex::open(&r).unwrap();
         assert_eq!(again.projects().unwrap(), vec![pname("demo")]);
