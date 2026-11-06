@@ -538,6 +538,30 @@ pub fn lineage(
         &mut cut_total,
         &mut cut_any,
     )?;
+    // Copies of one contract pair their fields by name, at read.
+    let mut unpaired_fields: Vec<SymbolHit> = Vec::new();
+    if declared_in.len() >= 2 && field_root == declared_in.first().map(|h| Id::of(&h.name)) {
+        for other in &declared_in[1..] {
+            let theirs = fields_of(tx, Id::of(&other.name))?;
+            pair_fields(&mut fields, theirs, &mut unpaired_fields);
+        }
+        unpaired_fields.sort_by(|a, b| a.name.cmp(&b.name));
+        for f in &mut fields {
+            f.copies.sort_by(|a, b| a.node.name.cmp(&b.node.name));
+            if f.copies.len() > per_group {
+                cut_any = true;
+                cut_total += f.copies.len() as u64;
+                cut_shown += per_group as u64;
+                f.copies.truncate(per_group);
+            }
+        }
+        if unpaired_fields.len() > per_group {
+            cut_any = true;
+            cut_total += unpaired_fields.len() as u64;
+            cut_shown += per_group as u64;
+            unpaired_fields.truncate(per_group);
+        }
+    }
 
     // ---- seeds ----
     let mut seeds: BTreeSet<Id> = declarers.clone();
@@ -1057,7 +1081,7 @@ pub fn lineage(
             subject_contracts,
             declared_in,
             fields,
-            unpaired_fields: Vec::new(),
+            unpaired_fields,
             related,
             bindings,
             code,
@@ -1286,4 +1310,90 @@ fn fill_mappings(
         f.mapped_by = maps;
     }
     Ok(())
+}
+
+/// The names from the first field below the root to this one, by `depth`.
+fn field_paths(fields: &[LineageField]) -> Vec<Vec<String>> {
+    let mut stack: Vec<String> = Vec::new();
+    fields
+        .iter()
+        .map(|f| {
+            stack.truncate(f.depth as usize - 1);
+            stack.push(leaf_of_name(&f.node.name));
+            stack.clone()
+        })
+        .collect()
+}
+
+/// A name compared across copies: lower case, without `_` and `-`.
+fn normalised(path: &[String]) -> Vec<String> {
+    path.iter()
+        .map(|s| {
+            s.chars()
+                .filter(|c| *c != '_' && *c != '-')
+                .flat_map(char::to_lowercase)
+                .collect()
+        })
+        .collect()
+}
+
+/// Pair the fields of another copy with the base fields by path of names: exact first, then
+/// normalised, only when the normalised path is unique among both sides' unpaired fields. A
+/// pair goes into the base field's `copies` (Inferred, by name); the rest of `theirs` goes to
+/// `unpaired`.
+fn pair_fields(
+    base: &mut [LineageField],
+    theirs: Vec<LineageField>,
+    unpaired: &mut Vec<SymbolHit>,
+) {
+    let bp = field_paths(base);
+    let tp = field_paths(&theirs);
+    let mut taken: Vec<bool> = vec![false; theirs.len()];
+    let mut paired: Vec<bool> = vec![false; base.len()];
+    for (i, p) in bp.iter().enumerate() {
+        if let Some(j) = tp.iter().enumerate().position(|(j, q)| !taken[j] && q == p) {
+            taken[j] = true;
+            paired[i] = true;
+            base[i].copies.push(LineageFieldCopy {
+                node: theirs[j].node.clone(),
+                by: "name".to_string(),
+            });
+        }
+    }
+    let count = |paths: &[Vec<String>], skip: &[bool]| {
+        let mut m: BTreeMap<Vec<String>, usize> = BTreeMap::new();
+        for (p, s) in paths.iter().zip(skip) {
+            if !*s {
+                *m.entry(normalised(p)).or_default() += 1;
+            }
+        }
+        m
+    };
+    let (cb, ct) = (count(&bp, &paired), count(&tp, &taken));
+    for (i, p) in bp.iter().enumerate() {
+        if paired[i] {
+            continue;
+        }
+        let n = normalised(p);
+        if cb.get(&n) != Some(&1) || ct.get(&n) != Some(&1) {
+            continue;
+        }
+        if let Some(j) = tp
+            .iter()
+            .enumerate()
+            .position(|(j, q)| !taken[j] && normalised(q) == n)
+        {
+            taken[j] = true;
+            paired[i] = true;
+            base[i].copies.push(LineageFieldCopy {
+                node: theirs[j].node.clone(),
+                by: "normalised-name".to_string(),
+            });
+        }
+    }
+    for (f, t) in theirs.into_iter().zip(taken) {
+        if !t {
+            unpaired.push(f.node);
+        }
+    }
 }
