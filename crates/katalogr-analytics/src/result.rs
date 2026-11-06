@@ -4,7 +4,7 @@
 use katalogr_model::Confidence;
 use katalogr_query::result::{PathStep, SymbolHit};
 use schemars::JsonSchema;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
 
@@ -19,7 +19,9 @@ enum ConfidenceSchema {
 }
 
 /// The granularity at which nodes are grouped.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, JsonSchema)]
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema,
+)]
 #[serde(rename_all = "kebab-case")]
 pub enum Level {
     Symbol,
@@ -32,7 +34,7 @@ pub enum Level {
 /// Symbol: canonical name, symbol kind, path, start line. File: artifact canonical name,
 /// `artifact`, path, no line. Package: the package fact value, `package`, the longest common
 /// directory of its files when they share a repository (else none), no line.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, JsonSchema)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct NodeHit {
     pub level: Level,
     pub name: String,
@@ -41,7 +43,7 @@ pub struct NodeHit {
     pub line: Option<u32>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, JsonSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct HubEntry {
     pub node: NodeHit,
     /// Weighted in-degree, 2 decimal places.
@@ -58,7 +60,7 @@ pub struct HubEntry {
     pub members: u64,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, JsonSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct HubReport {
     pub level: Level,
     /// Nodes of the graph at this level.
@@ -67,7 +69,7 @@ pub struct HubReport {
     pub items: Vec<HubEntry>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, JsonSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Community {
     pub id: u32,
     pub size: u64,
@@ -84,7 +86,7 @@ pub struct Community {
     pub files: u64,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, JsonSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct CommunityReport {
     pub level: Level,
     pub seed: u64,
@@ -98,7 +100,7 @@ pub struct CommunityReport {
     pub items: Vec<Community>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, JsonSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Cycle {
     pub id: u32,
     pub size: u64,
@@ -111,7 +113,7 @@ pub struct Cycle {
     pub confidence: Confidence,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, JsonSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct CycleReport {
     pub level: Level,
     pub include_inferred: bool,
@@ -123,7 +125,9 @@ pub struct CycleReport {
 }
 
 /// Why a symbol is a dead-code candidate.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, JsonSchema)]
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema,
+)]
 #[serde(rename_all = "kebab-case")]
 pub enum DeadClass {
     /// No usage link reaches it.
@@ -135,7 +139,7 @@ pub enum DeadClass {
 }
 
 /// How sure a candidate is. High is greater than medium, which is greater than low.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, JsonSchema)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum DeadConfidence {
     High,
@@ -165,7 +169,7 @@ impl Ord for DeadConfidence {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, JsonSchema)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct DeadCandidate {
     pub symbol: SymbolHit,
     pub class: DeadClass,
@@ -176,7 +180,7 @@ pub struct DeadCandidate {
     pub weak_incoming: u64,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, JsonSchema)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct DeadCodeReport {
     /// Entry points counted.
     pub roots: u64,

@@ -63,6 +63,10 @@ name = "web_lineage"
 required-features = ["web"]
 
 [[test]]
+name = "bench_export"
+required-features = ["web"]
+
+[[test]]
 name = "bench_web"
 required-features = ["web"]
 
@@ -73,6 +77,8 @@ tempfile.workspace = true
 camino.workspace = true
 katalogr-store.workspace = true
 katalogr-model.workspace = true
+# Queues an event without processing it (context tests).
+katalogr-engine.workspace = true
 fs4.workspace = true
 toml.workspace = true
 # Reads an index's canonical graph, with the artifact facts (URLs) the CLI does not print.

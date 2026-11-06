@@ -26,6 +26,22 @@ fn git_sha() -> Option<String> {
     (!sha.is_empty()).then_some(sha)
 }
 
+/// `0` when the tree is the commit it is stamped with: CI passed a sha, or `git status
+/// --porcelain` succeeds and prints nothing. `1` otherwise, including when git cannot say.
+fn build_dirty() -> &'static str {
+    if std::env::var("KATALOGR_GIT_SHA").is_ok_and(|v| !v.trim().is_empty()) {
+        return "0";
+    }
+    let out = Command::new("git")
+        .args(["status", "--porcelain"])
+        .current_dir(std::env::var("CARGO_MANIFEST_DIR").unwrap_or_else(|_| ".".into()))
+        .output();
+    match out {
+        Ok(o) if o.status.success() && o.stdout.is_empty() => "0",
+        _ => "1",
+    }
+}
+
 /// Resolves each name with `git rev-parse --git-path`, which follows a worktree's `.git` file
 /// to its own HEAD and the shared refs.
 fn git_paths(names: &[&str]) -> Vec<std::path::PathBuf> {
@@ -90,10 +106,20 @@ fn main() {
             println!("cargo:rerun-if-changed={}", p.display());
         }
     }
+    // An edit after the build must not keep a stale "clean": watch the sources and the lock file.
+    if let Ok(dir) = std::env::var("CARGO_MANIFEST_DIR") {
+        let root = std::path::Path::new(&dir).join("..").join("..");
+        println!("cargo:rerun-if-changed={}", root.join("crates").display());
+        println!(
+            "cargo:rerun-if-changed={}",
+            root.join("Cargo.lock").display()
+        );
+    }
     println!("cargo:rerun-if-env-changed=KATALOGR_GIT_SHA");
     println!("cargo:rerun-if-env-changed=SOURCE_DATE_EPOCH");
 
     let sha = git_sha().unwrap_or_else(|| "unknown".to_string());
     println!("cargo:rustc-env=KATALOGR_BUILD_SHA={sha}");
     println!("cargo:rustc-env=KATALOGR_BUILD_DATE={}", build_date());
+    println!("cargo:rustc-env=KATALOGR_BUILD_DIRTY={}", build_dirty());
 }

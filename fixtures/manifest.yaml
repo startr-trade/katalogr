@@ -13,6 +13,22 @@ technologies:
       - data/key-tree
     yaml:
       - data/key-tree
+  deps:
+    dependencies:
+      - deps/cargo-lock
+      - deps/npm-lock
+      - deps/pnpm-lock
+    members:
+      - deps/cargo-lock
+      - deps/pnpm-lock
+    packages:
+      - deps/cargo-lock
+      - deps/npm-lock
+      - deps/pnpm-lock
+    versions:
+      - deps/cargo-lock
+      - deps/npm-lock
+      - deps/pnpm-lock
   json-schema:
     api-components:
       - json-schema/api-components

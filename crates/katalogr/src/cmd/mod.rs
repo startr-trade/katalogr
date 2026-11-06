@@ -1,5 +1,6 @@
 //! Subcommand implementations. Each command is a thin wrapper over katalogr-dist.
 
+pub mod answers;
 #[cfg(feature = "api")]
 pub mod api;
 pub mod audit;
@@ -12,10 +13,13 @@ pub mod coverage;
 pub mod cycles;
 pub mod dangling;
 pub mod dead_code;
+pub mod deps;
+pub mod diff;
 pub mod docs_affected;
 pub mod doctor;
 pub mod eval;
 pub mod explain;
+pub mod export;
 pub mod find;
 pub mod hook;
 pub mod hooks;
@@ -45,6 +49,7 @@ pub mod session;
 pub mod shard;
 pub mod show;
 pub mod skill;
+pub mod snapshot;
 pub mod status;
 pub mod tests;
 pub mod version;
@@ -64,7 +69,7 @@ use crate::exit::ExitCode;
 pub fn resolve(cli: &Cli) -> Result<Katalogr, DistError> {
     let cwd =
         std::env::current_dir().map_err(|e| DistError::Usage(format!("current directory: {e}")))?;
-    Katalogr::resolve(
+    let mut k = Katalogr::resolve(
         &cwd,
         &Overrides {
             kindex: cli.kindex.clone(),
@@ -72,7 +77,9 @@ pub fn resolve(cli: &Cli) -> Result<Katalogr, DistError> {
             context: context_choice(cli),
             snapshot_dirs: Vec::new(),
         },
-    )
+    )?;
+    k.set_answer_build(crate::answer_build::current());
+    Ok(k)
 }
 
 /// `--context`, else `KATALOGR_CONTEXT`.
@@ -93,7 +100,9 @@ pub fn resolve_with_snapshots(
         std::env::current_dir().map_err(|e| DistError::Usage(format!("current directory: {e}")))?;
     let mut o = overrides(cli);
     o.snapshot_dirs = snapshots.to_vec();
-    Katalogr::resolve(&cwd, &o)
+    let mut k = Katalogr::resolve(&cwd, &o)?;
+    k.set_answer_build(crate::answer_build::current());
+    Ok(k)
 }
 
 pub fn overrides(cli: &Cli) -> Overrides {
@@ -152,6 +161,7 @@ pub fn options_with(cli: &Cli, diagnostic: bool) -> Options {
         at: cli.at.clone(),
         view: None,
         ranking: katalogr_dist::Ranking::Neutral,
+        fresh: cli.fresh,
     }
 }
 

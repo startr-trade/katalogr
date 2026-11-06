@@ -914,4 +914,541 @@ mod bench {
             );
         }
     }
+
+    /// A scratch directory for FEAT-096, on disk and outside `/tmp`, removed when dropped.
+    fn scratch_096() -> tempfile::TempDir {
+        let base = std::env::var("KATALOGR_SCRATCH").map_or_else(
+            |_| {
+                let home = std::env::var("HOME").expect("HOME");
+                PathBuf::from(home).join(".cache/katalogr-scratch/FEAT-096")
+            },
+            PathBuf::from,
+        );
+        std::fs::create_dir_all(&base).unwrap();
+        tempfile::Builder::new()
+            .prefix("bench-")
+            .tempdir_in(base)
+            .unwrap()
+    }
+
+    /// FEAT-096 R-18: `index_digest` over 15,000 file revisions takes at most 30 ms (median of 9).
+    #[test]
+    #[ignore]
+    fn index_digest_cost() {
+        use katalogr_dist::{kindex_init, project_init};
+        use katalogr_model::RelPath;
+        let tmp = scratch_096();
+        let root = std::fs::canonicalize(tmp.path()).unwrap();
+        let repo = root.join("app");
+        std::fs::create_dir_all(&repo).unwrap();
+        let kx = root.join("kx");
+        kindex_init(&kx).unwrap();
+        project_init(&kx, "demo", vec![("app".into(), repo)], false).unwrap();
+        let dir = Kindex::open(camino::Utf8Path::from_path(&kx).unwrap())
+            .unwrap()
+            .project(&ProjectName::new("demo").unwrap())
+            .unwrap();
+        let cache = Cache::open(
+            &dir,
+            std::time::Instant::now() + std::time::Duration::from_secs(30),
+        )
+        .unwrap();
+        let mut tx = cache.write().unwrap();
+        for i in 0..15_000 {
+            let path = RelPath::new(&format!("dir{}/file{i}.tx", i % 150)).unwrap();
+            tx.put_file_revision("app", &path, &format!("revision-{i}"))
+                .unwrap();
+        }
+        tx.commit().unwrap();
+        let load_before = load();
+        let mut ms = Vec::new();
+        let mut digest = String::new();
+        for _ in 0..9 {
+            let rx = cache.read().unwrap();
+            let t = Instant::now();
+            digest = rx.index_digest().unwrap();
+            ms.push(t.elapsed().as_secs_f64() * 1000.0);
+        }
+        ms.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        let median = ms[4];
+        println!(
+            "index_digest_cost: median {median:.1} ms, max {:.1} ms over 9 reads of 15,000 rows; digest {}; load {load_before} -> {}",
+            ms[8],
+            &digest[..12],
+            load()
+        );
+        assert!(median <= 30.0, "{median:.1} ms is over 30 ms");
+    }
+
+    /// FEAT-096 R-18: a miss (compute, then write) costs at most 10% plus 50 ms over a run with
+    /// the store off, for each command that stores. Medians of 7 runs, interleaved.
+    #[cfg(feature = "test-extractor")]
+    #[test]
+    #[ignore]
+    fn stored_answer_miss_overhead() {
+        use katalogr_analytics::{
+            CommunityOptions, CycleOptions, DeadCodeOptions, DeadConfidence, GraphOptions,
+            HubOptions, Level,
+        };
+        use katalogr_dist::{Katalogr, Options, Overrides, kindex_init, project_init};
+        let git = |dir: &Path, args: &[&str]| {
+            let out = std::process::Command::new("git")
+                .args([
+                    "-c",
+                    "user.name=t",
+                    "-c",
+                    "user.email=t@t",
+                    "-c",
+                    "commit.gpgsign=false",
+                ])
+                .args(args)
+                .current_dir(dir)
+                .output()
+                .unwrap();
+            assert!(out.status.success(), "{args:?}");
+        };
+        let tmp = scratch_096();
+        let root = std::fs::canonicalize(tmp.path()).unwrap();
+        let repo = root.join("app");
+        std::fs::create_dir_all(&repo).unwrap();
+        // 400 files of 40 functions, each calling a few functions of the next file.
+        for f in 0..400 {
+            let mut text = String::new();
+            for n in 0..40 {
+                text.push_str(&format!("sym fn f{f}_{n}\n"));
+            }
+            for n in 0..40 {
+                for k in 0..3 {
+                    text.push_str(&format!(
+                        "link f{f}_{n} calls f{}_{}\n",
+                        (f + 1) % 400,
+                        (n + k) % 40
+                    ));
+                }
+            }
+            std::fs::write(repo.join(format!("m{f}.tx")), text).unwrap();
+        }
+        git(&repo, &["init", "-q", "-b", "main"]);
+        git(&repo, &["add", "."]);
+        git(&repo, &["commit", "-q", "-m", "base"]);
+        let kx = root.join("kx");
+        kindex_init(&kx).unwrap();
+        project_init(&kx, "demo", vec![("app".into(), repo.clone())], true).unwrap();
+        let facade = |build: Option<&str>| {
+            let mut k = Katalogr::resolve(
+                &repo,
+                &Overrides {
+                    kindex: Some(kx.display().to_string()),
+                    ..Overrides::default()
+                },
+            )
+            .unwrap();
+            k.set_answer_build(build.map(str::to_string));
+            k
+        };
+        let off = facade(None);
+        let opts = Options {
+            timeout: Some(3600.0),
+            ..Options::default()
+        };
+        off.index(None, true, None, &opts).unwrap();
+        let on = facade(Some("bench"));
+        let g = || GraphOptions::new(Level::Symbol, true);
+        let fresh = Options {
+            fresh: true,
+            ..opts.clone()
+        };
+        type Run<'a> = Box<dyn Fn(&Katalogr, &Options) + 'a>;
+        let runs: Vec<(&str, Run)> = vec![
+            (
+                "hubs",
+                Box::new(|k, o| {
+                    k.hubs(
+                        &HubOptions {
+                            graph: g(),
+                            min_degree: 0.0,
+                            limit: 50,
+                        },
+                        o,
+                    )
+                    .unwrap();
+                }),
+            ),
+            (
+                "communities",
+                Box::new(|k, o| {
+                    k.communities(
+                        &CommunityOptions {
+                            graph: g(),
+                            seed: 1,
+                            resolution: 1.0,
+                            min_size: 3,
+                            members: 5,
+                            limit: 20,
+                            of: None,
+                        },
+                        o,
+                    )
+                    .unwrap();
+                }),
+            ),
+            (
+                "cycles",
+                Box::new(|k, o| {
+                    k.cycles(
+                        &CycleOptions {
+                            graph: g(),
+                            members: 5,
+                            limit: 20,
+                        },
+                        o,
+                    )
+                    .unwrap();
+                }),
+            ),
+            (
+                "dead-code",
+                Box::new(|k, o| {
+                    k.dead_code(
+                        DeadCodeOptions {
+                            code_kinds: Default::default(),
+                            exclude_kinds: g().exclude_kinds,
+                            internal: false,
+                            min_confidence: DeadConfidence::Low,
+                            path_prefix: None,
+                            limit: 50,
+                        },
+                        o,
+                    )
+                    .unwrap();
+                }),
+            ),
+            (
+                "map",
+                Box::new(|k, o| {
+                    k.map(o).unwrap();
+                }),
+            ),
+        ];
+        let load_before = load();
+        let mut failures = Vec::new();
+        for (name, run) in &runs {
+            let (mut off_ms, mut miss_ms) = (Vec::new(), Vec::new());
+            for _ in 0..7 {
+                let t = Instant::now();
+                run(&off, &opts);
+                off_ms.push(t.elapsed().as_secs_f64() * 1000.0);
+                // `fresh` computes and still writes: the cost of a miss.
+                let t = Instant::now();
+                run(&on, &fresh);
+                miss_ms.push(t.elapsed().as_secs_f64() * 1000.0);
+            }
+            off_ms.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            miss_ms.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            let (base, miss) = (off_ms[3], miss_ms[3]);
+            let line = base * 1.10 + 50.0;
+            println!(
+                "stored_answer_miss_overhead: {name}: store off {base:.1} ms, miss {miss:.1} ms (line {line:.1}); load {load_before} -> {}",
+                load()
+            );
+            if miss > line {
+                failures.push(format!("{name}: {miss:.1} ms over {line:.1}"));
+            }
+        }
+        assert!(failures.is_empty(), "{}", failures.join("; "));
+    }
+
+    // ---- diff report budgets (FEAT-095 R-18) ------------------------------------------
+    //
+    // Corpus: `KATALOGR_BENCH_CORPUS_ROOT` is a read-only git clone, and `KATALOGR_BENCH_DIFF_A`
+    // and `KATALOGR_BENCH_DIFF_B` are two revisions of it. The kindex lives under
+    // `~/.cache/katalogr-scratch/FEAT-095/` (or `KATALOGR_SCRATCH`) and is removed when the
+    // bench ends. A miss is reported, never fixed by changing a budget. Run one at a time:
+    // `systemd-run --user --scope -p MemoryMax=8G env KATALOGR_THREADS=4 flock
+    // ~/.cache/heavy-build.lock cargo test -p katalogr-dist --release --test bench diff_ --
+    // --ignored --nocapture --test-threads=1`.
+
+    fn scratch_095() -> tempfile::TempDir {
+        let base = std::env::var("KATALOGR_SCRATCH").map_or_else(
+            |_| {
+                let home = std::env::var("HOME").expect("HOME");
+                PathBuf::from(home).join(".cache/katalogr-scratch/FEAT-095")
+            },
+            PathBuf::from,
+        );
+        std::fs::create_dir_all(&base).unwrap();
+        tempfile::Builder::new()
+            .prefix("bench-")
+            .tempdir_in(base)
+            .unwrap()
+    }
+
+    fn bench_env(name: &str) -> Option<String> {
+        let v = std::env::var(name).ok().filter(|v| !v.is_empty());
+        if v.is_none() {
+            println!("skipped: {name} is not set");
+        }
+        v
+    }
+
+    /// Peak resident set of this process so far (`VmHWM`), in MiB.
+    fn peak_rss_095() -> u64 {
+        std::fs::read_to_string("/proc/self/status")
+            .unwrap_or_default()
+            .lines()
+            .find_map(|l| l.strip_prefix("VmHWM:"))
+            .and_then(|v| v.split_whitespace().next()?.parse::<u64>().ok())
+            .map_or(0, |kib| kib / 1024)
+    }
+
+    /// The corpus as project `bench` (repo `corpus`), indexed, with stored answers on.
+    fn diff_project() -> Option<(tempfile::TempDir, Katalogr, String, String)> {
+        let root = bench_env("KATALOGR_BENCH_CORPUS_ROOT")?;
+        let a = bench_env("KATALOGR_BENCH_DIFF_A")?;
+        let b = bench_env("KATALOGR_BENCH_DIFF_B")?;
+        let tmp = scratch_095();
+        let kx = tmp.path().join("kx");
+        kindex_init(&kx).unwrap();
+        // `mark` false: the clone is read-only, so no `.katalogr` marker is written.
+        project_init(
+            &kx,
+            "bench",
+            vec![("corpus".to_string(), PathBuf::from(root))],
+            false,
+        )
+        .unwrap();
+        let mut k = Katalogr::resolve(
+            &kx,
+            &Overrides {
+                kindex: Some(kx.display().to_string()),
+                project: Some("bench".to_string()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        k.set_answer_build(Some("bench".to_string()));
+        let opts = Options {
+            timeout: Some(7200.0),
+            consistency: Some(katalogr_dist::Consistency::WaitAll),
+            ..Options::default()
+        };
+        k.index(None, true, None, &opts).unwrap();
+        Some((tmp, k, a, b))
+    }
+
+    fn diff_request(a: &str, b: &str) -> katalogr_dist::diff::DiffRequest {
+        katalogr_dist::diff::DiffRequest {
+            a: a.to_string(),
+            b: b.to_string(),
+            repo: Some("corpus".to_string()),
+            limit: 200,
+        }
+    }
+
+    /// R-18: a stored report is read back in at most 100 ms (p95 of 40 reads), with no context.
+    #[test]
+    #[ignore]
+    fn diff_hit_budget() {
+        let Some((_tmp, k, a, b)) = diff_project() else {
+            return;
+        };
+        let opts = Options {
+            timeout: Some(7200.0),
+            ..Options::default()
+        };
+        let req = diff_request(&a, &b);
+        k.diff_report(&req, &opts).unwrap();
+        let load_before = load();
+        let mut ms = Vec::new();
+        for _ in 0..40 {
+            let t = Instant::now();
+            k.diff_report(&req, &opts).unwrap();
+            ms.push(t.elapsed().as_secs_f64() * 1000.0);
+        }
+        ms.sort_by(|x, y| x.partial_cmp(y).unwrap());
+        let p95 = ms[37];
+        println!(
+            "diff_hit_budget: p95 {p95:.1} ms, median {:.1} ms over 40 reads; peak RSS {} MiB; load {load_before} -> {}",
+            ms[20],
+            peak_rss_095(),
+            load()
+        );
+        assert!(p95 <= 100.0, "{p95:.1} ms is over 100 ms");
+    }
+
+    /// R-18: a build with both contexts present takes at most 60 s. Prints the three formats'
+    /// sizes, peak RSS and load; those have no budget.
+    #[test]
+    #[ignore]
+    fn diff_build_budget() {
+        let Some((_tmp, k, a, b)) = diff_project() else {
+            return;
+        };
+        let opts = Options {
+            timeout: Some(7200.0),
+            ..Options::default()
+        };
+        let req = diff_request(&a, &b);
+        // The first report seeds and indexes both contexts; they stay for the timed run.
+        let t = Instant::now();
+        k.diff_report(&req, &opts).unwrap();
+        let cold = t.elapsed().as_secs_f64();
+        let fresh = Options {
+            fresh: true,
+            ..opts.clone()
+        };
+        let load_before = load();
+        let t = Instant::now();
+        let r = k.diff_report(&req, &fresh).unwrap();
+        let secs = t.elapsed().as_secs_f64();
+        let json = match &r.outcome {
+            katalogr_dist::Outcome::Found(d) => serde_json::to_vec(d).unwrap().len(),
+            _ => 0,
+        };
+        let page = |f| match k.diff_page(&req, f, &opts).unwrap().outcome {
+            katalogr_dist::Outcome::Found(p) => p.text.len(),
+            _ => 0,
+        };
+        println!(
+            "diff_build_budget: cold {cold:.1} s; with contexts {secs:.1} s; sizes json {json} B, markdown {} B, html {} B; peak RSS {} MiB; load {load_before} -> {}",
+            page(katalogr_dist::diff::DiffRender::Markdown),
+            page(katalogr_dist::diff::DiffRender::Html),
+            peak_rss_095(),
+            load()
+        );
+        assert!(secs <= 60.0, "{secs:.1} s is over 60 s");
+    }
+
+    // FEAT-097 R-20. The corpus is one git checkout named by `KATALOGR_BENCH_CORPUS_ROOT`, read
+    // in place and never written; it must be clean and committed. The kindexes and the snapshot
+    // live under `~/.cache/katalogr-scratch/FEAT-097/` (or `KATALOGR_SCRATCH`) and are removed
+    // when the bench ends. Run once, under the heavy-job lock, in release:
+    // `flock ~/.cache/heavy-build.lock cargo test -p katalogr-dist --release --features
+    // test-extractor --test bench snapshot_round_trip_budget -- --ignored --nocapture`.
+
+    fn scratch_097() -> tempfile::TempDir {
+        let base = std::env::var("KATALOGR_SCRATCH").map_or_else(
+            |_| {
+                let home = std::env::var("HOME").expect("HOME");
+                PathBuf::from(home).join(".cache/katalogr-scratch/FEAT-097")
+            },
+            PathBuf::from,
+        );
+        std::fs::create_dir_all(&base).unwrap();
+        tempfile::Builder::new()
+            .prefix("bench-")
+            .tempdir_in(base)
+            .unwrap()
+    }
+
+    /// A project `bench` holding the corpus as repo `corpus`, in its own kindex under `dir`.
+    fn project_097(dir: &Path, corpus: &Path) -> Katalogr {
+        let kx = dir.join("kx");
+        kindex_init(&kx).unwrap();
+        // `mark` false: the corpus may be a read-only clone, so no `.katalogr` marker is written.
+        project_init(
+            &kx,
+            "bench",
+            vec![("corpus".to_string(), corpus.to_path_buf())],
+            false,
+        )
+        .unwrap();
+        Katalogr::resolve(
+            &kx,
+            &Overrides {
+                kindex: Some(kx.display().to_string()),
+                project: Some("bench".to_string()),
+                ..Default::default()
+            },
+        )
+        .unwrap()
+    }
+
+    /// Export, import and the index after it, against a cold index (FEAT-097 R-20). Prints each
+    /// wall time, the file size, peak RSS and the load average, then the budgets with PASS or
+    /// MISS. A miss is reported, not fixed: only the graph comparison asserts.
+    #[test]
+    #[ignore]
+    fn snapshot_round_trip_budget() {
+        let corpus = PathBuf::from(
+            std::env::var("KATALOGR_BENCH_CORPUS_ROOT")
+                .expect("set KATALOGR_BENCH_CORPUS_ROOT to a clean git checkout"),
+        );
+        let scratch = scratch_097();
+        let opts = Options {
+            timeout: Some(7200.0),
+            ..Options::default()
+        };
+        let load0 = load();
+
+        // 1. Cold index.
+        let source = project_097(&scratch.path().join("source"), &corpus);
+        let t = Instant::now();
+        let r = source.index(None, true, None, &opts).unwrap();
+        let cold = t.elapsed().as_secs_f64();
+        assert!(!r.stale && !r.timed_out, "cold index did not finish");
+        println!("cold index: {cold:.1} s; load {load0} -> {}", load());
+        let want = source.audit_record(&opts).unwrap().graph_digest;
+
+        // 2. Export.
+        let file = scratch.path().join("corpus.ksnap");
+        let file8 = camino::Utf8PathBuf::from_path_buf(file.clone()).unwrap();
+        let load1 = load();
+        let t = Instant::now();
+        let exported = source.snapshot_export(&file8, &opts).unwrap();
+        let export_s = t.elapsed().as_secs_f64();
+        println!(
+            "export: {export_s:.1} s; file {} bytes from a database of {} bytes; load {load1} -> {}",
+            exported.file_bytes,
+            exported.manifest.bytes,
+            load()
+        );
+        drop(source);
+
+        // 3. Import into an empty project.
+        let target = project_097(&scratch.path().join("target"), &corpus);
+        let load2 = load();
+        let t = Instant::now();
+        let imported = target.snapshot_import(&file8, false, None, &opts).unwrap();
+        let import_s = t.elapsed().as_secs_f64();
+        println!(
+            "import: {import_s:.1} s; facts match {}; load {load2} -> {}",
+            imported.facts_match,
+            load()
+        );
+
+        // 4. Index after the import: the snapshot's commit is the checkout's, so nothing differs.
+        let load3 = load();
+        let t = Instant::now();
+        let r = target.index(None, false, None, &opts).unwrap();
+        let index_s = t.elapsed().as_secs_f64();
+        assert!(
+            !r.stale && !r.timed_out,
+            "index after import did not finish"
+        );
+        println!(
+            "index after import: {index_s:.1} s; load {load3} -> {}",
+            load()
+        );
+
+        // 5. The graph is the same.
+        let have = target.audit_record(&opts).unwrap().graph_digest;
+        assert_eq!(have, want, "the imported graph differs from the source's");
+
+        let saving = 1.0 - (import_s + index_s) / cold;
+        let verdict = |ok: bool| if ok { "PASS" } else { "MISS" };
+        println!(
+            "snapshot_round_trip_budget: peak RSS {} MiB; load now {}",
+            peak_rss_mib(),
+            load()
+        );
+        println!(
+            "  export <= 15 s: {} ({export_s:.1} s)\n  import <= 5 s: {} ({import_s:.1} s)\n  import + index saves >= 90% of a cold index: {} ({:.1}%)\n  snapshot size: {} bytes (recorded, no budget)",
+            verdict(export_s <= 15.0),
+            verdict(import_s <= 5.0),
+            verdict(saving >= 0.9),
+            saving * 100.0,
+            exported.file_bytes
+        );
+    }
 }

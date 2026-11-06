@@ -21,7 +21,7 @@ use katalogr_query::{Explain, SymbolHit};
 use katalogr_store::blob::git_blob_id;
 use katalogr_store::{Reader, StoreError, SymbolRow};
 use serde_json::{Value, json};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use std::io::Write;
 use std::panic::AssertUnwindSafe;
 use std::path::{Path, PathBuf};
@@ -273,14 +273,11 @@ fn pre_read(
             let Some(row) = tx.artifact(artifact.id())? else {
                 return Ok(None);
             };
-            let ranks: BTreeMap<String, f64> = katalogr_query::rank(tx)?
-                .into_iter()
-                .map(|(s, r)| (s.name, r))
-                .collect();
+            let ranks = katalogr_query::file_symbol_ranks(tx, &row.symbols)?;
             let mut symbols = Vec::new();
             for id in &row.symbols {
                 if let Some(s) = tx.symbol(*id)? {
-                    let r = ranks.get(&s.name.canonical()).copied().unwrap_or(0.0);
+                    let r = ranks.get(id).copied().unwrap_or(0.0);
                     symbols.push((s, r));
                 }
             }
@@ -599,6 +596,24 @@ impl Katalogr {
         let inbox = katalogr_engine::queue::Inbox::new(&layer);
         for ev in &events {
             inbox.append(ev)?;
+        }
+        // A merge asks for a report between the two heads. Only a file is written here; a later
+        // `index` builds it. A failure is logged, never raised.
+        if hook == "post-merge" && self.diff_on_merge() {
+            let queued = (|| {
+                let a = katalogr_engine::base::resolve_commit(root.as_std_path(), "ORIG_HEAD")?;
+                let b = katalogr_engine::base::resolve_commit(root.as_std_path(), "HEAD")?;
+                if a != b {
+                    crate::diff_requests::queue_diff_request(&self.project, repo, &a, &b)?;
+                }
+                Ok::<(), DistError>(())
+            })();
+            if let Err(e) = queued {
+                log(
+                    self.project.cache_dir().as_std_path(),
+                    &format!("git post-merge diff request: {e}"),
+                );
+            }
         }
         // When the branch that moved is the default branch, the base follows it. A failed
         // advance never fails the hook; the next one retries from the recorded commit.

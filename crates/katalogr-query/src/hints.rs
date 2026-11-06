@@ -18,6 +18,12 @@ impl HintSource for Vec<DanglingRef> {
     }
 }
 /// A drift is followed up by looking at the contract, which `explain` can do from the output.
+/// A package listing is followed up through the code it names, not one symbol.
+impl HintSource for Vec<crate::deps::DepHit> {
+    fn lead(&self) -> Option<String> {
+        None
+    }
+}
 impl HintSource for Vec<MirrorDrift> {
     fn lead(&self) -> Option<String> {
         None

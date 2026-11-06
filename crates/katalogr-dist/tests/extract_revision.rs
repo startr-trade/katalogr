@@ -14,6 +14,7 @@ fn extractors() -> Vec<(Box<dyn Extractor>, &'static str)> {
     vec![
         (Box::new(katalogr_ext_rust::RustExtractor), "rust"),
         (Box::new(katalogr_ext_ts::TsExtractor), "ts"),
+        (Box::new(katalogr_ext_deps::DepsExtractor), "deps"),
         (Box::new(katalogr_ext_sql::SqlExtractor), "sql"),
         (Box::new(katalogr_ext_openapi::OpenApiExtractor), "openapi"),
         (Box::new(katalogr_ext_schema::XsdExtractor), "xsd"),

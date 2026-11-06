@@ -12,3 +12,6 @@ publish = false
 boa_engine = { version = "=0.22.0", default-features = false }
 katalogr-web.workspace = true
 serde_json.workspace = true
+
+[dev-dependencies]
+katalogr-render.workspace = true

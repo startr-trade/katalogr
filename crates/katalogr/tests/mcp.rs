@@ -276,7 +276,7 @@ mod mcp {
         c.send(json!({"jsonrpc": "2.0", "id": "two", "method": "tools/list"}));
         let list = c.recv();
         assert_eq!(list["id"], "two");
-        assert!(list["result"]["tools"].as_array().unwrap().len() == 15);
+        assert!(list["result"]["tools"].as_array().unwrap().len() == 16);
         let found = c.call(3, "find", json!({"text": "target"}));
         assert_eq!(found["result"]["isError"], false, "{found}");
         let out = last_text(&found);
@@ -482,6 +482,7 @@ mod mcp {
                 "map",
                 "search",
                 "dangling",
+                "deps",
                 "why",
                 "docs-affected",
                 "impact",
@@ -538,7 +539,7 @@ mod mcp {
             assert_eq!(t["outputSchema"], want, "{name}");
             with_schema += 1;
         }
-        assert_eq!(with_schema, 13);
+        assert_eq!(with_schema, 14);
         // A client on an older protocol gets none.
         drop(c);
         let mut c = Client::spawn(&repo, &[], &["--output-schemas"]);
@@ -564,6 +565,7 @@ mod mcp {
             "map",
             "search",
             "dangling",
+            "deps",
             "why",
             "docs-affected",
             "impact",
@@ -753,6 +755,50 @@ mod mcp {
                 vec!["lineage", "target"],
             ),
         ]
+    }
+
+    /// FEAT-096 R-15. `map` over MCP gives the answer the CLI gives, from the same stored entry.
+    #[test]
+    fn stored_map_matches_cli() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (_kx, repo) = query_project(tmp.path());
+        let git = |args: &[&str]| {
+            let st = Command::new("git")
+                .current_dir(&repo)
+                .args(args)
+                .env("GIT_CONFIG_GLOBAL", "/dev/null")
+                .env("GIT_CONFIG_SYSTEM", "/dev/null")
+                .status()
+                .unwrap();
+            assert!(st.success(), "git {args:?}");
+        };
+        git(&["init", "-q"]);
+        git(&["config", "user.name", "Test"]);
+        git(&["config", "user.email", "test@example.com"]);
+        git(&["config", "commit.gpgsign", "false"]);
+        git(&["add", "."]);
+        git(&["commit", "-q", "-m", "c1"]);
+        let cli = |args: &[&str]| {
+            let out = Command::new(BIN)
+                .current_dir(&repo)
+                .env_remove("KATALOGR_KINDEX")
+                .env_remove("KATALOGR_PROJECT")
+                .env("KATALOGR_ANSWER_BUILD", "mcp-test")
+                .args(args)
+                .output()
+                .unwrap();
+            assert!(out.status.success(), "{args:?}: {out:?}");
+            String::from_utf8(out.stdout).unwrap()
+        };
+        // The CLI writes the entry; the server must read it and answer alike.
+        let from_cli: Value = serde_json::from_str(&cli(&["--json", "map", "--neutral"])).unwrap();
+        let mut c = Client::spawn(&repo, &[], &[]);
+        c.initialize("2025-06-18");
+        let r = c.call(1, "map", json!({}));
+        let text: Value = serde_json::from_str(&last_text(&r)).unwrap();
+        assert_eq!(text["items"], from_cli["items"]);
+        let stats: Value = serde_json::from_str(&cli(&["--json", "answers", "stats"])).unwrap();
+        assert!(stats["entries"].as_u64().unwrap() >= 1);
     }
 
     /// R-3. Every answer, text and `structuredContent`, validates against its `schema/v1`
@@ -1015,6 +1061,38 @@ mod mcp {
             }
             assert_eq!(got, want, "{tool} {args}: text differs from `{full:?}`");
             assert_eq!(exit_meta(&r), code as i64, "{tool} {args}");
+        }
+    }
+
+    /// FEAT-007 R-8. The `deps` tool prints what `deps --json` prints.
+    #[test]
+    fn deps_tool_matches_cli() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (_kx, repo) = query_project(tmp.path());
+        std::fs::write(repo.join("Cargo.lock"), "version = 3\n\n[[package]]\nname = \"alpha-lib\"\nversion = \"1.2.3\"\nsource = \"registry+https://registry.example/index\"\n\n[[package]]\nname = \"beta-lib\"\nversion = \"0.9.0\"\nsource = \"registry+https://registry.example/index\"\n").unwrap();
+        ok(&repo, &["index"]);
+        let mut c = Client::spawn(&repo, &[], &[]);
+        c.initialize("2025-06-18");
+        let cases: Vec<(Value, Vec<&str>)> = vec![
+            (json!({}), vec!["deps"]),
+            (
+                json!({"package": "alpha-lib"}),
+                vec!["deps", "--package", "alpha-lib"],
+            ),
+            (json!({"limit": 1}), vec!["deps", "--limit", "1"]),
+            (
+                json!({"used_by_limit": 2}),
+                vec!["deps", "--used-by-limit", "2"],
+            ),
+        ];
+        for (i, (args, cli)) in cases.iter().enumerate() {
+            let mut full = vec!["--json"];
+            full.extend(cli.iter().copied());
+            let (code, out, _) = run_raw(&repo, &full);
+            let r = c.call(i as u64 + 1, "deps", args.clone());
+            assert!(out.contains("-lib"), "{out}");
+            assert_eq!(last_text(&r), out.trim_end_matches('\n'), "{args}");
+            assert_eq!(exit_meta(&r), code as i64, "{args}");
         }
     }
 

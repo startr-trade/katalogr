@@ -342,6 +342,34 @@ mod api {
         }
     }
 
+    /// FEAT-007 R-8. The `deps` body is byte for byte what `deps --json` prints, with a filter and
+    /// a limit.
+    #[test]
+    fn deps_body_equals_cli_json() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (_kx, repo) = project(tmp.path());
+        std::fs::write(repo.join("Cargo.lock"), "version = 3\n\n[[package]]\nname = \"alpha-lib\"\nversion = \"1.2.3\"\nsource = \"registry+https://registry.example/index\"\n\n[[package]]\nname = \"beta-lib\"\nversion = \"0.9.0\"\nsource = \"registry+https://registry.example/index\"\n").unwrap();
+        ok(&repo, &["index"]);
+        let server = serve(&repo, &[]);
+        let cases: &[(&str, &[&str])] = &[
+            ("deps", &["deps"]),
+            ("deps?package=beta-lib", &["deps", "--package", "beta-lib"]),
+            ("deps?limit=1", &["deps", "--limit", "1"]),
+            ("deps?used-by-limit=3", &["deps", "--used-by-limit", "3"]),
+        ];
+        for (route, args) in cases {
+            let sep = if route.contains('?') { '&' } else { '?' };
+            let r = get(&server, &format!("/api/v1/{route}{sep}consistency=wait"));
+            assert_eq!(r.status, 200, "{route}: {r:?}");
+            let mut full = vec!["--json", "--consistency", "wait"];
+            full.extend_from_slice(args);
+            let out = cli(&repo, &full);
+            let want = String::from_utf8(out.stdout).unwrap();
+            assert!(want.contains("-lib"), "{want}");
+            assert_eq!(r.body, want.trim_end(), "{route}: {r:?}");
+        }
+    }
+
     /// R-10. The `impact` body is byte for byte what `impact --json` prints, for each way of
     /// giving the seeds and for the depth, limit and test-depth arguments.
     #[test]
@@ -590,6 +618,7 @@ mod api {
         ("map", ""),
         ("search", "terms=caller"),
         ("dangling", ""),
+        ("deps", ""),
         ("mirrors", ""),
         ("status", ""),
         ("docs-affected", ""),
@@ -687,6 +716,8 @@ mod api {
             "api",
             // The API plus the web view's pages.
             "serve",
+            // Writes a file for reviewers (FEAT-034).
+            "export",
             "mcp",
             "eval",
             "profiles",
@@ -697,8 +728,17 @@ mod api {
             // Writes a record into the project (`record`), or compares with one (`verify`); its
             // answers are its own types, not envelopes (FEAT-094 R-14).
             "audit",
+            // Inspects and tidies the stored answers of this machine (FEAT-096): a maintenance
+            // command with its own report types, not an envelope.
+            "answers",
             // Prints one file's extracted text for a person, writing nothing (FEAT-094 R-13).
             "shard",
+            // Exports a snapshot of the index to a file, or imports one (FEAT-097): it writes, and its
+            // answers are its own types, not envelopes.
+            "snapshot",
+            // Builds, stores and prints a diff report between two positions (FEAT-095); it has no
+            // route, and its report is its own type, not an envelope.
+            "diff",
             // Draws a view for a person; the generated views are `view`, served under
             // `/api/v1/views/`.
             "render",

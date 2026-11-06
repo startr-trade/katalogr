@@ -54,6 +54,10 @@ pub enum StoreError {
     Row(String),
     #[error("stitch: {0}")]
     Stitch(String),
+    #[error("not a usable snapshot: {0}")]
+    BadSnapshot(String),
+    #[error("snapshot format {0} is newer than this binary reads")]
+    SnapshotFormat(u32),
 }
 
 impl StoreError {

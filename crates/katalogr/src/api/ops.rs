@@ -406,6 +406,23 @@ fn dangling(k: &Katalogr, a: &Args, o: &Options) -> JsonAnswer {
     })
 }
 
+fn deps(k: &Katalogr, a: &Args, o: &Options) -> JsonAnswer {
+    let package = a.opt("package").filter(|s| !s.is_empty());
+    let (limit, used_by_limit) = (a.int("limit") as usize, a.int("used-by-limit") as usize);
+    let dopts = katalogr_dist::DepsOptions {
+        package: package.map(str::to_string),
+        limit,
+        used_by_limit,
+    };
+    let o = q(
+        o,
+        a,
+        "deps",
+        &crate::cmd::deps::args(package, limit, used_by_limit),
+    );
+    answer(k.deps(&dopts, &o), |r| render_json::list(r, a.budget(), ""))
+}
+
 fn mirrors(k: &Katalogr, a: &Args, o: &Options) -> JsonAnswer {
     let kinds = kinds(a);
     let o = q(o, a, "mirrors", &[("kinds", kinds.join(","))]);
@@ -786,6 +803,22 @@ pub const OPS: &[Op] = &[
         )],
         Some("dangling"),
         Call::Project(dangling)
+    ),
+    op!(
+        "deps",
+        "Package versions the lockfiles pin, the members that pin them and the code that uses them.",
+        &[
+            opt("package", Ty::Str, "only this package name"),
+            dflt("limit", Ty::Int(1), "1000", "how many versions to list"),
+            dflt(
+                "used-by-limit",
+                Ty::Int(1),
+                "20",
+                "how many users to list per version"
+            ),
+        ],
+        Some("deps"),
+        Call::Project(deps)
     ),
     op!(
         "mirrors",
@@ -1247,4 +1280,47 @@ pub fn view_id_now(start: &Path, op: &Op, args: &Args, overrides: &Overrides) ->
 /// The route of `name` in `ops`.
 pub fn find_op<'a>(ops: &'a [Op], name: &str) -> Option<&'a Op> {
     ops.iter().find(|o| o.name == name)
+}
+
+/// One facade call for `op`: the project is resolved for it, or the op resolves for itself.
+pub fn call_op(
+    start: &Path,
+    op: &Op,
+    args: &Args,
+    overrides: &Overrides,
+    o: &Options,
+) -> JsonAnswer {
+    match op.call {
+        Call::Project(f) => match Katalogr::resolve(start, overrides) {
+            Ok(k) => f(&k, args, o),
+            Err(e) => render_json::error(&e),
+        },
+        Call::Free(f) => f(start, overrides, args, o),
+    }
+}
+
+/// One row by name, exactly as a request would run it, with no socket and no gate: the same
+/// validation, the same base options and the same renderer. An unknown name or a bad parameter
+/// is `DistError::Usage`.
+pub fn call_by_name(
+    start: &Path,
+    overrides: &Overrides,
+    name: &str,
+    params: &BTreeMap<String, String>,
+) -> Result<JsonAnswer, DistError> {
+    let op = find_op(OPS, name).ok_or_else(|| DistError::Usage(format!("no such op: {name}")))?;
+    let args = Args::parse(op.params, params).map_err(|e| DistError::Usage(e.message))?;
+    let mut overrides = overrides.clone();
+    overrides.context = args.opt("context").map(str::to_string);
+    let base = Options {
+        consistency: Some(args.consistency()),
+        timeout: args.float("timeout"),
+        diagnostic: false,
+        expand: false,
+        at: args.opt("at").map(str::to_string),
+        view: None,
+        ranking: katalogr_dist::Ranking::Neutral,
+        fresh: false,
+    };
+    Ok(call_op(start, op, &args, &overrides, &base))
 }

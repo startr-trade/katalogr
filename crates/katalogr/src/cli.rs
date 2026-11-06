@@ -31,6 +31,14 @@ pub enum LevelArg {
     Package,
 }
 
+/// The page format of `diff`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+#[value(rename_all = "kebab-case")]
+pub enum DiffFormat {
+    Markdown,
+    Html,
+}
+
 /// Output format of `render`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 #[value(rename_all = "kebab-case")]
@@ -62,6 +70,55 @@ pub enum RenderAction {
         #[arg(long)]
         strict: bool,
     },
+}
+
+/// Output format of `export graph`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+#[value(rename_all = "kebab-case")]
+pub enum GraphFormat {
+    Dot,
+    Graphml,
+    Json,
+}
+
+/// The arguments of `katalogr export html` (FEAT-034). `--at` and `--timeout` are the global
+/// flags.
+#[cfg(feature = "web")]
+#[derive(Debug, clap::Args)]
+pub struct ExportHtmlArgs {
+    /// The file to write.
+    #[arg(long, value_name = "FILE")]
+    pub out: std::path::PathBuf,
+    /// The most connected symbols that get a page in the file.
+    #[arg(long, default_value_t = 200, value_name = "N")]
+    pub max_symbols: usize,
+    /// Also put source lines in the file; by default it holds signatures and doc comments only.
+    #[arg(long)]
+    pub with_source: bool,
+}
+
+/// The arguments of `katalogr export graph` (FEAT-034).
+#[derive(Debug, clap::Args)]
+pub struct ExportGraphArgs {
+    /// `dot`, `graphml` or `json` (Cytoscape elements).
+    #[arg(long, value_enum, value_name = "FORMAT")]
+    pub format: Option<GraphFormat>,
+    /// The file to write.
+    #[arg(long, value_name = "FILE")]
+    pub out: Option<std::path::PathBuf>,
+    /// The view: an op, then its arguments and flags, as `view` takes them.
+    #[arg(allow_hyphen_values = true, value_name = "OP [ARGS]")]
+    pub words: Vec<String>,
+}
+
+/// Static exports for reviewers (FEAT-034).
+#[derive(Debug, Subcommand)]
+pub enum ExportAction {
+    /// Write one self-contained offline file holding the web view's views and their data.
+    #[cfg(feature = "web")]
+    Html(ExportHtmlArgs),
+    /// Write one view as DOT, GraphML or Cytoscape JSON, for Gephi, yEd or Cytoscape.
+    Graph(ExportGraphArgs),
 }
 
 /// Document modes of `view` (FEAT-035).
@@ -193,6 +250,10 @@ pub struct Cli {
     /// Limit query output to about this many tokens (estimated as characters / 4).
     #[arg(long, global = true, value_name = "TOKENS")]
     pub budget: Option<u64>,
+
+    /// Compute the answer again instead of reading a stored one. The result is still stored.
+    #[arg(long, global = true)]
+    pub fresh: bool,
 
     #[command(subcommand)]
     pub command: Option<Command>,
@@ -351,6 +412,12 @@ pub enum Command {
         #[arg(allow_hyphen_values = true, value_name = "OP [ARGS]")]
         words: Vec<String>,
     },
+    /// Write static files for reviewers: `html` (one offline file with the web view's views) or
+    /// `graph` (one view as DOT, GraphML or JSON).
+    Export {
+        #[command(subcommand)]
+        action: ExportAction,
+    },
     /// Describe a symbol: signature, doc, links and rationale.
     Explain {
         /// Canonical name or plain name.
@@ -406,6 +473,9 @@ pub enum Command {
         /// Index the commits that carry item trailers (`Refs:`).
         #[arg(long)]
         history: bool,
+        /// Do not build the diff reports that merges asked for.
+        #[arg(long)]
+        no_reports: bool,
     },
     /// Show the index watermark, pending changes and staleness.
     Status,
@@ -576,6 +646,19 @@ pub enum Command {
         #[arg(long, value_name = "KIND")]
         kind: Vec<String>,
     },
+    /// List the package versions the lockfiles pin, with the members that pin each and the code
+    /// that uses the package.
+    Deps {
+        /// Only this package name.
+        #[arg(long, value_name = "NAME")]
+        package: Option<String>,
+        /// How many package versions to list.
+        #[arg(long, default_value_t = katalogr_dist::DEFAULT_DEPS_LIMIT, value_name = "N")]
+        limit: usize,
+        /// How many users of a package to list per version.
+        #[arg(long, default_value_t = katalogr_dist::DEFAULT_USED_BY_LIMIT, value_name = "N")]
+        used_by_limit: usize,
+    },
     /// List documents linked to code that changed since a revision (default: the merge-base with
     /// the default branch), up to `--at` (default: this checkout, uncommitted changes included).
     DocsAffected {
@@ -647,15 +730,57 @@ pub enum Command {
         #[command(subcommand)]
         action: ProfilesAction,
     },
+    /// Inspect and tidy the stored answers of `hubs`, `communities`, `cycles`, `dead-code`,
+    /// `map` and `coverage`.
+    Answers {
+        #[command(subcommand)]
+        action: AnswersAction,
+    },
     /// Record the index's digest at the current positions, and check a re-index against it.
     Audit {
         #[command(subcommand)]
         action: AuditAction,
     },
+    /// Write the graph to one file, or install such a file as this project's index.
+    Snapshot {
+        #[command(subcommand)]
+        action: SnapshotAction,
+    },
     /// Print what the index holds about one file, as text.
     Shard {
         #[command(subcommand)]
         action: ShardAction,
+    },
+    /// Report what changed in the code's structure between two commits, branches or releases:
+    /// symbols added, removed, moved or changed, links, contracts, and shifts in hubs, cycles,
+    /// communities and coverage. The report is stored and read back; `--json` gives the data.
+    Diff {
+        /// The earlier revision (a commit, branch or tag).
+        #[arg(required_unless_present = "requested", conflicts_with = "requested")]
+        a: Option<String>,
+        /// The later revision.
+        #[arg(required_unless_present = "requested", conflicts_with = "requested")]
+        b: Option<String>,
+        /// Build the reports that merges asked for, then stop.
+        #[arg(long)]
+        requested: bool,
+        /// The repo; default: the current one.
+        #[arg(long, value_name = "NAME")]
+        repo: Option<String>,
+        /// The page format on standard output or in `--out`. Default: markdown.
+        #[arg(long, value_enum, value_name = "FORMAT", conflicts_with = "json")]
+        format: Option<DiffFormat>,
+        /// Entries per list.
+        #[arg(long, default_value_t = 200, value_name = "N")]
+        limit: usize,
+        /// Write the report to this file instead of standard output. Refused where git would
+        /// track it.
+        #[arg(long, value_name = "FILE", conflicts_with = "out_dir")]
+        out: Option<std::path::PathBuf>,
+        /// Write `diff-<a12>-<b12>.json`, `.md` and `.html` into this folder. Refused where git
+        /// would track them.
+        #[arg(long, value_name = "DIR")]
+        out_dir: Option<std::path::PathBuf>,
     },
     /// Compare mirrored copies of a structure: contracts with two or more declarers. Exits 1
     /// when a field is missing on one side or differs in type, required or many.
@@ -751,6 +876,28 @@ pub enum ContextAction {
 }
 
 #[derive(Debug, Subcommand)]
+pub enum AnswersAction {
+    /// Compare each stored answer of the current position and build with a fresh computation.
+    /// Exits 0 when all match, 1 when one differs, 5 when the position cannot be held.
+    Check {
+        /// Check at most this many entries, in view-ID order.
+        #[arg(long, value_name = "N")]
+        limit: Option<usize>,
+        /// Remove the entries that differ.
+        #[arg(long)]
+        repair: bool,
+    },
+    /// Count the stored answers and their bytes, by command.
+    Stats,
+    /// Remove the oldest stored answers until at most this size remains.
+    Prune {
+        /// Megabytes to keep (default: the setting `answers.max_mib`).
+        #[arg(long, value_name = "N")]
+        max_mib: Option<u64>,
+    },
+}
+
+#[derive(Debug, Subcommand)]
 pub enum AuditAction {
     /// Write `audit/<positions-hash>.json` in the project: the positions, the facts version and
     /// the digest of the graph. Meant for each release; commit the file in the kindex.
@@ -762,6 +909,38 @@ pub enum AuditAction {
         /// The record file (default: the stored record of the current positions).
         #[arg(value_name = "RECORD")]
         record: Option<String>,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum SnapshotAction {
+    /// Write the context's graph to FILE: a text header with the positions, facts version, cache
+    /// schema and digest, then the compressed database. Refuses when the index is not current,
+    /// a repo is not at a clean commit, or FILE would be tracked by git. The file holds symbol
+    /// names, paths and signature text: keep it as private as the code.
+    Export {
+        /// The file to write (name it `*.ksnap`); it must not exist.
+        #[arg(long, value_name = "FILE")]
+        out: String,
+    },
+    /// Install FILE as the project's base index, atomically. Checks the schema, the repos and the
+    /// digest first. A later read re-extracts only what differs from the snapshot's commits.
+    /// Exits 1 for a damaged file and 5 for a refusal. `--context` is not accepted.
+    Import {
+        file: String,
+        /// Install over an existing index.
+        #[arg(long)]
+        replace: bool,
+        /// The digest to expect, as printed by `snapshot show`; compared before any decoding.
+        #[arg(long, value_name = "HEX")]
+        digest: Option<String>,
+    },
+    /// Print FILE's manifest. Needs no project unless `--verify`.
+    Show {
+        file: String,
+        /// Decode the payload to a temporary file and check its digest.
+        #[arg(long)]
+        verify: bool,
     },
 }
 

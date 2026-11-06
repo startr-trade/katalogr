@@ -23,6 +23,7 @@ katalogr-ext-sql.workspace = true
 katalogr-ext-md.workspace = true
 katalogr-ext-kanbanr.workspace = true
 katalogr-ext-data.workspace = true
+katalogr-ext-deps.workspace = true
 katalogr-ext-text.workspace = true
 katalogr-ext-schema.workspace = true
 katalogr-ext-openapi.workspace = true
@@ -43,3 +44,4 @@ sha2.workspace = true
 [dev-dependencies]
 tempfile.workspace = true
 camino.workspace = true
+fs4.workspace = true

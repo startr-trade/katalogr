@@ -1,5 +1,6 @@
 //! The katalogr CLI: a thin wrapper over katalogr-dist (ADR-0010).
 
+mod answer_build;
 #[cfg(feature = "api")]
 mod api;
 mod cli;
@@ -48,7 +49,15 @@ fn run(cli: &Cli) -> Result<ExitCode, DistError> {
             range,
             full,
             history,
-        }) => cmd::index::run(cli, since.as_ref(), range.as_ref(), *full, *history),
+            no_reports,
+        }) => cmd::index::run(
+            cli,
+            since.as_ref(),
+            range.as_ref(),
+            *full,
+            *history,
+            *no_reports,
+        ),
         Some(Command::Status) => cmd::status::run(cli),
         Some(Command::Contract) => cmd::contract::run(cli),
         Some(Command::Watch { interval }) => cmd::watch::run(cli, *interval),
@@ -87,8 +96,15 @@ fn run(cli: &Cli) -> Result<ExitCode, DistError> {
         Some(Command::Context { action }) => cmd::context::run(cli, action),
         Some(Command::Profiles { action }) => cmd::profiles::run(cli, action),
         Some(Command::Shard { action }) => cmd::shard::run(cli, action),
+        Some(Command::Answers { action }) => cmd::answers::run(cli, action),
         Some(Command::Audit { action }) => cmd::audit::run(cli, action),
+        Some(Command::Snapshot { action }) => cmd::snapshot::run(cli, action),
         Some(Command::Dangling { kind }) => cmd::dangling::run(cli, kind),
+        Some(Command::Deps {
+            package,
+            limit,
+            used_by_limit,
+        }) => cmd::deps::run(cli, package.as_deref(), *limit, *used_by_limit),
         Some(Command::DocsAffected { since, kind, limit }) => {
             cmd::docs_affected::run(cli, since.as_deref(), kind, *limit)
         }
@@ -121,6 +137,28 @@ fn run(cli: &Cli) -> Result<ExitCode, DistError> {
             per_group,
             expand,
         }) => cmd::lineage::run(cli, text, *depth, *limit, *per_group, *expand),
+        Some(Command::Diff {
+            a,
+            b,
+            requested,
+            repo,
+            format,
+            limit,
+            out,
+            out_dir,
+        }) => cmd::diff::run(
+            cli,
+            &cmd::diff::Args {
+                a: a.as_deref(),
+                b: b.as_deref(),
+                requested: *requested,
+                repo: repo.as_deref(),
+                format: *format,
+                limit: *limit,
+                out: out.as_deref(),
+                out_dir: out_dir.as_deref(),
+            },
+        ),
         Some(Command::Mirrors { kind }) => cmd::mirrors::run(cli, kind),
         Some(Command::Hubs {
             level,
@@ -210,6 +248,7 @@ fn run(cli: &Cli) -> Result<ExitCode, DistError> {
             fresh,
             words,
         }) => cmd::view::run(cli, action.as_ref(), *fresh, words),
+        Some(Command::Export { action }) => cmd::export::run(cli, action),
         Some(Command::Explain { symbol, per_side }) => cmd::explain::run(cli, symbol, *per_side),
         Some(Command::Replace { symbol, file }) => cmd::replace::run(cli, symbol, file),
         None => {

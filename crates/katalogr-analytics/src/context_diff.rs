@@ -7,11 +7,11 @@ use katalogr_model::{Id, Name};
 use katalogr_query::result::{DanglingRef, Partial, cap};
 use katalogr_store::{LinkKey, Reader, StoreError};
 use schemars::JsonSchema;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
 /// One link, by the canonical names of its ends.
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, JsonSchema)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, JsonSchema)]
 pub struct LinkDelta {
     pub from: String,
     pub kind: String,
@@ -19,7 +19,7 @@ pub struct LinkDelta {
 }
 
 /// One measure in both contexts, as `graph.symbols`, `graph.links` and `graph.dangling`.
-#[derive(Clone, Debug, PartialEq, Serialize, JsonSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct MetricDelta {
     pub name: String,
     pub a: f64,
@@ -32,14 +32,14 @@ pub struct MetricDelta {
 /// What differs between context `a` and context `b`. A list cut by the limit adds one
 /// `limit` entry to `partial`, in the order `links_added`, `links_removed`, `dangling_added`,
 /// `dangling_removed`.
-#[derive(Clone, Debug, PartialEq, Serialize, JsonSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct ContextDiff {
     pub links_added: Vec<LinkDelta>,
     pub links_removed: Vec<LinkDelta>,
     pub dangling_added: Vec<DanglingRef>,
     pub dangling_removed: Vec<DanglingRef>,
     pub metrics: Vec<MetricDelta>,
-    #[serde(skip)]
+    #[serde(skip, default)]
     #[schemars(skip)]
     pub partial: Vec<Partial>,
 }
@@ -57,16 +57,16 @@ pub struct ContextConflicts {
 type DanglingKey = (String, String, Vec<String>);
 
 /// Per contract: its counts, and every `(symbol, role)` binding that names it.
-type Shapes = BTreeMap<Id, (String, BTreeSet<(Id, String)>)>;
+pub(crate) type Shapes = BTreeMap<Id, (String, BTreeSet<(Id, String)>)>;
 
-fn name_of(id: Id, readers: &[&dyn NameLookup]) -> String {
+pub(crate) fn name_of(id: Id, readers: &[&dyn NameLookup]) -> String {
     readers
         .iter()
         .find_map(|r| r.name(id))
         .unwrap_or_else(|| id.to_hex())
 }
 
-trait NameLookup {
+pub(crate) trait NameLookup {
     fn name(&self, id: Id) -> Option<String>;
 }
 
@@ -195,7 +195,7 @@ pub fn context_diff(
 }
 
 /// A contract as the graph holds it: its counts and every binding that names it.
-fn contract_shapes(tx: &impl Reader) -> Result<Shapes, StoreError> {
+pub(crate) fn contract_shapes(tx: &impl Reader) -> Result<Shapes, StoreError> {
     let mut out: Shapes = BTreeMap::new();
     for (id, row) in tx.contracts()? {
         let shape = format!("{}/{}/{}", row.providers, row.consumers, row.declarers);

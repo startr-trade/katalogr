@@ -83,7 +83,7 @@ pub struct ToolSpec {
     pub args: &'static [Arg],
 }
 
-/// Fixed order: find, refs, callers, explain, show, path, map, search, dangling, why,
+/// Fixed order: find, refs, callers, explain, show, path, map, search, dangling, deps, why,
 /// docs-affected, impact, lineage, index, status.
 pub const TOOLS: &[ToolSpec] = &[
     ToolSpec {
@@ -150,6 +150,16 @@ pub const TOOLS: &[ToolSpec] = &[
             "kind",
             Ty::Enum(&["links-to", "annotated-by", "refs-item", "contract"]),
         )],
+    },
+    ToolSpec {
+        name: "deps",
+        description: "Package versions the lockfiles pin, the members that pin them and the code that uses them.",
+        query: true,
+        args: &[
+            opt("package", Ty::Str),
+            opt_int("limit", 1, 1000),
+            opt_int("used_by_limit", 1, 20),
+        ],
     },
     ToolSpec {
         name: "why",
@@ -285,6 +295,7 @@ fn output_schema(name: &str) -> Option<JsonObject> {
         "map" => include_str!("../../../../schema/v1/map.schema.json"),
         "search" => include_str!("../../../../schema/v1/search.schema.json"),
         "dangling" => include_str!("../../../../schema/v1/dangling.schema.json"),
+        "deps" => include_str!("../../../../schema/v1/deps.schema.json"),
         "why" => include_str!("../../../../schema/v1/why.schema.json"),
         "docs-affected" => include_str!("../../../../schema/v1/docs-affected.schema.json"),
         "impact" => include_str!("../../../../schema/v1/impact.schema.json"),
@@ -474,10 +485,11 @@ pub fn call(cfg: &ServeConfig, name: &str, args: &Value) -> Result<JsonAnswer, U
     if let Some(c) = p.text("context") {
         overrides.context = Some(c.to_string());
     }
-    let k = match Katalogr::resolve(&cfg.root, &overrides) {
+    let mut k = match Katalogr::resolve(&cfg.root, &overrides) {
         Ok(k) => k,
         Err(e) => return Ok(render_json::error(&e)),
     };
+    k.set_answer_build(crate::answer_build::current());
     let budget = p.budget().or(cfg.budget);
     // The same `op` names and argument keys as the CLI, so both give one view ID.
     let mk = |op: &str, args: &[(&str, String)]| -> Options {
@@ -597,6 +609,24 @@ pub fn call(cfg: &ServeConfig, name: &str, args: &Value) -> Result<JsonAnswer, U
             let opts = &mk("dangling", &[("kinds", kinds.join(","))]);
             answer(Katalogr::dangling(&k, &kinds, opts), |r| {
                 render_json::dangling(r, budget)
+            })
+        }
+        "deps" => {
+            let package = p.text("package");
+            let limit = p.int("limit", katalogr_dist::DEFAULT_DEPS_LIMIT as u32) as usize;
+            let used_by_limit =
+                p.int("used_by_limit", katalogr_dist::DEFAULT_USED_BY_LIMIT as u32) as usize;
+            let dopts = katalogr_dist::DepsOptions {
+                package: package.map(str::to_string),
+                limit,
+                used_by_limit,
+            };
+            let opts = &mk(
+                "deps",
+                &crate::cmd::deps::args(package, limit, used_by_limit),
+            );
+            answer(Katalogr::deps(&k, &dopts, opts), |r| {
+                render_json::list(r, budget, "")
             })
         }
         "why" => {

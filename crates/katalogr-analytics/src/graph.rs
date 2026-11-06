@@ -3,7 +3,7 @@
 
 use crate::options::{CONTRACT_EDGE_CAP, CONTRACT_EDGE_KIND, GraphOptions};
 use crate::result::{Level, NodeHit};
-use katalogr_model::insight::FACT_PACKAGE;
+use katalogr_model::insight::{FACT_PACKAGE, is_external_kind};
 use katalogr_model::{Confidence, Fact, Id, Name};
 use katalogr_store::{
     ArtifactRow, ContractRow, LinkKey, LinkRow, RANK_CONTEXT, Reader, StoreError, SymbolCore,
@@ -235,8 +235,12 @@ impl InsightGraph {
         match opts.level {
             Level::Symbol => {
                 let mut file_index: HashMap<Id, u32> = HashMap::new();
-                for (i, (id, row)) in symbols.iter().enumerate() {
-                    node_of.insert(*id, i as u32);
+                for (id, row) in &symbols {
+                    // Nodes for code outside the project are not part of the structure.
+                    if is_external_kind(&row.kind) {
+                        continue;
+                    }
+                    node_of.insert(*id, nodes.len() as u32);
                     nodes.push(NodeHit {
                         level: Level::Symbol,
                         name: row.name.clone(),
@@ -306,6 +310,9 @@ impl InsightGraph {
         if opts.level != Level::Symbol {
             // Symbols (and, at package level, artifacts) map to the node of their file.
             for (id, row) in &symbols {
+                if is_external_kind(&row.kind) {
+                    continue;
+                }
                 if let Some(&n) = node_of.get(&row.artifact) {
                     node_of.insert(*id, n);
                 }

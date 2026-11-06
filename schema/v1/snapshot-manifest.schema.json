@@ -1,0 +1,63 @@
+{
+  "$defs": {
+    "SnapshotPosition": {
+      "description": "One repo's position, in the same shape as `PositionRef` of katalogr-query, which this crate\ndoes not depend on. `dirty` is always null in a snapshot.",
+      "properties": {
+        "commit": {
+          "type": "string"
+        },
+        "repo": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "repo",
+        "commit"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "bytes": {
+      "description": "Bytes of the decoded database.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "cache_schema": {
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "digest": {
+      "description": "64 lower-case hex: the SHA-256 of the decoded database.",
+      "type": "string"
+    },
+    "facts_version": {
+      "type": "string"
+    },
+    "format": {
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "positions": {
+      "description": "Sorted by repo.",
+      "items": {
+        "$ref": "#/$defs/SnapshotPosition"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "format",
+    "bytes",
+    "positions",
+    "facts_version",
+    "cache_schema",
+    "digest"
+  ],
+  "title": "SnapshotManifest",
+  "type": "object"
+}

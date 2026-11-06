@@ -4,7 +4,7 @@ use crate::diagnostic::Trace;
 use crate::position::PositionRef;
 use katalogr_model::{Confidence, Span};
 use schemars::JsonSchema;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 /// Outcome of resolving a piece of text to one symbol.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -35,7 +35,7 @@ pub(crate) enum ConfidenceSchema {
     Declared,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct SymbolHit {
     /// Canonical name.
     pub name: String,
@@ -169,7 +169,7 @@ pub struct WhySource {
 }
 
 /// A reference that names something no artifact exports.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct DanglingRef {
     /// The symbol (or artifact) the reference starts at.
     pub from: SymbolHit,
@@ -211,7 +211,7 @@ pub struct MirrorDrift {
     pub differences: Vec<FieldDiff>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct MapEntry {
     pub symbol: SymbolHit,
     pub in_degree: f64,
@@ -238,7 +238,9 @@ pub struct SearchHit {
 }
 
 /// Which way a link was followed.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, JsonSchema)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, JsonSchema,
+)]
 pub enum Direction {
     /// The link points from `from` to `to`.
     Forward,
@@ -246,7 +248,7 @@ pub enum Direction {
     Backward,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct PathStep {
     pub from: String,
     pub kind: String,
@@ -383,7 +385,7 @@ pub mod cap {
 pub const PARTIAL_NOTE: &str = "absence is not proof";
 
 /// The answer was cut by a cap: more items exist (or may exist) than are shown.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct Partial {
     /// Which cap: one of [`cap`]'s names.
     pub cap: String,

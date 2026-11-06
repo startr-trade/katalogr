@@ -1,0 +1,38 @@
+mode: exact
+symbols:
+- fx:pnpm-lock.yaml#member:root
+- fx:pnpm-lock.yaml#package:@scope%2Fbeta
+- fx:pnpm-lock.yaml#package:@scope%2Fbeta/version:2.0.0
+- fx:pnpm-lock.yaml#package:alpha-lib
+- fx:pnpm-lock.yaml#package:alpha-lib/version:1.4.0
+- fx:pnpm-lock.yaml#package:gamma
+- fx:pnpm-lock.yaml#package:gamma/version:3.0.0
+links:
+- from: fx:pnpm-lock.yaml#member:root
+  kind: depends-on
+  to: fx:pnpm-lock.yaml#package:@scope%2Fbeta/version:2.0.0
+  confidence: Extracted
+- from: fx:pnpm-lock.yaml#member:root
+  kind: depends-on
+  to: fx:pnpm-lock.yaml#package:alpha-lib/version:1.4.0
+  confidence: Extracted
+- from: fx:pnpm-lock.yaml#package:@scope%2Fbeta
+  kind: has-version
+  to: fx:pnpm-lock.yaml#package:@scope%2Fbeta/version:2.0.0
+  confidence: Extracted
+- from: fx:pnpm-lock.yaml#package:@scope%2Fbeta/version:2.0.0
+  kind: depends-on
+  to: fx:pnpm-lock.yaml#package:alpha-lib/version:1.4.0
+  confidence: Extracted
+- from: fx:pnpm-lock.yaml#package:@scope%2Fbeta/version:2.0.0
+  kind: depends-on
+  to: fx:pnpm-lock.yaml#package:gamma/version:3.0.0
+  confidence: Extracted
+- from: fx:pnpm-lock.yaml#package:alpha-lib
+  kind: has-version
+  to: fx:pnpm-lock.yaml#package:alpha-lib/version:1.4.0
+  confidence: Extracted
+- from: fx:pnpm-lock.yaml#package:gamma
+  kind: has-version
+  to: fx:pnpm-lock.yaml#package:gamma/version:3.0.0
+  confidence: Extracted

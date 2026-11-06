@@ -1,0 +1,43 @@
+mode: exact
+symbols:
+- fx:package-lock.json#member:demo-app
+- fx:package-lock.json#package:@scope%2Fbeta
+- fx:package-lock.json#package:@scope%2Fbeta/version:2.0.0
+- fx:package-lock.json#package:alpha-lib
+- fx:package-lock.json#package:alpha-lib/version:1.4.0
+- fx:package-lock.json#package:alpha-lib/version:2.1.0
+- fx:package-lock.json#package:gamma-dev
+- fx:package-lock.json#package:gamma-dev/version:3.0.0
+links:
+- from: fx:package-lock.json#member:demo-app
+  kind: depends-on
+  to: fx:package-lock.json#package:@scope%2Fbeta/version:2.0.0
+  confidence: Extracted
+- from: fx:package-lock.json#member:demo-app
+  kind: depends-on
+  to: fx:package-lock.json#package:alpha-lib/version:1.4.0
+  confidence: Extracted
+- from: fx:package-lock.json#member:demo-app
+  kind: depends-on
+  to: fx:package-lock.json#package:gamma-dev/version:3.0.0
+  confidence: Extracted
+- from: fx:package-lock.json#package:@scope%2Fbeta
+  kind: has-version
+  to: fx:package-lock.json#package:@scope%2Fbeta/version:2.0.0
+  confidence: Extracted
+- from: fx:package-lock.json#package:@scope%2Fbeta/version:2.0.0
+  kind: depends-on
+  to: fx:package-lock.json#package:alpha-lib/version:2.1.0
+  confidence: Extracted
+- from: fx:package-lock.json#package:alpha-lib
+  kind: has-version
+  to: fx:package-lock.json#package:alpha-lib/version:1.4.0
+  confidence: Extracted
+- from: fx:package-lock.json#package:alpha-lib
+  kind: has-version
+  to: fx:package-lock.json#package:alpha-lib/version:2.1.0
+  confidence: Extracted
+- from: fx:package-lock.json#package:gamma-dev
+  kind: has-version
+  to: fx:package-lock.json#package:gamma-dev/version:3.0.0
+  confidence: Extracted

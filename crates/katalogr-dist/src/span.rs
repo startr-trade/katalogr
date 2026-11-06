@@ -4,7 +4,7 @@
 //! never printed or overwritten.
 
 use crate::error::DistError;
-use crate::{Katalogr, Options, Outcome, Reply, unknown_root};
+use crate::{Katalogr, Options, Outcome, Reply};
 use katalogr_engine::{EventKind, NewEvent};
 use katalogr_model::RelPath;
 use katalogr_query::show::{Target, blob_of};
@@ -20,6 +20,8 @@ const STALE: &str = "the index is stale for this file; run `katalogr index`";
 enum Read {
     Fresh(PathBuf, Vec<u8>),
     Stale(String),
+    /// The repo has no root on this machine (FEAT-097 R-14).
+    NoCheckout(String),
 }
 
 /// Byte offsets of the start of every line, and the end of the text.
@@ -63,10 +65,12 @@ fn reject_contract(text: &str, command: &str) -> Result<(), DistError> {
 
 impl Katalogr {
     fn read_fresh(&self, t: &Target) -> Result<Read, DistError> {
-        let root = self
-            .roots
-            .get(&t.repo)
-            .ok_or_else(|| unknown_root(&t.repo))?;
+        let Some(root) = self.roots.get(&t.repo) else {
+            return Ok(Read::NoCheckout(format!(
+                "repo {} has no checkout here",
+                t.repo
+            )));
+        };
         let rel = RelPath::new(&t.symbol.path).map_err(|e| DistError::usage(e.to_string()))?;
         let file = root.join(rel.as_str());
         let canon_root = std::fs::canonicalize(root).map_err(|e| DistError::io(root, e))?;
@@ -146,6 +150,7 @@ impl Katalogr {
             let (_, bytes) = match self.read_fresh(t)? {
                 Read::Fresh(p, b) => (p, b),
                 Read::Stale(m) => return Ok(Outcome::StaleFile(m)),
+                Read::NoCheckout(m) => return Ok(Outcome::NoMatch(m)),
             };
             let text = String::from_utf8_lossy(&bytes);
             let Some((from, to)) = line_range(&text, lines.0, lines.1) else {
@@ -208,6 +213,7 @@ impl Katalogr {
         let (path, bytes) = match self.read_fresh(t)? {
             Read::Fresh(p, b) => (p, b),
             Read::Stale(m) => return Ok(Outcome::StaleFile(m)),
+            Read::NoCheckout(m) => return Ok(Outcome::NoMatch(m)),
         };
         let text = std::str::from_utf8(&bytes)
             .map_err(|_| DistError::usage(format!("{}: not UTF-8", t.symbol.path)))?;

@@ -29,6 +29,22 @@
 //! `KATALOGR_QUERY_PROJECT` name an index that is already built and is only read.
 //! `KATALOGR_QUERY_REPS` (default 5) is the number of runs per command.
 //!
+//! FEAT-096 R-17: `corpus_stored_answer_budget` runs each whole-graph command once with `--fresh`
+//! (which stores the answer), then `KATALOGR_QUERY_REPS` (default 10) stored runs, and checks the
+//! stored runs against the fresh one. It names the build with `KATALOGR_ANSWER_BUILD`, so the
+//! binary need not come from a clean checkout. The corpus repos must be clean git checkouts:
+//!
+//! ```text
+//! KATALOGR_BIN=<release binary> \
+//! KATALOGR_BUDGET_REPOS=name=/path/to/clone[,name2=/path2] \
+//! KATALOGR_STORED_BUDGET=insight_ms=300 \
+//!   cargo test -p katalogr-bench --release --test budget corpus_stored_answer_budget -- --ignored --nocapture
+//! ```
+//!
+//! `insight_ms` is 300 for XSD, SQL and JSON Schema corpora and 600 for Markdown; `map` must be at
+//! most half its fresh time and `coverage` at or under it. `KATALOGR_QUERY_KINDEX` and
+//! `KATALOGR_QUERY_PROJECT` name an index that is already built, as for `corpus_query_budget`.
+//!
 //! FEAT-080 R-10 and R-11: `concurrent_query_budget` indexes the corpus twice, once alone and
 //! once with `KATALOGR_CONCURRENT_WORKERS` (default 4) `stale-ok` query loops started after the
 //! first round has published. It fails on any query error, on a p95 over its line, on a slowdown
@@ -306,12 +322,13 @@ mod bench {
             ("query", "explain", vec!["explain", t]),
             ("query", "tests", vec!["tests", t]),
             ("session", "session-start", vec!["session-start"]),
-            ("map", "map", vec!["map"]),
-            ("insight", "hubs", vec!["hubs"]),
-            ("insight", "communities", vec!["communities"]),
-            ("insight", "cycles", vec!["cycles"]),
-            ("insight", "dead-code", vec!["dead-code"]),
-            ("insight", "coverage", vec!["coverage"]),
+            // These measure computation, so a stored answer must not serve them (FEAT-096 R-11).
+            ("map", "map", vec!["--fresh", "map"]),
+            ("insight", "hubs", vec!["--fresh", "hubs"]),
+            ("insight", "communities", vec!["--fresh", "communities"]),
+            ("insight", "cycles", vec!["--fresh", "cycles"]),
+            ("insight", "dead-code", vec!["--fresh", "dead-code"]),
+            ("insight", "coverage", vec!["--fresh", "coverage"]),
         ];
         let mut failures = Vec::new();
         for (group, command, args) in &plan {
@@ -696,5 +713,138 @@ mod bench {
             fields_limits("KATALOGR_FIELDS_SELF_LIMITS"),
             "self",
         );
+    }
+
+    /// FEAT-096 R-17: stored answers of the whole-graph commands are fast, and agree with the
+    /// computation. One `--fresh` run per command, then `reps` stored runs.
+    #[test]
+    #[ignore = "benchmark: needs a corpus; see the module comment"]
+    fn corpus_stored_answer_budget() {
+        let bin = Utf8PathBuf::from(env("KATALOGR_BIN"));
+        let spec: BTreeMap<String, u64> = env("KATALOGR_STORED_BUDGET")
+            .split(',')
+            .map(|kv| {
+                let (k, v) = kv
+                    .split_once('=')
+                    .unwrap_or_else(|| panic!("KATALOGR_STORED_BUDGET: bad entry `{kv}`"));
+                (
+                    k.trim().to_string(),
+                    v.trim().parse().unwrap_or_else(|_| {
+                        panic!("KATALOGR_STORED_BUDGET: `{kv}` is not a number")
+                    }),
+                )
+            })
+            .collect();
+        let insight_ms = *spec
+            .get("insight_ms")
+            .unwrap_or_else(|| panic!("KATALOGR_STORED_BUDGET lacks `insight_ms`"))
+            as f64;
+        let reps: usize = std::env::var("KATALOGR_QUERY_REPS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(10);
+        let _keep;
+        let k = match (
+            std::env::var("KATALOGR_QUERY_KINDEX"),
+            std::env::var("KATALOGR_QUERY_PROJECT"),
+        ) {
+            (Ok(kindex), Ok(project)) => Katalogr {
+                bin: bin.clone(),
+                kindex: Utf8PathBuf::from(kindex),
+                project,
+            },
+            _ => {
+                let tmp = tempfile::tempdir().expect("temporary kindex");
+                let root = Utf8Path::from_path(tmp.path())
+                    .expect("UTF-8 temporary directory")
+                    .to_owned();
+                _keep = tmp;
+                let k = new_project(&bin, &root, "kx", &env("KATALOGR_BUDGET_REPOS"));
+                let mut index = k.cmd(&["index", "--full"]);
+                index.env("KATALOGR_THREADS", "4");
+                let run = run_with_timeout(&mut index, Duration::from_secs(7200))
+                    .expect("run index --full");
+                assert_eq!(
+                    run.status,
+                    Some(0),
+                    "{}",
+                    String::from_utf8_lossy(&run.stderr)
+                );
+                k
+            }
+        };
+        let named = |args: &[&str]| {
+            let mut cmd = k.cmd(args);
+            cmd.env("KATALOGR_THREADS", "4")
+                .env("KATALOGR_ANSWER_BUILD", "budget");
+            cmd
+        };
+        let commands: [(&str, &[&str]); 6] = [
+            ("hubs", &["hubs"]),
+            ("communities", &["communities"]),
+            ("cycles", &["cycles"]),
+            ("dead-code", &["dead-code"]),
+            ("map", &["map", "--neutral"]),
+            ("coverage", &["coverage"]),
+        ];
+        let mut failures = Vec::new();
+        for (command, args) in commands {
+            let load = load_average();
+            let mut fresh_args = vec!["--fresh"];
+            fresh_args.extend(args);
+            let fresh =
+                run_with_timeout(&mut named(&fresh_args), Duration::from_secs(600)).expect("run");
+            // `cycles` exits 1 when it finds some: a correct answer.
+            let ok_codes: &[Option<i32>] = if command == "cycles" {
+                &[Some(0), Some(1)]
+            } else {
+                &[Some(0)]
+            };
+            assert!(
+                ok_codes.contains(&fresh.status),
+                "{command}: {:?}: {}",
+                fresh.status,
+                String::from_utf8_lossy(&fresh.stderr)
+            );
+            let fresh_ms = fresh.wall.as_secs_f64() * 1000.0;
+            let mut walls = Vec::new();
+            for _ in 0..reps {
+                let run =
+                    run_with_timeout(&mut named(args), Duration::from_secs(600)).expect("run");
+                assert_eq!(run.status, fresh.status, "{command}: stored run differs");
+                assert_eq!(
+                    run.stdout, fresh.stdout,
+                    "{command}: a stored answer is not the fresh one"
+                );
+                walls.push(run.wall.as_secs_f64() * 1000.0);
+            }
+            walls.sort_by(|a, b| a.total_cmp(b));
+            let (p50, p95) = (walls[walls.len() / 2], nearest_rank(&walls, 95.0));
+            println!(
+                "load {load} to {}: {command}: fresh {fresh_ms:.0} ms, stored p50 {p50:.0} ms, p95 {p95:.0} ms, {reps} runs",
+                load_average()
+            );
+            match command {
+                "map" if p50 > fresh_ms / 2.0 => failures.push(format!(
+                    "map: stored p50 {p50:.0} ms over half the fresh {fresh_ms:.0} ms"
+                )),
+                "coverage" if p50 > fresh_ms => failures.push(format!(
+                    "coverage: stored p50 {p50:.0} ms over the fresh {fresh_ms:.0} ms"
+                )),
+                "hubs" | "communities" | "cycles" | "dead-code" if p95 > insight_ms => {
+                    failures.push(format!("{command}: p95 {p95:.0} ms over {insight_ms}"))
+                }
+                _ => {}
+            }
+        }
+        // What the store holds, then the proof that it holds the truth.
+        let stats = run_with_timeout(&mut named(&["answers", "stats"]), Duration::from_secs(60))
+            .expect("answers stats");
+        println!("answers stats: {}", String::from_utf8_lossy(&stats.stdout));
+        let check = run_with_timeout(&mut named(&["answers", "check"]), Duration::from_secs(1800))
+            .expect("answers check");
+        println!("answers check: {}", String::from_utf8_lossy(&check.stdout));
+        assert_eq!(check.status, Some(0), "answers check found a difference");
+        assert!(failures.is_empty(), "{}", failures.join("; "));
     }
 }

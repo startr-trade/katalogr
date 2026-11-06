@@ -77,6 +77,17 @@ pub struct Answer<T> {
     pub warnings: Vec<String>,
 }
 
+/// What the reconcile found before the read's value is computed (FEAT-096). `exact` is the
+/// answer's exactness as far as it can be known then: nothing pending anywhere, every checkout's
+/// position read and recorded or recordable. A checkout edited while the value is computed still
+/// turns the returned [`Answer`] inexact. `positions` are the checkouts' positions when `exact`,
+/// else the last positions reached exactly, as in [`Answer`].
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ReadState {
+    pub positions: Vec<PositionRef>,
+    pub exact: bool,
+}
+
 /// Meta key prefix of the last position a repo reached exactly: compact JSON of a `PositionRef`.
 pub const POSITION_META: &str = "position.";
 /// Meta key prefix of the uncommitted paths of that position: JSON of [`ChangedSet`].
@@ -119,6 +130,9 @@ pub struct Engine {
     /// Repos whose position is fixed by the context, not read from a checkout: the commit the
     /// context reflects (`None`: no commit known). Such a repo is never reconciled.
     pins: BTreeMap<String, Option<String>>,
+    /// Repos with no root here that hold a recorded position (an imported snapshot, FEAT-097):
+    /// they answer from their rows, are never reconciled, and count as exact at that position.
+    recorded_only: BTreeSet<String>,
     /// Per repo `(include, exclude)` globs; a repo not listed uses the defaults.
     filters: BTreeMap<String, (Vec<String>, Vec<String>)>,
     /// Embedded profiles: `(file name, text)`, applied before the project's own.
@@ -197,6 +211,7 @@ impl Engine {
             roots,
             sources,
             pins: BTreeMap::new(),
+            recorded_only: BTreeSet::new(),
             filters: BTreeMap::new(),
             builtin_profiles: Vec::new(),
             parallelism: Parallelism::from_cores(),
@@ -220,6 +235,7 @@ impl Engine {
             registry,
             sources,
             pins,
+            recorded_only,
             stitcher,
             roots,
             filters,
@@ -236,6 +252,7 @@ impl Engine {
                 registry,
                 sources,
                 pins,
+                recorded_only,
                 stitcher,
                 roots,
                 filters,
@@ -307,6 +324,15 @@ impl Engine {
     /// pinned repo is not read from disk and nothing is queued for it.
     pub fn set_pinned_position(&mut self, repo: &str, commit: Option<String>) {
         self.pins.insert(repo.to_string(), commit);
+    }
+
+    /// FEAT-097. Repos with no root here that hold a recorded position, and so answer from
+    /// their rows. A repo with a root is never listed here.
+    pub fn set_recorded_only(&mut self, repos: BTreeSet<String>) {
+        self.recorded_only = repos
+            .into_iter()
+            .filter(|r| !self.roots.contains_key(r))
+            .collect();
     }
 
     /// FEAT-084. The position of `repo` as it is now: its pin, or the checkout read from disk
@@ -442,6 +468,15 @@ impl Engine {
         o: &QueryOptions,
         f: impl FnOnce(&ReadTx) -> T,
     ) -> Result<Answer<T>, EngineError> {
+        self.with_consistency_state(o, |tx, _| f(tx))
+    }
+
+    /// As [`Engine::with_consistency`], telling `f` what the reconcile found before `f` runs.
+    pub fn with_consistency_state<T>(
+        &self,
+        o: &QueryOptions,
+        f: impl FnOnce(&ReadTx, &ReadState) -> T,
+    ) -> Result<Answer<T>, EngineError> {
         let deadline = Instant::now() + o.timeout;
         let scope = match o.consistency {
             Consistency::WaitAll => Scope::Project,
@@ -478,7 +513,13 @@ impl Engine {
                 } else {
                     self.pending_in(&snap, &Scope::Project)?
                 };
-                let value = f(&snap);
+                let state = self.read_state(
+                    reconcile && unrecorded.is_empty(),
+                    all_pending == 0,
+                    &before,
+                    &recorded,
+                );
+                let value = f(&snap, &state);
                 drop(snap);
                 // Read after the value, so an edit made while it was computed is seen.
                 let (positions, exact) = self.settle(
@@ -528,6 +569,37 @@ impl Engine {
         }
     }
 
+    /// The state `f` is told: the positions read before the value, when nothing is pending and
+    /// every checkout was read; otherwise the recorded ones.
+    fn read_state(
+        &self,
+        reconcile: bool,
+        nothing_pending: bool,
+        before: &BTreeMap<String, WorkingState>,
+        recorded: &BTreeMap<String, PositionRef>,
+    ) -> ReadState {
+        if reconcile
+            && nothing_pending
+            && !(self.roots.is_empty() && self.recorded_only.is_empty())
+            && self.recorded_only.iter().all(|r| recorded.contains_key(r))
+            && before.len() == self.roots.len()
+        {
+            let mut positions: Vec<PositionRef> =
+                before.values().map(|s| s.position.clone()).collect();
+            positions.extend(self.recorded_only_positions(recorded));
+            positions.sort_by(|a, b| a.repo.cmp(&b.repo));
+            ReadState {
+                positions,
+                exact: true,
+            }
+        } else {
+            ReadState {
+                positions: recorded.values().cloned().collect(),
+                exact: false,
+            }
+        }
+    }
+
     /// The last position each repo reached exactly, from `snap`, sorted by repo.
     fn recorded_positions(
         &self,
@@ -548,7 +620,22 @@ impl Engine {
                 out.insert(repo.clone(), p);
             }
         }
+        for repo in &self.recorded_only {
+            if let Some(p) = recorded_position(snap, repo)? {
+                out.insert(repo.clone(), p);
+            }
+        }
         Ok(out)
+    }
+
+    /// The recorded positions of the repos with no root here.
+    fn recorded_only_positions<'a>(
+        &'a self,
+        recorded: &'a BTreeMap<String, PositionRef>,
+    ) -> impl Iterator<Item = PositionRef> + 'a {
+        self.recorded_only
+            .iter()
+            .filter_map(|r| recorded.get(r).cloned())
     }
 
     fn state_of(&self, repo: &str) -> Result<WorkingState, crate::scan::ScanError> {
@@ -707,10 +794,23 @@ impl Engine {
         recorded: BTreeMap<String, PositionRef>,
         warnings: &mut Vec<String>,
     ) -> Result<(Vec<PositionRef>, bool), EngineError> {
+        // FEAT-097 R-13. Said on every read, since the answer is not from a checkout.
+        for repo in &self.recorded_only {
+            if let Some(commit) = recorded.get(repo).and_then(|p| p.commit.as_deref()) {
+                warnings.push(format!(
+                    "repo {repo} has no checkout here: answering from its imported index at {}",
+                    &commit[..commit.len().min(12)]
+                ));
+            }
+        }
         let not_exact = |recorded: BTreeMap<String, PositionRef>| {
             (recorded.into_values().collect::<Vec<_>>(), false)
         };
-        if !reconcile || !nothing_pending || self.roots.is_empty() {
+        if !reconcile
+            || !nothing_pending
+            || (self.roots.is_empty() && self.recorded_only.is_empty())
+            || self.recorded_only.iter().any(|r| !recorded.contains_key(r))
+        {
             return Ok(not_exact(recorded));
         }
         let mut after = BTreeMap::new();
@@ -766,7 +866,10 @@ impl Engine {
             }
             tx.commit()?;
         }
-        Ok((after.into_values().map(|s| s.position).collect(), true))
+        let mut positions: Vec<PositionRef> = after.into_values().map(|s| s.position).collect();
+        positions.extend(self.recorded_only_positions(&recorded));
+        positions.sort_by(|a, b| a.repo.cmp(&b.repo));
+        Ok((positions, true))
     }
 }
 
