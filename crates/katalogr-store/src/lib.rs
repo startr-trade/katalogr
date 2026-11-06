@@ -31,7 +31,9 @@ pub use cache::{
     Posting, RANK_TOP_ENTRIES, RankTop, ReadTx, Reader, RefId, Snapshot, SymbolBrief, SymbolCore,
     SymbolRow, TableId, WriteTx,
 };
-pub use compact::{CompactMode, CompactOutcome, CompactPolicy, CompactReport, REWRITE_FILE};
+pub use compact::{
+    CompactMode, CompactOutcome, CompactPolicy, CompactReport, ExportPlan, REWRITE_FILE,
+};
 pub use context::{ContextId, ContextKind, ContextManifest, seed_layer};
 #[doc(hidden)]
 pub use dict::Memo;

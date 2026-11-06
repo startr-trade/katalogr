@@ -8,13 +8,14 @@
 use crate::codec::{self, EntryBrief, Pid, Vid};
 use crate::compact::{
     self, COMPACTED_BYTES_META, CompactMode, CompactOutcome, CompactPolicy, CompactReport,
+    ExportPlan,
 };
 use crate::dict;
 use crate::error::StoreError;
 use crate::fan;
 use crate::kindex::ProjectDir;
 use crate::postings::{self, PostingBuf};
-use camino::Utf8PathBuf;
+use camino::{Utf8Path, Utf8PathBuf};
 use katalogr_model::{
     ArtifactName, Confidence, ContractName, ContractRole, Export, ExportKey, Fact, Id, LinkKind,
     Name, OutRef, Provenance, RelPath, Span, SymbolName,
@@ -3258,6 +3259,20 @@ impl Cache {
     /// Whether `policy` asks for a compaction now (see [`CompactPolicy::due`]).
     pub fn compaction_due(&self, policy: &CompactPolicy) -> Result<bool, StoreError> {
         Ok(policy.due(self.file_bytes()?, self.compacted_bytes()?))
+    }
+
+    /// Writes a compacted copy of the current snapshot to `tmp`, applying `plan`, the same way as a
+    /// `CompactMode::Rewrite`. The live file is not touched. A read-only handle is refused.
+    pub fn export_copy(
+        &self,
+        tmp: &Utf8Path,
+        plan: &ExportPlan,
+        deadline: Instant,
+    ) -> Result<(), StoreError> {
+        match &*self.db.read().unwrap_or_else(PoisonError::into_inner) {
+            Handle::Writer(d) => compact::rewrite_with(d, tmp, plan, deadline),
+            Handle::Reader(_) => Err(StoreError::Row("export needs a writer handle".into())),
+        }
     }
 
     /// Compact the cache (R-6, R-7). Consumes the cache because a rewrite swaps the file.
