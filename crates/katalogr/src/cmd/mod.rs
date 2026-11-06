@@ -2,6 +2,7 @@
 
 #[cfg(feature = "api")]
 pub mod api;
+pub mod audit;
 pub mod callers;
 pub mod claude;
 pub mod communities;

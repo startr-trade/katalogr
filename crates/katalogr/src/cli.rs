@@ -539,6 +539,11 @@ pub enum Command {
         #[command(subcommand)]
         action: ProfilesAction,
     },
+    /// Record the index's digest at the current positions, and check a re-index against it.
+    Audit {
+        #[command(subcommand)]
+        action: AuditAction,
+    },
     /// Print what the index holds about one file, as text.
     Shard {
         #[command(subcommand)]
@@ -634,6 +639,21 @@ pub enum ContextAction {
         /// Keep at most this many.
         #[arg(long, value_name = "N")]
         keep: Option<usize>,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum AuditAction {
+    /// Write `audit/<positions-hash>.json` in the project: the positions, the facts version and
+    /// the digest of the graph. Meant for each release; commit the file in the kindex.
+    Record,
+    /// Compare the index with a record. Exits 0 on a match, 1 on a mismatch, 5 when the record
+    /// is not comparable (another facts version) or the checkouts are not at its positions,
+    /// and 4 when there is no record.
+    Verify {
+        /// The record file (default: the stored record of the current positions).
+        #[arg(value_name = "RECORD")]
+        record: Option<String>,
     },
 }
 

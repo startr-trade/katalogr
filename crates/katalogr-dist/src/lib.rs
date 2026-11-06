@@ -3,7 +3,9 @@
 //! All behaviour of the command-line wrapper lives here; the wrapper parses, calls and renders.
 
 mod at;
+mod audit;
 pub use at::position_without_board;
+pub use audit::{AuditOutcome, AuditRecord, PositionText};
 mod claude;
 mod docs_affected;
 pub use docs_affected::{DEFAULT_DOCS_LIMIT, DocsAffectedParams};
@@ -100,6 +102,10 @@ pub fn schemas() -> BTreeMap<&'static str, serde_json::Value> {
     assert!(
         all.insert("doctor", doctor::schema()).is_none(),
         "schema name doctor is registered twice"
+    );
+    assert!(
+        all.insert("audit", audit::schema()).is_none(),
+        "schema name audit is registered twice"
     );
     assert!(
         all.insert("contract", contract::schema()).is_none(),

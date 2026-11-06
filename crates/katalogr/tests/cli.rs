@@ -1080,6 +1080,36 @@ mod cli {
         assert_eq!(code, 0, "{err}");
         assert_eq!(tree_state(tmp.path()), before);
     }
+
+    /// R-14. `audit verify` exits 0 on a match, 1 on a mismatch, 5 when not comparable and 4
+    /// when there is no record.
+    #[test]
+    fn audit_exit_codes() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (kx, repo) = query_project(tmp.path());
+        assert_eq!(run_raw(&repo, &["audit", "verify"]).0, 4);
+        let (code, out, err) = run_raw(&repo, &["--json", "audit", "record"]);
+        assert_eq!(code, 0, "{err}");
+        let rec: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(run_raw(&repo, &["audit", "verify"]).0, 0);
+        let dir = kx.join("projects/demo/audit");
+        let file = std::fs::read_dir(&dir)
+            .unwrap()
+            .next()
+            .unwrap()
+            .unwrap()
+            .path();
+        let mut wrong = rec.clone();
+        wrong["graph_digest"] = "0".repeat(64).into();
+        std::fs::write(&file, wrong.to_string()).unwrap();
+        let path = file.to_str().unwrap();
+        assert_eq!(run_raw(&repo, &["audit", "verify", path]).0, 1);
+        wrong["facts_version"] = "f".repeat(64).into();
+        std::fs::write(&file, wrong.to_string()).unwrap();
+        let (code, out, _) = run_raw(&repo, &["--json", "audit", "verify", path]);
+        assert_eq!(code, 5);
+        assert!(out.contains("\"outcome\":\"not_comparable\""), "{out}");
+    }
 }
 
 mod query {
@@ -1112,7 +1142,7 @@ mod query {
     fn schemas_current() {
         let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../schema/v1");
         let fresh = katalogr_dist::schemas();
-        assert_eq!(fresh.len(), 28);
+        assert_eq!(fresh.len(), 29);
         for (name, schema) in fresh {
             let mut want = serde_json::to_string_pretty(&schema).unwrap();
             want.push('\n');
