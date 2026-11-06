@@ -7230,7 +7230,7 @@
         "description": "One problem (or notice) with a stable code and a recommended fix.",
         "properties": {
           "area": {
-            "description": "`marker`, `format`, `cache`, `journal`, `shards`, `queue`, `lock`, `parse`, `profile`,\n`git` or `roots`.",
+            "description": "`marker`, `format`, `cache`, `lock`, `revisions`, `queue`, `parse`, `profile`,\n`git` or `roots`.",
             "type": "string"
           },
           "code": {
