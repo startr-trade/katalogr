@@ -571,8 +571,7 @@ mod context {
             ..Options::default()
         };
         // Drained: the first add succeeds.
-        let info = k
-            .context_add_commit("app", &head, &Options::default())
+        k.context_add_commit("app", &head, &Options::default())
             .unwrap();
         let id = katalogr_store::ContextId::for_commit("app", &head);
         let layer = k.project().layer(&id);
