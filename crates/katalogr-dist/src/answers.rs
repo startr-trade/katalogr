@@ -545,6 +545,7 @@ impl Katalogr {
         let mut warnings = a.warnings;
         warnings.extend(store_warnings);
         let mut reply = Reply {
+            workspace: None,
             outcome: a.value?,
             partial: Vec::new(),
             folded: Vec::new(),

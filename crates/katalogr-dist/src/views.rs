@@ -543,6 +543,7 @@ impl Katalogr {
             && let Some(body) = store.get(id)
         {
             return Ok(Reply {
+                workspace: None,
                 outcome: Outcome::Found(ViewBytes {
                     body,
                     from_store: true,
@@ -619,6 +620,7 @@ impl Katalogr {
             diagnostic,
             partial,
             folded,
+            workspace,
         } = reply;
         let outcome = match outcome {
             Outcome::Found(graph) => {
@@ -668,6 +670,7 @@ impl Katalogr {
             }
         };
         Ok(Reply {
+            workspace,
             outcome,
             report,
             diagnostic,

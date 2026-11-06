@@ -114,6 +114,9 @@ mod workspace {
         let before = hash_tree(&kx.join("projects/a"));
         let st = b.workspace_status(&Options::default()).unwrap();
         assert_eq!(st[0].state, "ok");
+        // A read that joins the peer writes nothing into it either.
+        let r = b.refs("call", &Options::default()).unwrap();
+        assert!(r.workspace.is_some());
         assert_eq!(hash_tree(&kx.join("projects/a")), before);
     }
 
@@ -151,7 +154,9 @@ mod workspace {
             .workspace_status(&Options::default())
             .unwrap();
         assert_eq!(st[0].state, "ok", "{:?}", st[0]);
-        assert_eq!(st[0].positions.len(), 1);
+        // The rows answer; the repo can no longer be read, so its position shows nowhere.
+        assert!(st[0].positions.is_empty());
+        assert!(st[0].repos_absent.is_empty());
     }
 
     #[test]
@@ -163,6 +168,18 @@ mod workspace {
             .unwrap();
         assert_eq!(st[0].state, "not-found");
         assert!(st[0].fix.is_none());
+        // The read answers from what it has: local result, warning, partial and not exact.
+        let r = open(&kx, "b").refs("call", &Options::default()).unwrap();
+        assert!(matches!(r.outcome, katalogr_dist::Outcome::Found(_)));
+        assert!(
+            r.report.warnings.iter().any(|w| w.contains("ghost")),
+            "{:?}",
+            r.report.warnings
+        );
+        assert!(!r.report.exact);
+        assert_eq!(r.partial.len(), 1);
+        assert_eq!(r.partial[0].cap, "peers");
+        assert_eq!(r.workspace.unwrap().peers[0].state, "not-found");
     }
 
     #[test]
@@ -177,6 +194,13 @@ mod workspace {
         let fix = st[0].fix.as_deref().unwrap();
         assert!(fix.contains("--project a index --full"), "{fix}");
         assert!(!fix.contains(kx.to_str().unwrap()), "{fix}");
+        let r = open(&kx, "b").refs("call", &Options::default()).unwrap();
+        assert!(
+            r.report.warnings.iter().any(|w| w.contains("index --full")),
+            "{:?}",
+            r.report.warnings
+        );
+        assert!(!r.report.exact);
     }
 
     #[test]

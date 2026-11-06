@@ -2,6 +2,7 @@
 //! its repos the user may read, and reads one snapshot. The core names no technology; contract
 //! kinds and export namespaces are opaque strings.
 
+use crate::impact::ImpactReport;
 use crate::resolve::hit;
 use crate::result::SymbolHit;
 use katalogr_model::insight::is_external_kind;
@@ -217,4 +218,71 @@ pub fn parse_wanted(text: &str) -> Option<Wanted> {
         namespace: namespace.to_string(),
         key: key.to_string(),
     }))
+}
+
+/// The opaque text that replaces the name of a node the user cannot read.
+const HIDDEN: &str = "hidden";
+
+/// `report` with hits the user cannot read removed: group totals are recounted, names of restricted
+/// nodes are removed from each `chain`, and `seed` and `via` naming one become the opaque text
+/// `hidden`. Returns the filtered report and whether anything was removed.
+pub fn filter_report(
+    mut report: ImpactReport,
+    project: &str,
+    access: &dyn SourceAccess,
+) -> (ImpactReport, bool) {
+    // A name that parses to a symbol or artifact is restricted when its repo and path are not
+    // readable; contracts and text that is no name belong to no repo.
+    let restricted = |name: &str| match parse_name(name) {
+        Ok(AnyName::Symbol(s)) => !access.can_read(project, &s.artifact.repo, s.artifact.path.as_str()),
+        Ok(AnyName::Artifact(a)) => !access.can_read(project, &a.repo, a.path.as_str()),
+        _ => false,
+    };
+    let mut removed = false;
+    let mask = |text: &mut String, removed: &mut bool| {
+        if restricted(text) {
+            *text = HIDDEN.to_string();
+            *removed = true;
+        }
+    };
+    let before = report.seeds.len();
+    report.seeds.retain(|s| !restricted(&s.node.name));
+    removed |= report.seeds.len() != before;
+    let mut dropped = 0u64;
+    for g in &mut report.groups {
+        let n = g.hits.len();
+        g.hits.retain(|h| !restricted(&h.node.name));
+        dropped += (n - g.hits.len()) as u64;
+        for h in &mut g.hits {
+            let c = h.chain.len();
+            h.chain.retain(|n| !restricted(n));
+            removed |= h.chain.len() != c;
+            mask(&mut h.seed, &mut removed);
+            if let Some(v) = &mut h.via {
+                mask(v, &mut removed);
+            }
+        }
+    }
+    report.groups.retain(|g| !g.hits.is_empty());
+    if dropped > 0 {
+        removed = true;
+        report.total = report.total.map(|t| t.saturating_sub(dropped));
+    }
+    let n = report.tests.len();
+    report.tests.retain(|t| !restricted(&t.test.name));
+    removed |= report.tests.len() != n;
+    for t in &mut report.tests {
+        let c = t.chain.len();
+        t.chain.retain(|n| !restricted(n));
+        removed |= t.chain.len() != c;
+        mask(&mut t.seed, &mut removed);
+        if let Some(v) = &mut t.via {
+            mask(v, &mut removed);
+        }
+    }
+    // The repos of what the user cannot read are not listed either.
+    let repos = report.repos.len();
+    report.repos.retain(|r| access.can_read(project, r, ""));
+    removed |= report.repos.len() != repos;
+    (report, removed)
 }

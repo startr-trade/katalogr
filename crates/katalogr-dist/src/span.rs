@@ -125,6 +125,7 @@ impl Katalogr {
             }
         };
         Ok(Reply {
+            workspace: None,
             outcome,
             report: reply.report,
             diagnostic: None,
@@ -201,6 +202,7 @@ impl Katalogr {
             }
         };
         Ok(Reply {
+            workspace: None,
             outcome,
             report: reply.report,
             diagnostic: None,

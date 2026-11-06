@@ -182,7 +182,7 @@ fn closed(spec: &PeerSpec, state: &str, fix: Option<String>) -> OpenPeer {
     }
 }
 
-fn index_fix(spec: &PeerSpec) -> String {
+pub(crate) fn index_fix(spec: &PeerSpec) -> String {
     format!(
         "katalogr --kindex <dir> --project {} index --full",
         spec.project
@@ -276,6 +276,9 @@ fn open_one(
     };
     let access = RootsAccess::open(&spec.project, &repos, &peer_roots, Some(&snap));
     drop(snap);
+    // A repo the user cannot read shows nowhere, its position included, so that restricted
+    // structure changes no byte of an answer (R-11).
+    positions.retain(|p| access.readable.contains(&p.repo));
     let mut state = state_of(spec, "ok", None);
     state.positions = positions;
     state.repos_absent = absent;

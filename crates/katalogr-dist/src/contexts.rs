@@ -358,6 +358,7 @@ impl Katalogr {
         let diff = katalogr_analytics::context_diff::context_diff(&ra, &rb, limit)?;
         let partial = diff.partial.clone();
         Ok(Reply {
+            workspace: None,
             outcome: Outcome::Found(diff),
             report,
             diagnostic: None,
@@ -381,6 +382,7 @@ impl Katalogr {
         );
         let c = katalogr_analytics::context_diff::context_conflicts(&rbase, &ra, &rb)?;
         Ok(Reply {
+            workspace: None,
             outcome: Outcome::Found(c),
             report,
             diagnostic: None,

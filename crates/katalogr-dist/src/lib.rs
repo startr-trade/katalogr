@@ -51,6 +51,7 @@ mod view_store;
 pub use view_store::ViewStore;
 mod views;
 mod workspace;
+mod workspace_join;
 pub use views::{FreshCheck, ViewBytes};
 pub use workspace::{MAX_IMPACT_ROUNDS, PEERS_SETTING, PeerSpec, RootsAccess};
 pub mod watch;
@@ -521,6 +522,9 @@ pub struct Reply<T> {
     pub partial: Vec<Partial>,
     /// Folds of a `refs` or `callers` answer; empty for every other command and with `expand`.
     pub folded: Vec<Fold>,
+    /// What the peers of the reading project added (FEAT-020); `None` when it names none, or
+    /// with `--no-peers`.
+    pub workspace: Option<katalogr_query::WorkspaceBlock>,
 }
 
 /// What a `search` or `map` read learned about its working set.
@@ -1191,6 +1195,7 @@ impl Katalogr {
                     Ok(reply)
                 }
                 at::Resolved::Unavailable { wanted, available } => Ok(Reply {
+                    workspace: None,
                     outcome: Outcome::PositionUnavailable { wanted, available },
                     report: Report {
                         watermark: 0,
@@ -1255,6 +1260,7 @@ impl Katalogr {
             |tx| f(tx, &mut diag),
         )?;
         Ok(Reply {
+            workspace: None,
             outcome: a.value?,
             partial: Vec::new(),
             folded: Vec::new(),
@@ -1317,22 +1323,34 @@ impl Katalogr {
         })
     }
 
-    /// References to the symbol `text` names, through re-exports.
+    /// References to the symbol `text` names, through re-exports. A project that names peers also
+    /// gets the far ends of the contracts the symbol is bound to (FEAT-020).
     pub fn refs(&self, text: &str, opts: &Options) -> Result<Reply<Vec<RefHit>>, DistError> {
         let fold_from = (!opts.expand).then_some(katalogr_query::FOLD_FROM);
+        let _extra = self.extra_scope();
+        let mut peers = self.peers_for_read(opts)?;
         let mut folds = Vec::new();
+        let mut keys = katalogr_query::LinkKeys::default();
         let mut reply = self.query_traced(opts, |tx, diag| {
             on_target_traced(tx, text, diag, |t, diag| {
+                if !peers.is_empty() {
+                    keys = katalogr_query::link_keys(tx, t)?;
+                }
                 let f = katalogr_query::refs_folded_traced(tx, t, fold_from, diag)?;
                 folds = f.folds;
                 Ok(f.hits)
             })
         })?;
         reply.folded = folds;
+        if reply.is_found() {
+            let ends = workspace_join::peer_ends(&mut peers, &keys);
+            workspace_join::attach(&mut reply, &peers, ends, Vec::new());
+        }
         Ok(reply)
     }
 
-    /// Callers of the symbol `text` names, up to `depth` hops.
+    /// Callers of the symbol `text` names, up to `depth` hops. A project that names peers also
+    /// gets the far ends of the contracts the symbol provides and the callers came through.
     pub fn callers(
         &self,
         text: &str,
@@ -1344,10 +1362,29 @@ impl Katalogr {
         // `callers` treats a depth of 0 as 1.
         let depth = depth.max(1);
         let fold_from = (!opts.expand).then_some(katalogr_query::FOLD_FROM);
+        let _extra = self.extra_scope();
+        let mut peers = self.peers_for_read(opts)?;
         let mut folds = Vec::new();
+        let mut keys = katalogr_query::LinkKeys::default();
         let mut reply = self.query(opts, |tx| {
             on_target(tx, text, |t| {
                 let a = katalogr_query::callers_folded(tx, t, depth, fold_from)?;
+                if !peers.is_empty() {
+                    let mut ids = workspace_join::via_contracts(
+                        a.folded.hits.iter().filter_map(|h| h.via.as_deref()),
+                    );
+                    if t.kind == "contract" {
+                        ids.push(katalogr_model::Id::of(&t.name));
+                    } else {
+                        ids.extend(workspace_join::provided(
+                            tx,
+                            katalogr_model::Id::of(&t.name),
+                        )?);
+                    }
+                    ids.sort();
+                    ids.dedup();
+                    keys.contracts = ids;
+                }
                 if a.deeper {
                     partial.push(Partial::new(
                         cap::DEPTH,
@@ -1362,6 +1399,10 @@ impl Katalogr {
         })?;
         reply.partial = partial;
         reply.folded = folds;
+        if reply.is_found() {
+            let ends = workspace_join::peer_ends(&mut peers, &keys);
+            workspace_join::attach(&mut reply, &peers, ends, Vec::new());
+        }
         Ok(reply)
     }
 
@@ -1469,20 +1510,32 @@ impl Katalogr {
     }
 
     /// Unresolved references of the given kinds (default: Markdown links, annotations and
-    /// trailers), across the project.
+    /// trailers), across the project. An entry that a peer of the project resolves moves to the
+    /// answer's `workspace.resolved` (FEAT-020).
     pub fn dangling(
         &self,
         kinds: &[&str],
         opts: &Options,
     ) -> Result<Reply<Vec<DanglingRef>>, DistError> {
-        self.query(opts, |tx| {
+        let _extra = self.extra_scope();
+        let mut peers = self.peers_for_read(opts)?;
+        let mut reply = self.query(opts, |tx| {
             let kinds = if kinds.is_empty() {
                 katalogr_query::DANGLING_KINDS
             } else {
                 kinds
             };
             Ok(Outcome::Found(katalogr_query::dangling(tx, kinds)?))
-        })
+        })?;
+        if !peers.is_empty()
+            && let Outcome::Found(list) =
+                std::mem::replace(&mut reply.outcome, Outcome::NoMatch(String::new()))
+        {
+            let (keep, resolved) = workspace_join::resolve_dangling(&mut peers, list);
+            reply.outcome = Outcome::Found(keep);
+            workspace_join::attach(&mut reply, &peers, Vec::new(), resolved);
+        }
+        Ok(reply)
     }
 
     /// Contracts with two or more declarers (mirrored copies of a structure), compared field by
