@@ -84,7 +84,7 @@ pub struct ToolSpec {
 }
 
 /// Fixed order: find, refs, callers, explain, show, path, map, search, dangling, why,
-/// docs-affected, impact, index, status.
+/// docs-affected, impact, lineage, index, status.
 pub const TOOLS: &[ToolSpec] = &[
     ToolSpec {
         name: "find",
@@ -183,6 +183,18 @@ pub const TOOLS: &[ToolSpec] = &[
         ],
     },
     ToolSpec {
+        name: "lineage",
+        description: "What a type, schema element, symbol or contract is and where it goes.",
+        query: true,
+        args: &[
+            req("text", Ty::Str),
+            opt_int("depth", 1, 3),
+            opt_int("limit", 1, 200),
+            opt_int("per_group", 1, 10),
+            opt("expand", Ty::Bool),
+        ],
+    },
+    ToolSpec {
         name: "index",
         description: "Queue changes and bring the index up to date.",
         query: false,
@@ -276,6 +288,7 @@ fn output_schema(name: &str) -> Option<JsonObject> {
         "why" => include_str!("../../../../schema/v1/why.schema.json"),
         "docs-affected" => include_str!("../../../../schema/v1/docs-affected.schema.json"),
         "impact" => include_str!("../../../../schema/v1/impact.schema.json"),
+        "lineage" => include_str!("../../../../schema/v1/lineage.schema.json"),
         _ => return None,
     };
     match serde_json::from_str::<Value>(text) {
@@ -641,6 +654,30 @@ pub fn call(cfg: &ServeConfig, name: &str, args: &Value) -> Result<JsonAnswer, U
                     })
                 }
             }
+        }
+        "lineage" => {
+            let text = p.need("text");
+            let depth = p.int("depth", crate::cmd::lineage::DEFAULT_DEPTH);
+            let limit = p.int("limit", crate::cmd::lineage::DEFAULT_LIMIT as u32) as usize;
+            let per_group =
+                p.int("per_group", crate::cmd::lineage::DEFAULT_PER_GROUP as u32) as usize;
+            let expand = p.flag("expand");
+            let opts = &Options {
+                expand,
+                ..mk(
+                    "lineage",
+                    &crate::cmd::lineage::args(text, depth, limit, per_group, expand),
+                )
+            };
+            answer(
+                Katalogr::lineage(
+                    &k,
+                    text,
+                    crate::cmd::lineage::options(depth, limit, per_group),
+                    opts,
+                ),
+                render_json::lineage,
+            )
         }
         "index" => {
             let since = owned(p.text("since"));
