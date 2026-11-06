@@ -76,20 +76,32 @@ pub fn plan_views(capabilities: &[String]) -> Vec<PlannedCall> {
 
 /// The calls for one symbol's page, from its explain answer's path and line: `explain`, `why`
 /// at `path:line`, `tests`, the callers view, and `show` with `signature=true` unless
-/// `opts.with_source` is set.
-pub fn plan_symbol(name: &str, path: &str, line: u32, opts: &PlanOptions) -> Vec<PlannedCall> {
+/// `opts.with_source` is set. When `capabilities` holds `type-lineage`, also `lineage` (`text`)
+/// and the lineage view (`symbol`), so an embedded symbol keeps its lineage offline.
+pub fn plan_symbol(
+    name: &str,
+    path: &str,
+    line: u32,
+    opts: &PlanOptions,
+    capabilities: &[String],
+) -> Vec<PlannedCall> {
     let location = format!("{path}:{line}");
     let mut show = vec![("symbol", name)];
     if !opts.with_source {
         show.push(("signature", "true"));
     }
-    vec![
+    let mut calls = vec![
         PlannedCall::new("explain", &[("symbol", name)]),
         PlannedCall::new("why", &[("location", &location)]),
         PlannedCall::new("tests", &[("text", name)]),
         PlannedCall::new("views/callers", &[("symbol", name)]),
         PlannedCall::new("show", &show),
-    ]
+    ];
+    if capabilities.iter().any(|c| c == "type-lineage") {
+        calls.push(PlannedCall::new("lineage", &[("text", name)]));
+        calls.push(PlannedCall::new("views/lineage", &[("symbol", name)]));
+    }
+    calls
 }
 
 /// What JavaScript's `encodeURIComponent` leaves alone: `A-Za-z0-9-_.!~*'()`.

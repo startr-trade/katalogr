@@ -389,7 +389,7 @@ mod html_export {
                 .as_u64()
                 .or(node["span"]["start_line"].as_u64())
                 .unwrap_or(1) as u32;
-            for planned in plan_symbol(name, path, line, &opts) {
+            for planned in plan_symbol(name, path, line, &opts, &capabilities) {
                 c.run(&planned)?;
             }
             symbols.push(node);
