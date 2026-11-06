@@ -950,7 +950,10 @@ mod bench {
     }
 
     use crate::support::{artifact, link, open};
-    use katalogr_query::{ChangedFile, DocImpactInput, doc_impact};
+    use katalogr_query::{
+        ChangedFile, DocImpactInput, ImpactOptions, SEED_SYMBOL, Seed, doc_impact, impact,
+        seeds_for_changes,
+    };
 
     /// FEAT-086 R-9: 100 changed files on a 10,000-symbol graph (100 files of 100 symbols), each
     /// with a 100-line changed range, and 1,000 documents linking to symbols and files: within
@@ -1025,6 +1028,121 @@ mod bench {
             Duration::from_secs_f64(ms / 1000.0) < Duration::from_millis(200),
             "{ms} ms"
         );
+    }
+
+    /// The one-minute load average, printed next to every timing.
+    fn loadavg() -> String {
+        std::fs::read_to_string("/proc/loadavg")
+            .map(|s| s.split_whitespace().take(3).collect::<Vec<_>>().join(" "))
+            .unwrap_or_else(|_| "unknown".into())
+    }
+
+    /// FEAT-028 R-12 fixture: 100 files of 100 symbols (symbol `i` of a file spans lines
+    /// `10i+1..10i+10`), each symbol called by three others. Returns the symbol ids in file
+    /// order.
+    fn impact_graph(tmp: &tempfile::TempDir) -> (Cache, Vec<Id>) {
+        const FILES: usize = 100;
+        const PER_FILE: usize = 100;
+        const CALLERS: usize = 3;
+        let cache = open(tmp, &["r"]);
+        let mut all: Vec<Id> = Vec::new();
+        {
+            let mut tx = cache.write().unwrap();
+            let names: Vec<String> = (0..PER_FILE).map(|i| format!("s{i}")).collect();
+            for f in 0..FILES {
+                let syms: Vec<(&str, u32, u32)> = names
+                    .iter()
+                    .enumerate()
+                    .map(|(i, n)| (n.as_str(), (i * 10 + 1) as u32, (i * 10 + 10) as u32))
+                    .collect();
+                let (_, ids) = artifact(&mut tx, "r", &format!("src/f{f}.tx"), &syms);
+                all.extend(ids);
+            }
+            let n = all.len();
+            for g in 0..n {
+                for k in 0..CALLERS {
+                    let c = (g * 7 + k * 1009 + 13) % n;
+                    if c == g {
+                        continue;
+                    }
+                    link(
+                        &mut tx,
+                        "r",
+                        &format!("src/f{}.tx", c / PER_FILE),
+                        all[c],
+                        "calls",
+                        all[g],
+                    );
+                }
+            }
+            tx.commit().unwrap();
+        }
+        (cache, all)
+    }
+
+    /// FEAT-028 R-12: one symbol of the 10,000-symbol fixture at depth 3: within 100 ms.
+    #[test]
+    #[ignore]
+    fn impact_symbol_depth_3() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (cache, all) = impact_graph(&tmp);
+        let read = cache.read().unwrap();
+        let seeds = [Seed {
+            id: all[5050],
+            precision: SEED_SYMBOL,
+            wanted: None,
+        }];
+        let opts = ImpactOptions {
+            depth: 3,
+            limit: 500,
+            test_depth: 3,
+        };
+        let mut hits = 0;
+        let ms = best_ms(|| {
+            let r = impact(&read, &seeds, &opts).unwrap();
+            hits = r.groups.iter().map(|g| g.hits.len()).sum();
+        });
+        println!(
+            "bench::impact_symbol_depth_3: {ms} ms, {hits} hits, load {}",
+            loadavg()
+        );
+        assert!(hits > 0);
+        assert!(ms < 100.0, "{ms} ms");
+    }
+
+    /// FEAT-028 R-12: 100 changed files of the same fixture, each with a 100-line changed range.
+    /// Seeds from the changed lines, then depth 3, end to end: within 300 ms.
+    #[test]
+    #[ignore]
+    fn impact_range_100_files() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (cache, _all) = impact_graph(&tmp);
+        let changes: Vec<ChangedFile> = (0..100)
+            .map(|f| ChangedFile {
+                path: RelPath::new(&format!("src/f{f}.tx")).unwrap(),
+                kind: "modified".into(),
+                ranges: vec![(401, 500)],
+            })
+            .collect();
+        let read = cache.read().unwrap();
+        let opts = ImpactOptions {
+            depth: 3,
+            limit: 500,
+            test_depth: 3,
+        };
+        let (mut seeds_n, mut hits) = (0, 0);
+        let ms = best_ms(|| {
+            let seeds = seeds_for_changes(&read, "r", &changes).unwrap();
+            seeds_n = seeds.len();
+            let r = impact(&read, &seeds, &opts).unwrap();
+            hits = r.groups.iter().map(|g| g.hits.len()).sum();
+        });
+        println!(
+            "bench::impact_range_100_files: {ms} ms, {seeds_n} seeds, {hits} hits, load {}",
+            loadavg()
+        );
+        assert!(seeds_n > 0 && hits > 0);
+        assert!(ms < 300.0, "{ms} ms");
     }
 }
 
