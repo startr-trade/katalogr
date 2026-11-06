@@ -548,13 +548,13 @@ pub enum Command {
         #[arg(long, value_name = "CODE")]
         item: Option<String>,
         /// How many hops to follow.
-        #[arg(long, default_value_t = katalogr_dist::query::DEFAULT_IMPACT_DEPTH, value_name = "N")]
+        #[arg(long, default_value_t = crate::cmd::impact::DEFAULT_DEPTH, value_name = "N")]
         depth: u32,
         /// Most nodes in the groups, and most tests.
-        #[arg(long, default_value_t = katalogr_dist::query::DEFAULT_IMPACT_LIMIT, value_name = "N")]
+        #[arg(long, default_value_t = crate::cmd::impact::DEFAULT_LIMIT, value_name = "N")]
         limit: usize,
         /// How many hops the tests section follows.
-        #[arg(long, default_value_t = katalogr_dist::query::DEFAULT_TEST_DEPTH, value_name = "N")]
+        #[arg(long, default_value_t = crate::cmd::impact::DEFAULT_TEST, value_name = "N")]
         test_depth: u32,
     },
     /// List, add and remove contexts: the base, each checkout's own, and pinned commits.

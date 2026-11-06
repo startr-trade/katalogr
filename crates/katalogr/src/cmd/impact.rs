@@ -1,8 +1,24 @@
 //! `katalogr impact [SYMBOL] [--file PATH | --range BASE..HEAD | --since REV | --item CODE]
 //! [--depth N] [--limit N] [--test-depth N]`.
 
-use katalogr_dist::query::ImpactOptions;
+use katalogr_dist::query::{
+    DEFAULT_IMPACT_DEPTH, DEFAULT_IMPACT_LIMIT, DEFAULT_TEST_DEPTH, ImpactOptions,
+};
 use katalogr_dist::{DistError, ImpactInput};
+
+/// The CLI's defaults for `--depth`, `--limit` and `--test-depth`; the API and MCP share them.
+pub const DEFAULT_DEPTH: u32 = DEFAULT_IMPACT_DEPTH;
+pub const DEFAULT_LIMIT: usize = DEFAULT_IMPACT_LIMIT;
+pub const DEFAULT_TEST: u32 = DEFAULT_TEST_DEPTH;
+
+/// The facade options for these `--depth`, `--limit` and `--test-depth` values.
+pub fn options(depth: u32, limit: usize, test_depth: u32) -> ImpactOptions {
+    ImpactOptions {
+        depth,
+        limit,
+        test_depth,
+    }
+}
 
 use crate::cli::Cli;
 use crate::cmd::{options_for, resolve};
@@ -64,11 +80,7 @@ pub fn run(
     test_depth: u32,
 ) -> Result<ExitCode, DistError> {
     let facade_input = input.parse(cli.at.as_deref())?;
-    let iopts = ImpactOptions {
-        depth,
-        limit,
-        test_depth,
-    };
+    let iopts = options(depth, limit, test_depth);
     let reply = resolve(cli)?.impact(
         &facade_input,
         &iopts,

@@ -529,7 +529,7 @@ mod archtest {
     ];
 
     /// The facade calls `tools.rs` makes: each exactly once.
-    const MCP_FACADE_CALLS: [&str; 14] = [
+    const MCP_FACADE_CALLS: [&str; 15] = [
         "resolve",
         "find",
         "refs",
@@ -542,6 +542,7 @@ mod archtest {
         "dangling",
         "why",
         "docs_affected",
+        "impact",
         "index",
         "status",
     ];
@@ -756,7 +757,7 @@ mod archtest {
     ];
 
     /// The read calls an op row makes on the facade; each row makes exactly one.
-    const API_READ_CALLS: [&str; 26] = [
+    const API_READ_CALLS: [&str; 27] = [
         "find",
         "view",
         "refs",
@@ -772,6 +773,7 @@ mod archtest {
         "mirrors",
         "status",
         "docs_affected",
+        "impact",
         "position",
         "hubs",
         "cycles",

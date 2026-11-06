@@ -342,6 +342,50 @@ mod api {
         }
     }
 
+    /// R-10. The `impact` body is byte for byte what `impact --json` prints, for each way of
+    /// giving the seeds and for the depth, limit and test-depth arguments.
+    #[test]
+    fn impact_body_equals_cli_json() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (_kx, repo) = project(tmp.path());
+        let server = serve(&repo, &[]);
+        let cases: &[(&str, &[&str])] = &[
+            ("impact?text=target", &["impact", "target"]),
+            ("impact?file=lib.tx", &["impact", "--file", "lib.tx"]),
+            ("impact?since=HEAD", &["impact", "--since", "HEAD"]),
+            (
+                "impact?text=target&depth=1&limit=5&test-depth=2",
+                &[
+                    "impact",
+                    "target",
+                    "--depth",
+                    "1",
+                    "--limit",
+                    "5",
+                    "--test-depth",
+                    "2",
+                ],
+            ),
+        ];
+        for (route, args) in cases {
+            let sep = if route.contains('?') { '&' } else { '?' };
+            let r = get(&server, &format!("/api/v1/{route}{sep}consistency=wait"));
+            assert_eq!(r.status, 200, "{route}: {r:?}");
+            let mut full = vec!["--json", "--consistency", "wait"];
+            full.extend_from_slice(args);
+            let out = cli(&repo, &full);
+            assert!(out.status.success(), "{args:?}: {out:?}");
+            let want = String::from_utf8(out.stdout).unwrap();
+            assert_eq!(r.body, want.trim_end(), "{route}: {r:?}");
+        }
+        // A range and --at together are a usage error, as on the CLI.
+        let r = get(
+            &server,
+            "/api/v1/impact?range=HEAD~1..HEAD&at=HEAD&consistency=wait",
+        );
+        assert_eq!(r.status, 400, "{r:?}");
+    }
+
     /// R-3. `context` and `at` are parameters; a position nothing holds is 409.
     #[test]
     fn context_and_at_params() {
@@ -510,6 +554,7 @@ mod api {
         ("mirrors", ""),
         ("status", ""),
         ("docs-affected", ""),
+        ("impact", "text=target"),
         ("position", ""),
         ("hubs", ""),
         ("cycles", ""),
