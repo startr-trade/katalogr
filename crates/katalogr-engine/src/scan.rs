@@ -292,6 +292,82 @@ fn dirty_paths(repo_root: &std::path::Path) -> Result<Vec<String>, ScanError> {
     Ok(paths)
 }
 
+/// True when `path`'s folder is in no git work tree, or git ignores `path` and does not track it.
+/// `path` need not exist; the nearest existing folder above it decides which work tree it is in.
+pub fn output_outside_git(path: &std::path::Path) -> Result<bool, ScanError> {
+    use std::path::{Component, PathBuf};
+    let absolute = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::env::current_dir()
+            .map_err(|e| ScanError::Io {
+                path: path.display().to_string(),
+                message: e.to_string(),
+            })?
+            .join(path)
+    };
+    // Fold `.` and `..` by hand: the file may not exist, so `canonicalize` cannot do it.
+    let mut clean = PathBuf::new();
+    for c in absolute.components() {
+        match c {
+            Component::ParentDir => {
+                clean.pop();
+            }
+            Component::CurDir => {}
+            other => clean.push(other.as_os_str()),
+        }
+    }
+    // The nearest existing folder above the path, with the names below it kept.
+    let mut existing = clean.parent().map(PathBuf::from).unwrap_or_default();
+    let mut below: Vec<std::ffi::OsString> = vec![clean.file_name().unwrap_or_default().into()];
+    while !existing.is_dir() {
+        let Some(name) = existing.file_name() else {
+            break;
+        };
+        below.push(name.to_os_string());
+        if !existing.pop() {
+            break;
+        }
+    }
+    below.reverse();
+    let existing = std::fs::canonicalize(&existing).map_err(|e| ScanError::Io {
+        path: existing.display().to_string(),
+        message: e.to_string(),
+    })?;
+    let Some(root) = crate::position::checkout_root(&existing) else {
+        return Ok(true);
+    };
+    let root = std::fs::canonicalize(&root).unwrap_or(root);
+    let rel_dir = existing.strip_prefix(&root).map_err(|_| ScanError::Io {
+        path: existing.display().to_string(),
+        message: "the folder is outside its own work tree".into(),
+    })?;
+    let mut parts: Vec<String> = rel_dir
+        .components()
+        .map(|c| c.as_os_str().to_string_lossy().into_owned())
+        .collect();
+    parts.extend(below.iter().map(|n| n.to_string_lossy().into_owned()));
+    let git = gix::open(&root).map_err(|e| ScanError::RepoOpen {
+        path: root.display().to_string(),
+        message: e.to_string(),
+    })?;
+    let index = git.index_or_empty().map_err(diff_err)?;
+    let rel = parts.join("/");
+    if index.entry_by_path(rel.as_str().into()).is_some() {
+        return Ok(false);
+    }
+    let mut stack = crate::position::excludes_stack(&git, &index)?;
+    // Ignored itself, or inside an ignored folder.
+    for n in 1..=parts.len() {
+        let prefix = parts[..n].join("/");
+        let is_dir = n < parts.len();
+        if crate::position::stack_excluded(&mut stack, &prefix, is_dir)? {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
 /// Every regular file under `repo_root` (the `.git` directory is never entered, symbolic links
 /// are skipped) whose repo-relative path matches an `include` glob and no `exclude` glob.
 /// In a root with a `.git` entry, paths git ignores are dropped (a tracked file stays); if git's

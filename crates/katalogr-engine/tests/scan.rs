@@ -53,7 +53,7 @@ mod graph {
 mod scan {
     use camino::Utf8PathBuf;
     use katalogr_engine::registry::ExtensionRegistry;
-    use katalogr_engine::scan::{list_files, list_files_warned};
+    use katalogr_engine::scan::{list_files, list_files_warned, output_outside_git};
     use katalogr_engine::{NewEvent, Scope, queue::Processor};
     use katalogr_model::RelPath;
     use katalogr_store::{Kindex, ProjectConfig, ProjectName, Reader, RepoConfig};
@@ -139,6 +139,29 @@ mod scan {
         let files: Vec<&str> = files.iter().map(RelPath::as_str).collect();
         assert_eq!(files, [".gitignore", "kept.log", "keptdir/in.txt"]);
         assert!(warnings.is_empty(), "{warnings:?}");
+    }
+
+    #[test]
+    fn output_outside_git_cases() {
+        let d = tempfile::tempdir().unwrap();
+        let r = d.path();
+        // Outside any work tree, even when the folder does not exist yet.
+        assert!(output_outside_git(&r.join("out.ksnap")).unwrap());
+        assert!(output_outside_git(&r.join("new/deeper/out.ksnap")).unwrap());
+        init(r);
+        put(r, ".gitignore", "*.ksnap\nscratch/\n");
+        put(r, "tracked.ksnap", "t\n");
+        git(r, &["add", "-f", "tracked.ksnap", ".gitignore"]);
+        // Inside the work tree and not ignored.
+        assert!(!output_outside_git(&r.join("out.txt")).unwrap());
+        assert!(!output_outside_git(&r.join("sub/out.txt")).unwrap());
+        // Ignored, and not tracked.
+        assert!(output_outside_git(&r.join("out.ksnap")).unwrap());
+        assert!(output_outside_git(&r.join("scratch/deep/out.bin")).unwrap());
+        // Ignored by pattern but tracked.
+        assert!(!output_outside_git(&r.join("tracked.ksnap")).unwrap());
+        // A relative path with `..` resolves before the work tree is found.
+        assert!(!output_outside_git(&r.join("sub/../out.txt")).unwrap());
     }
 
     #[test]
