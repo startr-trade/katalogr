@@ -258,6 +258,14 @@ mod bench {
             cs > 0 && ci == 0,
             "the fact is recorded for the strings only"
         );
+        println!(
+            "katalogr-bench: string_calls_time_ratio {:.4} ratio",
+            time_ratio
+        );
+        println!(
+            "katalogr-bench: string_calls_bytes_ratio {:.4} ratio",
+            byte_ratio
+        );
         assert!(time_ratio <= 1.41, "time ratio {time_ratio:.3}");
         assert!(byte_ratio <= 1.15, "bytes ratio {byte_ratio:.3}");
     }

@@ -44,6 +44,10 @@ mod bench {
             assert_eq!(f.symbols.len(), 20_001);
         }
         println!("bench::data_doc_20k_keys: {} bytes in {best:?}", text.len());
+        println!(
+            "katalogr-bench: data_doc_20k_keys {:.3} ms",
+            best.as_secs_f64() * 1000.0
+        );
         assert!(best < Duration::from_millis(73), "took {best:?}");
 
         // The same keys as JSON and XML parse within the same order of time.

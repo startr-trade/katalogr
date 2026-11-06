@@ -147,6 +147,10 @@ mod bench {
         let s = base.symbols[3].name.canonical();
         assert!(s.contains("k0"));
         println!("bench::profile_scope_20k_symbols: {emitted} refs in {best:?}");
+        println!(
+            "katalogr-bench: profile_scope_20k_symbols {:.3} ms",
+            best.as_secs_f64() * 1000.0
+        );
         assert!(best < Duration::from_millis(105), "took {best:?}");
     }
 }

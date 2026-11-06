@@ -15,6 +15,7 @@ use crate::katalogr::Katalogr;
 use crate::machine::MachineProfile;
 use crate::manifest::{Manifest, Selection, Tier};
 use crate::measure::{self, CorpusResult, Phases, Settings};
+use crate::micro;
 use crate::report::{self, RUN_VERSION, RunResult, SettingsRecord};
 use crate::workspace::Workspace;
 
@@ -124,7 +125,7 @@ pub enum Command {
         #[arg(long)]
         run_id: Option<String>,
     },
-    /// Idle re-measure of the ignored cargo benches (not built yet).
+    /// Idle re-measure of the ignored cargo benches; the results join the run `--run-id`, or a new run.
     Micro {
         #[arg(long)]
         repo: Option<Utf8PathBuf>,
@@ -393,7 +394,68 @@ fn execute(cli: &Cli) -> Result<i32> {
             }
             Ok(if refused { 3 } else { 0 })
         }
-        Command::Micro { .. } => Err(BenchError::Workspace("micro: not yet built".into())),
+        Command::Micro { repo, runs, run_id } => {
+            let _lock = ws.lock()?;
+            let repo = match repo {
+                Some(r) => r.clone(),
+                None => Utf8PathBuf::from_path_buf(std::env::current_dir()?)
+                    .map_err(|_| BenchError::Workspace("current directory is not UTF-8".into()))?,
+            };
+            let idle = IdlePolicy::default();
+            let existing = match run_id {
+                Some(id) if ws.results(id).join("run.json").exists() => {
+                    Some(RunResult::load(&ws, id)?)
+                }
+                _ => None,
+            };
+            let mut run = match existing {
+                Some(r) => r,
+                None => {
+                    let bin = resolve_katalogr(cli.katalogr.as_deref())?;
+                    let id = run_id.clone().unwrap_or_else(|| {
+                        let date = utc_date();
+                        (1..)
+                            .map(|n| format!("{date}-micro-{n}"))
+                            .find(|id| !ws.results(id).exists())
+                            .expect("an unused run id")
+                    });
+                    let k = Katalogr {
+                        bin,
+                        kindex: ws.kindex(),
+                        project: "-".into(),
+                    };
+                    let disk = DiskPolicy::default();
+                    RunResult {
+                        version: RUN_VERSION,
+                        run_id: id,
+                        date: utc_date(),
+                        machine: MachineProfile::detect(&ws, &k)?,
+                        settings: SettingsRecord {
+                            runs: *runs,
+                            reps: 0,
+                            targets: 0,
+                            concurrency: 0,
+                            max_load: idle.max_load,
+                            idle_wait_s: idle.wait.as_secs(),
+                            allow_loaded: idle.allow_loaded,
+                            keep: "all".into(),
+                            phases: String::new(),
+                            refresh_workload: false,
+                            budget_gib: disk.budget_bytes as f64 / GIB as f64,
+                            min_free_gib: disk.min_free_bytes as f64 / GIB as f64,
+                        },
+                        corpora: vec![],
+                        micro: vec![],
+                        samples: vec![],
+                    }
+                }
+            };
+            run.micro = micro::run_micro(&repo, *runs, &idle)?;
+            run.refresh_samples();
+            report::write(&ws, &run)?;
+            println!("micro results written to run {}", run.run_id);
+            Ok(0)
+        }
         Command::Report { run_id } => {
             let r = RunResult::load(&ws, run_id)?;
             report::atomic(

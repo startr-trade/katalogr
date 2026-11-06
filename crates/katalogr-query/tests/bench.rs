@@ -941,6 +941,10 @@ fn tests_100k() {
     let elapsed = start.elapsed();
     assert_eq!(hits.len(), 9_900);
     println!("bench::tests_100k: {} ms", elapsed.as_secs_f64() * 1000.0);
+    println!(
+        "katalogr-bench: tests_100k {:.3} ms",
+        elapsed.as_secs_f64() * 1000.0
+    );
     assert!(elapsed < Duration::from_millis(500), "{elapsed:?}");
 }
 
