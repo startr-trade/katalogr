@@ -26,6 +26,7 @@ pub mod structure;
 #[cfg(test)]
 #[allow(dead_code)]
 mod testkit;
+pub mod workspace_view;
 
 pub use communities::communities;
 #[doc(hidden)]
@@ -40,3 +41,4 @@ pub use options::*;
 pub use rationale::rationale;
 pub use result::*;
 pub use schema::schemas;
+pub use workspace_view::{ContractEndRow, ProjectEdge, WorkspaceMap, workspace_map};

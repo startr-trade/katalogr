@@ -34,6 +34,7 @@ pub mod timeline;
 mod view_answer;
 mod why;
 pub mod working_set;
+pub mod workspace;
 
 pub use callers::{CallersAnswer, callers, callers_folded};
 pub use contract_map::{ContractEnds, ContractMap, contract_map};
@@ -70,8 +71,9 @@ pub use resolve::{resolve, resolve_traced};
 pub use result::{
     CallerHit, CommitHit, ContractEnd, ContractInfo, DanglingRef, Direction, Envelope, Explain,
     FieldDiff, FieldShape, Fold, LinkBrief, MapEntry, Matched, MirrorDrift, Note, PARTIAL_NOTE,
-    Partial, PathStep, RationaleLink, RefHit, ReplaceResult, Resolution, SearchHit, ShowResult,
-    SymbolHit, TestHit, Truncation, WhyResult, WhySource, WhyUse, cap,
+    Partial, PathStep, PeerState, RationaleLink, RefHit, ReplaceResult, Resolution, ResolvedRef,
+    SearchHit, ShowResult, SymbolHit, TestHit, Truncation, WhyResult, WhySource, WhyUse,
+    WorkspaceBlock, cap,
 };
 pub use schema::{position_schema, schemas};
 pub use search::{
@@ -82,6 +84,10 @@ pub use timeline::{PointSource, Timeline, TimelinePoint};
 pub use view_answer::{ViewAnswer, ViewQueryJson, view_schema};
 pub use why::{Blame, DEFAULT_USE_LIMIT, RATIONALE_KINDS, attach_use, why, why_sources, why_use};
 pub use working_set::{Boost, Tier, Weights, WorkingSet, WorkingSetSummary, boost};
+pub use workspace::{
+    LinkKeys, PeerEnd, SourceAccess, Wanted, link_keys, parse_wanted, peer_contract_ends,
+    peer_export_ends,
+};
 
 /// Re-exported so wrappers can bound on it without a direct dependency.
 pub use serde::Serialize;
