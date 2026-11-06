@@ -1451,4 +1451,139 @@ mod bench {
             exported.file_bytes
         );
     }
+
+    // ------------------------------------------------ peers (FEAT-020 R-16)
+
+    /// A project `name` of `symbols` functions in one repo, in the kindex `kx`: every tenth
+    /// function provides `svc:c<k>` and calls the one before; `consumer` also consumes `svc:c0`.
+    #[cfg(feature = "test-extractor")]
+    fn peer_project(scratch: &Path, kx: &Path, name: &str, symbols: usize, consumer: bool) {
+        use std::fmt::Write as _;
+        let repo = scratch.join(name);
+        std::fs::create_dir_all(&repo).unwrap();
+        let mut text = String::new();
+        for i in 0..symbols {
+            let _ = writeln!(text, "sym fn f{i}");
+            if i > 0 {
+                let _ = writeln!(text, "link f{i} calls f{}", i - 1);
+            }
+            if i % 10 == 0 {
+                let _ = writeln!(text, "bind f{i} provides svc:c{}", i / 10);
+            }
+        }
+        if consumer {
+            text.push_str("sym fn client\nbind client consumes svc:c0\n");
+        }
+        std::fs::write(repo.join("a.tx"), text).unwrap();
+        project_init(kx, name, vec![("r".to_string(), repo.clone())], false).unwrap();
+        let k = Katalogr::resolve(
+            kx,
+            &Overrides {
+                kindex: Some(kx.display().to_string()),
+                project: Some(name.to_string()),
+                ..Overrides::default()
+            },
+        )
+        .unwrap();
+        k.index(None, true, None, &Options::default()).unwrap();
+    }
+
+    /// FEAT-020 R-16. Proposed budgets: `refs` with no peers within 2 percent of the same read
+    /// before this item, and under 100 ms added per peer, with three peers of 10k symbols each.
+    /// Prints the load, each median and the time of one impact round. Needs the test extractor.
+    /// `flock ~/.cache/heavy-build.lock cargo test -p katalogr-dist --release --features
+    /// test-extractor --test bench peer_read_overhead -- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    #[cfg(feature = "test-extractor")]
+    fn peer_read_overhead() {
+        use katalogr_dist::{ImpactInput, PEERS_SETTING, PeerSpec};
+        let base = std::env::var_os("KATALOGR_SCRATCH")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| {
+                PathBuf::from(std::env::var_os("HOME").unwrap()).join(".cache/katalogr-scratch")
+            })
+            .join("FEAT-020");
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(&base).unwrap();
+        let kx = base.join("kx");
+        kindex_init(&kx).unwrap();
+        let symbols = 10_000;
+        peer_project(&base, &kx, "home", symbols, true);
+        for p in ["p1", "p2", "p3"] {
+            peer_project(&base, &kx, p, symbols, false);
+        }
+        let open = || {
+            Katalogr::resolve(
+                &kx,
+                &Overrides {
+                    kindex: Some(kx.display().to_string()),
+                    project: Some("home".to_string()),
+                    ..Overrides::default()
+                },
+            )
+            .unwrap()
+        };
+        let opts = Options {
+            consistency: Some(katalogr_dist::Consistency::StaleOk),
+            ..Options::default()
+        };
+        let median = |f: &dyn Fn()| {
+            f();
+            let mut ms: Vec<f64> = (0..9)
+                .map(|_| {
+                    let t = Instant::now();
+                    f();
+                    t.elapsed().as_secs_f64() * 1000.0
+                })
+                .collect();
+            ms.sort_by(f64::total_cmp);
+            ms[4]
+        };
+        let none = median(&|| {
+            open().refs("client", &opts).unwrap();
+        });
+        println!(
+            "peer_read_overhead: load {}; refs, no peers: {none:.1} ms",
+            load()
+        );
+        let mut last = none;
+        for n in 1..=3usize {
+            let specs: Vec<PeerSpec> = (1..=n)
+                .map(|i| PeerSpec {
+                    kindex: None,
+                    project: format!("p{i}"),
+                })
+                .collect();
+            open()
+                .project()
+                .set_setting(PEERS_SETTING, serde_yaml_ng::to_value(&specs).unwrap())
+                .unwrap();
+            let t = median(&|| {
+                open().refs("client", &opts).unwrap();
+            });
+            println!(
+                "peer_read_overhead: load {}; refs, {n} peer(s): {t:.1} ms; added {:.1} ms per peer",
+                load(),
+                (t - none) / n as f64
+            );
+            last = t;
+        }
+        let per_peer = (last - none) / 3.0;
+        let impact = median(&|| {
+            open()
+                .impact(
+                    &ImpactInput::Symbol("f0"),
+                    &katalogr_dist::query::ImpactOptions::default(),
+                    &opts,
+                )
+                .unwrap();
+        });
+        println!(
+            "peer_read_overhead: load {}; impact with 3 peers (local walk plus rounds): {impact:.1} ms",
+            load()
+        );
+        let _ = std::fs::remove_dir_all(&base);
+        assert!(per_peer < 100.0, "{per_peer:.1} ms per peer");
+    }
 }
