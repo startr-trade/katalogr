@@ -21,6 +21,7 @@ fn schema_text(name: &str) -> Option<&'static str> {
         "find" => include_str!("../../../../schema/v1/find.schema.json"),
         "hubs" => include_str!("../../../../schema/v1/hubs.schema.json"),
         "impact" => include_str!("../../../../schema/v1/impact.schema.json"),
+        "lineage" => include_str!("../../../../schema/v1/lineage.schema.json"),
         "map" => include_str!("../../../../schema/v1/map.schema.json"),
         "mirrors" => include_str!("../../../../schema/v1/mirrors.schema.json"),
         "path" => include_str!("../../../../schema/v1/path.schema.json"),
