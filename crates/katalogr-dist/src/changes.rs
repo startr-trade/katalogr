@@ -12,7 +12,6 @@ pub(crate) struct ChangeRange {
     /// The marked repository the changes belong to.
     pub repo: String,
     /// The commit the range starts at.
-    #[allow(dead_code)] // read by `impact` (FEAT-028 T5)
     pub from: String,
     pub changes: Vec<ChangedFile>,
 }
@@ -127,7 +126,6 @@ impl Katalogr {
 
     /// `base..head`, both resolved to commits in the marked repository, with the head commit.
     /// Text without `..`, or with `...`, is a usage error.
-    #[allow(dead_code)] // called by `impact` (FEAT-028 T5)
     pub(crate) fn range_changes(&self, text: &str) -> Result<(ChangeRange, String), DistError> {
         let usage = || DistError::usage(format!("--range {text}: expected BASE..HEAD"));
         let (base, head) = text.split_once("..").ok_or_else(usage)?;
