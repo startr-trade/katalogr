@@ -16,7 +16,10 @@ mod harness {
 
     #[test]
     fn fake_dom_collects_text() {
-        let b = MapBackend::new().with("/ping", 200, "pong");
+        let b = MapBackend::new()
+            .with("/api/v1/meta", 200, "{\"capabilities\":[]}")
+            .with("/api/v1/views/", 200, "{\"views\":[]}")
+            .with("/ping", 200, "pong");
         let mut p = Page::open("#/graph", &b);
         // The page drew its failure notice for the missing capabilities; clear it.
         p.eval_json("document.getElementById('kw-main').replaceChildren()");
@@ -42,7 +45,7 @@ mod harness {
         assert!(!p.has("missing"));
         p.fire("go", "click", None, &b);
         assert_eq!(p.text(), "Title\nGo\n200:pong");
-        assert_eq!(p.requests(), ["/api/v1/meta", "/ping"]);
+        assert_eq!(p.requests(), ["/api/v1/meta", "/api/v1/views/", "/ping"]);
         assert_eq!(p.markup_writes(), ["<b>x</b>"]);
         assert!(p.pele_sources().is_empty());
         assert_eq!(

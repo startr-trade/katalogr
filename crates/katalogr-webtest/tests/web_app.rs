@@ -6,7 +6,6 @@ mod web_app {
     use serde_json::{Value, json};
 
     const HOSTILE: &str = "<img src=x onerror=alert(1)>";
-    const STRUCTURE_ID: &str = "v1-00000000000000000000000000000001";
     const SNAPSHOT_ID: &str = "v1-0000000000000000000000000000000a";
     const SYMBOL: &str = "repo%3Aapp%23fn%3Atarget";
 

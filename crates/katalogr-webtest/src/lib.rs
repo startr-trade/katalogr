@@ -165,6 +165,12 @@ impl Page {
         self.drain(backend);
     }
 
+    /// Answers requests the page queued by itself (for example after a script ran), until none
+    /// is pending.
+    pub fn settle<B: Backend>(&mut self, backend: &B) {
+        self.drain(backend);
+    }
+
     /// All text under `<main>`, in document order, one text node per line.
     pub fn text(&mut self) -> String {
         self.eval_string("__mainText()")
