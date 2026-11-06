@@ -406,6 +406,23 @@ fn dangling(k: &Katalogr, a: &Args, o: &Options) -> JsonAnswer {
     })
 }
 
+fn deps(k: &Katalogr, a: &Args, o: &Options) -> JsonAnswer {
+    let package = a.opt("package").filter(|s| !s.is_empty());
+    let (limit, used_by_limit) = (a.int("limit") as usize, a.int("used-by-limit") as usize);
+    let dopts = katalogr_dist::DepsOptions {
+        package: package.map(str::to_string),
+        limit,
+        used_by_limit,
+    };
+    let o = q(
+        o,
+        a,
+        "deps",
+        &crate::cmd::deps::args(package, limit, used_by_limit),
+    );
+    answer(k.deps(&dopts, &o), |r| render_json::list(r, a.budget(), ""))
+}
+
 fn mirrors(k: &Katalogr, a: &Args, o: &Options) -> JsonAnswer {
     let kinds = kinds(a);
     let o = q(o, a, "mirrors", &[("kinds", kinds.join(","))]);
@@ -759,6 +776,22 @@ pub const OPS: &[Op] = &[
         )],
         Some("dangling"),
         Call::Project(dangling)
+    ),
+    op!(
+        "deps",
+        "Package versions the lockfiles pin, the members that pin them and the code that uses them.",
+        &[
+            opt("package", Ty::Str, "only this package name"),
+            dflt("limit", Ty::Int(1), "1000", "how many versions to list"),
+            dflt(
+                "used-by-limit",
+                Ty::Int(1),
+                "20",
+                "how many users to list per version"
+            ),
+        ],
+        Some("deps"),
+        Call::Project(deps)
     ),
     op!(
         "mirrors",

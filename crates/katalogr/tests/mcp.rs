@@ -276,7 +276,7 @@ mod mcp {
         c.send(json!({"jsonrpc": "2.0", "id": "two", "method": "tools/list"}));
         let list = c.recv();
         assert_eq!(list["id"], "two");
-        assert!(list["result"]["tools"].as_array().unwrap().len() == 14);
+        assert!(list["result"]["tools"].as_array().unwrap().len() == 15);
         let found = c.call(3, "find", json!({"text": "target"}));
         assert_eq!(found["result"]["isError"], false, "{found}");
         let out = last_text(&found);
@@ -482,6 +482,7 @@ mod mcp {
                 "map",
                 "search",
                 "dangling",
+                "deps",
                 "why",
                 "docs-affected",
                 "impact",
@@ -537,7 +538,7 @@ mod mcp {
             assert_eq!(t["outputSchema"], want, "{name}");
             with_schema += 1;
         }
-        assert_eq!(with_schema, 12);
+        assert_eq!(with_schema, 13);
         // A client on an older protocol gets none.
         drop(c);
         let mut c = Client::spawn(&repo, &[], &["--output-schemas"]);
@@ -563,6 +564,7 @@ mod mcp {
             "map",
             "search",
             "dangling",
+            "deps",
             "why",
             "docs-affected",
             "impact",
@@ -1012,6 +1014,38 @@ mod mcp {
             }
             assert_eq!(got, want, "{tool} {args}: text differs from `{full:?}`");
             assert_eq!(exit_meta(&r), code as i64, "{tool} {args}");
+        }
+    }
+
+    /// FEAT-007 R-8. The `deps` tool prints what `deps --json` prints.
+    #[test]
+    fn deps_tool_matches_cli() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (_kx, repo) = query_project(tmp.path());
+        std::fs::write(repo.join("Cargo.lock"), "version = 3\n\n[[package]]\nname = \"alpha-lib\"\nversion = \"1.2.3\"\nsource = \"registry+https://registry.example/index\"\n\n[[package]]\nname = \"beta-lib\"\nversion = \"0.9.0\"\nsource = \"registry+https://registry.example/index\"\n").unwrap();
+        ok(&repo, &["index"]);
+        let mut c = Client::spawn(&repo, &[], &[]);
+        c.initialize("2025-06-18");
+        let cases: Vec<(Value, Vec<&str>)> = vec![
+            (json!({}), vec!["deps"]),
+            (
+                json!({"package": "alpha-lib"}),
+                vec!["deps", "--package", "alpha-lib"],
+            ),
+            (json!({"limit": 1}), vec!["deps", "--limit", "1"]),
+            (
+                json!({"used_by_limit": 2}),
+                vec!["deps", "--used-by-limit", "2"],
+            ),
+        ];
+        for (i, (args, cli)) in cases.iter().enumerate() {
+            let mut full = vec!["--json"];
+            full.extend(cli.iter().copied());
+            let (code, out, _) = run_raw(&repo, &full);
+            let r = c.call(i as u64 + 1, "deps", args.clone());
+            assert!(out.contains("-lib"), "{out}");
+            assert_eq!(last_text(&r), out.trim_end_matches('\n'), "{args}");
+            assert_eq!(exit_meta(&r), code as i64, "{args}");
         }
     }
 

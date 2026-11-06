@@ -1,7 +1,6 @@
 //! `katalogr deps [--package NAME] [--limit N] [--used-by-limit N]`.
 
-use katalogr_dist::DistError;
-use katalogr_dist::query::DepsOptions;
+use katalogr_dist::{DepsOptions, DistError};
 
 use crate::cli::Cli;
 use crate::cmd::{options_for, resolve};
@@ -21,15 +20,20 @@ pub fn run(
     };
     let reply = resolve(cli)?.deps(
         &opts,
-        &options_for(
-            cli,
-            "deps",
-            &[
-                ("package", package.unwrap_or("").to_string()),
-                ("limit", limit.to_string()),
-                ("used_by_limit", used_by_limit.to_string()),
-            ],
-        ),
+        &options_for(cli, "deps", &args(package, limit, used_by_limit)),
     )?;
     Ok(render::list(cli, reply, render::deps_line, ""))
+}
+
+/// The view ID arguments of a question; the API and the MCP tool build the same ones.
+pub fn args(
+    package: Option<&str>,
+    limit: usize,
+    used_by_limit: usize,
+) -> Vec<(&'static str, String)> {
+    vec![
+        ("package", package.unwrap_or("").to_string()),
+        ("limit", limit.to_string()),
+        ("used_by_limit", used_by_limit.to_string()),
+    ]
 }

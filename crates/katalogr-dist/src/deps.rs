@@ -1,7 +1,8 @@
 //! `deps` (FEAT-007 R-8): the package versions a dependency inventory lists, in one read.
 
 use crate::{DistError, Katalogr, Options, Outcome, Reply};
-use katalogr_query::{DepHit, DepsOptions, Partial, cap};
+pub use katalogr_query::DepsOptions;
+use katalogr_query::{DepHit, Partial, cap};
 
 /// The version count `deps` returns when the caller gives no limit.
 pub const DEFAULT_DEPS_LIMIT: usize = 1000;
