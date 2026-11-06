@@ -37,3 +37,6 @@ window.cytoscape = function (opts) {
   };
   return api;
 };
+
+// The harness starts the page itself, after setting the hash.
+window.KW_MANUAL_BOOT = true;

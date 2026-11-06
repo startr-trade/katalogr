@@ -116,3 +116,7 @@ KW.boot = function () {
     main.appendChild(KW.dom.notice(m.text + (m.detail ? " " + m.detail : ""), "error"));
   });
 };
+
+/* The scripts load at the end of <body>, so the page is ready. A test or a host page that wants
+   to start it itself sets KW_MANUAL_BOOT first. */
+if (!window.KW_MANUAL_BOOT) { KW.boot(); }
