@@ -59,6 +59,10 @@ name = "web_links"
 required-features = ["web"]
 
 [[test]]
+name = "bench_export"
+required-features = ["web"]
+
+[[test]]
 name = "bench_web"
 required-features = ["web"]
 
