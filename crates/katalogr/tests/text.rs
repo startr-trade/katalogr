@@ -136,7 +136,11 @@ rules: []
         assert_eq!(shown(&repo).0, 0);
         std::fs::remove_file(profile_path(&kx)).unwrap();
         ok(&repo, &["index"]);
-        assert_eq!(shown(&repo).0, 4, "a deselected file is no longer extracted");
+        assert_eq!(
+            shown(&repo).0,
+            4,
+            "a deselected file is no longer extracted"
+        );
         let (code, out, err) = run(&repo, &["search", "tortoise"]);
         assert_eq!(code, 4, "{out}{err}");
     }

@@ -185,11 +185,7 @@ pub(super) fn plan_one(env: &PlanEnv, key: &PendingKey) -> Result<Action, Engine
         source.read(&key.path)?
     };
     let delete_or_skip = || {
-        if held.is_some()
-            || env
-                .errored
-                .contains(&(key.repo.clone(), key.path.clone()))
-        {
+        if held.is_some() || env.errored.contains(&(key.repo.clone(), key.path.clone())) {
             Action::Delete
         } else {
             Action::Skip

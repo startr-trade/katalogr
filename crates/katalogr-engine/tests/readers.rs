@@ -11,9 +11,7 @@ use katalogr_model::RelPath;
 use katalogr_store::{Kindex, PendingKey, ProjectDir, ProjectName, Reader, StoreError};
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::{Duration, Instant};
-use support::{
-    TestExtractor, drained_graph, file_event, fresh_index, init_project, open_engine,
-};
+use support::{TestExtractor, drained_graph, file_event, fresh_index, init_project, open_engine};
 
 struct Fixture {
     _tmp: tempfile::TempDir,
@@ -379,10 +377,7 @@ mod readers {
         let root = Utf8PathBuf::from_path_buf(f._tmp.path().to_path_buf()).unwrap();
         let (fresh_kx, fresh) = fresh_index(&root, "fresh", &f.work);
         assert_eq!(graph, fresh);
-        let (a, b) = (
-            open_engine(&f.kx, &f.work),
-            open_engine(&fresh_kx, &f.work),
-        );
+        let (a, b) = (open_engine(&f.kx, &f.work), open_engine(&fresh_kx, &f.work));
         assert_eq!(
             support::extracted_texts(&a, &f.work),
             support::extracted_texts(&b, &f.work)

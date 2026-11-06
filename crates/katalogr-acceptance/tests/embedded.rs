@@ -238,7 +238,13 @@ mod embedded {
         /// One file's fragment, extracted as the planner would; nothing is written.
         fn fragment(&self, path: &str) -> katalogr_model::Fragment {
             let rel = RelPath::new(path).unwrap();
-            let content = self.engine.source("r").unwrap().read(&rel).unwrap().unwrap();
+            let content = self
+                .engine
+                .source("r")
+                .unwrap()
+                .read(&rel)
+                .unwrap()
+                .unwrap();
             let profiles = self.engine.routing_profiles().unwrap();
             katalogr_engine::queue::extract_for_show(&self.engine, "r", &rel, &content, &profiles)
                 .unwrap()

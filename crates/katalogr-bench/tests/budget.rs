@@ -177,10 +177,7 @@ mod bench {
         println!(
             "load {load_before} to {load_after}: wall {wall_s:.1} s (budget {}), peak RSS {rss_mib:.0} MiB (budget {}), \
              index (graph database) {index_mib:.0} MiB (budget {}), claimed files {files} (expected {})",
-            want["wall_s"],
-            want["rss_mib"],
-            want["index_mib"],
-            want["files"],
+            want["wall_s"], want["rss_mib"], want["index_mib"], want["files"],
         );
         assert!(wall_s <= want["wall_s"] as f64, "wall {wall_s:.1} s");
         assert!(

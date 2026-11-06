@@ -185,11 +185,17 @@ mod plan {
         let bad = RelPath::new("bad.tx").unwrap();
         let errors = |f: &Fx| f.e.cache().read().unwrap().index_errors("r", &bad).unwrap();
         assert!(!errors(&f).is_empty(), "the failed extraction is recorded");
-        assert!(!f.paths().contains(&"bad.tx".to_string()), "and has no revision");
+        assert!(
+            !f.paths().contains(&"bad.tx".to_string()),
+            "and has no revision"
+        );
         // A rescan after the file is gone removes the row.
         std::fs::remove_file(f.work.join("bad.tx")).unwrap();
         f.rescan();
-        assert!(errors(&f).is_empty(), "the row of a deleted file is removed");
+        assert!(
+            errors(&f).is_empty(),
+            "the row of a deleted file is removed"
+        );
 
         // The same through a change event for the deleted path.
         std::fs::write(f.work.join("bad.tx"), [0xffu8, 0xfe, 0x00]).unwrap();
@@ -197,7 +203,11 @@ mod plan {
         assert!(!errors(&f).is_empty());
         std::fs::remove_file(f.work.join("bad.tx")).unwrap();
         f.e.inbox()
-            .append(&NewEvent::file("r", &bad, katalogr_engine::EventKind::Deleted))
+            .append(&NewEvent::file(
+                "r",
+                &bad,
+                katalogr_engine::EventKind::Deleted,
+            ))
             .unwrap();
         drained_graph(&f.e);
         assert!(errors(&f).is_empty());

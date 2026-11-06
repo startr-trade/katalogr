@@ -213,12 +213,18 @@ mod rank {
         assert_eq!(f.engine.index_stats().rank_refreshes, 1);
     }
 
-    fn snapshot(e: &Engine, work: &camino::Utf8Path) -> (support::CacheDump, Vec<(String, Vec<u8>)>) {
+    fn snapshot(
+        e: &Engine,
+        work: &camino::Utf8Path,
+    ) -> (support::CacheDump, Vec<(String, Vec<u8>)>) {
         let dump = cache_dump(e)
             .into_iter()
             .filter(|(n, _)| n != "file_revisions")
             .collect();
-        (dump, support::extracted_texts(e, work).into_iter().collect())
+        (
+            dump,
+            support::extracted_texts(e, work).into_iter().collect(),
+        )
     }
 
     /// FEAT-093 R-16. The round size and the thread count change neither the extracted texts nor any

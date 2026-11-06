@@ -458,7 +458,6 @@ impl ProjectDir {
             deleted,
         })
     }
-
 }
 
 /// The files a person writes in a project: a file name, or a folder whose files all count.

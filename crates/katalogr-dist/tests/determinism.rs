@@ -46,7 +46,10 @@ mod determinism {
         let config = kx.join("projects/demo/config.yaml");
         let text = std::fs::read_to_string(&config).unwrap();
         assert!(text.contains("settings: {}"), "{text}");
-        let text = text.replace("settings: {}", &format!("settings:\n  index.threads: {threads}"));
+        let text = text.replace(
+            "settings: {}",
+            &format!("settings:\n  index.threads: {threads}"),
+        );
         std::fs::write(config, text).unwrap();
         Built {
             _tmp: tmp,
@@ -103,6 +106,10 @@ mod determinism {
             k.notify(std::slice::from_ref(p), false).unwrap();
         }
         k.index(None, false, None, &Options::default()).unwrap();
-        assert_eq!(digest(&c), want, "4 threads, change events in reverse order");
+        assert_eq!(
+            digest(&c),
+            want,
+            "4 threads, change events in reverse order"
+        );
     }
 }

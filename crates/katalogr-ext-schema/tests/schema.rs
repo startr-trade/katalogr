@@ -856,7 +856,10 @@ mod jsonschema {
             let dir = case_dir(kind, name);
             let a = Case::open(&registry, &dir).unwrap();
             let b = Case::open(&registry, &dir).unwrap();
-            let (sa, sb) = (extracted_texts(&a, dir.as_std_path()), extracted_texts(&b, dir.as_std_path()));
+            let (sa, sb) = (
+                extracted_texts(&a, dir.as_std_path()),
+                extracted_texts(&b, dir.as_std_path()),
+            );
             assert!(!sa.is_empty(), "{name}: nothing extracted");
             assert_eq!(
                 sa.keys().collect::<Vec<_>>(),

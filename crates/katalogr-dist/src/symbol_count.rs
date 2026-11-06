@@ -14,7 +14,8 @@ pub fn symbol_count(
     extension: &str,
     kind: &str,
 ) -> Result<u64, DistError> {
-    let name = ProjectName::new(project).map_err(|e| DistError::usage(format!("{project}: {e}")))?;
+    let name =
+        ProjectName::new(project).map_err(|e| DistError::usage(format!("{project}: {e}")))?;
     let dir = Kindex::open(kindex)?.project(&name)?;
     let Some(cache) = Cache::open_reader(&dir)? else {
         return Err(DistError::Refused {

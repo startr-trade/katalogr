@@ -322,7 +322,10 @@ select:
     fn select_routes_file_to_extension() {
         let e = env(&[("app.tx", APP), ("notes.txt", "alpha one\nbeta two\n")]);
         let graph = full_index(&e.engine);
-        assert!(!graph.contains("notes.txt"), "no route, no extraction:\n{graph}");
+        assert!(
+            !graph.contains("notes.txt"),
+            "no route, no extraction:\n{graph}"
+        );
 
         // An entry that names an unregistered extension routes nothing.
         e.write_profile(

@@ -422,8 +422,8 @@ mod kanbanr {
             .unwrap()
             .project()
             .clone();
-        let id = katalogr_store::ContextId::new(layer.file_name().unwrap().to_str().unwrap())
-            .unwrap();
+        let id =
+            katalogr_store::ContextId::new(layer.file_name().unwrap().to_str().unwrap()).unwrap();
         let cache = katalogr_store::Cache::open(
             &dir.layer(&id),
             std::time::Instant::now() + std::time::Duration::from_secs(5),

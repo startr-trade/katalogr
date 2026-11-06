@@ -28,7 +28,8 @@ pub fn run(cli: &Cli, action: &AuditAction) -> Result<ExitCode, DistError> {
             Ok(ExitCode::Ok)
         }
         AuditAction::Verify { record } => {
-            let outcome = k.audit_verify(record.as_deref().map(std::path::Path::new), &options(cli))?;
+            let outcome =
+                k.audit_verify(record.as_deref().map(std::path::Path::new), &options(cli))?;
             if cli.json {
                 println!(
                     "{}",

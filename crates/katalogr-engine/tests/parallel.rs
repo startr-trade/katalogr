@@ -14,8 +14,9 @@ use std::collections::BTreeMap;
 use std::num::NonZeroUsize;
 use std::time::{Duration, Instant};
 use support::{
-    CacheDump, TestExtractor, TestProbe, cache_dump, dictionary_dump, drained_graph, full_index,
-    init_project, open_engine_par, open_engine_threads, extracted_texts, published, test_slow,
+    CacheDump, TestExtractor, TestProbe, cache_dump, dictionary_dump, drained_graph,
+    extracted_texts, full_index, init_project, open_engine_par, open_engine_threads, published,
+    test_slow,
 };
 
 struct Project {
@@ -128,7 +129,10 @@ mod parallel {
         assert!(one.0.len() >= 200, "files extracted");
         for threads in [2, 8] {
             let many = index_at(&files, threads);
-            assert!(one.0 == many.0, "extracted text differs at {threads} threads");
+            assert!(
+                one.0 == many.0,
+                "extracted text differs at {threads} threads"
+            );
             assert_eq!(one.1, many.1, "canonical graph at {threads} threads");
             assert!(one.2 == many.2, "cache dump differs at {threads} threads");
         }

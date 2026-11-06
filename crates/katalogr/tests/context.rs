@@ -130,11 +130,18 @@ mod context {
             .clone();
         let id = ContextId::new(layer.file_name().unwrap().to_str().unwrap()).unwrap();
         let revisions = |c: Cache| -> std::collections::BTreeMap<_, _> {
-            c.read().unwrap().file_revisions().unwrap().into_iter().collect()
+            c.read()
+                .unwrap()
+                .file_revisions()
+                .unwrap()
+                .into_iter()
+                .collect()
         };
         let mine = revisions(Cache::open(&base.layer(&id), dl()).unwrap());
         let theirs = revisions(Cache::open(&base, dl()).unwrap());
-        mine.iter().filter(|(k, v)| theirs.get(*k) != Some(*v)).count()
+        mine.iter()
+            .filter(|(k, v)| theirs.get(*k) != Some(*v))
+            .count()
             + theirs.keys().filter(|k| !mine.contains_key(*k)).count()
     }
 

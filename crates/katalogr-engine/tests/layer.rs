@@ -109,7 +109,10 @@ mod context {
         assert_eq!(rescan(&e), g);
         assert_eq!(n.load(Ordering::SeqCst), 1);
         let now = e.cache().read().unwrap().file_revision("r", &p).unwrap();
-        assert!(now.is_some() && now != seeded, "the edit changed the revision");
+        assert!(
+            now.is_some() && now != seeded,
+            "the edit changed the revision"
+        );
     }
 
     #[test]
@@ -164,7 +167,14 @@ mod context {
         rescan(&e);
         // `bad.tx` failed to extract, so it has no file revision and is tried again; `ok.tx`
         // is unchanged from the seed and is not. The errors are there either way.
-        assert_eq!(n.load(Ordering::SeqCst), 1, "only the failed file is retried");
-        assert_eq!(e.cache().read().unwrap().index_errors("r", &p).unwrap(), rows);
+        assert_eq!(
+            n.load(Ordering::SeqCst),
+            1,
+            "only the failed file is retried"
+        );
+        assert_eq!(
+            e.cache().read().unwrap().index_errors("r", &p).unwrap(),
+            rows
+        );
     }
 }
