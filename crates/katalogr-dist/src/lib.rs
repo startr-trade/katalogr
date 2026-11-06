@@ -4,6 +4,7 @@
 
 mod at;
 pub use at::position_without_board;
+mod changes;
 mod claude;
 mod docs_affected;
 pub use docs_affected::{DEFAULT_DOCS_LIMIT, DocsAffectedParams};
