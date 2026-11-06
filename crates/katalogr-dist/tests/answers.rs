@@ -276,7 +276,7 @@ mod answers {
         assert_eq!(hubs.args["exclude_kinds"], "[\"alpha\",\"zeta\"]");
         assert_eq!(hubs.args["min_degree"], "15.5");
         assert_eq!(hubs.args.len(), 5);
-        assert!(samples()[8].to_view_query().args.get("repo").is_none());
+        assert!(!samples()[8].to_view_query().args.contains_key("repo"));
         assert!(samples()[6].to_view_query().args.is_empty());
         // Unknown ops and bad values are refused.
         let bad = |op: &str, k: &str, v: &str| {
