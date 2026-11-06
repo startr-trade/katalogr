@@ -1184,6 +1184,65 @@ fn docs_affected_lines(d: &katalogr_dist::query::DocImpact) -> Vec<String> {
     out
 }
 
+/// `impact`: a header naming seeds and projects, one block per group, then the tests and the
+/// contracts that are open at this project's edge.
+pub fn impact(cli: &Cli, reply: Reply<katalogr_dist::query::ImpactReport>) -> ExitCode {
+    plain(cli, reply, "impact", impact_lines, |_| false)
+}
+
+fn impact_lines(r: &katalogr_dist::query::ImpactReport) -> Vec<String> {
+    let seeds: Vec<String> = r
+        .seeds
+        .iter()
+        .map(|s| format!("{} ({})", s.node.name, s.precision))
+        .collect();
+    let mut out = vec![format!(
+        "impact of {}; project {}",
+        if seeds.is_empty() {
+            "nothing".to_string()
+        } else {
+            seeds.join(", ")
+        },
+        r.projects.join(", ")
+    )];
+    for g in &r.groups {
+        out.push(format!(
+            "{} [{}] {}",
+            g.kind,
+            format!("{:?}", g.confidence).to_lowercase(),
+            g.hits.len()
+        ));
+        for h in &g.hits {
+            let mut line = format!("  {}  depth {}  {:.4}", h.node.name, h.depth, h.score);
+            if let Some(c) = &h.via {
+                line.push_str(&format!("  via {c}"));
+            }
+            if !h.chain.is_empty() {
+                line.push_str(&format!("  through {}", h.chain.join(" <- ")));
+            }
+            out.push(line);
+        }
+    }
+    if !r.tests.is_empty() {
+        out.push("tests:".to_string());
+        out.extend(r.tests.iter().map(|t| format!("  {}", test_line(t))));
+    }
+    let open: Vec<_> = r.contracts.iter().filter(|c| c.open.is_some()).collect();
+    if !open.is_empty() {
+        out.push("open contracts:".to_string());
+        for c in open {
+            out.push(format!(
+                "  {}  {}  ({} providers, {} consumers)",
+                c.contract,
+                c.open.as_deref().unwrap_or(""),
+                c.providers,
+                c.consumers
+            ));
+        }
+    }
+    out
+}
+
 /// The `doctor` report: JSON with `--json`, else one line per finding with its fix.
 pub fn doctor(cli: &Cli, r: &katalogr_dist::doctor::Report) -> ExitCode {
     if cli.json {

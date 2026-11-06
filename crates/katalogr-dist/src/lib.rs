@@ -4,9 +4,12 @@
 
 mod at;
 pub use at::position_without_board;
+mod changes;
 mod claude;
 mod docs_affected;
+mod impact;
 pub use docs_affected::{DEFAULT_DOCS_LIMIT, DocsAffectedParams};
+pub use impact::ImpactInput;
 pub mod contexts;
 pub mod contract;
 pub use katalogr_query::{PositionAnswer, PositionRef, ViewQuery, WorkingSetSummary};
@@ -407,6 +410,19 @@ pub struct Reply<T> {
 struct WsRun {
     summary: Option<katalogr_query::WorkingSetSummary>,
     warnings: Vec<String>,
+}
+
+/// Holds the view-ID arguments a read adds (`view_extra`) for the length of one question: they
+/// are removed when the guard drops, so a read that fails before its report is finished leaves
+/// none behind for the next one.
+pub(crate) struct ExtraScope<'a>(&'a std::sync::Mutex<Vec<(String, String)>>);
+
+impl Drop for ExtraScope<'_> {
+    fn drop(&mut self) {
+        if let Ok(mut extra) = self.0.lock() {
+            extra.clear();
+        }
+    }
 }
 
 impl WsRun {
@@ -1057,6 +1073,11 @@ impl Katalogr {
         })
     }
 
+    /// A guard that clears `view_extra` when the question ends, however it ends.
+    pub(crate) fn extra_scope(&self) -> ExtraScope<'_> {
+        ExtraScope(&self.view_extra)
+    }
+
     /// FEAT-084. Give an exact answer to a question its view ID. A snapshot that cannot be read
     /// leaves the ID off.
     pub(crate) fn finish_report(
@@ -1272,6 +1293,7 @@ impl Katalogr {
 
     /// All symbols by PageRank.
     pub fn map(&self, opts: &Options) -> Result<Reply<Vec<MapEntry>>, DistError> {
+        let _extra = self.extra_scope();
         let mut ws = WsRun::default();
         let mut reply = self.query_traced(opts, |tx, diag| {
             let boost = self.ws_boost(opts, tx, &mut ws);
@@ -1336,6 +1358,7 @@ impl Katalogr {
         }
         // One extra hit tells whether the limit cut the answer.
         let mut partial = Vec::new();
+        let _extra = self.extra_scope();
         let mut ws = WsRun::default();
         let mut reply = self.query_traced(opts, |tx, diag| {
             let boost = self.ws_boost(opts, tx, &mut ws);

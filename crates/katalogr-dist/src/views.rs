@@ -138,7 +138,7 @@ fn kind_of(name: &str) -> String {
 /// The query line of a spec: the op, its positional words, then its flags in name order.
 fn title_of(spec: &ViewSpec) -> String {
     let positional: &[&str] = match spec.op.as_str() {
-        "callers" => &["symbol"],
+        "callers" | "impact" => &["symbol"],
         "path" => &["from", "to"],
         _ => &[],
     };
@@ -221,6 +221,7 @@ impl Katalogr {
             "structure" => self.view_structure(spec, opts, title),
             "contracts" => self.view_contracts(spec, opts, title),
             "callers" => self.view_callers(spec, opts, title),
+            "impact" => self.view_impact(spec, opts, title),
             "path" => self.view_path(spec, opts, title),
             "cycles" => self.view_cycles(spec, opts, title),
             other => Err(DistError::usage(format!("unknown view op `{other}`"))),
@@ -338,6 +339,55 @@ impl Katalogr {
                 for (f, t, k, i) in &edges {
                     b.edge(f, t, k, *i);
                 }
+                let g = b.finish(title, total);
+                partial = limit_partial(max, g.shown, g.total);
+                Ok::<_, StoreError>(g)
+            })
+        })?;
+        Ok(with_partial(reply, partial))
+    }
+
+    /// The symbol's impact: the seed, its hits and its tests as nodes, each joined to the node
+    /// it was reached from (`chain[0]`, else the seed). The cap is `max-nodes` on hits.
+    fn view_impact(
+        &self,
+        spec: &ViewSpec,
+        opts: &Options,
+        title: String,
+    ) -> Result<Reply<ViewGraph>, DistError> {
+        let text = arg(spec, "symbol")?;
+        let depth = number(spec, "depth")?.max(1) as u32;
+        let max = number(spec, "max-nodes")?.max(1);
+        let iopts = katalogr_query::ImpactOptions {
+            depth,
+            limit: max,
+            ..Default::default()
+        };
+        let mut partial = Vec::new();
+        let reply = self.query(opts, |tx| {
+            on_target(tx, text, |root| {
+                let seeds = katalogr_query::seeds_for_symbol(root);
+                let report = katalogr_query::impact(tx, &seeds, &iopts)?;
+                let mut b = Builder::default();
+                for s in &report.seeds {
+                    b.node(&s.node.name, &s.node.kind, Some(&s.node.path));
+                }
+                for g in &report.groups {
+                    let inferred = g.confidence == katalogr_model::Confidence::Inferred;
+                    for h in &g.hits {
+                        b.node(&h.node.name, &h.node.kind, Some(&h.node.path));
+                        let to = h.chain.first().unwrap_or(&h.seed);
+                        b.edge(&h.node.name, to, &g.kind, inferred);
+                    }
+                }
+                for t in &report.tests {
+                    b.node(&t.test.name, &t.test.kind, Some(&t.test.path));
+                    let to = t.chain.first().unwrap_or(&t.seed);
+                    b.edge(&t.test.name, to, "tests", false);
+                }
+                let hits: u64 = report.groups.iter().map(|g| g.hits.len() as u64).sum();
+                let others = (report.seeds.len() + report.tests.len()) as u64;
+                let total = report.total.unwrap_or(hits) + others;
                 let g = b.finish(title, total);
                 partial = limit_partial(max, g.shown, g.total);
                 Ok::<_, StoreError>(g)

@@ -529,6 +529,34 @@ pub enum Command {
         #[arg(long, default_value_t = katalogr_dist::DEFAULT_DOCS_LIMIT, value_name = "N")]
         limit: usize,
     },
+    /// What a symbol, file, change range or board item reaches, grouped by link kind and
+    /// confidence, with the tests that cover it. Give at most one of SYMBOL, --file, --range,
+    /// --since and --item; with none, the changes since the merge-base with the default branch.
+    Impact {
+        /// Canonical name or plain name of a symbol or contract.
+        symbol: Option<String>,
+        /// A file: `<repo>:<path>`, or a path relative to the marked repository.
+        #[arg(long, value_name = "PATH")]
+        file: Option<String>,
+        /// A change range `BASE..HEAD`; the head must be a position the index holds.
+        #[arg(long, value_name = "BASE..HEAD")]
+        range: Option<String>,
+        /// Changes since a revision or a clean position, up to `--at` (default: this checkout).
+        #[arg(long, value_name = "REV")]
+        since: Option<String>,
+        /// A board item code.
+        #[arg(long, value_name = "CODE")]
+        item: Option<String>,
+        /// How many hops to follow.
+        #[arg(long, default_value_t = crate::cmd::impact::DEFAULT_DEPTH, value_name = "N")]
+        depth: u32,
+        /// Most nodes in the groups, and most tests.
+        #[arg(long, default_value_t = crate::cmd::impact::DEFAULT_LIMIT, value_name = "N")]
+        limit: usize,
+        /// How many hops the tests section follows.
+        #[arg(long, default_value_t = crate::cmd::impact::DEFAULT_TEST, value_name = "N")]
+        test_depth: u32,
+    },
     /// List, add and remove contexts: the base, each checkout's own, and pinned commits.
     Context {
         #[command(subcommand)]

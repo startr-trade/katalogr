@@ -84,7 +84,7 @@ pub struct ToolSpec {
 }
 
 /// Fixed order: find, refs, callers, explain, show, path, map, search, dangling, why,
-/// docs-affected, index, status.
+/// docs-affected, impact, index, status.
 pub const TOOLS: &[ToolSpec] = &[
     ToolSpec {
         name: "find",
@@ -165,6 +165,21 @@ pub const TOOLS: &[ToolSpec] = &[
             opt("since", Ty::Str),
             opt("kind", Ty::Str),
             opt_int("limit", 1, 200),
+        ],
+    },
+    ToolSpec {
+        name: "impact",
+        description: "What a symbol, file, change range or item reaches, and the tests over it.",
+        query: true,
+        args: &[
+            opt("text", Ty::Str),
+            opt("file", Ty::Str),
+            opt("range", Ty::Str),
+            opt("since", Ty::Str),
+            opt("item", Ty::Str),
+            opt_int("depth", 0, 3),
+            opt_int("limit", 1, 500),
+            opt_int("test_depth", 0, 3),
         ],
     },
     ToolSpec {
@@ -260,6 +275,7 @@ fn output_schema(name: &str) -> Option<JsonObject> {
         "dangling" => include_str!("../../../../schema/v1/dangling.schema.json"),
         "why" => include_str!("../../../../schema/v1/why.schema.json"),
         "docs-affected" => include_str!("../../../../schema/v1/docs-affected.schema.json"),
+        "impact" => include_str!("../../../../schema/v1/impact.schema.json"),
         _ => return None,
     };
     match serde_json::from_str::<Value>(text) {
@@ -599,6 +615,32 @@ pub fn call(cfg: &ServeConfig, name: &str, args: &Value) -> Result<JsonAnswer, U
             answer(Katalogr::docs_affected(&k, since, &params, opts), |r| {
                 render_json::plain(r, |_| false)
             })
+        }
+        "impact" => {
+            let input = crate::cmd::impact::Input {
+                symbol: p.text("text"),
+                file: p.text("file"),
+                range: p.text("range"),
+                since: p.text("since"),
+                item: p.text("item"),
+            };
+            let depth = p.int("depth", crate::cmd::impact::DEFAULT_DEPTH);
+            let limit = p.int("limit", crate::cmd::impact::DEFAULT_LIMIT as u32) as usize;
+            let test_depth = p.int("test_depth", crate::cmd::impact::DEFAULT_TEST);
+            let iopts = crate::cmd::impact::options(depth, limit, test_depth);
+            let at = p.text("at").or(cfg.options.at.as_deref());
+            match input.parse(at) {
+                Err(e) => render_json::error(&e),
+                Ok(facade) => {
+                    let opts = &mk(
+                        "impact",
+                        &crate::cmd::impact::args(&input, depth, limit, test_depth),
+                    );
+                    answer(Katalogr::impact(&k, &facade, &iopts, opts), |r| {
+                        render_json::plain(r, |_| false)
+                    })
+                }
+            }
         }
         "index" => {
             let since = owned(p.text("since"));

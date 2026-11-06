@@ -202,7 +202,7 @@ pub fn doc_impact(tx: &impl Reader, input: &DocImpactInput<'_>) -> Result<DocImp
 }
 
 /// Whether the wanted `key` names `path` itself or a place inside it (`path#anchor`).
-fn names_path(key: &str, path: &str) -> bool {
+pub(crate) fn names_path(key: &str, path: &str) -> bool {
     key == path || key.strip_prefix(path).is_some_and(|r| r.starts_with('#'))
 }
 

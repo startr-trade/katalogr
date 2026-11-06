@@ -95,6 +95,22 @@ const OPS: &[Op] = &[
         ],
     },
     Op {
+        name: "impact",
+        positional: &["symbol"],
+        flags: &[
+            Flag {
+                name: "depth",
+                kind: Kind::Number,
+                default: "3",
+            },
+            Flag {
+                name: "max-nodes",
+                kind: Kind::Number,
+                default: "60",
+            },
+        ],
+    },
+    Op {
         name: "path",
         positional: &["from", "to"],
         flags: &[Flag {
@@ -409,7 +425,14 @@ fn catalogue_is_sorted_and_complete() {
     let names: Vec<&str> = c.iter().map(|o| o.name).collect();
     assert_eq!(
         names,
-        ["callers", "contracts", "cycles", "path", "structure"]
+        [
+            "callers",
+            "contracts",
+            "cycles",
+            "impact",
+            "path",
+            "structure"
+        ]
     );
     let path = c.iter().find(|o| o.name == "path").unwrap();
     assert_eq!(path.args[0].name, "from");
@@ -439,6 +462,11 @@ fn parses_every_op() {
     assert_eq!(
         args(&s),
         [("depth", "3"), ("max-nodes", "20"), ("symbol", "my symbol")]
+    );
+    let s = ViewSpec::parse("impact load").unwrap();
+    assert_eq!(
+        args(&s),
+        [("depth", "3"), ("max-nodes", "60"), ("symbol", "load")]
     );
     let s = ViewSpec::parse("path a b --max-len 9").unwrap();
     assert_eq!(args(&s), [("from", "a"), ("max-len", "9"), ("to", "b")]);

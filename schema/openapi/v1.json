@@ -10288,6 +10288,1137 @@
         ],
         "type": "object"
       },
+      "impact": {
+        "description": "What `--json` prints.",
+        "properties": {
+          "context": {
+            "description": "The context the answer was read from, when it names one.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "diagnostic": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/impact.Trace"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The trace of the query, present only with `--diagnostic` (FEAT-065)."
+          },
+          "exact": {
+            "default": false,
+            "description": "Nothing was pending and every checkout's position was the same before and after the read.",
+            "type": "boolean"
+          },
+          "folded": {
+            "description": "`refs` and `callers` only: hits folded into summaries (absent with `--expand` and\nwhenever nothing was folded).",
+            "items": {
+              "$ref": "#/components/schemas/impact.Fold"
+            },
+            "type": "array"
+          },
+          "next": {
+            "description": "Suggested follow-up commands, at most three.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "partial": {
+            "description": "Present when a cap or budget cut the answer; one entry per cap that cut it.",
+            "items": {
+              "$ref": "#/components/schemas/impact.Partial"
+            },
+            "type": "array"
+          },
+          "pending": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "positions": {
+            "description": "What the index reflects, one entry per repo sorted by repo (FEAT-084). Omitted when empty.",
+            "items": {
+              "$ref": "#/components/schemas/impact.PositionRef"
+            },
+            "type": "array"
+          },
+          "result": {
+            "$ref": "#/components/schemas/impact.ImpactReport"
+          },
+          "schema": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "stale": {
+            "type": "boolean"
+          },
+          "truncated": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/impact.Truncation"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "view_id": {
+            "description": "Identifies this answer; present only on an exact answer to a question that has one.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "watermark": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "working_set": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/impact.WorkingSetSummary"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "`search` and `map` only (FEAT-039): the working set that reordered this answer. Absent\nwhen ranking was neutral or the set was empty."
+          }
+        },
+        "required": [
+          "schema",
+          "watermark",
+          "pending",
+          "stale",
+          "result"
+        ],
+        "title": "Envelope",
+        "type": "object"
+      },
+      "impact.Confidence": {
+        "description": "Schema-only mirror of [`katalogr_model::Confidence`].",
+        "enum": [
+          "Extracted",
+          "Inferred",
+          "Declared"
+        ],
+        "type": "string"
+      },
+      "impact.ExpandedTerm": {
+        "properties": {
+          "postings": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "term": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "term",
+          "postings"
+        ],
+        "type": "object"
+      },
+      "impact.Fold": {
+        "description": "Hits of `refs` or `callers` folded into one summary because they reach their node only\nthrough an export key with `FOLD_FROM` or more targets (FEAT-077). `--expand` lists them.",
+        "properties": {
+          "at": {
+            "description": "The number of `result` entries that come before this fold in today's order.",
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "depth": {
+            "description": "`callers`: the depth of the folded callers.",
+            "format": "uint32",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "first": {
+            "description": "The first folded hits (referrer or caller), in today's order.",
+            "items": {
+              "$ref": "#/components/schemas/impact.SymbolHit"
+            },
+            "type": "array"
+          },
+          "hits": {
+            "description": "Hits folded.",
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "key": {
+            "description": "The export key, `namespace:key`.",
+            "type": "string"
+          },
+          "kind": {
+            "description": "Link kind of the folded hits (`calls` for callers).",
+            "type": "string"
+          },
+          "targets": {
+            "description": "The key's current target count.",
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "via": {
+            "description": "`refs`: the re-export chain of the folded hits, nearest the target first.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "key",
+          "kind",
+          "targets",
+          "hits",
+          "first",
+          "at"
+        ],
+        "type": "object"
+      },
+      "impact.FoldTrace": {
+        "description": "One fold of a `refs` answer (FEAT-077).",
+        "properties": {
+          "at": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "hits": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "key": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "targets": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "key",
+          "kind",
+          "targets",
+          "hits",
+          "at"
+        ],
+        "type": "object"
+      },
+      "impact.ImpactContract": {
+        "properties": {
+          "consumers": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "contract": {
+            "description": "Canonical name.",
+            "type": "string"
+          },
+          "open": {
+            "description": "`no-provider` or `no-consumer` when impact may continue outside this project.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "providers": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "contract",
+          "providers",
+          "consumers"
+        ],
+        "type": "object"
+      },
+      "impact.ImpactGroup": {
+        "properties": {
+          "confidence": {
+            "$ref": "#/components/schemas/impact.Confidence"
+          },
+          "hits": {
+            "items": {
+              "$ref": "#/components/schemas/impact.ImpactHit"
+            },
+            "type": "array"
+          },
+          "kind": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "confidence",
+          "hits"
+        ],
+        "type": "object"
+      },
+      "impact.ImpactHit": {
+        "properties": {
+          "chain": {
+            "description": "Canonical names between the hit and the seed, hit side first; contracts excluded.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "depth": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "node": {
+            "$ref": "#/components/schemas/impact.SymbolHit"
+          },
+          "score": {
+            "description": "Product of the row weights on the path, rounded to 4 decimals.",
+            "format": "double",
+            "type": "number"
+          },
+          "seed": {
+            "description": "Canonical name of the nearest seed.",
+            "type": "string"
+          },
+          "via": {
+            "description": "The contract (`contract:<kind>:<key>`) the path goes through, when it does.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "node",
+          "depth",
+          "score",
+          "seed",
+          "chain"
+        ],
+        "type": "object"
+      },
+      "impact.ImpactReport": {
+        "properties": {
+          "contracts": {
+            "description": "Each contract the walk reached, sorted by name.",
+            "items": {
+              "$ref": "#/components/schemas/impact.ImpactContract"
+            },
+            "type": "array"
+          },
+          "groups": {
+            "description": "Sorted by confidence (strongest first), then kind.",
+            "items": {
+              "$ref": "#/components/schemas/impact.ImpactGroup"
+            },
+            "type": "array"
+          },
+          "partial": {
+            "description": "Caps that cut this answer; the facade copies it to `Reply::partial`.",
+            "items": {
+              "$ref": "#/components/schemas/impact.Partial"
+            },
+            "type": "array"
+          },
+          "projects": {
+            "description": "The projects this answer covers, sorted. Set by the facade: `impact` leaves it empty.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "repos": {
+            "description": "The repos of the seeds and hits, sorted.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "seeds": {
+            "description": "Seeds found, sorted by name then precision. Unknown ids are dropped.",
+            "items": {
+              "$ref": "#/components/schemas/impact.ImpactSeed"
+            },
+            "type": "array"
+          },
+          "tests": {
+            "description": "As `tests_for` sorts, at most `limit`.",
+            "items": {
+              "$ref": "#/components/schemas/impact.TestHit"
+            },
+            "type": "array"
+          },
+          "total": {
+            "description": "All hits in `groups`, before the limit; absent when the walk stopped early.",
+            "format": "uint64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "seeds",
+          "groups",
+          "tests",
+          "contracts",
+          "repos",
+          "projects",
+          "partial"
+        ],
+        "type": "object"
+      },
+      "impact.ImpactSeed": {
+        "properties": {
+          "node": {
+            "$ref": "#/components/schemas/impact.SymbolHit"
+          },
+          "precision": {
+            "type": "string"
+          },
+          "wanted": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "node",
+          "precision"
+        ],
+        "type": "object"
+      },
+      "impact.PackEntry": {
+        "properties": {
+          "index": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "kept": {
+            "type": "boolean"
+          },
+          "reason": {
+            "description": "Set by context packs (FEAT-038).",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "tier": {
+            "description": "Set by context packs (FEAT-038).",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "tokens": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "index",
+          "tokens",
+          "kept"
+        ],
+        "type": "object"
+      },
+      "impact.PackTrace": {
+        "properties": {
+          "budget": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "considered": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "entries": {
+            "description": "The first `DIAG_PACK` kept entries, plus the first omitted one.",
+            "items": {
+              "$ref": "#/components/schemas/impact.PackEntry"
+            },
+            "type": "array"
+          },
+          "estimator": {
+            "type": "string"
+          },
+          "first_omitted_tokens": {
+            "description": "What the first omitted entry would have cost.",
+            "format": "uint64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "kept": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "omitted": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "used_tokens": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "budget",
+          "estimator",
+          "considered",
+          "kept",
+          "omitted",
+          "used_tokens",
+          "entries"
+        ],
+        "type": "object"
+      },
+      "impact.PartTrace": {
+        "properties": {
+          "contribution": {
+            "description": "`factor * idf * t / (k1 + t)` (6 decimals).",
+            "format": "double",
+            "type": "number"
+          },
+          "factor": {
+            "description": "1.0 for an exact term, the prefix factor for a prefix term.",
+            "format": "double",
+            "type": "number"
+          },
+          "t": {
+            "description": "Field-weighted, length-normalised frequency (6 decimals).",
+            "format": "double",
+            "type": "number"
+          },
+          "term": {
+            "description": "The indexed term that gave the best value.",
+            "type": "string"
+          },
+          "token": {
+            "type": "string"
+          },
+          "via": {
+            "description": "`exact` or `prefix`.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "token",
+          "via",
+          "term",
+          "t",
+          "factor",
+          "contribution"
+        ],
+        "type": "object"
+      },
+      "impact.Partial": {
+        "description": "The answer was cut by a cap: more items exist (or may exist) than are shown.",
+        "properties": {
+          "at": {
+            "description": "The cap's value: N in \"capped at N\" (items, hops, or tokens for `budget`).",
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "cap": {
+            "description": "Which cap: one of [`cap`]'s names.",
+            "type": "string"
+          },
+          "note": {
+            "description": "Always [`PARTIAL_NOTE`].",
+            "type": "string"
+          },
+          "shown": {
+            "description": "Items shown.",
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "total": {
+            "description": "Items there were before the cap, when known.",
+            "format": "uint64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "cap",
+          "at",
+          "shown",
+          "note"
+        ],
+        "type": "object"
+      },
+      "impact.PositionRef": {
+        "description": "One repo's position. Serialises as `{\"repo\",\"commit\",\"dirty\"}`, absent parts as `null`.",
+        "properties": {
+          "commit": {
+            "description": "40 lower-case hex, or `None` for a directory with no commit.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "dirty": {
+            "description": "64 lower-case hex, or `None` when the checkout is clean.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "repo": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "repo"
+        ],
+        "type": "object"
+      },
+      "impact.PrefixTrace": {
+        "properties": {
+          "attempted": {
+            "description": "The token has enough characters to be expanded.",
+            "type": "boolean"
+          },
+          "cap_hit": {
+            "description": "The expansion cap was reached.",
+            "type": "boolean"
+          },
+          "expanded": {
+            "description": "Terms the expansion returned.",
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "factor": {
+            "format": "double",
+            "type": "number"
+          },
+          "terms": {
+            "description": "At most `DIAG_TERMS`, in selection order.",
+            "items": {
+              "$ref": "#/components/schemas/impact.ExpandedTerm"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "attempted",
+          "expanded",
+          "cap_hit",
+          "factor",
+          "terms"
+        ],
+        "type": "object"
+      },
+      "impact.RankSource": {
+        "properties": {
+          "damping": {
+            "format": "double",
+            "type": "number"
+          },
+          "iterations": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "rank_watermark": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "source": {
+            "description": "`cached` or `live`.",
+            "type": "string"
+          },
+          "watermark": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "source",
+          "watermark",
+          "damping",
+          "iterations"
+        ],
+        "type": "object"
+      },
+      "impact.RankTrace": {
+        "properties": {
+          "parts": {
+            "description": "One per query token that contributed, in query order.",
+            "items": {
+              "$ref": "#/components/schemas/impact.PartTrace"
+            },
+            "type": "array"
+          },
+          "position": {
+            "description": "1-based.",
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "score": {
+            "description": "As printed in the answer.",
+            "format": "double",
+            "type": "number"
+          },
+          "symbol": {
+            "description": "Canonical name.",
+            "type": "string"
+          },
+          "tied_with_next": {
+            "description": "Same score as the next hit, so the name order decided.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "position",
+          "symbol",
+          "score",
+          "parts",
+          "tied_with_next"
+        ],
+        "type": "object"
+      },
+      "impact.RoutingTrace": {
+        "properties": {
+          "after_collapse": {
+            "description": "After re-export and impl collapsing.",
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "candidates": {
+            "description": "Symbols the winning tier matched before alias collapsing.",
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "command": {
+            "description": "`search`, `refs` or `map`.",
+            "type": "string"
+          },
+          "dropped": {
+            "description": "`search`: words of the input that produced no token.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "input": {
+            "description": "The user's text (not a path).",
+            "type": "string"
+          },
+          "kind": {
+            "description": "`tokens`, `name` or `none`.",
+            "type": "string"
+          },
+          "tier": {
+            "description": "`refs`: `contract`, `canonical`, `plain` or `plain_ci`.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "tokens": {
+            "description": "`search`: the query tokens, deduplicated, in order.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "command",
+          "input",
+          "kind",
+          "tokens",
+          "dropped",
+          "candidates",
+          "after_collapse"
+        ],
+        "type": "object"
+      },
+      "impact.Span": {
+        "description": "Schema-only mirror of [`katalogr_model::Span`].",
+        "properties": {
+          "end_col": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "end_line": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "start_col": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "start_line": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "start_line",
+          "start_col",
+          "end_line",
+          "end_col"
+        ],
+        "type": "object"
+      },
+      "impact.SymbolHit": {
+        "properties": {
+          "kind": {
+            "type": "string"
+          },
+          "name": {
+            "description": "Canonical name.",
+            "type": "string"
+          },
+          "path": {
+            "description": "Repository-relative path.",
+            "type": "string"
+          },
+          "span": {
+            "$ref": "#/components/schemas/impact.Span"
+          }
+        },
+        "required": [
+          "name",
+          "kind",
+          "path",
+          "span"
+        ],
+        "type": "object"
+      },
+      "impact.TermTrace": {
+        "properties": {
+          "exact_postings": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "idf": {
+            "description": "Rounded to 6 decimals.",
+            "format": "double",
+            "type": "number"
+          },
+          "matching_docs": {
+            "description": "Documents matched by the token or any of its expansions.",
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "prefix": {
+            "$ref": "#/components/schemas/impact.PrefixTrace"
+          },
+          "token": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "token",
+          "exact_postings",
+          "matching_docs",
+          "idf",
+          "prefix"
+        ],
+        "type": "object"
+      },
+      "impact.TestHit": {
+        "description": "A test that exercises or verifies a symbol (FEAT-063).",
+        "properties": {
+          "chain": {
+            "description": "Canonical names between the test and the seed, test side first; contracts excluded.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "confidence": {
+            "$ref": "#/components/schemas/impact.Confidence",
+            "description": "The weakest confidence on the path (Extracted > Declared > Inferred)."
+          },
+          "depth": {
+            "description": "Hops from the seed; 0 when the seed itself is test code.",
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "requirements": {
+            "description": "Canonical names of the nodes with a `verified-by` link to the test, sorted.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "role": {
+            "description": "`case`, `suite`, `support`, or any other string an extension or profile set.",
+            "type": "string"
+          },
+          "score": {
+            "description": "Product of the row weights on the path, rounded to 4 decimals.",
+            "format": "double",
+            "type": "number"
+          },
+          "seed": {
+            "description": "Canonical name of the seed reached.",
+            "type": "string"
+          },
+          "test": {
+            "$ref": "#/components/schemas/impact.SymbolHit",
+            "description": "The test node; an artifact is shown with kind `artifact` (as `dangling` shows referrers)."
+          },
+          "via": {
+            "description": "The first contract on the path from the test side, `contract:<kind>:<key>`.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "test",
+          "role",
+          "depth",
+          "confidence",
+          "score",
+          "seed",
+          "chain",
+          "requirements"
+        ],
+        "type": "object"
+      },
+      "impact.Trace": {
+        "description": "What `--diagnostic` reports.",
+        "properties": {
+          "folds": {
+            "description": "`refs`: the folds of the answer, in answer order, at most `DIAG_REFS` (the rest are\ncounted in `omitted[\"folds\"]`).",
+            "items": {
+              "$ref": "#/components/schemas/impact.FoldTrace"
+            },
+            "type": "array"
+          },
+          "omitted": {
+            "additionalProperties": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "description": "List name to the number of entries cut by a cap.",
+            "type": "object"
+          },
+          "packing": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/impact.PackTrace"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Set by the wrapper that packs the output (`--budget`)."
+          },
+          "rank_source": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/impact.RankSource"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "`map`: where the rank came from."
+          },
+          "ranking": {
+            "description": "`search`: the top hits, best first.",
+            "items": {
+              "$ref": "#/components/schemas/impact.RankTrace"
+            },
+            "type": "array"
+          },
+          "routing": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/impact.RoutingTrace"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "terms": {
+            "description": "`search`: one per query token, in query order.",
+            "items": {
+              "$ref": "#/components/schemas/impact.TermTrace"
+            },
+            "type": "array"
+          },
+          "weights": {
+            "description": "`refs` and `map`: link weights.",
+            "items": {
+              "$ref": "#/components/schemas/impact.WeightTrace"
+            },
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
+      "impact.Truncation": {
+        "properties": {
+          "budget": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "omitted": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "shown": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "shown",
+          "omitted",
+          "budget"
+        ],
+        "type": "object"
+      },
+      "impact.WeightTrace": {
+        "properties": {
+          "confidence": {
+            "description": "`Extracted`, `Inferred` or `Declared`.",
+            "type": "string"
+          },
+          "fanout": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "from": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "to": {
+            "description": "The symbol the link arrives at.",
+            "type": "string"
+          },
+          "weight": {
+            "description": "The link row's weight (6 decimals).",
+            "format": "double",
+            "type": "number"
+          }
+        },
+        "required": [
+          "to",
+          "from",
+          "kind",
+          "confidence",
+          "weight"
+        ],
+        "type": "object"
+      },
+      "impact.WorkingSetSummary": {
+        "description": "What the answer says about the working set, so a reader can see why the order differs.",
+        "properties": {
+          "branch": {
+            "format": "uint",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "dirty": {
+            "format": "uint",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "item": {
+            "description": "The active item, when there is one. Filled by the caller; [`WorkingSet::counts`] leaves\nit empty.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "item_paths": {
+            "format": "uint",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "recent": {
+            "format": "uint",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "dirty",
+          "recent",
+          "branch",
+          "item_paths"
+        ],
+        "type": "object"
+      },
       "map": {
         "description": "What `--json` prints.",
         "properties": {
@@ -22176,6 +23307,280 @@
         "summary": "The nodes with the highest weighted degree."
       }
     },
+    "/api/v1/impact": {
+      "get": {
+        "operationId": "impact",
+        "parameters": [
+          {
+            "description": "symbol or contract, canonical or plain name",
+            "in": "query",
+            "name": "text",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "`<repo>:<path>`, or a path in the marked repository",
+            "in": "query",
+            "name": "file",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "change range `BASE..HEAD`",
+            "in": "query",
+            "name": "range",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "changes since a revision or clean position",
+            "in": "query",
+            "name": "since",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "board item code",
+            "in": "query",
+            "name": "item",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "call hops to follow",
+            "in": "query",
+            "name": "depth",
+            "required": false,
+            "schema": {
+              "default": 3.0,
+              "maximum": 4294967295,
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "most nodes in the groups, and most tests",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 500.0,
+              "maximum": 4294967295,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "hops the tests section follows",
+            "in": "query",
+            "name": "test-depth",
+            "required": false,
+            "schema": {
+              "default": 3.0,
+              "maximum": 4294967295,
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "`current`, `base` or an id from context-list",
+            "in": "query",
+            "name": "context",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "answer for this position",
+            "in": "query",
+            "name": "at",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "freshness requirement",
+            "in": "query",
+            "name": "consistency",
+            "required": false,
+            "schema": {
+              "default": "stale-ok",
+              "enum": [
+                "wait",
+                "wait-all",
+                "stale-ok"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "seconds to wait, at most 120",
+            "in": "query",
+            "name": "timeout",
+            "required": false,
+            "schema": {
+              "minimum": 0,
+              "type": "number"
+            }
+          },
+          {
+            "description": "limit the answer to about this many tokens",
+            "in": "query",
+            "name": "budget",
+            "required": false,
+            "schema": {
+              "maximum": 4294967295,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "include a diagnostic trace",
+            "in": "query",
+            "name": "diagnostic",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "description": "list every hit instead of folding",
+            "in": "query",
+            "name": "expand",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/impact"
+                }
+              }
+            },
+            "description": "The same JSON as the CLI prints with `--json`.",
+            "headers": {
+              "ETag": {
+                "description": "The view ID, when the answer is exact",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "304": {
+            "description": "The view ID in `If-None-Match` is the current one."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A bad or unknown parameter."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Not authenticated."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Denied, or an unexpected Host header."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No match, or no such route."
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Only GET is served."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Ambiguous, or the position is unavailable."
+          },
+          "431": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The request head is over 8 KiB."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "An error."
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The queue is full; retry after 1 second."
+          }
+        },
+        "summary": "What a symbol, file, change range or item reaches, and the tests over it."
+      }
+    },
     "/api/v1/map": {
       "get": {
         "operationId": "map",
@@ -25160,6 +26565,232 @@
           }
         },
         "summary": "A cycles view at a position: Mermaid and the graph."
+      }
+    },
+    "/api/v1/views/impact": {
+      "get": {
+        "operationId": "views/impact",
+        "parameters": [
+          {
+            "description": "canonical name or plain name",
+            "in": "query",
+            "name": "symbol",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "hops to follow",
+            "in": "query",
+            "name": "depth",
+            "required": false,
+            "schema": {
+              "default": 3.0,
+              "maximum": 4294967295,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "most nodes drawn",
+            "in": "query",
+            "name": "max-nodes",
+            "required": false,
+            "schema": {
+              "default": 60.0,
+              "maximum": 4294967295,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "`current`, `base` or an id from context-list",
+            "in": "query",
+            "name": "context",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "answer for this position",
+            "in": "query",
+            "name": "at",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "freshness requirement",
+            "in": "query",
+            "name": "consistency",
+            "required": false,
+            "schema": {
+              "default": "stale-ok",
+              "enum": [
+                "wait",
+                "wait-all",
+                "stale-ok"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "seconds to wait, at most 120",
+            "in": "query",
+            "name": "timeout",
+            "required": false,
+            "schema": {
+              "minimum": 0,
+              "type": "number"
+            }
+          },
+          {
+            "description": "limit the answer to about this many tokens",
+            "in": "query",
+            "name": "budget",
+            "required": false,
+            "schema": {
+              "maximum": 4294967295,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "include a diagnostic trace",
+            "in": "query",
+            "name": "diagnostic",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "description": "list every hit instead of folding",
+            "in": "query",
+            "name": "expand",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/view"
+                }
+              }
+            },
+            "description": "The same JSON as the CLI prints with `--json`.",
+            "headers": {
+              "ETag": {
+                "description": "The view ID, when the answer is exact",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "304": {
+            "description": "The view ID in `If-None-Match` is the current one."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A bad or unknown parameter."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Not authenticated."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Denied, or an unexpected Host header."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No match, or no such route."
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Only GET is served."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Ambiguous, or the position is unavailable."
+          },
+          "431": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The request head is over 8 KiB."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "An error."
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The queue is full; retry after 1 second."
+          }
+        },
+        "summary": "An impact view at a position: Mermaid and the graph."
       }
     },
     "/api/v1/views/path": {

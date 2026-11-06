@@ -590,7 +590,14 @@ mod doc_views {
         valid.dedup();
         assert_eq!(
             valid,
-            vec!["callers", "contracts", "cycles", "path", "structure"]
+            vec![
+                "callers",
+                "contracts",
+                "cycles",
+                "impact",
+                "path",
+                "structure"
+            ]
         );
         assert!(invalid >= 10, "{invalid}");
     }

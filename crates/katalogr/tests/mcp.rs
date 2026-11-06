@@ -276,7 +276,7 @@ mod mcp {
         c.send(json!({"jsonrpc": "2.0", "id": "two", "method": "tools/list"}));
         let list = c.recv();
         assert_eq!(list["id"], "two");
-        assert!(list["result"]["tools"].as_array().unwrap().len() == 13);
+        assert!(list["result"]["tools"].as_array().unwrap().len() == 14);
         let found = c.call(3, "find", json!({"text": "target"}));
         assert_eq!(found["result"]["isError"], false, "{found}");
         let out = last_text(&found);
@@ -453,7 +453,7 @@ mod mcp {
         );
     }
 
-    /// R-2. Exactly the twelve core tools, in order, and the `tools` capability only.
+    /// R-2. Exactly the thirteen core tools, in order, and the `tools` capability only.
     #[test]
     fn tools_list_is_the_core_queries() {
         let tmp = tempfile::tempdir().unwrap();
@@ -484,6 +484,7 @@ mod mcp {
                 "dangling",
                 "why",
                 "docs-affected",
+                "impact",
                 "index",
                 "status"
             ]
@@ -536,7 +537,7 @@ mod mcp {
             assert_eq!(t["outputSchema"], want, "{name}");
             with_schema += 1;
         }
-        assert_eq!(with_schema, 11);
+        assert_eq!(with_schema, 12);
         // A client on an older protocol gets none.
         drop(c);
         let mut c = Client::spawn(&repo, &[], &["--output-schemas"]);
@@ -564,6 +565,7 @@ mod mcp {
             "dangling",
             "why",
             "docs-affected",
+            "impact",
             "index",
             "status",
         ] {
@@ -736,6 +738,12 @@ mod mcp {
                 "explain",
                 vec!["explain", "caller_a", "--budget", "20"],
             ),
+            (
+                "impact",
+                json!({"text": "target"}),
+                "impact",
+                vec!["impact", "target"],
+            ),
         ]
     }
 
@@ -762,6 +770,49 @@ mod mcp {
                 assert_eq!(r["result"]["structuredContent"], text, "{cli:?}");
             }
         }
+    }
+
+    /// FEAT-028 R-10. The `impact` tool answers as `katalogr impact --json` does, for a
+    /// symbol, a file and the arguments the CLI takes.
+    #[test]
+    fn impact_tool_matches_cli() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (_kx, repo) = query_project(tmp.path());
+        let mut c = Client::spawn(&repo, &[], &[]);
+        c.initialize("2025-06-18");
+        let cases: Vec<(Value, Vec<&str>)> = vec![
+            (json!({"text": "target"}), vec!["impact", "target"]),
+            (
+                json!({"file": "lib.tx"}),
+                vec!["impact", "--file", "lib.tx"],
+            ),
+            (
+                json!({"text": "target", "depth": 1, "limit": 5, "test_depth": 2}),
+                vec![
+                    "impact",
+                    "target",
+                    "--depth",
+                    "1",
+                    "--limit",
+                    "5",
+                    "--test-depth",
+                    "2",
+                ],
+            ),
+        ];
+        for (i, (args, cli)) in cases.into_iter().enumerate() {
+            let mut full = vec!["--json"];
+            full.extend(cli.iter().copied());
+            let (code, out, err) = run_raw(&repo, &full);
+            let r = c.call(i as u64 + 1, "impact", args.clone());
+            assert_eq!(r["result"]["isError"], false, "{args}: {r} {err}");
+            assert_eq!(last_text(&r).trim_end(), out.trim_end(), "{args}");
+            assert_eq!(exit_meta(&r), code as i64, "{args}");
+        }
+        // The same usage error as the CLI: a range with `at`.
+        let r = c.call(99, "impact", json!({"range": "HEAD~1..HEAD", "at": "HEAD"}));
+        assert_eq!(r["result"]["isError"], true, "{r}");
+        assert_eq!(exit_meta(&r), 2, "{r}");
     }
 
     /// FEAT-086 R-8. The `docs-affected` tool answers as the CLI's `--json` does.
