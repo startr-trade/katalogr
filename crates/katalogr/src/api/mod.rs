@@ -24,13 +24,13 @@ use std::sync::{Arc, Condvar, Mutex, PoisonError};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use katalogr_dist::{Consistency, DistError, Katalogr, Options, Overrides};
+use katalogr_dist::{Consistency, DistError, Options, Overrides};
 
 use self::guard::{Authorizer, check_host, check_listen, cors_allow_origin};
 use self::http::{HttpError, RequestHead, header, parse_target, redact, status_of};
-use self::ops::{Args, Call, OPS, Op, find_op};
+use self::ops::{Args, OPS, Op, find_op};
 use crate::exit::ExitCode;
-use crate::render::json::{self as render_json, JsonAnswer};
+use crate::render::json::JsonAnswer;
 
 /// How the server runs.
 pub struct ApiConfig {
@@ -464,7 +464,7 @@ fn execute(shared: &Shared, op: &Op, args: &Args) -> JsonAnswer {
         _ticket = gate.enter();
     }
     let start = shared.cfg.start_dir.as_path();
-    let call = |o: &Options| call_op(start, op, args, &overrides, o);
+    let call = |o: &Options| ops::call_op(start, op, args, &overrides, o);
     let run = || {
         if waits && !shared.cfg.process {
             poll_stale(&call, &base, timeout)
@@ -482,22 +482,6 @@ fn execute(shared: &Shared, op: &Op, args: &Args) -> JsonAnswer {
             diagnostic: Vec::new(),
             headers: Vec::new(),
         },
-    }
-}
-
-fn call_op(
-    start: &std::path::Path,
-    op: &Op,
-    args: &Args,
-    overrides: &Overrides,
-    o: &Options,
-) -> JsonAnswer {
-    match op.call {
-        Call::Project(f) => match Katalogr::resolve(start, overrides) {
-            Ok(k) => f(&k, args, o),
-            Err(e) => render_json::error(&e),
-        },
-        Call::Free(f) => f(start, overrides, args, o),
     }
 }
 

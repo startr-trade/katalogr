@@ -241,6 +241,7 @@ fn run(cli: &Cli) -> Result<ExitCode, DistError> {
             fresh,
             words,
         }) => cmd::view::run(cli, action.as_ref(), *fresh, words),
+        Some(Command::Export { action }) => cmd::export::run(cli, action),
         Some(Command::Explain { symbol, per_side }) => cmd::explain::run(cli, symbol, *per_side),
         Some(Command::Replace { symbol, file }) => cmd::replace::run(cli, symbol, file),
         None => {

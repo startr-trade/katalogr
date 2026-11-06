@@ -2594,6 +2594,7 @@ dependencies = [
  "layout-rs",
  "schemars",
  "serde",
+ "serde_json",
  "sha2",
 ]
 
@@ -2622,6 +2623,7 @@ dependencies = [
 name = "katalogr-web"
 version = "0.1.0"
 dependencies = [
+ "katalogr-query",
  "katalogr-render",
  "serde",
  "serde_json",
@@ -2633,6 +2635,7 @@ name = "katalogr-webtest"
 version = "0.1.0"
 dependencies = [
  "boa_engine",
+ "katalogr-render",
  "katalogr-web",
  "serde_json",
 ]

@@ -85,6 +85,10 @@ KW.views = (function () {
 
   /* After an answer: the points stored for this question, or the sentence saying there are none. */
   function slider(into, answer, route, live) {
+    if (KW.static) {
+      into.appendChild(D().notice(KW.core.messages.fixedPosition, "info"));
+      return;
+    }
     timeline(function (t) {
       if (!live()) { return; }
       var points = KW.core.pointsFor(t, answer.query);
@@ -277,7 +281,10 @@ KW.views = (function () {
       var line = sym.span ? sym.span.start_line : 1;
       KW.get(KW.core.apiPath("why", { location: sym.path + ":" + line }), done("why"));
       KW.get(KW.core.apiPath("tests", { text: sym.name }), done("tests"));
-      KW.get(KW.core.apiPath("show", { symbol: sym.name }), done("show"));
+      /* A single-file export holds signatures only, unless it was made with --with-source. */
+      var showParams = { symbol: sym.name };
+      if (KW.static && !KW.staticSource) { showParams.signature = "true"; }
+      KW.get(KW.core.apiPath("show", showParams), done("show"));
       KW.get(KW.core.apiPath("views/callers", { symbol: sym.name, consistency: "wait", timeout: KW.state.manifest.wait_seconds }), done("callers"));
 
       function draw() {

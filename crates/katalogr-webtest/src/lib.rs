@@ -60,6 +60,51 @@ impl Backend for MapBackend {
     }
 }
 
+/// A backend for a page that must make no request of its own: any call fails the test.
+pub struct NoBackend;
+
+impl Backend for NoBackend {
+    fn get(&self, path_and_query: &str) -> (u16, String) {
+        panic!("a request reached a backend: {path_and_query}");
+    }
+}
+
+/// The script blocks of an exported file.
+struct FileBlocks {
+    /// `(id, text)` of each `application/json` block.
+    json: Vec<(String, String)>,
+    /// The page's own classic scripts, in file order, with `<\/script` restored.
+    scripts: Vec<String>,
+}
+
+fn file_blocks(text: &str) -> FileBlocks {
+    let mut out = FileBlocks {
+        json: Vec::new(),
+        scripts: Vec::new(),
+    };
+    let mut rest = text;
+    while let Some(i) = rest.find("<script") {
+        rest = &rest[i + "<script".len()..];
+        let tag_end = rest.find('>').expect("a script tag ends");
+        let attrs = &rest[..tag_end];
+        let after = &rest[tag_end + 1..];
+        let end = after.find("</script>").expect("a script block ends");
+        let body = &after[..end];
+        if attrs.contains("application/json") {
+            let id = attrs
+                .split("id=\"")
+                .nth(1)
+                .and_then(|s| s.split('"').next())
+                .expect("a JSON block has an id");
+            out.json.push((id.to_string(), body.to_string()));
+        } else if body.trim_start().starts_with("/* katalogr web view") {
+            out.scripts.push(body.replace("<\\/script", "</script"));
+        }
+        rest = &after[end + "</script>".len()..];
+    }
+    out
+}
+
 /// A plain HTTP/1.1 GET over `std::net` to a running server.
 pub struct HttpBackend {
     pub addr: SocketAddr,
@@ -144,7 +189,8 @@ impl Page {
             "document.getElementById('kw-views').textContent = {views};"
         ));
         for a in katalogr_web::assets() {
-            if a.name.starts_with("kw-") && a.name.ends_with(".js") {
+            // `kw-static.js` is for the single file only: it would replace the harness transport.
+            if a.name.starts_with("kw-") && a.name.ends_with(".js") && a.name != "kw-static.js" {
                 page.run(a.text);
             }
         }
@@ -153,6 +199,44 @@ impl Page {
             json_str(hash)
         ));
         page.drain(backend);
+        page
+    }
+
+    /// Opens an exported file (FEAT-034): the page's own scripts are taken from the file's text,
+    /// the manifest and the data from its two JSON blocks, and every request goes through the
+    /// file's static transport. Pele and Cytoscape are the harness stubs. A request to anything
+    /// else (`fetch`, `XMLHttpRequest`) fails the test.
+    pub fn open_file(text: &str, hash: &str) -> Page {
+        let blocks = file_blocks(text);
+        let mut page = Page {
+            ctx: Context::default(),
+        };
+        page.run(FAKE_DOM);
+        page.run(STUBS);
+        page.run(
+            "window.fetch = function (u) { throw new Error('fetch ' + u); };\n\
+             window.XMLHttpRequest = function () { throw new Error('XMLHttpRequest'); };",
+        );
+        for (id, body) in &blocks.json {
+            page.run(&format!(
+                "document.getElementById({}).textContent = {};",
+                json_str(id),
+                json_str(body)
+            ));
+        }
+        for script in &blocks.scripts {
+            page.run(script);
+        }
+        // Record each path asked of the static transport, as the harness transport does.
+        page.run(
+            "(function () { var inner = window.KW_TRANSPORT; \
+               window.KW_TRANSPORT = function (p, cb) { __requests.push(p); inner(p, cb); }; })();",
+        );
+        page.run(&format!(
+            "__setHash({}); if (window.KW && KW.boot) KW.boot();",
+            json_str(hash)
+        ));
+        page.drain(&NoBackend);
         page
     }
 
