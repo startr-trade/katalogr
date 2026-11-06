@@ -538,7 +538,7 @@
     },
     {
       "name": "retrieval.ndcg@10",
-      "value": 0.951409,
+      "value": 0.951186,
       "better": "higher"
     },
     {
@@ -588,7 +588,7 @@
     },
     {
       "name": "retrieval.ndcg@10",
-      "value": 0.979767,
+      "value": 0.979117,
       "better": "higher",
       "labels": {
         "op": "search",
@@ -614,7 +614,7 @@
     },
     {
       "name": "retrieval.ndcg@10",
-      "value": 0.958524,
+      "value": 0.958269,
       "better": "higher",
       "labels": {
         "scope": "within"
@@ -622,7 +622,7 @@
     },
     {
       "name": "retrieval.ndcg@10",
-      "value": 0.952604,
+      "value": 0.952264,
       "better": "higher",
       "labels": {
         "set": "core"
@@ -1033,12 +1033,12 @@
     },
     {
       "name": "retrieval.scope_leak_rate",
-      "value": 0.227273,
+      "value": 0.217391,
       "better": "lower"
     },
     {
       "name": "retrieval.scope_leak_rate",
-      "value": 0.263158,
+      "value": 0.25,
       "better": "lower",
       "labels": {
         "op": "search",
@@ -1056,7 +1056,7 @@
     },
     {
       "name": "retrieval.scope_leak_rate",
-      "value": 0.227273,
+      "value": 0.217391,
       "better": "lower",
       "labels": {
         "scope": "within"
@@ -1064,7 +1064,7 @@
     },
     {
       "name": "retrieval.scope_leak_rate",
-      "value": 0.263158,
+      "value": 0.25,
       "better": "lower",
       "labels": {
         "set": "core"
@@ -1080,7 +1080,7 @@
     },
     {
       "name": "retrieval.tokens_per_relevant_hit",
-      "value": 131.606061,
+      "value": 134.409091,
       "better": "lower"
     },
     {
@@ -1130,7 +1130,7 @@
     },
     {
       "name": "retrieval.tokens_per_relevant_hit",
-      "value": 209.217391,
+      "value": 217.26087,
       "better": "lower",
       "labels": {
         "op": "search",
@@ -1156,7 +1156,7 @@
     },
     {
       "name": "retrieval.tokens_per_relevant_hit",
-      "value": 143.017857,
+      "value": 146.321429,
       "better": "lower",
       "labels": {
         "scope": "within"
@@ -1164,7 +1164,7 @@
     },
     {
       "name": "retrieval.tokens_per_relevant_hit",
-      "value": 160.489362,
+      "value": 164.425532,
       "better": "lower",
       "labels": {
         "set": "core"
@@ -1520,7 +1520,7 @@
       },
       "ndcg": {
         "1": 1.0,
-        "10": 0.984691,
+        "10": 0.977543,
         "5": 0.946768
       },
       "rr": 1.0,
@@ -1539,7 +1539,7 @@
       "route_actual": "found",
       "route_ok": true,
       "scope_class": "within",
-      "returned": 5,
+      "returned": 6,
       "relevant_in_k": 3,
       "hit": {
         "1": 1.0,
@@ -1552,7 +1552,7 @@
         "5": 0.972121
       },
       "rr": 1.0,
-      "tokens": 402,
+      "tokens": 464,
       "scope_leaks": 0,
       "missing_evidence": []
     },
@@ -1623,7 +1623,7 @@
       "route_actual": "found",
       "route_ok": true,
       "scope_class": "within",
-      "returned": 2,
+      "returned": 3,
       "relevant_in_k": 1,
       "hit": {
         "1": 1.0,
@@ -1636,7 +1636,7 @@
         "5": 1.0
       },
       "rr": 1.0,
-      "tokens": 192,
+      "tokens": 253,
       "scope_leaks": null,
       "missing_evidence": []
     },
@@ -1679,7 +1679,7 @@
       "route_actual": "found",
       "route_ok": true,
       "scope_class": "within",
-      "returned": 3,
+      "returned": 4,
       "relevant_in_k": 1,
       "hit": {
         "1": 1.0,
@@ -1692,7 +1692,7 @@
         "5": 0.917319
       },
       "rr": 1.0,
-      "tokens": 223,
+      "tokens": 285,
       "scope_leaks": null,
       "missing_evidence": []
     },
@@ -1748,7 +1748,7 @@
         "5": 1.0
       },
       "rr": 1.0,
-      "tokens": 803,
+      "tokens": 805,
       "scope_leaks": null,
       "missing_evidence": []
     },
@@ -1776,7 +1776,7 @@
         "5": 0.929544
       },
       "rr": 1.0,
-      "tokens": 683,
+      "tokens": 682,
       "scope_leaks": null,
       "missing_evidence": []
     },
@@ -1804,7 +1804,7 @@
         "5": 0.973758
       },
       "rr": 1.0,
-      "tokens": 325,
+      "tokens": 324,
       "scope_leaks": null,
       "missing_evidence": []
     },
