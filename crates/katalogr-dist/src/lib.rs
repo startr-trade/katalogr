@@ -20,6 +20,7 @@ pub use impact::ImpactInput;
 pub mod contexts;
 pub mod contract;
 pub mod diff;
+pub mod diff_render;
 pub use katalogr_query::{PositionAnswer, PositionRef, ViewQuery, WorkingSetSummary};
 pub mod doc_blocks;
 pub mod doc_views;

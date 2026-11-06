@@ -1,0 +1,111 @@
+{
+  "report_format": 1,
+  "repo": "app",
+  "a": {
+    "commit": "1111111111111111111111111111111111111111",
+    "positions": [{"repo": "app", "commit": "1111111111111111111111111111111111111111", "dirty": null}]
+  },
+  "b": {
+    "commit": "2222222222222222222222222222222222222222",
+    "positions": [{"repo": "app", "commit": "2222222222222222222222222222222222222222", "dirty": null}]
+  },
+  "facts_version": "abababababababababababababababababababababababababababababababab",
+  "limit": 200,
+  "diff": {
+    "symbols": {
+      "added": [
+        {"name": "app:src/new.tx#fn:fresh", "kind": "fn", "path": "src/new.tx", "line": 1},
+        {"name": "app:src/lib.tx#fn:extra", "kind": "fn", "path": "src/lib.tx", "line": 12}
+      ],
+      "added_total": 2,
+      "removed": [
+        {"name": "app:src/old.tx#fn:gone", "kind": "fn", "path": "src/old.tx", "line": 4}
+      ],
+      "removed_total": 3,
+      "moved": [
+        {
+          "from": {"name": "app:src/a.tx#fn:shared", "kind": "fn", "path": "src/a.tx", "line": 2},
+          "to": {"name": "app:src/b.tx#fn:shared", "kind": "fn", "path": "src/b.tx", "line": 7}
+        }
+      ],
+      "moved_total": 1,
+      "changed": [
+        {
+          "symbol": {"name": "app:src/lib.tx#fn:parse", "kind": "fn", "path": "src/lib.tx", "line": 20},
+          "signature_a": "fn parse(x: u8)",
+          "signature_b": "fn parse(x: u8 | u16)",
+          "kind_a": "fn"
+        }
+      ],
+      "changed_total": 1,
+      "files_changed": 5
+    },
+    "links": {
+      "links_added": [
+        {"from": "app:src/lib.tx#fn:extra", "kind": "calls", "to": "app:src/lib.tx#fn:parse"},
+        {"from": "app:src/new.tx#fn:fresh", "kind": "calls", "to": "app:src/lib.tx#fn:parse"}
+      ],
+      "links_removed": [
+        {"from": "app:src/old.tx#fn:gone", "kind": "calls", "to": "app:src/lib.tx#fn:parse"}
+      ],
+      "dangling_added": [
+        {
+          "from": {"name": "app:src/new.tx#fn:fresh", "kind": "fn", "path": "src/new.tx", "span": {"start_line": 1, "start_col": 1, "end_line": 1, "end_col": 10}},
+          "kind": "links-to",
+          "wanted": ["ns:ghost"]
+        }
+      ],
+      "dangling_removed": [],
+      "metrics": [
+        {"name": "graph.dangling", "a": 0.0, "b": 1.0, "delta": 1.0, "better": "lower"},
+        {"name": "graph.links", "a": 10.0, "b": 11.0, "delta": 1.0, "better": "info"},
+        {"name": "graph.symbols", "a": 12.0, "b": 13.0, "delta": 1.0, "better": "info"}
+      ]
+    },
+    "contracts": [
+      {
+        "contract": "contract:route:users",
+        "a": {"providers": 1, "consumers": 1, "declarers": 0},
+        "b": {"providers": 0, "consumers": 2, "declarers": 0},
+        "consumers_added": ["app:src/new.tx#fn:fresh"],
+        "consumers_removed": [],
+        "providers_added": [],
+        "providers_removed": ["app:src/old.tx#fn:gone"],
+        "declarers_added": [],
+        "declarers_removed": [],
+        "newly_dangling": true,
+        "no_longer_dangling": false
+      }
+    ],
+    "contracts_total": 1,
+    "partial": [
+      {"cap": "limit", "at": 1, "shown": 1, "total": 3, "note": "absence is not proof"}
+    ]
+  },
+  "insights": {
+    "hubs": [
+      {"name": "app:src/lib.tx#fn:parse", "kind": "fn", "path": "src/lib.tx", "degree_a": 4.0, "degree_b": 6.0, "rank_a": 0.1, "rank_b": 0.15}
+    ],
+    "cycles": {
+      "total_a": 0,
+      "total_b": 1,
+      "cyclic_nodes_a": 0,
+      "cyclic_nodes_b": 2,
+      "added": [["app:src/a.tx", "app:src/b.tx"]],
+      "removed": []
+    },
+    "communities": {
+      "total_a": 2,
+      "total_b": 3,
+      "modularity_a": 0.31,
+      "modularity_b": 0.42,
+      "appeared": [{"label": "app:src/new.tx", "dir": "src", "size": 3}],
+      "disappeared": [],
+      "resized": [{"label": "app:src/lib.tx", "size_a": 4, "size_b": 6}]
+    },
+    "coverage": [
+      {"name": "coverage.resolution_rate", "a": 0.5, "b": 0.75, "delta": 0.25, "better": "higher"}
+    ]
+  },
+  "other_repos_differ": []
+}
