@@ -160,6 +160,7 @@ pub fn options_with(cli: &Cli, diagnostic: bool) -> Options {
         view: None,
         ranking: katalogr_dist::Ranking::Neutral,
         fresh: cli.fresh,
+        no_peers: cli.no_peers,
     }
 }
 

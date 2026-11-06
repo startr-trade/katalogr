@@ -9,8 +9,8 @@ use katalogr_dist::analytics::Itemized;
 use katalogr_dist::eval::{EvalReport, SweepReport};
 use katalogr_dist::query::{
     DanglingRef, Envelope, Explain, Fold, HintSource, MirrorDrift, Partial, RESULT_SCHEMA_VERSION,
-    ReplaceResult, Serialize, ShowResult, SymbolHit, Trace, Truncation, WhyResult, budget, cap,
-    hints,
+    ReplaceResult, Serialize, ShowResult, SymbolHit, Trace, Truncation, WhyResult, WorkspaceBlock,
+    budget, cap, hints,
 };
 use katalogr_dist::{DistError, Outcome, PositionRef, Reply, Report};
 
@@ -75,6 +75,7 @@ pub(super) fn envelope<T>(
         view_id: report.view_id.clone(),
         context: report.context.clone(),
         working_set: report.working_set.clone(),
+        workspace: None,
     }
 }
 
@@ -151,6 +152,7 @@ fn list_envelope<T: Serialize>(
     command: &str,
     mut trace: Option<Trace>,
     folded: Vec<Fold>,
+    workspace: Option<WorkspaceBlock>,
 ) -> String
 where
     Vec<T>: HintSource,
@@ -178,6 +180,7 @@ where
     };
     let mut e = envelope(report, truncated, partial, items, next, trace);
     e.folded = folded;
+    e.workspace = workspace;
     line(&e)
 }
 
@@ -201,6 +204,7 @@ fn other_outcome<T>(
                 "",
                 trace,
                 Vec::new(),
+                None,
             );
             JsonAnswer {
                 message: Some(message),
@@ -261,6 +265,7 @@ where
                 command,
                 reply.diagnostic,
                 Vec::new(),
+                reply.workspace,
             );
             found(exit, &reply.report, stdout)
         }
@@ -289,6 +294,7 @@ where
                 command,
                 reply.diagnostic,
                 reply.folded,
+                reply.workspace,
             );
             found(exit, &reply.report, stdout)
         }
@@ -488,7 +494,8 @@ pub fn plain<R: Serialize>(reply: Reply<R>, fails: fn(&R) -> bool) -> JsonAnswer
     match reply.outcome {
         Outcome::Found(r) => {
             let failing = fails(&r);
-            let e = envelope(&reply.report, None, reply.partial, r, Vec::new(), None);
+            let mut e = envelope(&reply.report, None, reply.partial, r, Vec::new(), None);
+            e.workspace = reply.workspace;
             let exit = if exit == ExitCode::Ok && failing {
                 ExitCode::Error
             } else {
@@ -671,6 +678,7 @@ mod tests {
             diagnostic: None,
             partial: Vec::new(),
             folded: Vec::new(),
+            workspace: None,
         }
     }
 

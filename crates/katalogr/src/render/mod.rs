@@ -14,7 +14,7 @@ use katalogr_dist::eval::{EvalReport, SweepReport};
 use katalogr_dist::query::{
     CallerHit, DanglingRef, Direction, Explain, FieldShape, Fold, HintSource, MapEntry,
     MirrorDrift, Partial, PathStep, RefHit, ReplaceResult, SearchHit, Serialize, ShowResult,
-    SymbolHit, TestHit, Trace, WhyResult, budget, hints,
+    SymbolHit, TestHit, Trace, WhyResult, WorkspaceBlock, budget, hints,
 };
 use katalogr_dist::{Outcome, Reply, Report};
 
@@ -136,6 +136,61 @@ fn print_partial(partial: &[Partial]) {
     }
 }
 
+/// The `peers:` block of text output (FEAT-020): each peer that was not read in full, then each
+/// far end. Nothing when the project names no peers or every peer was read and holds no end.
+fn peers_lines(w: &WorkspaceBlock) -> Vec<String> {
+    let mut out = Vec::new();
+    for p in &w.peers {
+        let who = match &p.kindex {
+            Some(a) => format!("{a}/{}", p.project),
+            None => p.project.clone(),
+        };
+        let mut notes = Vec::new();
+        if p.state != "ok" {
+            notes.push(p.state.clone());
+        }
+        if !p.repos_absent.is_empty() {
+            notes.push(format!("repos absent: {}", p.repos_absent.join(", ")));
+        }
+        if p.stale {
+            notes.push("stale".to_string());
+        }
+        if notes.is_empty() {
+            continue;
+        }
+        let mut line = format!("  {who}: {}", notes.join("; "));
+        if let Some(fix) = &p.fix {
+            line.push_str(&format!("; fix: {fix}"));
+        }
+        out.push(line);
+    }
+    for e in &w.ends {
+        out.push(format!("  {}", end_line(e)));
+    }
+    for r in &w.resolved {
+        out.push(format!("  resolved  {}", dangling_line(&r.reference)));
+        out.extend(r.ends.iter().map(|e| format!("    {}", end_line(e))));
+    }
+    if !out.is_empty() {
+        out.insert(0, "peers:".to_string());
+    }
+    out
+}
+
+/// One far end: `project  link  role  name (place)`, or `restricted` for an opaque one.
+pub fn end_line(e: &katalogr_dist::query::PeerEnd) -> String {
+    match &e.hit {
+        Some(h) => format!("{}  {}  {}  {}", e.project, e.link, e.role, place_name(h)),
+        None => format!("{}  {}  {}  (restricted)", e.project, e.link, e.role),
+    }
+}
+
+fn print_workspace(w: Option<&WorkspaceBlock>) {
+    for l in w.map(peers_lines).unwrap_or_default() {
+        println!("{l}");
+    }
+}
+
 /// The `next:` footer of text output.
 fn print_next(next: &[String]) {
     if !next.is_empty() {
@@ -162,7 +217,7 @@ fn print_list<T: Serialize>(
 ) where
     Vec<T>: HintSource,
 {
-    print_list_with(cli, report, items, &[], partial, line, command, trace);
+    print_list_with(cli, report, items, &[], partial, line, command, trace, None);
 }
 
 /// [`print_list`], with each fold's line placed among the item lines (FEAT-077). Fold lines
@@ -177,6 +232,7 @@ fn print_list_with<T: Serialize>(
     line: impl Fn(&T) -> String,
     command: &str,
     mut trace: Option<Trace>,
+    workspace: Option<&WorkspaceBlock>,
 ) where
     Vec<T>: HintSource,
 {
@@ -188,6 +244,7 @@ fn print_list_with<T: Serialize>(
     }
     print_lines(cli, lines, &mut partial);
     print_partial(&partial);
+    print_workspace(workspace);
     print_next(&next);
     print_trace(trace.as_ref());
 }
@@ -377,14 +434,16 @@ where
     let code = exit_for(&reply);
     match reply.outcome {
         Outcome::Found(items) => {
-            print_list(
+            print_list_with(
                 cli,
                 &reply.report,
                 items,
+                &[],
                 reply.partial,
                 line,
                 command,
                 reply.diagnostic,
+                reply.workspace.as_ref(),
             );
         }
         other => other_outcomes(cli, &reply.report, other, reply.diagnostic),
@@ -417,6 +476,7 @@ where
                 line,
                 command,
                 reply.diagnostic,
+                reply.workspace.as_ref(),
             );
         }
         other => other_outcomes(cli, &reply.report, other, reply.diagnostic),
@@ -521,14 +581,16 @@ pub fn dangling(cli: &Cli, reply: Reply<Vec<DanglingRef>>) -> ExitCode {
     let code = exit_for(&reply);
     let any = matches!(&reply.outcome, Outcome::Found(v) if !v.is_empty());
     match reply.outcome {
-        Outcome::Found(items) => print_list(
+        Outcome::Found(items) => print_list_with(
             cli,
             &reply.report,
             items,
+            &[],
             reply.partial,
             dangling_line,
             "",
             None,
+            reply.workspace.as_ref(),
         ),
         other => other_outcomes(cli, &reply.report, other, None),
     }
@@ -1239,6 +1301,7 @@ pub fn plain<R: Serialize>(
                 println!("{l}");
             }
             print_partial(&reply.partial);
+            print_workspace(reply.workspace.as_ref());
             if code == ExitCode::Ok && fails(&r) {
                 return ExitCode::Error;
             }
@@ -1314,6 +1377,26 @@ fn impact_lines(r: &katalogr_dist::query::ImpactReport) -> Vec<String> {
     if !r.tests.is_empty() {
         out.push("tests:".to_string());
         out.extend(r.tests.iter().map(|t| format!("  {}", test_line(t))));
+    }
+    for p in &r.peers {
+        out.push(format!("peer {}", p.project));
+        for g in &p.groups {
+            out.push(format!(
+                "  {} [{}] {}",
+                g.kind,
+                format!("{:?}", g.confidence).to_lowercase(),
+                g.hits.len()
+            ));
+            for h in &g.hits {
+                let mut line = format!("    {}  depth {}", h.node.name, h.depth);
+                if let Some(c) = &h.via {
+                    line.push_str(&format!("  via {c}"));
+                }
+                out.push(line);
+            }
+        }
+        out.extend(p.tests.iter().map(|t| format!("  test  {}", test_line(t))));
+        out.extend(p.opaque.iter().map(|e| format!("  {}", end_line(e))));
     }
     let open: Vec<_> = r.contracts.iter().filter(|c| c.open.is_some()).collect();
     if !open.is_empty() {

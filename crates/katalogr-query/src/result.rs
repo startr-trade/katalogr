@@ -534,6 +534,10 @@ pub struct Envelope<T> {
     /// when ranking was neutral or the set was empty.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub working_set: Option<crate::working_set::WorkingSetSummary>,
+    /// `refs`, `callers`, `dangling`, `impact` and the workspace map, for a project that names
+    /// peers (FEAT-020): each peer's state and the far ends of the answer. Absent otherwise.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace: Option<WorkspaceBlock>,
 }
 
 #[cfg(test)]

@@ -48,6 +48,7 @@ fn graph_reply(spec: &ViewSpec, reply: Reply<ViewBytes>) -> Result<Reply<ViewGra
         diagnostic,
         mut partial,
         folded,
+        workspace,
     } = reply;
     let outcome = match outcome {
         Outcome::Found(vb) => {
@@ -78,6 +79,7 @@ fn graph_reply(spec: &ViewSpec, reply: Reply<ViewBytes>) -> Result<Reply<ViewGra
         diagnostic,
         partial,
         folded,
+        workspace,
     })
 }
 

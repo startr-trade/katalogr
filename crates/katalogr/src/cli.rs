@@ -206,6 +206,10 @@ pub struct Cli {
     #[arg(long, global = true)]
     pub fresh: bool,
 
+    /// Read this project alone, even when it names peers (`workspace.peers`).
+    #[arg(long, global = true)]
+    pub no_peers: bool,
+
     #[command(subcommand)]
     pub command: Option<Command>,
 }

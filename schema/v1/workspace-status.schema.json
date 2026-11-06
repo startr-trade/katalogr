@@ -1,0 +1,101 @@
+{
+  "$defs": {
+    "PeerState": {
+      "description": "One named peer: whether it could be read, and the positions its answers reflect.",
+      "properties": {
+        "fix": {
+          "description": "The command that fixes it; never a path.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "kindex": {
+          "description": "The kindex alias, when the peer lives in another kindex.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "positions": {
+          "items": {
+            "$ref": "#/$defs/PositionRef"
+          },
+          "type": "array"
+        },
+        "project": {
+          "type": "string"
+        },
+        "repos_absent": {
+          "description": "Repos in the peer's config with no recorded position here.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "stale": {
+          "type": "boolean"
+        },
+        "state": {
+          "description": "`ok`, `no-location`, `not-found`, `newer-format`, `no-index`, `unavailable` or `timeout`.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "project",
+        "state",
+        "positions",
+        "stale"
+      ],
+      "type": "object"
+    },
+    "PositionRef": {
+      "description": "One repo's position. Serialises as `{\"repo\",\"commit\",\"dirty\"}`, absent parts as `null`.",
+      "properties": {
+        "commit": {
+          "description": "40 lower-case hex, or `None` for a directory with no commit.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "dirty": {
+          "description": "64 lower-case hex, or `None` when the checkout is clean.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "repo": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "repo"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "`katalogr workspace status --json`: the state of each named peer.",
+  "properties": {
+    "peers": {
+      "items": {
+        "$ref": "#/$defs/PeerState"
+      },
+      "type": "array"
+    },
+    "schema": {
+      "description": "The `--json` result schema version.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "schema",
+    "peers"
+  ],
+  "title": "WorkspaceStatus",
+  "type": "object"
+}
