@@ -1,7 +1,6 @@
 //! `katalogr snapshot export|import|show` (FEAT-097).
 
-use camino::Utf8Path;
-use katalogr_dist::{DistError, SnapshotManifest};
+use katalogr_dist::{DistError, SnapshotManifest, Utf8Path};
 
 use crate::cli::{Cli, SnapshotAction};
 use crate::cmd::{options, resolve};

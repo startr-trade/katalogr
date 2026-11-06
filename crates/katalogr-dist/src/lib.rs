@@ -74,7 +74,8 @@ pub use snapshot::SnapshotExport;
 pub use snapshot_import::{SnapshotImport, read_snapshot_manifest};
 pub use threads::{BATCH_BYTES_KEY, THREADS_ENV, THREADS_KEY, resolve_parallelism};
 
-use camino::{Utf8Path, Utf8PathBuf};
+pub use camino::Utf8Path;
+use camino::Utf8PathBuf;
 use katalogr_analytics::{
     CommunityOptions, CommunityReport, CoverageInput, CoverageReport, CycleOptions, CycleReport,
     DEFAULT_SEED, DeadCodeOptions, DeadCodeReport, HubOptions, HubReport, RationaleReport,
