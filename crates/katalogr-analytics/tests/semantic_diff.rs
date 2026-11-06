@@ -465,4 +465,252 @@ mod semantic_diff {
         // The same diff with room has no marker.
         assert!(run(&a, &b, 5).partial.is_empty());
     }
+
+    // ---- insight shifts (R-6) ----
+
+    use katalogr_analytics::insight_shift::{InsightSide, insight_shifts};
+    use katalogr_analytics::metrics::{Better, MetricSample};
+    use katalogr_analytics::{
+        Community, CommunityReport, CoverageReport, Cycle, CycleReport, HubEntry, HubReport, Level,
+        NodeHit,
+    };
+
+    fn node(name: &str) -> NodeHit {
+        NodeHit {
+            level: Level::File,
+            name: name.into(),
+            kind: "artifact".into(),
+            path: Some(format!("{name}.rs")),
+            line: None,
+        }
+    }
+
+    fn hub(name: &str, degree: f64, rank: f64) -> HubEntry {
+        HubEntry {
+            node: node(name),
+            in_degree: degree,
+            out_degree: 0.0,
+            degree,
+            z: 0.0,
+            rank,
+            members: 1,
+        }
+    }
+
+    fn hubs(items: Vec<HubEntry>) -> HubReport {
+        HubReport {
+            level: Level::File,
+            nodes: items.len() as u64,
+            mean_degree: 1.0,
+            items,
+        }
+    }
+
+    fn community(label: &str, size: u64) -> Community {
+        Community {
+            id: 0,
+            size,
+            label: node(label),
+            dir: Some(format!("src/{label}")),
+            cohesion: 0.5,
+            internal_weight: 1.0,
+            boundary_weight: 1.0,
+            top: Vec::new(),
+            bridges: Vec::new(),
+            files: size,
+        }
+    }
+
+    fn communities(items: Vec<Community>, modularity: f64) -> CommunityReport {
+        CommunityReport {
+            level: Level::File,
+            seed: 1,
+            resolution: 1.0,
+            modularity,
+            communities_total: items.len() as u64,
+            unclustered: 0,
+            note: None,
+            items,
+        }
+    }
+
+    fn cycle(members: &[&str]) -> Cycle {
+        Cycle {
+            id: 0,
+            size: members.len() as u64,
+            members: members.iter().map(|m| node(m)).collect(),
+            members_total: members.len() as u64,
+            witness: Vec::new(),
+            confidence: Confidence::Extracted,
+        }
+    }
+
+    fn cycles(items: Vec<Cycle>) -> CycleReport {
+        CycleReport {
+            level: Level::File,
+            include_inferred: false,
+            cycles_total: items.len() as u64,
+            cyclic_nodes: items.iter().map(|c| c.size).sum(),
+            skipped_contracts: 0,
+            items,
+        }
+    }
+
+    fn coverage(samples: Vec<MetricSample>) -> CoverageReport {
+        CoverageReport {
+            totals: Default::default(),
+            by_repo: Vec::new(),
+            by_extension: Vec::new(),
+            by_language: Vec::new(),
+            groups: Vec::new(),
+            by_link_kind: Vec::new(),
+            dangling_contracts_by_kind: Vec::new(),
+            unclaimed: Vec::new(),
+            roots_missing: Vec::new(),
+            metrics: samples,
+        }
+    }
+
+    struct Reports {
+        hubs: HubReport,
+        communities: CommunityReport,
+        cycles: CycleReport,
+        coverage: CoverageReport,
+    }
+
+    impl Reports {
+        fn empty() -> Reports {
+            Reports {
+                hubs: hubs(vec![]),
+                communities: communities(vec![], 0.0),
+                cycles: cycles(vec![]),
+                coverage: coverage(vec![]),
+            }
+        }
+        fn side(&self) -> InsightSide<'_> {
+            InsightSide {
+                hubs: &self.hubs,
+                communities: &self.communities,
+                cycles: &self.cycles,
+                coverage: &self.coverage,
+            }
+        }
+    }
+
+    #[test]
+    fn hub_shift_sorted_by_change() {
+        let mut a = Reports::empty();
+        let mut b = Reports::empty();
+        a.hubs = hubs(vec![
+            hub("same", 5.0, 0.1),
+            hub("small", 4.0, 0.1),
+            hub("gone", 6.0, 0.2),
+        ]);
+        b.hubs = hubs(vec![
+            hub("same", 5.0, 0.1),
+            hub("small", 5.0, 0.1),
+            hub("big", 9.0, 0.3),
+        ]);
+        let mut partial = Vec::new();
+        let s = insight_shifts(&a.side(), &b.side(), 10, &mut partial);
+        let order: Vec<(&str, f64, f64)> = s
+            .hubs
+            .iter()
+            .map(|h| (h.name.as_str(), h.degree_a, h.degree_b))
+            .collect();
+        // Unchanged is dropped; a side where it is absent counts as 0; largest change first.
+        assert_eq!(
+            order,
+            [("big", 0.0, 9.0), ("gone", 6.0, 0.0), ("small", 4.0, 5.0)]
+        );
+        assert!(partial.is_empty());
+        // A cut is marked.
+        let mut partial = Vec::new();
+        let s = insight_shifts(&a.side(), &b.side(), 1, &mut partial);
+        assert_eq!(s.hubs.len(), 1);
+        assert_eq!(partial.len(), 1);
+        assert_eq!(partial[0].total, Some(3));
+    }
+
+    #[test]
+    fn cycle_added_and_removed() {
+        let mut a = Reports::empty();
+        let mut b = Reports::empty();
+        a.cycles = cycles(vec![cycle(&["x", "y"]), cycle(&["p", "q", "r"])]);
+        b.cycles = cycles(vec![cycle(&["y", "x"]), cycle(&["m", "n"])]);
+        let mut partial = Vec::new();
+        let s = insight_shifts(&a.side(), &b.side(), 10, &mut partial);
+        assert_eq!(s.cycles.added, [vec!["m".to_string(), "n".to_string()]]);
+        assert_eq!(
+            s.cycles.removed,
+            [vec!["p".to_string(), "q".to_string(), "r".to_string()]]
+        );
+        assert_eq!((s.cycles.total_a, s.cycles.total_b), (2, 2));
+        assert_eq!((s.cycles.cyclic_nodes_a, s.cycles.cyclic_nodes_b), (5, 4));
+    }
+
+    #[test]
+    fn community_appears_and_resizes() {
+        let mut a = Reports::empty();
+        let mut b = Reports::empty();
+        a.communities = communities(
+            vec![
+                community("core", 10),
+                community("old", 3),
+                community("flat", 4),
+            ],
+            0.31,
+        );
+        b.communities = communities(
+            vec![
+                community("core", 12),
+                community("fresh", 5),
+                community("flat", 4),
+            ],
+            0.42,
+        );
+        let mut partial = Vec::new();
+        let s = insight_shifts(&a.side(), &b.side(), 10, &mut partial);
+        let c = &s.communities;
+        assert_eq!(c.appeared.len(), 1);
+        assert_eq!(c.appeared[0].label, "fresh");
+        assert_eq!(c.appeared[0].size, 5);
+        assert_eq!(c.disappeared[0].label, "old");
+        assert_eq!(c.resized.len(), 1);
+        assert_eq!(
+            (
+                c.resized[0].label.as_str(),
+                c.resized[0].size_a,
+                c.resized[0].size_b
+            ),
+            ("core", 10, 12)
+        );
+        assert_eq!((c.modularity_a, c.modularity_b), (0.31, 0.42));
+        assert_eq!((c.total_a, c.total_b), (3, 3));
+    }
+
+    #[test]
+    fn coverage_metric_deltas() {
+        let mut a = Reports::empty();
+        let mut b = Reports::empty();
+        a.coverage = coverage(vec![
+            MetricSample::new("coverage.resolution_rate", 0.5, Better::Higher),
+            MetricSample::new("coverage.resolution_rate", 0.4, Better::Higher).label("repo", "r"),
+            MetricSample::new("coverage.same", 1.0, Better::Info),
+            MetricSample::new("other.metric", 1.0, Better::Info),
+        ]);
+        b.coverage = coverage(vec![
+            MetricSample::new("coverage.resolution_rate", 0.75, Better::Higher),
+            MetricSample::new("coverage.resolution_rate", 0.4, Better::Higher).label("repo", "r"),
+            MetricSample::new("coverage.same", 1.0, Better::Info),
+            MetricSample::new("other.metric", 2.0, Better::Info),
+        ]);
+        let mut partial = Vec::new();
+        let s = insight_shifts(&a.side(), &b.side(), 10, &mut partial);
+        assert_eq!(s.coverage.len(), 1);
+        let m = &s.coverage[0];
+        assert_eq!(m.name, "coverage.resolution_rate");
+        assert_eq!((m.a, m.b, m.delta), (0.5, 0.75, 0.25));
+        assert_eq!(m.better, Better::Higher);
+    }
 }

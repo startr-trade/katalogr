@@ -11,6 +11,7 @@ mod fan_answers;
 mod graph;
 mod hints;
 mod hubs;
+pub mod insight_shift;
 #[cfg(test)]
 mod link_walk;
 mod louvain;
