@@ -116,6 +116,26 @@ fn run(cli: &Cli) -> Result<ExitCode, DistError> {
             *limit,
             *test_depth,
         ),
+        Some(Command::Diff {
+            a,
+            b,
+            repo,
+            format,
+            limit,
+            out,
+            out_dir,
+        }) => cmd::diff::run(
+            cli,
+            &cmd::diff::Args {
+                a,
+                b,
+                repo: repo.as_deref(),
+                format: *format,
+                limit: *limit,
+                out: out.as_deref(),
+                out_dir: out_dir.as_deref(),
+            },
+        ),
         Some(Command::Mirrors { kind }) => cmd::mirrors::run(cli, kind),
         Some(Command::Hubs {
             level,

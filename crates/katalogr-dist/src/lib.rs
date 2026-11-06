@@ -138,6 +138,14 @@ pub fn schemas() -> BTreeMap<&'static str, serde_json::Value> {
         "schema name answers-stats is registered twice"
     );
     assert!(
+        all.insert(
+            "diff",
+            schemars::schema_for!(katalogr_query::Envelope<diff::DiffReport>).to_value()
+        )
+        .is_none(),
+        "schema name diff is registered twice"
+    );
+    assert!(
         all.insert("position", katalogr_query::position_schema())
             .is_none(),
         "schema name position is registered twice"
@@ -1970,6 +1978,12 @@ fn limit_partial(limit: usize, shown: usize, total: Option<u64>) -> Vec<Partial>
     } else {
         Vec::new()
     }
+}
+
+/// Whether a file written at `path` stays out of git (FEAT-095 R-15): its folder is in no work
+/// tree, or git ignores the path and does not track it.
+pub fn output_outside_git(path: &Path) -> Result<bool, DistError> {
+    Ok(katalogr_engine::scan::output_outside_git(path)?)
 }
 
 pub(crate) fn unknown_root(repo: &str) -> DistError {
