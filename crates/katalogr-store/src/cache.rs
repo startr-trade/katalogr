@@ -824,6 +824,21 @@ pub trait Reader {
         Ok(out)
     }
 
+    /// Hex SHA-256 over every `file_revisions` row in key order: u32 big-endian key length, key,
+    /// then the 32-byte revision hash (FEAT-096). A revision covers the file's content, the
+    /// profile and the extractor, so the digest names what the index was built from.
+    fn index_digest(&self) -> Result<String, StoreError> {
+        let mut h = Sha256::new();
+        for (k, v) in self.raw_scan(TableId::FileRevisions, &[])? {
+            let len = u32::try_from(k.len())
+                .map_err(|_| StoreError::Row("file revision key too long".into()))?;
+            h.update(len.to_be_bytes());
+            h.update(&k);
+            h.update(revision_value(&v)?);
+        }
+        Ok(h.finalize().iter().map(|b| format!("{b:02x}")).collect())
+    }
+
     /// The vocabulary id of `s`; `None` when no row ever used it.
     #[doc(hidden)]
     fn vid_of(&self, s: &str) -> Result<Option<Vid>, StoreError> {

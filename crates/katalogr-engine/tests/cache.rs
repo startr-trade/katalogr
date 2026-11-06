@@ -119,6 +119,40 @@ mod cache {
         assert!(keys[0].to < keys[1].to);
     }
 
+    fn digest(fx: &Fx) -> String {
+        let cache = fx.cache();
+        let d = cache.read().unwrap().index_digest().unwrap();
+        d
+    }
+
+    #[test]
+    fn index_digest_follows_shard_hash() {
+        let fx = Fx::new(&[("a.tx", "sym fn A\n"), ("b.tx", "sym fn B\n")]);
+        fx.index();
+        let first = digest(&fx);
+        assert_eq!(first.len(), 64);
+        assert_eq!(digest(&fx), first, "reading twice agrees");
+        fx.write("b.tx", "sym fn B\nsym fn C\n");
+        fx.changed(&["b.tx"]);
+        let second = digest(&fx);
+        assert_ne!(second, first, "a changed file changes the digest");
+        fx.remove("b.tx");
+        fx.changed(&["b.tx"]);
+        assert_ne!(digest(&fx), second, "a removed file changes the digest");
+    }
+
+    #[test]
+    fn index_digest_ignores_stat() {
+        let fx = Fx::new(&[("a.tx", "sym fn A\n")]);
+        fx.index();
+        let first = digest(&fx);
+        // Same bytes written again: a new mtime, the same revision.
+        std::thread::sleep(Duration::from_millis(20));
+        fx.write("a.tx", "sym fn A\n");
+        fx.changed(&["a.tx"]);
+        assert_eq!(digest(&fx), first);
+    }
+
     #[test]
     fn unresolved_from_artifact_row() {
         use katalogr_store::cache::TableId;
