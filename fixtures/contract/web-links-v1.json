@@ -1,0 +1,30 @@
+{
+  "format": 1,
+  "capability": "web-view",
+  "template": "/#/{view}?at={at}&symbol={symbol}",
+  "views": [
+    "graph",
+    "impact",
+    "service-map"
+  ],
+  "examples": [
+    {
+      "link": "/#/graph?symbol=target",
+      "view": "graph",
+      "at": "",
+      "symbol": "target"
+    },
+    {
+      "link": "/#/service-map?symbol=target",
+      "view": "service-map",
+      "at": "",
+      "symbol": "target"
+    },
+    {
+      "link": "/#/impact?at=0123456789abcdef0123456789abcdef01234567&symbol=repo%3Aapp%23fn%3Atarget",
+      "view": "impact",
+      "at": "0123456789abcdef0123456789abcdef01234567",
+      "symbol": "repo:app#fn:target"
+    }
+  ]
+}

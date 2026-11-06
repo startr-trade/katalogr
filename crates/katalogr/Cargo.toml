@@ -54,6 +54,10 @@ required-features = ["api"]
 name = "web"
 required-features = ["web"]
 
+[[test]]
+name = "web_links"
+required-features = ["web"]
+
 [dev-dependencies]
 # The `.tx` test extractor gives integration tests symbols to query.
 katalogr-dist = { workspace = true, features = ["test-extractor"] }
