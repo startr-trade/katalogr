@@ -63,3 +63,52 @@ impl Extractor for DepsExtractor {
         Ok(lock_common::entries_to_fragment(input, lock))
     }
 }
+
+/// Test helper: run the extractor on `text` as a file named `path`.
+#[cfg(test)]
+pub(crate) fn run(path: &str, text: &str) -> Result<(Fragment, Vec<ExtractError>), ExtractError> {
+    let path = RelPath::new(path).unwrap();
+    DepsExtractor.extract_with_errors(&ExtractInput {
+        repo: "app",
+        path: &path,
+        revision: "rev",
+        content: text.as_bytes(),
+        context: &[],
+    })
+}
+
+/// Test helper: canonical names of a fragment's symbols, with their kinds, sorted.
+#[cfg(test)]
+pub(crate) fn names(f: &Fragment) -> Vec<(String, String)> {
+    use katalogr_model::Name;
+    f.symbols
+        .iter()
+        .map(|s| (s.name.canonical(), s.kind.clone()))
+        .collect()
+}
+
+/// Test helper: each link as `from-canonical kind to-canonical`, sorted.
+#[cfg(test)]
+pub(crate) fn link_lines(f: &Fragment) -> Vec<String> {
+    use katalogr_model::Name;
+    let by_id: std::collections::HashMap<_, _> = f
+        .symbols
+        .iter()
+        .map(|s| (s.name.id(), s.name.canonical()))
+        .collect();
+    let short = |c: &String| c.split_once('#').map_or(c.clone(), |(_, t)| t.to_string());
+    let mut v: Vec<String> = f
+        .links
+        .iter()
+        .map(|l| {
+            format!(
+                "{} {} {}",
+                short(&by_id[&l.from]),
+                l.kind.0,
+                short(&by_id[&l.to])
+            )
+        })
+        .collect();
+    v.sort();
+    v
+}

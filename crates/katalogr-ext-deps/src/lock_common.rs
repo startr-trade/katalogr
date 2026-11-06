@@ -539,3 +539,14 @@ fn output_is_sorted() {
     let keys: Vec<&str> = a.exports.iter().map(|e| e.key.key.as_str()).collect();
     assert_eq!(keys, vec!["alpha-lib", "zeta"]);
 }
+
+#[cfg(test)]
+#[test]
+fn find_line_matches_exact_lines() {
+    let text = "a\r\n  b\nb\nb\n";
+    assert_eq!(find_line(text, "a", 1), Some(1));
+    assert_eq!(find_line(text, "b", 1), Some(3));
+    assert_eq!(find_line(text, "b", 4), Some(4));
+    assert_eq!(find_line(text, "b", 5), None);
+    assert_eq!(find_line(text, "c", 1), None);
+}
