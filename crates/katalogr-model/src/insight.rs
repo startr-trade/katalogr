@@ -37,6 +37,21 @@ pub const TEST_NAME_NS: &str = "test-name";
 /// Link kind from a requirement (or any node) to a test case that verifies it.
 pub const VERIFIED_BY: &str = "verified-by";
 
+/// Symbol kind: a package (by name) outside the project, found in a dependency inventory.
+pub const KIND_PACKAGE_EXTERNAL: &str = "package_external";
+/// Symbol kind: one version of an external package.
+pub const KIND_PACKAGE_VERSION: &str = "package_version";
+/// Symbol kind: a package local to the project, listed in the same inventory.
+pub const KIND_PACKAGE_MEMBER: &str = "package_member";
+/// Link kind from a package to one of its versions.
+pub const LINK_HAS_VERSION: &str = "has-version";
+
+/// True for [`KIND_PACKAGE_EXTERNAL`] and [`KIND_PACKAGE_VERSION`]: nodes describing code
+/// outside the project.
+pub fn is_external_kind(kind: &str) -> bool {
+    kind == KIND_PACKAGE_EXTERNAL || kind == KIND_PACKAGE_VERSION
+}
+
 /// The `test-name` keys for a test whose full runner path is `segments`, joined with `::`:
 /// the full path, then every proper suffix of at least two segments, longest first.
 /// `["a","b","c"]` gives `["a::b::c", "b::c"]`; `["x"]` gives `["x"]`; `[]` gives `[]`.
@@ -54,6 +69,14 @@ pub fn test_name_keys(segments: &[&str]) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn external_kinds_are_the_first_two() {
+        assert!(is_external_kind(KIND_PACKAGE_EXTERNAL));
+        assert!(is_external_kind(KIND_PACKAGE_VERSION));
+        assert!(!is_external_kind(KIND_PACKAGE_MEMBER));
+        assert!(!is_external_kind("function"));
+    }
 
     #[test]
     fn keys_are_full_path_then_suffixes() {

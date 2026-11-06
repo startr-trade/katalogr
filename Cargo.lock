@@ -2428,6 +2428,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "katalogr-ext-deps"
+version = "0.1.0"
+dependencies = [
+ "katalogr-model",
+ "serde_json",
+ "serde_yaml_ng",
+ "toml",
+]
+
+[[package]]
 name = "katalogr-ext-kanbanr"
 version = "0.1.0"
 dependencies = [

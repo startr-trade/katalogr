@@ -1,0 +1,15 @@
+[package]
+name = "katalogr-ext-deps"
+description = "Dependency inventory: lockfile entries as package and version nodes."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+katalogr-model.workspace = true
+serde_json.workspace = true
+serde_yaml_ng.workspace = true
+toml.workspace = true
+
