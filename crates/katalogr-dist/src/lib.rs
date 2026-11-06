@@ -29,6 +29,7 @@ pub mod hooks;
 mod roots;
 mod setup;
 mod shard_show;
+pub mod snapshot;
 mod symbol_count;
 pub use symbol_count::symbol_count;
 mod span;
@@ -67,6 +68,7 @@ pub use katalogr_render as render;
 #[cfg(feature = "web")]
 pub use katalogr_web as web;
 pub use setup::{ProjectCreated, kindex_init, project_init};
+pub use snapshot::SnapshotExport;
 pub use threads::{BATCH_BYTES_KEY, THREADS_ENV, THREADS_KEY, resolve_parallelism};
 
 use camino::{Utf8Path, Utf8PathBuf};
