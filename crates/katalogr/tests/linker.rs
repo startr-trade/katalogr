@@ -435,6 +435,7 @@ mod kanbanr {
             .filter(|(_, row)| row.provenance.path.as_str().starts_with("@history/"))
             .map(|(_, row)| format!("{row:?}"))
             .collect();
+        drop(cache);
         found.sort();
         assert_eq!(found.len(), 2, "{found:?}");
         let both = found.join("\n");
