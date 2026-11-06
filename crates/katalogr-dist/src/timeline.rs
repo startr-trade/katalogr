@@ -68,9 +68,10 @@ impl Katalogr {
     /// `limit` points, with a `Partial`. Never fails on an unreadable snapshot: it warns and skips.
     pub fn timeline(&self, limit: usize) -> Result<Reply<Timeline>, DistError> {
         let store = self.view_store();
-        // The whole store is listed, not `limit` of it: snapshot rows replace repeated IDs, and
-        // the cut is by commit time, which only the heads tell.
-        let (heads, _) = store.list(usize::MAX);
+        // Only the newest `limit` entries are opened, chosen by file time before any is read:
+        // the work is bounded however many views are stored.
+        let (heads, stored_total) = store.list(limit);
+        let unread = stored_total.saturating_sub(heads.len());
         let mut points: BTreeMap<String, TimelinePoint> = BTreeMap::new();
         for h in heads {
             points.insert(
@@ -141,14 +142,17 @@ impl Katalogr {
         }
         let mut all: Vec<TimelinePoint> = points.into_values().collect();
         all.sort_by(|a, b| (a.committed, &a.view_id).cmp(&(b.committed, &b.view_id)));
-        let total = all.len();
+        // Stored views left unopened count toward the total, so the cut is reported.
+        let total = all.len() + unread;
         let mut partial = Vec::new();
+        if all.len() > limit {
+            all.drain(..all.len() - limit);
+        }
         if total > limit {
-            all.drain(..total - limit);
             partial.push(Partial::new(
                 cap::LIMIT,
                 limit as u64,
-                limit as u64,
+                all.len() as u64,
                 Some(total as u64),
             ));
         }

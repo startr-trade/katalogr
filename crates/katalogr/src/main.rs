@@ -60,6 +60,7 @@ fn run(cli: &Cli) -> Result<ExitCode, DistError> {
             queue,
             no_process,
             cors_origin,
+            snapshots,
         }) => cmd::api::run(
             cli,
             *listen,
@@ -67,6 +68,7 @@ fn run(cli: &Cli) -> Result<ExitCode, DistError> {
             *queue,
             *no_process,
             cors_origin.clone(),
+            snapshots,
         ),
         #[cfg(feature = "mcp")]
         Some(Command::Mcp {

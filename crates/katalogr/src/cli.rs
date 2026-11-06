@@ -84,6 +84,26 @@ pub enum ViewAction {
         #[arg(long, value_name = "DIR")]
         out: std::path::PathBuf,
     },
+    /// List the stored views and snapshot views, oldest first: what a time slider can show.
+    /// Reads no index and waits for no queue. With `--json` the answer is what
+    /// `GET /api/v1/timeline` returns.
+    Timeline {
+        /// A folder of view snapshots (`view snapshot --out`), or a folder of such folders.
+        #[arg(long, value_name = "DIR")]
+        snapshots: Vec<std::path::PathBuf>,
+        /// Most points listed; the newest are kept.
+        #[arg(long, default_value_t = 1000, value_name = "N")]
+        limit: usize,
+    },
+    /// Print a stored view by its view ID, as `view` does. With `--json` the answer is what
+    /// `GET /api/v1/stored-view` returns.
+    Stored {
+        /// The view ID.
+        id: String,
+        /// A folder of view snapshots, or a folder of such folders.
+        #[arg(long, value_name = "DIR")]
+        snapshots: Vec<std::path::PathBuf>,
+    },
 }
 
 /// How sure a dead-code candidate is.
@@ -383,6 +403,10 @@ pub enum Command {
         /// Send CORS headers for exactly this origin.
         #[arg(long, value_name = "ORIGIN")]
         cors_origin: Option<String>,
+        /// A folder of view snapshots, or a folder of such folders, that `timeline` and
+        /// `stored-view` also read. Repeatable.
+        #[arg(long, value_name = "DIR")]
+        snapshots: Vec<std::path::PathBuf>,
     },
     /// Keep the index fresh for edits made outside Claude: poll the checkout's position and
     /// reindex when it changes. Runs until interrupted.

@@ -8,7 +8,7 @@ use katalogr_dist::{DistError, FreshCheck};
 use crate::cli::{Cli, ViewAction};
 use crate::cmd::render::line_of;
 use crate::cmd::view_doc;
-use crate::cmd::{options, resolve};
+use crate::cmd::{options, resolve, resolve_with_snapshots};
 use crate::exit::ExitCode;
 use crate::render;
 
@@ -21,6 +21,14 @@ pub fn run(
     match action {
         Some(ViewAction::Check { path }) => return view_doc::check(cli, path),
         Some(ViewAction::Snapshot { docs, out }) => return view_doc::snapshot(cli, docs, out),
+        Some(ViewAction::Timeline { snapshots, limit }) => {
+            let k = resolve_with_snapshots(cli, snapshots)?;
+            return Ok(render::timeline(cli, k.timeline(*limit)?));
+        }
+        Some(ViewAction::Stored { id, snapshots }) => {
+            let k = resolve_with_snapshots(cli, snapshots)?;
+            return Ok(render::view_bytes(cli, k.stored_view(id)?));
+        }
         None => {}
     }
     if words.is_empty() {

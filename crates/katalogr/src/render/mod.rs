@@ -1096,6 +1096,62 @@ pub fn view_bytes(cli: &Cli, reply: Reply<katalogr_dist::ViewBytes>) -> ExitCode
     code
 }
 
+/// Render the timeline: the envelope with `--json`, else one line per point: date (UTC), short
+/// commit, source, op.
+pub fn timeline(cli: &Cli, reply: Reply<katalogr_dist::query::Timeline>) -> ExitCode {
+    if cli.json {
+        return emit(&json::timeline(reply));
+    }
+    let code = exit_for(&reply);
+    match reply.outcome {
+        Outcome::Found(t) => {
+            note_stale(&reply.report);
+            for w in &reply.report.warnings {
+                eprintln!("katalogr: warning: {w}");
+            }
+            for p in &t.points {
+                let date = p.committed.map_or("-".to_string(), utc_minute);
+                let commit = p
+                    .positions
+                    .iter()
+                    .find_map(|x| x.commit.as_deref())
+                    .map_or("-", |c| &c[..c.len().min(8)]);
+                let source = match p.source {
+                    katalogr_dist::query::PointSource::StoredView => "stored-view",
+                    katalogr_dist::query::PointSource::Snapshot => "snapshot",
+                    katalogr_dist::query::PointSource::MetricSample => "metric-sample",
+                };
+                let op = p.query.as_ref().map_or("-", |q| q.op.as_str());
+                println!("{date}  {commit}  {source}  {op}");
+            }
+            print_partial(&reply.partial);
+        }
+        other => other_outcomes(cli, &reply.report, other, None),
+    }
+    code
+}
+
+/// `YYYY-MM-DD HH:MM` in UTC for Unix seconds.
+fn utc_minute(secs: i64) -> String {
+    let days = secs.div_euclid(86_400);
+    let rem = secs.rem_euclid(86_400);
+    // Civil date from days since 1970-01-01 (Howard Hinnant's algorithm).
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z.rem_euclid(146_097);
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = yoe + era * 400 + i64::from(m <= 2);
+    format!(
+        "{y:04}-{m:02}-{d:02} {:02}:{:02}",
+        rem / 3600,
+        rem % 3600 / 60
+    )
+}
+
 /// Render an insight report as text or a JSON envelope. The budget trims whole `items`; the
 /// summary stays and the envelope records the truncation.
 pub fn insight<R>(cli: &Cli, reply: Reply<R>, command: &str, shape: &Shape<R>) -> ExitCode

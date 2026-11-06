@@ -8,14 +8,14 @@ use serde::Serialize;
 /// The path major: `/api/v1`.
 pub const API_VERSION: u32 = 1;
 /// Raised by every additive change to the contract.
-pub const CONTRACT_VERSION: u32 = 3;
+pub const CONTRACT_VERSION: u32 = 4;
 /// The position format (FEAT-043 CD-2).
 pub const POSITION_FORMAT: u32 = 1;
 /// The view-id format (FEAT-043 CD-3).
 pub const VIEW_FORMAT: u32 = 1;
 /// The capabilities this binary has, sorted. Later items add names here and raise
 /// [`CONTRACT_VERSION`].
-pub const CAPABILITIES: &[&str] = &["docs-affected", "position", "view-id", "views"];
+pub const CAPABILITIES: &[&str] = &["docs-affected", "position", "timeline", "view-id", "views"];
 
 /// Reported by a process that serves pages. Never in [`CAPABILITIES`].
 pub const WEB_CAPABILITY: &str = "web-view";

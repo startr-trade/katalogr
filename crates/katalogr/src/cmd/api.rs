@@ -21,10 +21,12 @@ pub fn run(
     queue: Option<usize>,
     no_process: bool,
     cors_origin: Option<String>,
+    snapshots: &[std::path::PathBuf],
 ) -> Result<ExitCode, DistError> {
     let start_dir =
         std::env::current_dir().map_err(|e| DistError::Usage(format!("current directory: {e}")))?;
-    let overrides = overrides(cli);
+    let mut overrides = overrides(cli);
+    overrides.snapshot_dirs = snapshots.to_vec();
     Katalogr::resolve(&start_dir, &overrides).map_err(|e| DistError::Usage(e.to_string()))?;
     let cfg = ApiConfig {
         listen,

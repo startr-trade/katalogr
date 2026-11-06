@@ -24087,6 +24087,208 @@
         "summary": "Index watermark, pending changes and staleness."
       }
     },
+    "/api/v1/stored-view": {
+      "get": {
+        "operationId": "stored-view",
+        "parameters": [
+          {
+            "description": "a view ID, `v1-` and 32 hex digits",
+            "in": "query",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "`current`, `base` or an id from context-list",
+            "in": "query",
+            "name": "context",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "answer for this position",
+            "in": "query",
+            "name": "at",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "freshness requirement",
+            "in": "query",
+            "name": "consistency",
+            "required": false,
+            "schema": {
+              "default": "stale-ok",
+              "enum": [
+                "wait",
+                "wait-all",
+                "stale-ok"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "seconds to wait, at most 120",
+            "in": "query",
+            "name": "timeout",
+            "required": false,
+            "schema": {
+              "minimum": 0,
+              "type": "number"
+            }
+          },
+          {
+            "description": "limit the answer to about this many tokens",
+            "in": "query",
+            "name": "budget",
+            "required": false,
+            "schema": {
+              "maximum": 4294967295,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "include a diagnostic trace",
+            "in": "query",
+            "name": "diagnostic",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "description": "list every hit instead of folding",
+            "in": "query",
+            "name": "expand",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/view"
+                }
+              }
+            },
+            "description": "The same JSON as the CLI prints with `--json`.",
+            "headers": {
+              "ETag": {
+                "description": "The view ID, when the answer is exact",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "304": {
+            "description": "The view ID in `If-None-Match` is the current one."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A bad or unknown parameter."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Not authenticated."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Denied, or an unexpected Host header."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No match, or no such route."
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Only GET is served."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Ambiguous, or the position is unavailable."
+          },
+          "431": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The request head is over 8 KiB."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "An error."
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The queue is full; retry after 1 second."
+          }
+        },
+        "summary": "The stored bytes of a view by its view ID, as a view route answers them."
+      }
+    },
     "/api/v1/tests": {
       "get": {
         "operationId": "tests",
@@ -24308,6 +24510,211 @@
           }
         },
         "summary": "Tests that exercise or verify a symbol."
+      }
+    },
+    "/api/v1/timeline": {
+      "get": {
+        "operationId": "timeline",
+        "parameters": [
+          {
+            "description": "most points returned; the newest are kept",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 1000.0,
+              "maximum": 4294967295,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "`current`, `base` or an id from context-list",
+            "in": "query",
+            "name": "context",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "answer for this position",
+            "in": "query",
+            "name": "at",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "freshness requirement",
+            "in": "query",
+            "name": "consistency",
+            "required": false,
+            "schema": {
+              "default": "stale-ok",
+              "enum": [
+                "wait",
+                "wait-all",
+                "stale-ok"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "seconds to wait, at most 120",
+            "in": "query",
+            "name": "timeout",
+            "required": false,
+            "schema": {
+              "minimum": 0,
+              "type": "number"
+            }
+          },
+          {
+            "description": "limit the answer to about this many tokens",
+            "in": "query",
+            "name": "budget",
+            "required": false,
+            "schema": {
+              "maximum": 4294967295,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "include a diagnostic trace",
+            "in": "query",
+            "name": "diagnostic",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "description": "list every hit instead of folding",
+            "in": "query",
+            "name": "expand",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The same JSON as the CLI prints with `--json`.",
+            "headers": {
+              "ETag": {
+                "description": "The view ID, when the answer is exact",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "304": {
+            "description": "The view ID in `If-None-Match` is the current one."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A bad or unknown parameter."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Not authenticated."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Denied, or an unexpected Host header."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No match, or no such route."
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Only GET is served."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Ambiguous, or the position is unavailable."
+          },
+          "431": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The request head is over 8 KiB."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "An error."
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The queue is full; retry after 1 second."
+          }
+        },
+        "summary": "The stored views and snapshot views, oldest first, for a time slider. Reads no index."
       }
     },
     "/api/v1/views/": {
