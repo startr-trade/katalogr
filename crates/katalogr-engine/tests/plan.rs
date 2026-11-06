@@ -174,4 +174,32 @@ mod plan {
                 .all(|(_, a)| a.name.path.as_str() != "b.tx")
         );
     }
+
+    /// R-12. A file whose extraction failed has an index-error row and no file revision; when
+    /// the file is deleted the row goes, by an event and by a rescan.
+    #[test]
+    fn deleted_file_with_only_errors_removed() {
+        let f = fixture();
+        std::fs::write(f.work.join("bad.tx"), [0xffu8, 0xfe, 0x00]).unwrap();
+        f.rescan();
+        let bad = RelPath::new("bad.tx").unwrap();
+        let errors = |f: &Fx| f.e.cache().read().unwrap().index_errors("r", &bad).unwrap();
+        assert!(!errors(&f).is_empty(), "the failed extraction is recorded");
+        assert!(!f.paths().contains(&"bad.tx".to_string()), "and has no revision");
+        // A rescan after the file is gone removes the row.
+        std::fs::remove_file(f.work.join("bad.tx")).unwrap();
+        f.rescan();
+        assert!(errors(&f).is_empty(), "the row of a deleted file is removed");
+
+        // The same through a change event for the deleted path.
+        std::fs::write(f.work.join("bad.tx"), [0xffu8, 0xfe, 0x00]).unwrap();
+        f.rescan();
+        assert!(!errors(&f).is_empty());
+        std::fs::remove_file(f.work.join("bad.tx")).unwrap();
+        f.e.inbox()
+            .append(&NewEvent::file("r", &bad, katalogr_engine::EventKind::Deleted))
+            .unwrap();
+        drained_graph(&f.e);
+        assert!(errors(&f).is_empty());
+    }
 }

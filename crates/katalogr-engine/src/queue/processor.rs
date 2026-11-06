@@ -123,17 +123,14 @@ impl<'a> Processor<'a> {
                 }
             }
         }
-        if self.engine.dir().is_layer() {
-            // A layer's `file_revisions` holds only its delta, so every stored artifact counts.
-            for (_, row) in tx.artifacts()? {
-                let p = &row.provenance;
-                if p.repo == ev.repo && !p.path.as_str().starts_with(crate::history::HISTORY_PREFIX)
-                {
-                    out.insert(p.path.clone());
-                }
+        for ((repo, path), _) in tx.file_revisions()? {
+            if repo == ev.repo {
+                out.insert(path);
             }
         }
-        for ((repo, path), _) in tx.file_revisions()? {
+        // A file whose extraction failed has an error row and no revision; a rescan must see
+        // it, to remove the row when the file is gone.
+        for ((repo, path), _) in tx.index_error_files()? {
             if repo == ev.repo {
                 out.insert(path);
             }

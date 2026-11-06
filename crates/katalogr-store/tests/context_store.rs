@@ -141,7 +141,12 @@ mod context_store {
         assert!(!layer.cache_dir().join("index.redb.tmp").exists());
         let c = Cache::open(&layer, dl()).unwrap();
         let r = c.read().unwrap();
-        assert!(r.file_revisions().unwrap().is_empty());
+        // The file revisions stay: they say the seeded file is unchanged. The queue is cleared.
+        assert!(
+            r.file_revision("r", &RelPath::new("a.tx").unwrap())
+                .unwrap()
+                .is_some()
+        );
         assert!(r.pending_entries(None).unwrap().is_empty());
         assert_eq!(r.meta("keep").unwrap().as_deref(), Some(&b"yes"[..]));
         assert_eq!(

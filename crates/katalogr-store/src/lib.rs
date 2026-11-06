@@ -26,7 +26,7 @@ pub use cache::{
     SymbolRow, TableId, WriteTx,
 };
 pub use compact::{CompactMode, CompactOutcome, CompactPolicy, CompactReport, REWRITE_FILE};
-pub use context::{ContextId, ContextKind, ContextManifest, META_BASE_ERRORS, seed_layer};
+pub use context::{ContextId, ContextKind, ContextManifest, seed_layer};
 #[doc(hidden)]
 pub use dict::Memo;
 pub use error::StoreError;

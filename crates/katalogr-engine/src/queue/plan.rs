@@ -54,6 +54,9 @@ pub(super) struct PlanEnv<'e> {
     embed_sig: Option<[u8; 32]>,
     /// The stored file revision (SHA-256 of the revision string) of each path of the round.
     revisions: BTreeMap<(String, RelPath), [u8; 32]>,
+    /// Paths of the round with an index-error row: a file whose extraction failed has no
+    /// revision, but its row must go when the file does.
+    errored: BTreeSet<(String, RelPath)>,
     /// Paths of the round that git ignores and does not track: treated as gone (FEAT-099).
     not_admitted: BTreeSet<(String, RelPath)>,
 }
@@ -88,9 +91,13 @@ impl<'e> PlanEnv<'e> {
             }
         }
         let mut revisions = BTreeMap::new();
+        let mut errored = BTreeSet::new();
         for (key, _) in items {
             if let Some(h) = snap.file_revision(&key.repo, &key.path)? {
                 revisions.insert((key.repo.clone(), key.path.clone()), h);
+            }
+            if !snap.index_errors(&key.repo, &key.path)?.is_empty() {
+                errored.insert((key.repo.clone(), key.path.clone()));
             }
         }
         let mut not_admitted = BTreeSet::new();
@@ -119,7 +126,8 @@ impl<'e> PlanEnv<'e> {
         let mut globs: BTreeMap<&str, Option<(globset::GlobSet, globset::GlobSet)>> =
             BTreeMap::new();
         for (key, _) in items {
-            if !revisions.contains_key(&(key.repo.clone(), key.path.clone()))
+            let k = (key.repo.clone(), key.path.clone());
+            if !(revisions.contains_key(&k) || errored.contains(&k))
                 || key
                     .path
                     .as_str()
@@ -145,6 +153,7 @@ impl<'e> PlanEnv<'e> {
             guests,
             embed_sig: embed::signature(engine.registry()),
             revisions,
+            errored,
         })
     }
 }
@@ -176,7 +185,11 @@ pub(super) fn plan_one(env: &PlanEnv, key: &PendingKey) -> Result<Action, Engine
         source.read(&key.path)?
     };
     let delete_or_skip = || {
-        if held.is_some() {
+        if held.is_some()
+            || env
+                .errored
+                .contains(&(key.repo.clone(), key.path.clone()))
+        {
             Action::Delete
         } else {
             Action::Skip
