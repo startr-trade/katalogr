@@ -15,6 +15,7 @@ mod find;
 pub mod fold;
 mod hints;
 pub mod impact;
+pub mod impact_seeds;
 mod map;
 mod mirror;
 mod path;
@@ -52,6 +53,7 @@ pub use impact::{
     ImpactHit, ImpactOptions, ImpactReport, ImpactSeed, SEED_BROKEN_REF, SEED_CONTRACT,
     SEED_CONTRACT_CONSUMERS, SEED_FILE, SEED_ITEM, SEED_SYMBOL, Seed, impact,
 };
+pub use impact_seeds::{seeds_for_changes, seeds_for_file, seeds_for_item, seeds_for_symbol};
 pub use map::{map, map_boosted_traced, map_top, map_top_behind, map_traced};
 pub use mirror::mirror_drift;
 pub use path::path;
