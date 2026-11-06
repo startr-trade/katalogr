@@ -367,7 +367,7 @@ impl Katalogr {
         std::mem::take(&mut *self.notes.lock().expect("notes lock"))
     }
 
-    fn note(&self, text: String) {
+    pub(crate) fn note(&self, text: String) {
         self.notes.lock().expect("notes lock").push(text);
     }
 

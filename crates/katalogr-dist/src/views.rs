@@ -424,7 +424,7 @@ impl Katalogr {
 
 impl Katalogr {
     /// The store of this project, bounded by `views.store_cap_mb`.
-    fn view_store(&self) -> ViewStore {
+    pub(crate) fn view_store(&self) -> ViewStore {
         let mb = self
             .project
             .config()

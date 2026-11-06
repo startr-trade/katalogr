@@ -64,6 +64,7 @@ pub fn resolve(cli: &Cli) -> Result<Katalogr, DistError> {
             kindex: cli.kindex.clone(),
             project: cli.project.clone(),
             context: context_choice(cli),
+            snapshot_dirs: Vec::new(),
         },
     )
 }
@@ -82,6 +83,7 @@ pub fn overrides(cli: &Cli) -> Overrides {
         kindex: cli.kindex.clone(),
         project: cli.project.clone(),
         context: context_choice(cli),
+        snapshot_dirs: Vec::new(),
     }
 }
 

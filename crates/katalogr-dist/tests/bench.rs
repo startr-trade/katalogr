@@ -606,6 +606,7 @@ mod bench {
                 kindex: Some(kx.display().to_string()),
                 project: Some("demo".into()),
                 context: None,
+                snapshot_dirs: Vec::new(),
             },
         )
         .unwrap();
