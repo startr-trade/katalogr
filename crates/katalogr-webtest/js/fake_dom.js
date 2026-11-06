@@ -142,6 +142,7 @@ __mk("button", "kw-theme", __app).setAttribute("data-kw", "theme-button");
 __mk("nav", "kw-sidebar", __app);
 __mk("main", "kw-main", __app);
 __mk("script", "kw-views");
+__mk("script", "kw-data");
 var __meta = document.createElement("meta");
 __meta.setAttribute("name", "katalogr-api"); __meta.setAttribute("content", "");
 document.body.appendChild(__meta);

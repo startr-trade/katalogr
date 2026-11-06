@@ -8,6 +8,7 @@ repository.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+katalogr-query.workspace = true
 katalogr-render.workspace = true
 serde.workspace = true
 serde_json.workspace = true
