@@ -32,8 +32,8 @@
     "salt": "text-extract-1"
   },
   "ts": {
-    "digest": "08764bf081e186854f157f51a15be0e0a1fa818e0213d8855420d88e779ea9c6",
-    "salt": "ts-extract-3;tests-1;rest-1;rest-2;rest-3"
+    "digest": "051b1eda709dfb636aa69b6ef618fdcec5f1bee6b0cf4021af2924c1270751dd",
+    "salt": "ts-extract-3;tests-1;rest-1;rest-2;rest-3;fields-1"
   },
   "xsd": {
     "digest": "5436b22d8bfd48487b1931be45306546e161608fb52dd45510e107aad815d05b",

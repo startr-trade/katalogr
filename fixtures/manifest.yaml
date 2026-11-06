@@ -203,6 +203,8 @@ technologies:
       - ts/require
     test-marks:
       - ts/tests
+    type-fields:
+      - ts/type-fields
     string-calls:
       - ts/string-calls
     wasm-glue:
