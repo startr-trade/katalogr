@@ -173,10 +173,6 @@ mod web {
                 "#/dependencies",
                 "Dependency and vulnerability data isn't in this version of katalogr.",
             ),
-            (
-                "#/type-lineage",
-                "Type lineage isn't in this version of katalogr.",
-            ),
         ] {
             let mut page = Page::open(hash, &backend);
             assert!(page.text().contains(sentence), "{hash}: {}", page.text());
