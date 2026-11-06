@@ -114,6 +114,13 @@ fn run(cli: &Cli) -> Result<ExitCode, DistError> {
             *limit,
             *test_depth,
         ),
+        Some(Command::Lineage {
+            text,
+            depth,
+            limit,
+            per_group,
+            expand,
+        }) => cmd::lineage::run(cli, text, *depth, *limit, *per_group, *expand),
         Some(Command::Mirrors { kind }) => cmd::mirrors::run(cli, kind),
         Some(Command::Hubs {
             level,
