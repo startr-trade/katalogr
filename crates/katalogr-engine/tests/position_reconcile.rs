@@ -70,6 +70,46 @@ mod position {
         std::fs::write(work.join(name), text).unwrap();
     }
 
+    /// FEAT-096 R-9: the state `f` is told equals the answer's, clean and dirty.
+    #[test]
+    fn state_seen_before_compute() {
+        let s = setup();
+        let seen = |e: &Engine| {
+            e.with_consistency_state(&opts(), |_, st| st.clone())
+                .unwrap()
+        };
+        let clean = seen(&s.engine);
+        assert!(clean.exact);
+        assert_eq!(clean.value.positions, clean.positions);
+        assert_eq!(clean.value.exact, clean.exact);
+        assert_eq!(clean.positions[0].dirty, None);
+
+        write(&s.work, "a.tx", "sym fn A\nsym fn A2\nexport k:a A2\n");
+        let dirty = seen(&s.engine);
+        assert!(dirty.exact);
+        assert!(dirty.positions[0].dirty.is_some());
+        assert_eq!(dirty.value.positions, dirty.positions);
+        assert_eq!(dirty.value.exact, dirty.exact);
+
+        // A read that does not reconcile is told what was last recorded, and not exact.
+        let stale = QueryOptions {
+            consistency: Consistency::StaleOk,
+            ..opts()
+        };
+        let a = s
+            .engine
+            .with_consistency_state(&stale, |_, st| st.clone())
+            .unwrap();
+        assert!(!a.exact);
+        assert_eq!(
+            a.value,
+            katalogr_engine::ReadState {
+                positions: a.positions.clone(),
+                exact: false
+            }
+        );
+    }
+
     #[test]
     fn reconcile_finds_edit_without_hook() {
         let s = setup();

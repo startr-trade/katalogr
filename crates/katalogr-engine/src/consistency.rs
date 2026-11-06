@@ -77,6 +77,17 @@ pub struct Answer<T> {
     pub warnings: Vec<String>,
 }
 
+/// What the reconcile found before the read's value is computed (FEAT-096). `exact` is the
+/// answer's exactness as far as it can be known then: nothing pending anywhere, every checkout's
+/// position read and recorded or recordable. A checkout edited while the value is computed still
+/// turns the returned [`Answer`] inexact. `positions` are the checkouts' positions when `exact`,
+/// else the last positions reached exactly, as in [`Answer`].
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ReadState {
+    pub positions: Vec<PositionRef>,
+    pub exact: bool,
+}
+
 /// Meta key prefix of the last position a repo reached exactly: compact JSON of a `PositionRef`.
 pub const POSITION_META: &str = "position.";
 /// Meta key prefix of the uncommitted paths of that position: JSON of [`ChangedSet`].
@@ -432,6 +443,15 @@ impl Engine {
         o: &QueryOptions,
         f: impl FnOnce(&ReadTx) -> T,
     ) -> Result<Answer<T>, EngineError> {
+        self.with_consistency_state(o, |tx, _| f(tx))
+    }
+
+    /// As [`Engine::with_consistency`], telling `f` what the reconcile found before `f` runs.
+    pub fn with_consistency_state<T>(
+        &self,
+        o: &QueryOptions,
+        f: impl FnOnce(&ReadTx, &ReadState) -> T,
+    ) -> Result<Answer<T>, EngineError> {
         let deadline = Instant::now() + o.timeout;
         let scope = match o.consistency {
             Consistency::WaitAll => Scope::Project,
@@ -468,7 +488,13 @@ impl Engine {
                 } else {
                     self.pending_in(&snap, &Scope::Project)?
                 };
-                let value = f(&snap);
+                let state = self.read_state(
+                    reconcile && unrecorded.is_empty(),
+                    all_pending == 0,
+                    &before,
+                    &recorded,
+                );
+                let value = f(&snap, &state);
                 drop(snap);
                 // Read after the value, so an edit made while it was computed is seen.
                 let (positions, exact) = self.settle(
@@ -514,6 +540,32 @@ impl Engine {
                     std::thread::sleep(backoff.min(left));
                     backoff = (backoff * 2).min(POLL_MAX);
                 }
+            }
+        }
+    }
+
+    /// The state `f` is told: the positions read before the value, when nothing is pending and
+    /// every checkout was read; otherwise the recorded ones.
+    fn read_state(
+        &self,
+        reconcile: bool,
+        nothing_pending: bool,
+        before: &BTreeMap<String, WorkingState>,
+        recorded: &BTreeMap<String, PositionRef>,
+    ) -> ReadState {
+        if reconcile
+            && nothing_pending
+            && !self.roots.is_empty()
+            && before.len() == self.roots.len()
+        {
+            ReadState {
+                positions: before.values().map(|s| s.position.clone()).collect(),
+                exact: true,
+            }
+        } else {
+            ReadState {
+                positions: recorded.values().cloned().collect(),
+                exact: false,
             }
         }
     }
