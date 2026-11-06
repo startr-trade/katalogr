@@ -915,7 +915,7 @@ mod cli {
         .unwrap();
         validate(&schema, &schema, &v, "$").unwrap_or_else(|e| panic!("{e}\n{v}"));
         assert_eq!(v["api"], 1);
-        assert_eq!(v["contract"], 5);
+        assert_eq!(v["contract"], 6);
         assert_eq!(v["schema"], 1);
         assert_eq!(v["katalogr"], env!("CARGO_PKG_VERSION"));
         assert_eq!(
@@ -925,6 +925,7 @@ mod cli {
                 "impact",
                 "position",
                 "timeline",
+                "type-lineage",
                 "view-id",
                 "views"
             ])
@@ -938,9 +939,21 @@ mod cli {
         let out = katalogr(tmp.path(), &["--json", "contract"]);
         assert_eq!(out.status.code(), Some(0), "{out:?}");
         let v: Value = serde_json::from_slice(&out.stdout).expect("json");
-        assert_eq!(v["contract"], 5);
+        assert_eq!(v["contract"], 6);
         let caps = v["capabilities"].as_array().expect("capabilities");
         assert!(caps.iter().any(|c| c == "impact"), "{caps:?}");
+    }
+
+    /// FEAT-101 R-9: `katalogr contract --json` lists `type-lineage`.
+    #[test]
+    fn contract_lists_type_lineage() {
+        let tmp = tempfile::tempdir().unwrap();
+        let out = katalogr(tmp.path(), &["--json", "contract"]);
+        assert_eq!(out.status.code(), Some(0), "{out:?}");
+        let v: Value = serde_json::from_slice(&out.stdout).expect("json");
+        assert_eq!(v["contract"], 6);
+        let caps = v["capabilities"].as_array().expect("capabilities");
+        assert!(caps.iter().any(|c| c == "type-lineage"), "{caps:?}");
     }
 
     /// The `.tx` query project as a git repository with a document that links to `target`,
