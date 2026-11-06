@@ -2272,6 +2272,7 @@ dependencies = [
  "katalogr-acceptance",
  "katalogr-bench",
  "katalogr-dist",
+ "katalogr-engine",
  "katalogr-model",
  "katalogr-store",
  "katalogr-web",
@@ -2361,6 +2362,7 @@ name = "katalogr-dist"
 version = "0.1.0"
 dependencies = [
  "camino",
+ "fs4",
  "katalogr-analytics",
  "katalogr-engine",
  "katalogr-ext-data",

@@ -11,6 +11,7 @@ mod fan_answers;
 mod graph;
 mod hints;
 mod hubs;
+pub mod insight_shift;
 #[cfg(test)]
 mod link_walk;
 mod louvain;
@@ -20,6 +21,7 @@ mod rationale;
 pub mod result;
 mod scc;
 mod schema;
+pub mod semantic_diff;
 pub mod structure;
 #[cfg(test)]
 #[allow(dead_code)]

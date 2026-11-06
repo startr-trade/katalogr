@@ -557,4 +557,42 @@ mod context {
         assert_eq!(code, 4);
         drop(held);
     }
+
+    /// FEAT-095 R-2. `context add --commit` that has not drained is reported, not a quiet
+    /// success. Not timing-based: the context's processor lock is held, so it cannot drain.
+    #[test]
+    fn add_commit_reports_undrained() {
+        use fs4::FileExt;
+        let p = project(&FILES, true);
+        let head = git(&p.repo, &["rev-parse", "HEAD"]);
+        let k = katalogr(&p.repo, ContextChoice::Base);
+        let quick = Options {
+            timeout: Some(0.3),
+            ..Options::default()
+        };
+        // Drained: the first add succeeds.
+        k.context_add_commit("app", &head, &Options::default())
+            .unwrap();
+        let id = katalogr_store::ContextId::for_commit("app", &head);
+        let layer = k.project().layer(&id);
+        // Something is queued in the context, and a process holds its lock.
+        katalogr_engine::queue::Inbox::new(&layer)
+            .append(&katalogr_engine::NewEvent::rescan("app"))
+            .unwrap();
+        let held = std::fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .write(true)
+            .open(layer.root().join(".cache/processor.lock"))
+            .unwrap();
+        FileExt::try_lock(&held).unwrap();
+        let err = k
+            .context_add_commit("app", &head, &quick)
+            .expect_err("a context that has not drained is reported");
+        assert_eq!(err.refused_exit(), Some(5), "{err}");
+        drop(held);
+        // Released, it drains.
+        k.context_add_commit("app", &head, &Options::default())
+            .unwrap();
+    }
 }

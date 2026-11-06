@@ -6,8 +6,8 @@ mod answers;
 mod at;
 mod audit;
 pub use answers::{
-    AnswerCheckReport, AnswerCounters, AnswerMismatch, AnswerRequest, AnswerStats, StoredQuery,
-    validity,
+    AnswerCheckReport, AnswerCounters, AnswerMismatch, AnswerRequest, AnswerStats, DiffQuery,
+    StoredQuery, validity,
 };
 pub use at::position_without_board;
 pub use audit::{AuditOutcome, AuditRecord, PositionText};
@@ -19,6 +19,9 @@ pub use docs_affected::{DEFAULT_DOCS_LIMIT, DocsAffectedParams};
 pub use impact::ImpactInput;
 pub mod contexts;
 pub mod contract;
+pub mod diff;
+pub mod diff_render;
+pub mod diff_requests;
 pub use katalogr_query::{PositionAnswer, PositionRef, ViewQuery, WorkingSetSummary};
 pub mod doc_blocks;
 pub mod doc_views;
@@ -134,6 +137,14 @@ pub fn schemas() -> BTreeMap<&'static str, serde_json::Value> {
         all.insert("answers-stats", answers::stats_schema())
             .is_none(),
         "schema name answers-stats is registered twice"
+    );
+    assert!(
+        all.insert(
+            "diff",
+            schemars::schema_for!(katalogr_query::Envelope<diff::DiffReport>).to_value()
+        )
+        .is_none(),
+        "schema name diff is registered twice"
     );
     assert!(
         all.insert("position", katalogr_query::position_schema())
@@ -679,6 +690,21 @@ impl Katalogr {
 
     pub fn project(&self) -> &ProjectDir {
         &self.project
+    }
+
+    /// A copy that reads through context `c`, with no notes and no view-ID arguments carried
+    /// over. Stored answers keep the same build and store.
+    pub(crate) fn with_context(&self, c: contexts::ContextChoice) -> Katalogr {
+        Katalogr {
+            project: self.project.clone(),
+            repo: self.repo.clone(),
+            roots: self.roots.clone(),
+            context: c,
+            notes: std::sync::Mutex::new(Vec::new()),
+            view_extra: std::sync::Mutex::new(Vec::new()),
+            snapshot_dirs: self.snapshot_dirs.clone(),
+            answers: self.answers.fork(),
+        }
     }
 
     /// Record (or replace) the machine-local root of a repo of this project.
@@ -1953,6 +1979,12 @@ fn limit_partial(limit: usize, shown: usize, total: Option<u64>) -> Vec<Partial>
     } else {
         Vec::new()
     }
+}
+
+/// Whether a file written at `path` stays out of git (FEAT-095 R-15): its folder is in no work
+/// tree, or git ignores the path and does not track it.
+pub fn output_outside_git(path: &Path) -> Result<bool, DistError> {
+    Ok(katalogr_engine::scan::output_outside_git(path)?)
 }
 
 pub(crate) fn unknown_root(repo: &str) -> DistError {

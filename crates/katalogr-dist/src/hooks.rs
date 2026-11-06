@@ -597,6 +597,24 @@ impl Katalogr {
         for ev in &events {
             inbox.append(ev)?;
         }
+        // A merge asks for a report between the two heads. Only a file is written here; a later
+        // `index` builds it. A failure is logged, never raised.
+        if hook == "post-merge" && self.diff_on_merge() {
+            let queued = (|| {
+                let a = katalogr_engine::base::resolve_commit(root.as_std_path(), "ORIG_HEAD")?;
+                let b = katalogr_engine::base::resolve_commit(root.as_std_path(), "HEAD")?;
+                if a != b {
+                    crate::diff_requests::queue_diff_request(&self.project, repo, &a, &b)?;
+                }
+                Ok::<(), DistError>(())
+            })();
+            if let Err(e) = queued {
+                log(
+                    self.project.cache_dir().as_std_path(),
+                    &format!("git post-merge diff request: {e}"),
+                );
+            }
+        }
         // When the branch that moved is the default branch, the base follows it. A failed
         // advance never fails the hook; the next one retries from the recorded commit.
         let mut n = events.len();

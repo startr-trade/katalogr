@@ -31,6 +31,14 @@ pub enum LevelArg {
     Package,
 }
 
+/// The page format of `diff`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+#[value(rename_all = "kebab-case")]
+pub enum DiffFormat {
+    Markdown,
+    Html,
+}
+
 /// Output format of `render`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 #[value(rename_all = "kebab-case")]
@@ -410,6 +418,9 @@ pub enum Command {
         /// Index the commits that carry item trailers (`Refs:`).
         #[arg(long)]
         history: bool,
+        /// Do not build the diff reports that merges asked for.
+        #[arg(long)]
+        no_reports: bool,
     },
     /// Show the index watermark, pending changes and staleness.
     Status,
@@ -647,6 +658,37 @@ pub enum Command {
     Shard {
         #[command(subcommand)]
         action: ShardAction,
+    },
+    /// Report what changed in the code's structure between two commits, branches or releases:
+    /// symbols added, removed, moved or changed, links, contracts, and shifts in hubs, cycles,
+    /// communities and coverage. The report is stored and read back; `--json` gives the data.
+    Diff {
+        /// The earlier revision (a commit, branch or tag).
+        #[arg(required_unless_present = "requested", conflicts_with = "requested")]
+        a: Option<String>,
+        /// The later revision.
+        #[arg(required_unless_present = "requested", conflicts_with = "requested")]
+        b: Option<String>,
+        /// Build the reports that merges asked for, then stop.
+        #[arg(long)]
+        requested: bool,
+        /// The repo; default: the current one.
+        #[arg(long, value_name = "NAME")]
+        repo: Option<String>,
+        /// The page format on standard output or in `--out`. Default: markdown.
+        #[arg(long, value_enum, value_name = "FORMAT", conflicts_with = "json")]
+        format: Option<DiffFormat>,
+        /// Entries per list.
+        #[arg(long, default_value_t = 200, value_name = "N")]
+        limit: usize,
+        /// Write the report to this file instead of standard output. Refused where git would
+        /// track it.
+        #[arg(long, value_name = "FILE", conflicts_with = "out_dir")]
+        out: Option<std::path::PathBuf>,
+        /// Write `diff-<a12>-<b12>.json`, `.md` and `.html` into this folder. Refused where git
+        /// would track them.
+        #[arg(long, value_name = "DIR")]
+        out_dir: Option<std::path::PathBuf>,
     },
     /// Compare mirrored copies of a structure: contracts with two or more declarers. Exits 1
     /// when a field is missing on one side or differs in type, required or many.

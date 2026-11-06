@@ -167,13 +167,29 @@ impl Katalogr {
     }
 
     /// A context that reads `commit` of `repo` from git objects, with no checkout. Built and
-    /// ready when this returns.
+    /// ready when this returns. A context that has not drained is reported as a refusal.
     pub fn context_add_commit(
         &self,
         repo: &str,
         commit: &str,
         o: &Options,
     ) -> Result<ContextInfo, DistError> {
+        let (id, _) = self.commit_side(repo, commit, None, o)?;
+        let layer = self.project.layer(&id);
+        let m = ContextManifest::read(layer.root())?;
+        Ok(self.info_of(&m, &layer))
+    }
+
+    /// One side of a comparison: the context for `commit` of `repo`, seeded if absent and brought
+    /// up to date. `keep` is never evicted to make room, so the first side survives the second.
+    /// A read that is `stale` or has `pending > 0` is `DistError::Refused { exit: 5, .. }`.
+    pub(crate) fn commit_side(
+        &self,
+        repo: &str,
+        commit: &str,
+        keep: Option<&ContextId>,
+        o: &Options,
+    ) -> Result<(ContextId, Report), DistError> {
         let timeout = o.timeout()?;
         let deadline = Instant::now() + timeout;
         let root = self
@@ -193,28 +209,36 @@ impl Katalogr {
                 seed_commit: None,
                 commit: Some(full),
             };
-            self.evict_for_seed(&id);
+            self.evict_for_seed_keeping(&id, keep);
             self.seed_from(&layer, &m, deadline)?;
         }
         let layer = self.current_layer(layer, deadline)?;
         let engine = self.engine_on(layer.clone(), deadline)?;
-        self.read(&engine, Consistency::WaitAll, timeout, 0, Vec::new())?;
+        let report = self.read(&engine, Consistency::WaitAll, timeout, 0, Vec::new())?;
         drop(engine);
-        let m = ContextManifest::read(layer.root())?;
-        Ok(self.info_of(&m, &layer))
+        if report.stale || report.pending > 0 {
+            return Err(DistError::Refused {
+                exit: 5,
+                message: format!(
+                    "context {id} has not drained ({} pending); run again to continue",
+                    report.pending
+                ),
+            });
+        }
+        Ok((id, report))
     }
 
     /// Remove contexts until at most `keep` remain: those whose checkout no longer exists
     /// first, then the least recently used. The base, this invocation's own context and any
     /// context whose processor lock is held are never removed. Returns the removed ids.
     pub fn context_prune(&self, keep: usize) -> Result<Vec<ContextId>, DistError> {
-        self.prune_keeping(keep, None)
+        self.prune_keeping(keep, &[])
     }
 
     fn prune_keeping(
         &self,
         keep: usize,
-        also_keep: Option<&ContextId>,
+        also_keep: &[&ContextId],
     ) -> Result<Vec<ContextId>, DistError> {
         let own = self.own_id();
         let named = match &self.context {
@@ -244,7 +268,7 @@ impl Katalogr {
             }
             if Some(&m.id) == own.as_ref()
                 || Some(&m.id) == named.as_ref()
-                || Some(&m.id) == also_keep
+                || also_keep.contains(&&m.id)
             {
                 continue;
             }
@@ -262,9 +286,11 @@ impl Katalogr {
     }
 
     /// Make room before a seed: past `contexts.max`, the oldest go.
-    fn evict_for_seed(&self, new: &ContextId) {
+    fn evict_for_seed_keeping(&self, new: &ContextId, keep: Option<&ContextId>) {
         let max = self.contexts_max().max(1);
-        if let Ok(removed) = self.prune_keeping(max - 1, Some(new))
+        let mut also = vec![new];
+        also.extend(keep);
+        if let Ok(removed) = self.prune_keeping(max - 1, &also)
             && !removed.is_empty()
         {
             self.note(format!(
@@ -458,7 +484,7 @@ impl Katalogr {
             seed_commit: None,
             commit: None,
         };
-        self.evict_for_seed(id);
+        self.evict_for_seed_keeping(id, None);
         self.seed_from(layer, &m, deadline)
     }
 

@@ -1157,4 +1157,165 @@ mod bench {
         }
         assert!(failures.is_empty(), "{}", failures.join("; "));
     }
+
+    // ---- diff report budgets (FEAT-095 R-18) ------------------------------------------
+    //
+    // Corpus: `KATALOGR_BENCH_CORPUS_ROOT` is a read-only git clone, and `KATALOGR_BENCH_DIFF_A`
+    // and `KATALOGR_BENCH_DIFF_B` are two revisions of it. The kindex lives under
+    // `~/.cache/katalogr-scratch/FEAT-095/` (or `KATALOGR_SCRATCH`) and is removed when the
+    // bench ends. A miss is reported, never fixed by changing a budget. Run one at a time:
+    // `systemd-run --user --scope -p MemoryMax=8G env KATALOGR_THREADS=4 flock
+    // ~/.cache/heavy-build.lock cargo test -p katalogr-dist --release --test bench diff_ --
+    // --ignored --nocapture --test-threads=1`.
+
+    fn scratch_095() -> tempfile::TempDir {
+        let base = std::env::var("KATALOGR_SCRATCH").map_or_else(
+            |_| {
+                let home = std::env::var("HOME").expect("HOME");
+                PathBuf::from(home).join(".cache/katalogr-scratch/FEAT-095")
+            },
+            PathBuf::from,
+        );
+        std::fs::create_dir_all(&base).unwrap();
+        tempfile::Builder::new()
+            .prefix("bench-")
+            .tempdir_in(base)
+            .unwrap()
+    }
+
+    fn bench_env(name: &str) -> Option<String> {
+        let v = std::env::var(name).ok().filter(|v| !v.is_empty());
+        if v.is_none() {
+            println!("skipped: {name} is not set");
+        }
+        v
+    }
+
+    /// Peak resident set of this process so far (`VmHWM`), in MiB.
+    fn peak_rss_095() -> u64 {
+        std::fs::read_to_string("/proc/self/status")
+            .unwrap_or_default()
+            .lines()
+            .find_map(|l| l.strip_prefix("VmHWM:"))
+            .and_then(|v| v.split_whitespace().next()?.parse::<u64>().ok())
+            .map_or(0, |kib| kib / 1024)
+    }
+
+    /// The corpus as project `bench` (repo `corpus`), indexed, with stored answers on.
+    fn diff_project() -> Option<(tempfile::TempDir, Katalogr, String, String)> {
+        let root = bench_env("KATALOGR_BENCH_CORPUS_ROOT")?;
+        let a = bench_env("KATALOGR_BENCH_DIFF_A")?;
+        let b = bench_env("KATALOGR_BENCH_DIFF_B")?;
+        let tmp = scratch_095();
+        let kx = tmp.path().join("kx");
+        kindex_init(&kx).unwrap();
+        // `mark` false: the clone is read-only, so no `.katalogr` marker is written.
+        project_init(
+            &kx,
+            "bench",
+            vec![("corpus".to_string(), PathBuf::from(root))],
+            false,
+        )
+        .unwrap();
+        let mut k = Katalogr::resolve(
+            &kx,
+            &Overrides {
+                kindex: Some(kx.display().to_string()),
+                project: Some("bench".to_string()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        k.set_answer_build(Some("bench".to_string()));
+        let opts = Options {
+            timeout: Some(7200.0),
+            consistency: Some(katalogr_dist::Consistency::WaitAll),
+            ..Options::default()
+        };
+        k.index(None, true, None, &opts).unwrap();
+        Some((tmp, k, a, b))
+    }
+
+    fn diff_request(a: &str, b: &str) -> katalogr_dist::diff::DiffRequest {
+        katalogr_dist::diff::DiffRequest {
+            a: a.to_string(),
+            b: b.to_string(),
+            repo: Some("corpus".to_string()),
+            limit: 200,
+        }
+    }
+
+    /// R-18: a stored report is read back in at most 100 ms (p95 of 40 reads), with no context.
+    #[test]
+    #[ignore]
+    fn diff_hit_budget() {
+        let Some((_tmp, k, a, b)) = diff_project() else {
+            return;
+        };
+        let opts = Options {
+            timeout: Some(7200.0),
+            ..Options::default()
+        };
+        let req = diff_request(&a, &b);
+        k.diff_report(&req, &opts).unwrap();
+        let load_before = load();
+        let mut ms = Vec::new();
+        for _ in 0..40 {
+            let t = Instant::now();
+            k.diff_report(&req, &opts).unwrap();
+            ms.push(t.elapsed().as_secs_f64() * 1000.0);
+        }
+        ms.sort_by(|x, y| x.partial_cmp(y).unwrap());
+        let p95 = ms[37];
+        println!(
+            "diff_hit_budget: p95 {p95:.1} ms, median {:.1} ms over 40 reads; peak RSS {} MiB; load {load_before} -> {}",
+            ms[20],
+            peak_rss_095(),
+            load()
+        );
+        assert!(p95 <= 100.0, "{p95:.1} ms is over 100 ms");
+    }
+
+    /// R-18: a build with both contexts present takes at most 60 s. Prints the three formats'
+    /// sizes, peak RSS and load; those have no budget.
+    #[test]
+    #[ignore]
+    fn diff_build_budget() {
+        let Some((_tmp, k, a, b)) = diff_project() else {
+            return;
+        };
+        let opts = Options {
+            timeout: Some(7200.0),
+            ..Options::default()
+        };
+        let req = diff_request(&a, &b);
+        // The first report seeds and indexes both contexts; they stay for the timed run.
+        let t = Instant::now();
+        k.diff_report(&req, &opts).unwrap();
+        let cold = t.elapsed().as_secs_f64();
+        let fresh = Options {
+            fresh: true,
+            ..opts.clone()
+        };
+        let load_before = load();
+        let t = Instant::now();
+        let r = k.diff_report(&req, &fresh).unwrap();
+        let secs = t.elapsed().as_secs_f64();
+        let json = match &r.outcome {
+            katalogr_dist::Outcome::Found(d) => serde_json::to_vec(d).unwrap().len(),
+            _ => 0,
+        };
+        let page = |f| match k.diff_page(&req, f, &opts).unwrap().outcome {
+            katalogr_dist::Outcome::Found(p) => p.text.len(),
+            _ => 0,
+        };
+        println!(
+            "diff_build_budget: cold {cold:.1} s; with contexts {secs:.1} s; sizes json {json} B, markdown {} B, html {} B; peak RSS {} MiB; load {load_before} -> {}",
+            page(katalogr_dist::diff::DiffRender::Markdown),
+            page(katalogr_dist::diff::DiffRender::Html),
+            peak_rss_095(),
+            load()
+        );
+        assert!(secs <= 60.0, "{secs:.1} s is over 60 s");
+    }
 }

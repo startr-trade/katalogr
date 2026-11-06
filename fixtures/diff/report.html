@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Changes in app from 111111111111 to 222222222222</title>
+<style>
+:root{color-scheme:light dark;--bg:#fff;--fg:#1b1f24;--muted:#57606a;--line:#d0d7de;--add:#1a7f37;--del:#cf222e;--link:#0969da}
+@media (prefers-color-scheme:dark){:root{--bg:#0d1117;--fg:#e6edf3;--muted:#8b949e;--line:#30363d;--add:#3fb950;--del:#f85149;--link:#58a6ff}}
+body{background:var(--bg);color:var(--fg);font:15px/1.5 system-ui,sans-serif;max-width:72rem;margin:0 auto;padding:1.5rem}
+h1{font-size:1.5rem}h2{font-size:1.2rem;cursor:pointer}h3{font-size:1rem;color:var(--muted)}
+table{border-collapse:collapse;margin:.5rem 0 1rem;width:100%}
+th,td{border:1px solid var(--line);padding:.25rem .5rem;text-align:left;vertical-align:top}
+code{font-family:ui-monospace,monospace;font-size:.9em}a{color:var(--link)}
+details{border-top:1px solid var(--line);margin-top:1rem}
+.diagram svg{max-width:100%;height:auto}
+</style>
+<!-- pele assets inlined here -->
+</head>
+<body>
+<h1>Changes in app from 111111111111 to 222222222222</h1>
+<details open>
+<summary><h2 style="display:inline">Summary</h2></summary>
+<p>Repository `app`, from `111111111111` to `222222222222`. Facts version `abababababab`. Each list is limited to 200 entries.</p>
+<table>
+<thead><tr><th>Measure</th><th>Value</th></tr></thead>
+<tbody>
+<tr><td>Files compared</td><td>5</td></tr>
+<tr><td>Symbols added</td><td>2</td></tr>
+<tr><td>Symbols removed</td><td>3</td></tr>
+<tr><td>Symbols moved</td><td>1</td></tr>
+<tr><td>Symbols with a changed signature</td><td>1</td></tr>
+<tr><td>Links added</td><td>2</td></tr>
+<tr><td>Links removed</td><td>1</td></tr>
+<tr><td>Contracts changed</td><td>1</td></tr>
+<tr><td>Hubs moved</td><td>1</td></tr>
+<tr><td>Cycles</td><td>0 to 1</td></tr>
+<tr><td>Communities</td><td>2 to 3</td></tr>
+<tr><td>graph.dangling</td><td>0 to 1</td></tr>
+<tr><td>graph.links</td><td>10 to 11</td></tr>
+<tr><td>graph.symbols</td><td>12 to 13</td></tr>
+</tbody>
+</table>
+</details>
+<details open>
+<summary><h2 style="display:inline">Symbols</h2></summary>
+<h3>Added</h3>
+<table>
+<thead><tr><th>Symbol</th><th>Kind</th><th>Where</th></tr></thead>
+<tbody>
+<tr><td><span id="s-n5a9629916649"><code>app:src/new.tx#fn:fresh</code></span></td><td>fn</td><td>src/new.tx:1</td></tr>
+<tr><td><span id="s-n0e00ccc26b4c"><code>app:src/lib.tx#fn:extra</code></span></td><td>fn</td><td>src/lib.tx:12</td></tr>
+</tbody>
+</table>
+<h3>Removed</h3>
+<table>
+<thead><tr><th>Symbol</th><th>Kind</th><th>Where</th></tr></thead>
+<tbody>
+<tr><td><span id="s-nd0dfc36d42bf"><code>app:src/old.tx#fn:gone</code></span></td><td>fn</td><td>src/old.tx:4</td></tr>
+</tbody>
+</table>
+<p>Showing 1 of 3.</p>
+<h3>Moved</h3>
+<table>
+<thead><tr><th>Symbol</th><th>From</th><th>To</th></tr></thead>
+<tbody>
+<tr><td><span id="s-nad07bb5cb7e4"><code>app:src/b.tx#fn:shared</code></span></td><td>src/a.tx:2</td><td>src/b.tx:7</td></tr>
+</tbody>
+</table>
+<h3>Changed</h3>
+<table>
+<thead><tr><th>Symbol</th><th>Kind before</th><th>Signature before</th><th>Signature after</th></tr></thead>
+<tbody>
+<tr><td><span id="s-n34a4996472b6"><code>app:src/lib.tx#fn:parse</code></span></td><td>fn</td><td>fn parse(x: u8)</td><td>fn parse(x: u8 | u16)</td></tr>
+</tbody>
+</table>
+</details>
+<details open>
+<summary><h2 style="display:inline">Links</h2></summary>
+<pre><code class="language-mermaid">flowchart LR
+%% katalogr view: diff 111111111111..222222222222
+  n0e00ccc26b4c[&quot;lib.tx/fn:extra&quot;]
+  n34a4996472b6[&quot;lib.tx/fn:parse&quot;]
+  n5a9629916649[&quot;new.tx/fn:fresh&quot;]
+  nd0dfc36d42bf[&quot;old.tx/fn:gone&quot;]
+  n0e00ccc26b4c --&gt;|&quot;added calls&quot;| n34a4996472b6
+  n5a9629916649 --&gt;|&quot;added calls&quot;| n34a4996472b6
+  nd0dfc36d42bf --&gt;|&quot;removed calls&quot;| n34a4996472b6
+</code></pre>
+<h3>Added</h3>
+<table>
+<thead><tr><th>From</th><th>Kind</th><th>To</th></tr></thead>
+<tbody>
+<tr><td><a href="#s-n0e00ccc26b4c"><code>app:src/lib.tx#fn:extra</code></a></td><td>calls</td><td><a href="#s-n34a4996472b6"><code>app:src/lib.tx#fn:parse</code></a></td></tr>
+<tr><td><a href="#s-n5a9629916649"><code>app:src/new.tx#fn:fresh</code></a></td><td>calls</td><td><a href="#s-n34a4996472b6"><code>app:src/lib.tx#fn:parse</code></a></td></tr>
+</tbody>
+</table>
+<h3>Removed</h3>
+<table>
+<thead><tr><th>From</th><th>Kind</th><th>To</th></tr></thead>
+<tbody>
+<tr><td><a href="#s-nd0dfc36d42bf"><code>app:src/old.tx#fn:gone</code></a></td><td>calls</td><td><a href="#s-n34a4996472b6"><code>app:src/lib.tx#fn:parse</code></a></td></tr>
+</tbody>
+</table>
+<h3>Newly dangling</h3>
+<table>
+<thead><tr><th>From</th><th>Kind</th><th>Wanted</th></tr></thead>
+<tbody>
+<tr><td><a href="#s-n5a9629916649"><code>app:src/new.tx#fn:fresh</code></a></td><td>links-to</td><td>ns:ghost</td></tr>
+</tbody>
+</table>
+</details>
+<details open>
+<summary><h2 style="display:inline">Contracts</h2></summary>
+<h3>Changed contracts</h3>
+<table>
+<thead><tr><th>Contract</th><th>Providers</th><th>Consumers</th><th>Declarers</th><th>Providers added</th><th>Providers removed</th><th>Consumers added</th><th>Consumers removed</th><th>Declarers added</th><th>Declarers removed</th><th>Dangling</th></tr></thead>
+<tbody>
+<tr><td>contract:route:users</td><td>1 to 0</td><td>1 to 2</td><td>0 to 0</td><td></td><td><a href="#s-nd0dfc36d42bf"><code>app:src/old.tx#fn:gone</code></a></td><td><a href="#s-n5a9629916649"><code>app:src/new.tx#fn:fresh</code></a></td><td></td><td></td><td></td><td>newly dangling</td></tr>
+</tbody>
+</table>
+</details>
+<details open>
+<summary><h2 style="display:inline">Hubs</h2></summary>
+<table>
+<thead><tr><th>Hub</th><th>Kind</th><th>Degree</th><th>Rank</th></tr></thead>
+<tbody>
+<tr><td><a href="#s-n34a4996472b6"><code>app:src/lib.tx#fn:parse</code></a></td><td>fn</td><td>4 to 6</td><td>0.1 to 0.15</td></tr>
+</tbody>
+</table>
+</details>
+<details open>
+<summary><h2 style="display:inline">Cycles</h2></summary>
+<p>Cycles: 0 to 1. Nodes in a cycle: 0 to 2.</p>
+<h3>New cycles</h3>
+<table>
+<thead><tr><th>Members</th></tr></thead>
+<tbody>
+<tr><td><code>app:src/a.tx</code>, <code>app:src/b.tx</code></td></tr>
+</tbody>
+</table>
+</details>
+<details open>
+<summary><h2 style="display:inline">Communities</h2></summary>
+<p>Communities: 2 to 3. Modularity: 0.31 to 0.42. Communities are matched by label, so a community whose label changed shows as one gone and one new.</p>
+<h3>New</h3>
+<table>
+<thead><tr><th>Label</th><th>Directory</th><th>Size</th></tr></thead>
+<tbody>
+<tr><td>app:src/new.tx</td><td>src</td><td>3</td></tr>
+</tbody>
+</table>
+<h3>Resized</h3>
+<table>
+<thead><tr><th>Label</th><th>Size before</th><th>Size after</th></tr></thead>
+<tbody>
+<tr><td>app:src/lib.tx</td><td>4</td><td>6</td></tr>
+</tbody>
+</table>
+</details>
+<details open>
+<summary><h2 style="display:inline">Coverage</h2></summary>
+<table>
+<thead><tr><th>Measure</th><th>Before</th><th>After</th><th>Change</th></tr></thead>
+<tbody>
+<tr><td>coverage.resolution_rate</td><td>0.5</td><td>0.75</td><td>0.25</td></tr>
+</tbody>
+</table>
+</details>
+<details open>
+<summary><h2 style="display:inline">Limits of the comparison</h2></summary>
+<p>A rename inside a file is one symbol removed and one added. A change of line number is not a change. A file whose blob is the same on both sides compares as unchanged, even if its context changed. A symbol moves only when exactly one removed and one added symbol share a kind, name and ordinal.</p>
+<p>partial: capped at 1 (limit; 3 found); absence is not proof</p>
+</details>
+</body>
+</html>
