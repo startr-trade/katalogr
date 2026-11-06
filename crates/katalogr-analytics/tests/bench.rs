@@ -30,8 +30,6 @@ mod bench {
     const PACKAGES: usize = 20;
     const SEED: u64 = 0x9E37_79B9_7F4A_7C15;
 
-    /// The bench graph has no shards, so restitching never runs.
-
     /// xorshift64: a small deterministic generator; `state` must start non-zero.
     fn next_rand(state: &mut u64) -> u64 {
         *state ^= *state << 13;

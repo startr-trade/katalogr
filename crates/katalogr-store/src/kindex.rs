@@ -4,7 +4,6 @@ use crate::context::{ContextId, ContextManifest};
 use crate::error::StoreError;
 use crate::shard;
 use camino::{Utf8Path, Utf8PathBuf};
-use katalogr_model::{Fragment, RelPath};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::io::Write;

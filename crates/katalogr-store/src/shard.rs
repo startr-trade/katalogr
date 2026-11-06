@@ -2,8 +2,8 @@
 
 use crate::error::StoreError;
 use crate::guard::scan_for_absolute;
-use camino::{Utf8Path, Utf8PathBuf};
-use katalogr_model::{Fragment, Name, RelPath};
+use camino::Utf8Path;
+use katalogr_model::{Fragment, Name};
 use serde_json::Value;
 
 pub const FORMAT: u64 = 1;

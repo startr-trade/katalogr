@@ -17,8 +17,6 @@ use katalogr_store::{
 use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
 
-/// The bench graph has no shards, so restitching never runs.
-
 const SYMBOLS: usize = 100_000;
 
 #[test]
