@@ -161,9 +161,31 @@ mod loadtest {
     }
 
     fn fixture(replay: u32) -> Fixture {
+        fixture_with_bulk(replay, 0)
+    }
+
+    /// Like `fixture`, plus one more commit adding `bulk` Go files, so a cold index takes long
+    /// enough for queries to run while it is in progress (FEAT-094: a stored-shard-free index of
+    /// the base fixture finishes before the first query).
+    fn fixture_with_bulk(replay: u32, bulk: usize) -> Fixture {
         let tmp = tempfile::tempdir().unwrap();
         let base = Utf8Path::from_path(tmp.path()).unwrap().to_path_buf();
-        let (url, commits) = synthetic_corpus(&base);
+        let (url, mut commits) = synthetic_corpus(&base);
+        if bulk > 0 {
+            let repo = base.join("remote");
+            for i in 0..bulk {
+                write(
+                    &repo,
+                    &format!("bulk/g{i}.go"),
+                    &format!(
+                        "package bulk\n\n// GoBulk{i} is generated for the load test.\nfunc GoBulk{i}(x int) int {{\n\treturn x + {i}\n}}\n"
+                    ),
+                );
+            }
+            git(&repo, &["add", "-A"]);
+            git(&repo, &["commit", "-q", "-m", "bulk go files"]);
+            commits.push(git(&repo, &["rev-parse", "HEAD"]));
+        }
         let ws = Workspace::open(Some(&base.join("ws"))).unwrap();
         ws.init_layout().unwrap();
         std::fs::write(
@@ -358,7 +380,9 @@ mod loadtest {
 
     #[test]
     fn concurrent_queries_while_indexing() {
-        let f = fixture(0);
+        // The bulk Go files keep the cold index running for several seconds, so the workers
+        // (started once the first round publishes) get queries in before it finishes.
+        let f = fixture_with_bulk(0, 1000);
         let mut s = settings(phases(true, false, true, true));
         s.concurrency = 2;
         let r = measure::run_corpus(&f.ws, &f.corpus, &s, &Git::default()).unwrap();
