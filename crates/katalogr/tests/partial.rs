@@ -269,6 +269,9 @@ mod partial {
                     // `answers check` and `answers stats` answer with their own reports (FEAT-096).
                     || n == "answers-check.schema.json"
                     || n == "answers-stats.schema.json"
+                    // `snapshot` answers with its own manifest and import report (FEAT-097).
+                    || n == "snapshot-manifest.schema.json"
+                    || n == "snapshot-import.schema.json"
             }) {
                 continue;
             }

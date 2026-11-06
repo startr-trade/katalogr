@@ -661,6 +661,9 @@ mod api {
             "answers",
             // Prints one file's extracted text for a person, writing nothing (FEAT-094 R-13).
             "shard",
+            // Exports a snapshot of the index to a file, or imports one (FEAT-097): it writes, and its
+            // answers are its own types, not envelopes.
+            "snapshot",
             // Draws a view for a person; the generated views are `view`, served under
             // `/api/v1/views/`.
             "render",
