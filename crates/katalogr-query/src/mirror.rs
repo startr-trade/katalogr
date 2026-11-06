@@ -6,7 +6,7 @@
 
 use crate::resolve::hit;
 use crate::result::{FieldDiff, FieldShape, MirrorDrift, SymbolHit};
-use katalogr_model::structure::{FIELD_TYPE, MANY, REQUIRED};
+use katalogr_model::structure::{FIELD_TYPE, MANY, PRIMITIVES, REQUIRED};
 use katalogr_model::{Fact, Id, LinkKind, Name};
 use katalogr_store::{Reader, StoreError, SymbolBrief, SymbolRow};
 use std::collections::BTreeMap;
@@ -188,6 +188,25 @@ fn fields_of_all(
     Ok(out)
 }
 
+/// The text after the last `}`, `::`, `.` or `/`.
+fn local_name(ty: &str) -> &str {
+    let mut s = ty;
+    for sep in ["}", "::", ".", "/"] {
+        if let Some((_, l)) = s.rsplit_once(sep) {
+            s = l;
+        }
+    }
+    s
+}
+
+/// Two `field_type` values are the same type when they are equal, or when neither is a
+/// primitive and their local names are equal (a code copy names `crate::model::Line` where a
+/// schema names `{ns}Line`). Primitive values compare as they are.
+fn same_type(a: &str, b: &str) -> bool {
+    a == b
+        || (!PRIMITIVES.contains(&a) && !PRIMITIVES.contains(&b) && local_name(a) == local_name(b))
+}
+
 fn compare(
     left: &BTreeMap<String, FieldShape>,
     right: &BTreeMap<String, FieldShape>,
@@ -205,7 +224,8 @@ fn compare(
         match right.get(field) {
             None => diff(field, "missing-right", Some(l), None),
             Some(r) => {
-                if matches!((&l.field_type, &r.field_type), (Some(a), Some(b)) if a != b) {
+                if matches!((&l.field_type, &r.field_type), (Some(a), Some(b)) if !same_type(a, b))
+                {
                     diff(field, "type", Some(l), Some(r));
                 }
                 if matches!((l.required, r.required), (Some(a), Some(b)) if a != b) {
