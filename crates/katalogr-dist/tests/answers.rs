@@ -1,4 +1,7 @@
-//! Stored answers (FEAT-096): the reports a stored answer holds.
+//! Stored answers (FEAT-096): the reports a stored answer holds, and how one is asked for and
+//! checked. Needs the `.tx` test extractor: `cargo test -p katalogr-dist --features
+//! test-extractor` (a workspace test run enables it through the CLI crate's dev-dependency).
+#![cfg(feature = "test-extractor")]
 
 mod answers {
     use katalogr_analytics::{
@@ -189,5 +192,145 @@ mod answers {
             };
             roundtrip("coverage", &coverage);
         }
+    }
+
+    use katalogr_analytics::{
+        CommunityOptions, CycleOptions, DeadCodeOptions, GraphOptions, HubOptions,
+    };
+    use katalogr_dist::{CoverageOptions, StoredQuery, validity};
+
+    fn graph(level: Level, inferred: bool) -> GraphOptions {
+        let mut g = GraphOptions::new(level, inferred);
+        // Not in sorted order: the key sorts it.
+        g.exclude_kinds = vec!["zeta".into(), "alpha".into()];
+        g
+    }
+
+    fn samples() -> Vec<StoredQuery> {
+        vec![
+            StoredQuery::Hubs(HubOptions {
+                graph: graph(Level::File, true),
+                min_degree: 15.5,
+                limit: 20,
+            }),
+            StoredQuery::Communities(CommunityOptions {
+                graph: graph(Level::Symbol, false),
+                seed: 42,
+                resolution: 0.1,
+                min_size: 3,
+                members: 5,
+                limit: 10,
+                of: Some("pkg::item".into()),
+            }),
+            StoredQuery::Communities(CommunityOptions {
+                graph: graph(Level::Package, false),
+                seed: 1,
+                resolution: 1.0,
+                min_size: 3,
+                members: 5,
+                limit: 10,
+                of: None,
+            }),
+            StoredQuery::Cycles(CycleOptions {
+                graph: graph(Level::Package, true),
+                members: 4,
+                limit: 7,
+            }),
+            StoredQuery::DeadCode(DeadCodeOptions {
+                code_kinds: BTreeMap::new(),
+                exclude_kinds: vec!["b".into(), "a".into()],
+                internal: true,
+                min_confidence: DeadConfidence::Medium,
+                path_prefix: Some("src/".into()),
+                limit: 50,
+            }),
+            StoredQuery::DeadCode(DeadCodeOptions {
+                code_kinds: BTreeMap::new(),
+                exclude_kinds: Vec::new(),
+                internal: false,
+                min_confidence: DeadConfidence::High,
+                path_prefix: None,
+                limit: 5,
+            }),
+            StoredQuery::Map,
+            StoredQuery::Coverage(CoverageOptions {
+                repo: Some("app".into()),
+                suffix_top: 20,
+            }),
+            StoredQuery::Coverage(CoverageOptions::default()),
+        ]
+    }
+
+    #[test]
+    fn view_query_roundtrip() {
+        for q in samples() {
+            let vq = q.to_view_query();
+            let back = StoredQuery::from_view_query(&vq)
+                .unwrap_or_else(|| panic!("{} did not come back", vq.op));
+            assert_eq!(back.to_view_query(), vq, "{}", vq.op);
+        }
+        // The table's arguments, spelled out for one op.
+        let hubs = samples()[0].to_view_query();
+        assert_eq!(hubs.op, "hubs");
+        assert_eq!(hubs.args["level"], "file");
+        assert_eq!(hubs.args["exclude_kinds"], "[\"alpha\",\"zeta\"]");
+        assert_eq!(hubs.args["min_degree"], "15.5");
+        assert_eq!(hubs.args.len(), 5);
+        assert!(samples()[8].to_view_query().args.get("repo").is_none());
+        assert!(samples()[6].to_view_query().args.is_empty());
+        // Unknown ops and bad values are refused.
+        let bad = |op: &str, k: &str, v: &str| {
+            let mut vq = samples()[0].to_view_query();
+            vq.op = op.into();
+            vq.args.insert(k.into(), v.into());
+            StoredQuery::from_view_query(&vq).is_none()
+        };
+        assert!(bad("nope", "limit", "1"));
+        assert!(bad("hubs", "limit", "many"));
+        assert!(bad("hubs", "level", "galaxy"));
+        let mut missing = samples()[0].to_view_query();
+        missing.args.remove("limit");
+        assert!(StoredQuery::from_view_query(&missing).is_none());
+        // A budget or output flag is not part of a question.
+        for q in samples() {
+            assert!(!q.to_view_query().args.contains_key("budget"));
+        }
+    }
+
+    #[test]
+    fn validity_changes_with_each_input() {
+        let mut inputs = BTreeMap::new();
+        inputs.insert("index".to_string(), "i1".to_string());
+        inputs.insert("listing".to_string(), "l1".to_string());
+        let base = validity("b1", &inputs);
+        assert_eq!(base.len(), 64);
+        assert_eq!(base, validity("b1", &inputs), "stable");
+        // Pinned to the documented form.
+        let want = {
+            use sha2::{Digest, Sha256};
+            let text = r#"{"answer_format":1,"build":"b1","inputs":{"index":"i1","listing":"l1"}}"#;
+            Sha256::digest(text.as_bytes())
+                .iter()
+                .map(|b| format!("{b:02x}"))
+                .collect::<String>()
+        };
+        assert_eq!(base, want);
+        assert_ne!(base, validity("b2", &inputs), "build");
+        let mut other = inputs.clone();
+        other.insert("index".into(), "i2".into());
+        assert_ne!(base, validity("b1", &other), "index value");
+        let mut other = inputs.clone();
+        other.insert("listing".into(), "l2".into());
+        assert_ne!(base, validity("b1", &other), "listing value");
+        let mut other = inputs.clone();
+        other.remove("listing");
+        assert_ne!(base, validity("b1", &other), "input removed");
+        let mut other = inputs.clone();
+        other.insert("extra".into(), "x".into());
+        assert_ne!(base, validity("b1", &other), "input added");
+        let mut renamed = BTreeMap::new();
+        renamed.insert("index2".to_string(), "i1".to_string());
+        renamed.insert("listing".to_string(), "l1".to_string());
+        assert_ne!(base, validity("b1", &renamed), "input renamed");
     }
 }

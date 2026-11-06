@@ -2,8 +2,10 @@
 //!
 //! All behaviour of the command-line wrapper lives here; the wrapper parses, calls and renders.
 
+mod answers;
 mod at;
 mod audit;
+pub use answers::{StoredQuery, validity};
 pub use at::position_without_board;
 pub use audit::{AuditOutcome, AuditRecord, PositionText};
 mod changes;
