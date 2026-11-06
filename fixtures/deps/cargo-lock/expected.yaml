@@ -1,0 +1,33 @@
+mode: exact
+symbols:
+- fx:Cargo.lock#member:app
+- fx:Cargo.lock#package:alpha-lib
+- fx:Cargo.lock#package:alpha-lib/version:1.0.0
+- fx:Cargo.lock#package:alpha-lib/version:2.0.0
+- fx:Cargo.lock#package:gamma-lib
+- fx:Cargo.lock#package:gamma-lib/version:0.3.1
+links:
+- from: fx:Cargo.lock#member:app
+  kind: depends-on
+  to: fx:Cargo.lock#package:alpha-lib/version:2.0.0
+  confidence: Extracted
+- from: fx:Cargo.lock#member:app
+  kind: depends-on
+  to: fx:Cargo.lock#package:gamma-lib/version:0.3.1
+  confidence: Extracted
+- from: fx:Cargo.lock#package:alpha-lib
+  kind: has-version
+  to: fx:Cargo.lock#package:alpha-lib/version:1.0.0
+  confidence: Extracted
+- from: fx:Cargo.lock#package:alpha-lib
+  kind: has-version
+  to: fx:Cargo.lock#package:alpha-lib/version:2.0.0
+  confidence: Extracted
+- from: fx:Cargo.lock#package:alpha-lib/version:1.0.0
+  kind: depends-on
+  to: fx:Cargo.lock#package:gamma-lib/version:0.3.1
+  confidence: Extracted
+- from: fx:Cargo.lock#package:gamma-lib
+  kind: has-version
+  to: fx:Cargo.lock#package:gamma-lib/version:0.3.1
+  confidence: Extracted

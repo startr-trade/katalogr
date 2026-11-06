@@ -3,6 +3,10 @@
     "digest": "97d5aa1372573c3c1c303d48cba4d146b3d5218b7e6e05cfb4686ea56014faf8",
     "salt": "data-extract-1"
   },
+  "deps": {
+    "digest": "ed4efd300c4fd8640f643f7fe047056639205e8e50c6ffebed05787e55f5fa76",
+    "salt": "deps-extract-1"
+  },
   "json-schema": {
     "digest": "c8cf712c3cec708c4253d87d8a615f5148086f35018ad2570a07ffb2c3c9d269",
     "salt": "json-schema-extract-1"

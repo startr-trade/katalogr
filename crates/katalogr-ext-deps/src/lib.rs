@@ -25,9 +25,9 @@ impl Extractor for DepsExtractor {
         "deps"
     }
 
-    /// `1` is the first output.
+    /// `deps-extract-1` is the first output.
     fn revision_salt(&self) -> &'static str {
-        "1"
+        "deps-extract-1"
     }
 
     fn handles(&self, path: &RelPath) -> bool {

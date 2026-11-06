@@ -1,0 +1,37 @@
+lockfileVersion: '9.0'
+
+settings:
+  autoInstallPeers: true
+
+importers:
+
+  .:
+    dependencies:
+      alpha-lib:
+        specifier: ^1.0.0
+        version: 1.4.0
+      '@scope/beta':
+        specifier: ^2.0.0
+        version: 2.0.0(alpha-lib@1.4.0)
+
+packages:
+
+  '@scope/beta@2.0.0':
+    resolution: {integrity: sha512-x, tarball: https://registry.example/beta-2.0.0.tgz}
+
+  alpha-lib@1.4.0:
+    resolution: {integrity: sha512-y}
+
+  gamma@3.0.0:
+    resolution: {integrity: sha512-z}
+
+snapshots:
+
+  '@scope/beta@2.0.0(alpha-lib@1.4.0)':
+    dependencies:
+      alpha-lib: 1.4.0
+      gamma: 3.0.0
+
+  alpha-lib@1.4.0: {}
+
+  gamma@3.0.0: {}

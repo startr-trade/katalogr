@@ -13,8 +13,10 @@ pub use at::position_without_board;
 pub use audit::{AuditOutcome, AuditRecord, PositionText};
 mod changes;
 mod claude;
+mod deps;
 mod docs_affected;
 mod impact;
+pub use deps::{DEFAULT_DEPS_LIMIT, DEFAULT_USED_BY_LIMIT};
 pub use docs_affected::{DEFAULT_DOCS_LIMIT, DocsAffectedParams};
 pub use impact::ImpactInput;
 pub mod contexts;
@@ -439,6 +441,8 @@ fn build_registry() -> ExtensionRegistry {
     let mut registry = ExtensionRegistry::new();
     registry.register(Box::new(katalogr_ext_rust::RustExtractor));
     registry.register(Box::new(katalogr_ext_ts::TsExtractor));
+    // Claims lockfiles by name.
+    registry.register(Box::new(katalogr_ext_deps::DepsExtractor));
     registry.register(Box::new(katalogr_ext_sql::SqlExtractor));
     // Claims only conventionally named OpenAPI files (`openapi*`, `swagger*`); a profile
     // `select` routes any other. Registered before the schema extractors so that it claims
