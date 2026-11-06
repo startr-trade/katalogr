@@ -580,6 +580,19 @@ pub enum Command {
         #[arg(long, value_name = "KIND")]
         kind: Vec<String>,
     },
+    /// List the package versions the lockfiles pin, with the members that pin each and the code
+    /// that uses the package.
+    Deps {
+        /// Only this package name.
+        #[arg(long, value_name = "NAME")]
+        package: Option<String>,
+        /// How many package versions to list.
+        #[arg(long, default_value_t = katalogr_dist::DEFAULT_DEPS_LIMIT, value_name = "N")]
+        limit: usize,
+        /// How many users of a package to list per version.
+        #[arg(long, default_value_t = katalogr_dist::DEFAULT_USED_BY_LIMIT, value_name = "N")]
+        used_by_limit: usize,
+    },
     /// List documents linked to code that changed since a revision (default: the merge-base with
     /// the default branch), up to `--at` (default: this checkout, uncommitted changes included).
     DocsAffected {

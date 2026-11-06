@@ -470,6 +470,38 @@ fn interleave(lines: Vec<String>, folds: &[Fold], command: &str) -> Vec<String> 
     out
 }
 
+/// One line per package version, then its pinning members and its users, indented.
+pub fn deps_line(d: &katalogr_dist::query::DepHit) -> String {
+    let mut out = format!(
+        "{} {}  {}  {}",
+        d.package, d.version, d.ecosystem, d.lockfile
+    );
+    if d.dev {
+        out.push_str("  dev");
+    }
+    if let Some(s) = &d.source {
+        out.push_str(&format!("  {s}"));
+    }
+    if !d.pinned_by.is_empty() {
+        out.push_str(&format!("\n    pinned by {}", d.pinned_by.join(", ")));
+    }
+    if !d.used_by.is_empty() {
+        let users: Vec<String> = d.used_by.iter().map(place_name).collect();
+        out.push_str(&format!("\n    used by {}", users.join(", ")));
+        if d.used_by_total > d.used_by.len() as u64 {
+            out.push_str(&format!(
+                " (+{} more)",
+                d.used_by_total - d.used_by.len() as u64
+            ));
+        }
+    }
+    out
+}
+
+fn place_name(s: &SymbolHit) -> String {
+    format!("{} ({})", s.name, place(s))
+}
+
 pub fn dangling_line(d: &DanglingRef) -> String {
     format!(
         "{}  {}  {}  wants {}",

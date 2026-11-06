@@ -13,6 +13,7 @@ pub mod coverage;
 pub mod cycles;
 pub mod dangling;
 pub mod dead_code;
+pub mod deps;
 pub mod docs_affected;
 pub mod doctor;
 pub mod eval;
