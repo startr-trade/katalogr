@@ -72,7 +72,7 @@ fn worker(
         let op = &ops[i % ops.len()];
         i += 1;
         let args = op.args();
-        let mut full: Vec<&str> = vec!["--consistency", "stale-ok"];
+        let mut full: Vec<&str> = super::query::leading_args().to_vec();
         full.extend(args.iter().map(String::as_str));
         let r = proc::run_with_timeout(&mut k.cmd(&full), QUERY_TIMEOUT);
         // A query that started while the index ran is measured even if it finishes after the
