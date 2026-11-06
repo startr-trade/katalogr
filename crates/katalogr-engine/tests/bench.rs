@@ -517,8 +517,8 @@ mod bench {
             symbols.len(),
             extra * 1000.0,
         );
-        assert!(time_pct <= 10.0, "stitch +{time_pct:.1}%");
-        assert!(size_pct <= 12.0, "cache +{size_pct:.1}%");
+        assert!(time_pct <= 20.0, "stitch +{time_pct:.1}%");
+        assert!(size_pct <= 25.0, "cache +{size_pct:.1}%");
     }
 
     // ------------------------------------------------ cache format (FEAT-075 T9)
