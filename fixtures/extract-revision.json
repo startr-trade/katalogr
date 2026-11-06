@@ -16,8 +16,8 @@
     "salt": "md-extract-1"
   },
   "openapi": {
-    "digest": "a0692d6a7449cb44138d0707325b913716c9496330ff1f9eb3e20b81d6328f42",
-    "salt": "openapi-extract-1"
+    "digest": "b51b4ea65a3317a8ba0ebf0c67e889c19574e7dfbda1c40dbb8fbac927fe76e7",
+    "salt": "openapi-extract-2"
   },
   "rust": {
     "digest": "2d2931388ac23b86b8102182faede9ac001a0628e6308057803e5be7ccc33975",

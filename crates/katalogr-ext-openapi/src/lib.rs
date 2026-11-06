@@ -58,7 +58,7 @@ impl Extractor for OpenApiExtractor {
     }
 
     fn revision_salt(&self) -> &'static str {
-        "openapi-extract-1"
+        "openapi-extract-2"
     }
 
     fn handles(&self, path: &RelPath) -> bool {
@@ -70,6 +70,7 @@ impl Extractor for OpenApiExtractor {
             "operations",
             "swagger2",
             "component-schemas",
+            "operation-schema-refs",
             "plain-artifact",
             "parse-error",
         ]
@@ -156,6 +157,7 @@ fn extract(input: &ExtractInput) -> Result<(Fragment, Vec<ExtractError>), Extrac
         b.artifact_fact("title", Fact::Str(t.to_string()));
     }
     b.artifact_fact("base_path", Fact::Str(doc::root_base(version, root)));
+    let mut op_refs: Vec<(usize, Vec<(String, katalogr_model::Span)>)> = Vec::new();
     for op in doc::operations(root, version) {
         let sym = b.symbol(
             None,
@@ -164,6 +166,7 @@ fn extract(input: &ExtractInput) -> Result<(Fragment, Vec<ExtractError>), Extrac
             op.span,
             op.facts,
         );
+        op_refs.push((sym, op.schema_refs));
         if let Some(key) = op.route {
             b.bind(
                 sym,
@@ -178,5 +181,10 @@ fn extract(input: &ExtractInput) -> Result<(Fragment, Vec<ExtractError>), Extrac
     errors.extend(jsonschema::extract_schemas(
         &mut b, root, input.repo, input.path,
     ));
+    for (sym, refs) in op_refs {
+        for (raw, span) in refs {
+            jsonschema::reference_type(&mut b, root, input.repo, input.path, sym, &raw, span);
+        }
+    }
     Ok((b.finish(), errors))
 }

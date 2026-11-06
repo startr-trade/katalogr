@@ -56,6 +56,8 @@ technologies:
     operations:
       - openapi/yaml-v3
       - openapi/json-v3
+    operation-schema-refs:
+      - openapi/op-schema-refs
     parse-error:
       - openapi/broken
     plain-artifact:

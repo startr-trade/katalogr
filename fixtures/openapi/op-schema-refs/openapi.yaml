@@ -1,0 +1,81 @@
+openapi: 3.0.3
+info:
+  title: Orders API
+  version: "1.0"
+servers:
+  - url: https://api.example.test/v1
+paths:
+  /orders:
+    post:
+      operationId: placeOrder
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Order'
+      responses:
+        "201":
+          description: created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Order'
+        "400":
+          description: refused
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+  /orders/{id}:
+    get:
+      operationId: getOrder
+      parameters:
+        - name: filter
+          in: query
+          schema:
+            $ref: '#/components/schemas/Filter'
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Order'
+        "404":
+          $ref: '#/components/responses/NotFound'
+  /ghost:
+    get:
+      operationId: getGhost
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Missing'
+components:
+  schemas:
+    Order:
+      type: object
+      properties:
+        id: {type: string}
+        lines:
+          type: array
+          items: {type: string}
+    Problem:
+      type: object
+      properties:
+        title: {type: string}
+    Filter:
+      type: object
+      properties:
+        status: {type: string}
+  responses:
+    NotFound:
+      description: not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Problem'
