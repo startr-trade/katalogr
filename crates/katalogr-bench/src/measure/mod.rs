@@ -122,11 +122,9 @@ pub struct IndexResult {
     pub files_indexed: u64,
     pub files_per_s: f64,
     pub peak_rss_mib: Summary,
-    pub shard_files: u64,
-    pub shard_bytes: u64,
     pub cache_bytes: u64,
     pub digests_equal: bool,
-    /// Digest of the shard tree of the last run.
+    /// Digest of the canonical graph of the last run.
     pub digest: String,
     /// Coefficient of variation of the wall times.
     pub wall_cv: f64,
@@ -178,7 +176,7 @@ pub struct DiscoveryResult {
     /// `files_seen / median cold wall`, for corpora whose only claimed files are `text` or `md`.
     pub unclaimed_per_s: Option<f64>,
     pub text_files: u64,
-    /// Chunk symbols of text-fallback shards.
+    /// Chunk symbols of text-fallback artifacts.
     pub text_chunks: Option<u64>,
     pub by_suffix: Vec<(String, u64)>,
 }

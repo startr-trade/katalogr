@@ -15,7 +15,7 @@ use std::num::NonZeroUsize;
 use std::time::{Duration, Instant};
 use support::{
     CacheDump, TestExtractor, TestProbe, cache_dump, dictionary_dump, drained_graph, full_index,
-    init_project, open_engine_par, open_engine_threads, shard_bytes, test_slow,
+    init_project, open_engine_par, open_engine_threads, extracted_texts, published, test_slow,
 };
 
 struct Project {
@@ -63,7 +63,7 @@ fn rich(i: usize, n: usize) -> String {
 
 type Snapshot = (BTreeMap<String, Vec<u8>>, String, CacheDump);
 
-/// Index `files` (path, text) fully at `threads` threads and capture shards, graph and cache.
+/// Index `files` (path, text) fully at `threads` threads and capture extracted texts, graph and cache.
 fn index_at(files: &[(String, String)], threads: usize) -> Snapshot {
     let p = project();
     for (path, text) in files {
@@ -75,7 +75,7 @@ fn index_at(files: &[(String, String)], threads: usize) -> Snapshot {
     let graph = full_index(&e);
     let mut dump = cache_dump(&e);
     dump.extend(dictionary_dump(&e));
-    (shard_bytes(&p.kx), graph, dump)
+    (extracted_texts(&e, &p.work), graph, dump)
 }
 
 fn rich_files(n: usize) -> Vec<(String, String)> {
@@ -114,7 +114,7 @@ mod parallel {
             names.len() > 1 && names.iter().all(|n| n.starts_with("katalogr-index-")),
             "{names:?}"
         );
-        assert_eq!(e.dir().list_shards().unwrap().len(), 64);
+        assert_eq!(published(&e).len(), 64);
         let stats = e.index_stats();
         assert_eq!(stats.files, 64);
         assert!(stats.rounds >= 1);
@@ -125,16 +125,16 @@ mod parallel {
     fn one_vs_many_threads_identical() {
         let files = rich_files(200);
         let one = index_at(&files, 1);
-        assert!(one.0.len() >= 200, "shards written");
+        assert!(one.0.len() >= 200, "files extracted");
         for threads in [2, 8] {
             let many = index_at(&files, threads);
-            assert!(one.0 == many.0, "shard bytes differ at {threads} threads");
+            assert!(one.0 == many.0, "extracted text differs at {threads} threads");
             assert_eq!(one.1, many.1, "canonical graph at {threads} threads");
             assert!(one.2 == many.2, "cache dump differs at {threads} threads");
         }
     }
 
-    /// FEAT-093 R-8. Many files that share keys, with fan rows and bound references: shards,
+    /// FEAT-093 R-8. Many files that share keys, with fan rows and bound references: extracted texts,
     /// graph and the whole cache, rank included, do not depend on the thread count.
     #[test]
     fn fan_heavy_one_vs_eight_threads_identical() {
@@ -179,7 +179,7 @@ mod parallel {
                 .any(|(n, rows)| n == "rank" && !rows.is_empty()),
             "rank is part of the dump"
         );
-        assert!(one.0 == many.0, "shard bytes differ");
+        assert!(one.0 == many.0, "extracted text differs");
         assert_eq!(one.1, many.1, "canonical graph");
         assert!(one.2 == many.2, "cache dump differs");
     }
@@ -207,13 +207,13 @@ mod parallel {
         fn threads_property_identical(files in tree()) {
             let one = index_at(&files, 1);
             let four = index_at(&files, 4);
-            prop_assert!(one.0 == four.0, "shard bytes");
+            prop_assert!(one.0 == four.0, "extracted text");
             prop_assert_eq!(one.1, four.1);
             prop_assert!(one.2 == four.2, "cache dump");
         }
     }
 
-    /// R-4. A round stops adding waves once its encoded bytes reach `batch_bytes`; the rest
+    /// R-4. A round stops adding waves once the source bytes it extracted reach `batch_bytes`; the rest
     /// stays pending and the final graph equals the 1-thread graph.
     #[test]
     fn batch_bytes_caps_round() {
@@ -227,7 +227,7 @@ mod parallel {
         }
         let par = Parallelism {
             threads: NonZeroUsize::new(4).unwrap(),
-            batch_bytes: 1 << 20,
+            batch_bytes: 1 << 17,
         };
         let mut reg = ExtensionRegistry::new();
         reg.register(Box::new(TestExtractor));
@@ -244,7 +244,7 @@ mod parallel {
         )
         .unwrap();
         drop(pr);
-        let published = e.dir().list_shards().unwrap().len();
+        let published = published(&e).len();
         let pending = e
             .cache()
             .read()
@@ -306,7 +306,7 @@ mod parallel {
 
         let snap = e.cache().read().unwrap();
         let pending = snap.pending_entries(None).unwrap();
-        let published = e.dir().list_shards().unwrap();
+        let published = published(&e);
         assert!(!published.is_empty(), "a non-empty prefix is published");
         assert!(!pending.is_empty(), "the deadline left paths pending");
         assert_eq!(published.len() + pending.len(), 100);

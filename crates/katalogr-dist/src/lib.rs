@@ -21,6 +21,8 @@ pub mod hooks;
 mod roots;
 mod setup;
 mod shard_show;
+mod symbol_count;
+pub use symbol_count::symbol_count;
 mod span;
 #[cfg(feature = "test-extractor")]
 mod test_extractor;

@@ -1,15 +1,13 @@
-//! Shard and cache sizes, and the digest of a project's shard tree.
+//! Cache size, the graph digest, and whether an index has published: all read from the
+//! project's graph database or through the binary. There are no shard files to measure
+//! (FEAT-094).
 
 use camino::{Utf8Path, Utf8PathBuf};
-use sha2::{Digest, Sha256};
+use std::time::Duration;
 
 use crate::error::{BenchError, Result};
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct ShardStats {
-    pub files: u64,
-    pub bytes: u64,
-}
+use crate::katalogr::Katalogr;
+use crate::proc;
 
 fn walk(dir: &Utf8Path, out: &mut Vec<(Utf8PathBuf, u64)>) -> Result<()> {
     let rd = match std::fs::read_dir(dir) {
@@ -35,23 +33,6 @@ fn walk(dir: &Utf8Path, out: &mut Vec<(Utf8PathBuf, u64)>) -> Result<()> {
     Ok(())
 }
 
-fn shard_files(project_dir: &Utf8Path) -> Result<Vec<(Utf8PathBuf, u64)>> {
-    let mut v = Vec::new();
-    walk(&project_dir.join("shards"), &mut v)?;
-    v.retain(|(p, _)| p.as_str().ends_with(".kshard.json"));
-    v.sort();
-    Ok(v)
-}
-
-/// Count and bytes of `shards/**/*.kshard.json`.
-pub fn shard_stats(project_dir: &Utf8Path) -> Result<ShardStats> {
-    let v = shard_files(project_dir)?;
-    Ok(ShardStats {
-        files: v.len() as u64,
-        bytes: v.iter().map(|(_, n)| n).sum(),
-    })
-}
-
 /// Total bytes under `.cache/`.
 pub fn cache_bytes(project_dir: &Utf8Path) -> Result<u64> {
     let mut v = Vec::new();
@@ -59,60 +40,53 @@ pub fn cache_bytes(project_dir: &Utf8Path) -> Result<u64> {
     Ok(v.iter().map(|(_, n)| n).sum())
 }
 
-/// SHA-256 over (relative path, NUL, bytes, NUL) of every shard in sorted path order, as hex.
-pub fn shard_digest(project_dir: &Utf8Path) -> Result<String> {
-    let shards = project_dir.join("shards");
-    let mut h = Sha256::new();
-    for (p, _) in shard_files(project_dir)? {
-        let rel = p.strip_prefix(&shards).unwrap_or(&p);
-        h.update(rel.as_str().as_bytes());
-        h.update([0u8]);
-        h.update(std::fs::read(&p)?);
-        h.update([0u8]);
+const PROBE_TIMEOUT: Duration = Duration::from_secs(120);
+
+/// The SHA-256 of the project's canonical graph, as hex, from `audit record --json`. The
+/// command waits for the index to catch up and writes a small record in the project's
+/// `audit/` folder, which is part of the benchmark's own workspace.
+pub fn graph_digest(k: &Katalogr) -> Result<String> {
+    let r = proc::run_with_timeout(&mut k.cmd(&["audit", "record"]), PROBE_TIMEOUT)?;
+    if r.status != Some(0) {
+        return Err(BenchError::Katalogr(format!(
+            "audit record: exit {:?}: {}",
+            r.status,
+            crate::measure::first_line(&r.stderr)
+        )));
     }
-    let d = h.finalize();
-    Ok(d.iter().map(|b| format!("{b:02x}")).collect())
+    let v: serde_json::Value = serde_json::from_slice(&r.stdout)
+        .map_err(|e| BenchError::Katalogr(format!("audit record: bad JSON: {e}")))?;
+    v.get("graph_digest")
+        .and_then(|d| d.as_str())
+        .map(str::to_string)
+        .ok_or_else(|| BenchError::Katalogr("audit record: no graph_digest".into()))
+}
+
+/// Whether a round has published: the worktree watermark of `status` is above zero. A project
+/// with no cache yet, or a query that fails, is not published.
+pub fn first_round_published(k: &Katalogr) -> bool {
+    let Ok(r) = proc::run_with_timeout(
+        &mut k.cmd(&["--consistency", "stale-ok", "status"]),
+        PROBE_TIMEOUT,
+    ) else {
+        return false;
+    };
+    r.status == Some(0)
+        && serde_json::from_slice::<serde_json::Value>(&r.stdout)
+            .ok()
+            .and_then(|v| v.get("watermark").and_then(|w| w.as_u64()))
+            .is_some_and(|w| w > 0)
 }
 
 #[cfg(test)]
 #[test]
-fn shard_and_cache_bytes() {
+fn cache_bytes_counts_the_cache_folder() {
     let tmp = tempfile::tempdir().unwrap();
     let dir = Utf8Path::from_path(tmp.path()).unwrap();
-    std::fs::create_dir_all(dir.join("shards/r/sub")).unwrap();
     std::fs::create_dir_all(dir.join(".cache")).unwrap();
-    std::fs::write(dir.join("shards/r/a.rs.kshard.json"), vec![b'a'; 10]).unwrap();
-    std::fs::write(dir.join("shards/r/sub/b.rs.kshard.json"), vec![b'b'; 20]).unwrap();
-    std::fs::write(dir.join("shards/r/ignored.txt"), b"zzzzzzzz").unwrap();
     std::fs::write(dir.join(".cache/index.redb"), vec![0u8; 100]).unwrap();
     std::fs::write(dir.join(".cache/roots.yaml"), vec![0u8; 5]).unwrap();
-    assert_eq!(
-        shard_stats(dir).unwrap(),
-        ShardStats {
-            files: 2,
-            bytes: 30
-        }
-    );
     assert_eq!(cache_bytes(dir).unwrap(), 105);
-    let d1 = shard_digest(dir).unwrap();
-    assert_eq!(d1.len(), 64);
-    assert_eq!(d1, shard_digest(dir).unwrap());
-    // mtime does not matter; one changed byte does.
-    let f = std::fs::File::options()
-        .write(true)
-        .open(dir.join("shards/r/a.rs.kshard.json"))
-        .unwrap();
-    f.set_modified(std::time::SystemTime::now() + std::time::Duration::from_secs(3600))
-        .unwrap();
-    drop(f);
-    assert_eq!(d1, shard_digest(dir).unwrap());
-    std::fs::write(dir.join("shards/r/a.rs.kshard.json"), b"abaaaaaaaa").unwrap();
-    assert_ne!(d1, shard_digest(dir).unwrap());
-    // No project: zeros.
-    let none = dir.join("nothing");
-    assert_eq!(
-        shard_stats(&none).unwrap(),
-        ShardStats { files: 0, bytes: 0 }
-    );
-    assert_eq!(cache_bytes(&none).unwrap(), 0);
+    // No project: zero.
+    assert_eq!(cache_bytes(&dir.join("nothing")).unwrap(), 0);
 }

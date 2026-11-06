@@ -80,16 +80,18 @@ rules: []
         std::fs::write(p, PROFILE).unwrap();
     }
 
-    fn shard(kx: &Path) -> PathBuf {
-        kx.join("projects/demo/shards/app/notes/notes.txt.kshard.json")
+    /// The file's extracted text (`shard show`); exit 4 when no extractor handles the file.
+    fn shown(repo: &Path) -> (i32, String) {
+        let (code, out, _) = run(repo, &["shard", "show", "app:notes/notes.txt"]);
+        (code, out)
     }
 
     #[test]
     fn default_index_skips_unclaimed_files() {
         let tmp = tempfile::tempdir().unwrap();
-        let (kx, repo) = project(tmp.path());
+        let (_kx, repo) = project(tmp.path());
         ok(&repo, &["index"]);
-        assert!(!shard(&kx).exists(), "no profile routes the file");
+        assert_eq!(shown(&repo).0, 4, "no profile routes the file");
         let (code, out, err) = run(&repo, &["search", "tortoise"]);
         assert_eq!(code, 4, "{out}{err}");
         assert!(!out.contains("notes.txt"), "{out}");
@@ -101,7 +103,8 @@ rules: []
         let (kx, repo) = project(tmp.path());
         install_profile(&kx);
         ok(&repo, &["index"]);
-        let text = std::fs::read_to_string(shard(&kx)).expect("a shard for the routed file");
+        let (code, text) = shown(&repo);
+        assert_eq!(code, 0, "an extraction for the routed file");
         assert!(text.contains("\"extension\": \"text\""), "{text}");
         assert_eq!(text.matches("\"kind\": \"chunk\"").count(), 2, "{text}");
         assert!(
@@ -125,18 +128,15 @@ rules: []
     }
 
     #[test]
-    fn deselect_removes_shard() {
+    fn deselect_removes_file() {
         let tmp = tempfile::tempdir().unwrap();
         let (kx, repo) = project(tmp.path());
         install_profile(&kx);
         ok(&repo, &["index"]);
-        assert!(shard(&kx).exists());
+        assert_eq!(shown(&repo).0, 0);
         std::fs::remove_file(profile_path(&kx)).unwrap();
         ok(&repo, &["index"]);
-        assert!(
-            !shard(&kx).exists(),
-            "the shard of a deselected file is removed"
-        );
+        assert_eq!(shown(&repo).0, 4, "a deselected file is no longer extracted");
         let (code, out, err) = run(&repo, &["search", "tortoise"]);
         assert_eq!(code, 4, "{out}{err}");
     }

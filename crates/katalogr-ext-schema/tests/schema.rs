@@ -806,33 +806,48 @@ mod jsonschema {
         assert!(ix.has("fx:m.schema.yaml#type:M/field:a"));
     }
 
-    /// Every shard file of an indexed project: path under `shards/` to bytes.
-    fn shard_bytes(c: &Case) -> BTreeMap<String, Vec<u8>> {
+    /// The extracted text of every file an extractor handles in the case directory: path to
+    /// the fragment's format 1 bytes, extracted as the planner would and written nowhere.
+    fn extracted_texts(c: &Case, base: &std::path::Path) -> BTreeMap<String, Vec<u8>> {
         fn walk(
             dir: &std::path::Path,
             base: &std::path::Path,
+            c: &Case,
             out: &mut BTreeMap<String, Vec<u8>>,
         ) {
             for e in std::fs::read_dir(dir).unwrap().flatten() {
                 let p = e.path();
                 if p.is_dir() {
-                    walk(&p, base, out);
-                } else {
-                    out.insert(
-                        p.strip_prefix(base).unwrap().to_string_lossy().to_string(),
-                        std::fs::read(&p).unwrap(),
-                    );
+                    walk(&p, base, c, out);
+                    continue;
+                }
+                let rel = p.strip_prefix(base).unwrap().to_string_lossy().to_string();
+                if rel.starts_with(".katalogr-profiles") {
+                    continue;
+                }
+                let path = katalogr_model::RelPath::new(&rel).unwrap();
+                let engine = c.engine();
+                if engine.registry().for_path(&path).is_none() {
+                    continue;
+                }
+                let content = engine.source("fx").unwrap().read(&path).unwrap().unwrap();
+                let profiles = engine.routing_profiles().unwrap();
+                if let Some(x) = katalogr_engine::queue::extract_for_show(
+                    engine, "fx", &path, &content, &profiles,
+                )
+                .unwrap()
+                {
+                    out.insert(rel, katalogr_store::shard::encode(&x.fragment).unwrap());
                 }
             }
         }
-        let root = c.engine().dir().root().join("shards");
         let mut out = BTreeMap::new();
-        walk(root.as_std_path(), root.as_std_path(), &mut out);
+        walk(base, base, c, &mut out);
         out
     }
 
     #[test]
-    fn shards_byte_identical_across_runs() {
+    fn extracted_text_identical_across_runs() {
         for (kind, name) in [
             ("json-schema", "defs-properties"),
             ("xsd", "types-fields"),
@@ -841,8 +856,8 @@ mod jsonschema {
             let dir = case_dir(kind, name);
             let a = Case::open(&registry, &dir).unwrap();
             let b = Case::open(&registry, &dir).unwrap();
-            let (sa, sb) = (shard_bytes(&a), shard_bytes(&b));
-            assert!(!sa.is_empty(), "{name}: no shards");
+            let (sa, sb) = (extracted_texts(&a, dir.as_std_path()), extracted_texts(&b, dir.as_std_path()));
+            assert!(!sa.is_empty(), "{name}: nothing extracted");
             assert_eq!(
                 sa.keys().collect::<Vec<_>>(),
                 sb.keys().collect::<Vec<_>>(),
@@ -851,7 +866,7 @@ mod jsonschema {
             for (path, bytes) in &sa {
                 assert!(
                     bytes == &sb[path],
-                    "{name}: shard {path} differs between runs"
+                    "{name}: text of {path} differs between runs"
                 );
             }
         }

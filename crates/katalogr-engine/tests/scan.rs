@@ -194,9 +194,8 @@ mod scan {
         round();
         assert_eq!(e.cache().read().unwrap().artifacts().unwrap().len(), 1);
         assert!(
-            !e.dir()
-                .shard_path("r", &RelPath::new("gen.tx").unwrap())
-                .exists()
+            !crate::support::published(&e).contains(&("r".to_string(), RelPath::new("gen.tx").unwrap())),
+            "gen.tx has no file revision"
         );
     }
 
@@ -249,9 +248,8 @@ mod scan {
         .unwrap();
         assert_eq!(e.cache().read().unwrap().artifacts().unwrap().len(), 1);
         assert!(
-            !e.dir()
-                .shard_path("r", &RelPath::new("gen.tx").unwrap())
-                .exists()
+            !crate::support::published(&e).contains(&("r".to_string(), RelPath::new("gen.tx").unwrap())),
+            "gen.tx has no file revision"
         );
     }
 }

@@ -40,17 +40,15 @@ pub fn doctor_args() -> [&'static str; 4] {
 /// How long the workers wait for the index to publish its first round before starting anyway.
 const FIRST_ROUND_WAIT: Duration = Duration::from_secs(600);
 
-/// Block until the cache file exists and a round has published a shard, so a query that finds
-/// an empty cache is not counted as an answer (FEAT-080 R-10).
-fn wait_first_round(project_dir: &camino::Utf8Path, limit: Duration) {
+/// Block until a round has published (the watermark is above zero), so a query that finds an
+/// empty cache is not counted as an answer (FEAT-080 R-10).
+fn wait_first_round(k: &Katalogr, limit: Duration) {
     let start = Instant::now();
     while start.elapsed() < limit {
-        let cache = project_dir.join(".cache").join("index.redb").exists();
-        let shards = sizes::shard_stats(project_dir).map_or(0, |s| s.files);
-        if cache && shards > 0 {
+        if sizes::first_round_published(k) {
             return;
         }
-        std::thread::sleep(Duration::from_millis(100));
+        std::thread::sleep(Duration::from_millis(200));
     }
 }
 
@@ -102,7 +100,7 @@ fn worker(
 }
 
 /// Reset the project, spawn `index --full` and loop `concurrency` workers until it exits. The
-/// final shard digest is compared with the cold runs' digest (both at the base commit) and
+/// final graph digest is compared with the cold runs' digest (both at the base commit) and
 /// `doctor --skip-git --fail-on error` must exit 0.
 pub fn run(
     cx: &mut Ctx,
@@ -114,16 +112,15 @@ pub fn run(
     let workers = cx.s.concurrency.max(1);
     cx.gate()?;
     cx.k.reset_index(cx.ws)?;
-    // The cold runs indexed the base commits; the concurrent run must too, to compare shards.
+    // The cold runs indexed the base commits; the concurrent run must too, to compare graphs.
     cx.checkout_base()?;
     let stop = AtomicBool::new(false);
     let shared = Mutex::new(Shared::default());
     let ws_root = cx.ws.root().to_string();
     let k = cx.k.clone();
-    let project_dir = cx.project_dir();
     let index = std::thread::scope(|scope| -> Result<proc::RunStats> {
         let running = proc::spawn_with(&mut k.cmd(&["index", "--full"]), Some(INDEX_TIMEOUT))?;
-        wait_first_round(&project_dir, FIRST_ROUND_WAIT);
+        wait_first_round(&k, FIRST_ROUND_WAIT);
         let handles: Vec<_> = (0..workers as usize)
             .map(|id| {
                 let (k, ops, stop, shared, ws_root) = (&k, &ops, &stop, &shared, ws_root.as_str());
@@ -145,7 +142,7 @@ pub fn run(
             super::first_line(&index.stderr)
         )));
     }
-    let digest = sizes::shard_digest(&cx.project_dir())?;
+    let digest = sizes::graph_digest(&cx.k)?;
     let doctor = proc::run_with_timeout(&mut cx.k.cmd(&doctor_args()), QUERY_TIMEOUT)?;
     let s = shared.into_inner().unwrap_or_else(|e| e.into_inner());
     let wall = index.wall.as_secs_f64();

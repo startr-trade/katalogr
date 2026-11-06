@@ -32,7 +32,7 @@
 //! FEAT-080 R-10 and R-11: `concurrent_query_budget` indexes the corpus twice, once alone and
 //! once with `KATALOGR_CONCURRENT_WORKERS` (default 4) `stale-ok` query loops started after the
 //! first round has published. It fails on any query error, on a p95 over its line, on a slowdown
-//! over the limit, or on shards that differ:
+//! over the limit, or on a graph that differs:
 //!
 //! ```text
 //! KATALOGR_BIN=<release binary> \
@@ -47,7 +47,7 @@ mod bench {
     use camino::{Utf8Path, Utf8PathBuf};
     use katalogr_bench::katalogr::Katalogr;
     use katalogr_bench::proc::run_with_timeout;
-    use katalogr_bench::sizes::{cache_bytes, shard_stats};
+    use katalogr_bench::sizes::cache_bytes;
     use katalogr_bench::stats::nearest_rank;
     use std::collections::BTreeMap;
     use std::process::Command;
@@ -158,9 +158,9 @@ mod bench {
         );
 
         let project_dir = kindex.join("projects").join(PROJECT);
-        let shards = shard_stats(&project_dir).expect("shard sizes");
+        // FEAT-094: the index is the graph database alone; there are no shard files.
         let cache = cache_bytes(&project_dir).expect("cache size");
-        let index_mib = (shards.bytes + cache) as f64 / MIB;
+        let index_mib = cache as f64 / MIB;
         let rss_mib = run.peak_rss_kib.expect("peak RSS (Linux)") as f64 / 1024.0;
         let wall_s = run.wall.as_secs_f64();
 
@@ -176,11 +176,9 @@ mod bench {
 
         println!(
             "load {load_before} to {load_after}: wall {wall_s:.1} s (budget {}), peak RSS {rss_mib:.0} MiB (budget {}), \
-             index {index_mib:.0} MiB = shards {:.0} + cache {:.0} (budget {}), claimed files {files} (expected {})",
+             index (graph database) {index_mib:.0} MiB (budget {}), claimed files {files} (expected {})",
             want["wall_s"],
             want["rss_mib"],
-            shards.bytes as f64 / MIB,
-            cache as f64 / MIB,
             want["index_mib"],
             want["files"],
         );
@@ -378,7 +376,7 @@ mod bench {
     #[ignore = "benchmark: needs a corpus; see the module comment"]
     fn concurrent_query_budget() {
         use katalogr_bench::proc::spawn_with;
-        use katalogr_bench::sizes::{shard_digest, shard_stats};
+        use katalogr_bench::sizes::{first_round_published, graph_digest};
         use std::sync::Mutex;
         use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -413,7 +411,7 @@ mod bench {
         let tmp = tempfile::tempdir().expect("temporary kindex");
         let root = Utf8Path::from_path(tmp.path()).expect("UTF-8 temporary directory");
 
-        // Alone first: the wall and the shards to compare with.
+        // Alone first: the wall and the graph digest to compare with.
         let cold = new_project(&bin, root, "cold", &repos);
         let mut index = cold.cmd(&["index", "--full"]);
         index.env("KATALOGR_THREADS", "4");
@@ -425,11 +423,10 @@ mod bench {
             "{}",
             String::from_utf8_lossy(&alone.stderr)
         );
-        let cold_digest = shard_digest(&cold.kindex.join("projects").join(PROJECT)).unwrap();
+        let cold_digest = graph_digest(&cold).unwrap();
 
         // Then with workers, started once the first round has published.
         let busy = new_project(&bin, root, "busy", &repos);
-        let busy_dir = busy.kindex.join("projects").join(PROJECT);
         let stop = AtomicBool::new(false);
         let seen: Mutex<BTreeMap<&'static str, (Vec<f64>, u32)>> = Mutex::new(BTreeMap::new());
         let errors: Mutex<Vec<String>> = Mutex::new(Vec::new());
@@ -448,11 +445,10 @@ mod bench {
             let running = spawn_with(&mut index, Some(Duration::from_secs(7200))).expect("spawn");
             let start = std::time::Instant::now();
             while start.elapsed() < Duration::from_secs(600) {
-                let cache = busy_dir.join(".cache").join("index.redb").exists();
-                if cache && shard_stats(&busy_dir).map_or(0, |s| s.files) > 0 {
+                if first_round_published(&busy) {
                     break;
                 }
-                std::thread::sleep(Duration::from_millis(100));
+                std::thread::sleep(Duration::from_millis(200));
             }
             let handles: Vec<_> = (0..workers)
                 .map(|id| {
@@ -502,7 +498,7 @@ mod bench {
             "{}",
             String::from_utf8_lossy(&together.stderr)
         );
-        let busy_digest = shard_digest(&busy_dir).unwrap();
+        let busy_digest = graph_digest(&busy).unwrap();
 
         let slowdown = together.wall.as_secs_f64() / alone.wall.as_secs_f64();
         println!(
@@ -537,7 +533,7 @@ mod bench {
             failures.push(format!("index slowdown {slowdown:.2}x"));
         }
         if busy_digest != cold_digest {
-            failures.push("shards differ from the index run alone".into());
+            failures.push("the graph differs from the index run alone".into());
         }
         assert!(failures.is_empty(), "{}", failures.join("; "));
     }

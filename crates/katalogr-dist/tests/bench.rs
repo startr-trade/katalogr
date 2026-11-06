@@ -624,14 +624,19 @@ mod bench {
         (dir, took)
     }
 
-    /// Bytes of `index.redb` per byte of the sources that have a shard.
+    /// Bytes of `index.redb` per byte of the sources that have a file revision.
     fn bytes_per_source_byte(dir: &ProjectDir, repo: &Path) -> (f64, u64, u64, usize) {
         let cache = std::fs::metadata(dir.cache_dir().join("index.redb"))
             .unwrap()
             .len();
         let mut source = 0u64;
-        let shards = dir.list_shards().unwrap();
-        for (_, path) in &shards {
+        let cache_db = katalogr_store::Cache::open(
+            dir,
+            std::time::Instant::now() + std::time::Duration::from_secs(30),
+        )
+        .unwrap();
+        let shards = katalogr_store::Reader::file_revisions(&cache_db.read().unwrap()).unwrap();
+        for ((_, path), _) in &shards {
             if let Ok(m) = std::fs::metadata(repo.join(path.as_str())) {
                 source += m.len();
             }

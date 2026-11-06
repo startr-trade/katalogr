@@ -410,7 +410,7 @@ mod kanbanr {
         let code = code_and_board(tmp.path());
 
         // One history artifact per commit that carries a trailer, none for the third.
-        // The checkout is a git repository, so the shards are in its own context.
+        // The checkout is a git repository, so the history artifacts are in its own context.
         let ctxs = tmp.path().join("kx/projects/demo/.cache/contexts");
         let layer = std::fs::read_dir(&ctxs)
             .unwrap()
@@ -418,18 +418,29 @@ mod kanbanr {
             .next()
             .unwrap()
             .path();
-        let shards = layer.join("shards/code/@history");
-        let mut found: Vec<String> = std::fs::read_dir(&shards)
+        let dir = katalogr_dist::Katalogr::resolve(&code, &katalogr_dist::Overrides::default())
             .unwrap()
-            .flatten()
-            .map(|e| std::fs::read_to_string(e.path()).unwrap())
+            .project()
+            .clone();
+        let id = katalogr_store::ContextId::new(layer.file_name().unwrap().to_str().unwrap())
+            .unwrap();
+        let cache = katalogr_store::Cache::open(
+            &dir.layer(&id),
+            std::time::Instant::now() + std::time::Duration::from_secs(5),
+        )
+        .unwrap();
+        let mut found: Vec<String> = katalogr_store::Reader::artifacts(&cache.read().unwrap())
+            .unwrap()
+            .into_iter()
+            .filter(|(_, row)| row.provenance.path.as_str().starts_with("@history/"))
+            .map(|(_, row)| format!("{row:?}"))
             .collect();
         found.sort();
         assert_eq!(found.len(), 2, "{found:?}");
         let both = found.join("\n");
-        assert!(both.contains("\"key\": \"FEAT-001/R-1\""), "{both}");
+        assert!(both.contains("FEAT-001/R-1"), "{both}");
         assert!(
-            both.contains("\"key\": \"code:src/a.tx\""),
+            both.contains("code:src/a.tx"),
             "touches the changed file: {both}"
         );
         assert!(

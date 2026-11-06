@@ -7,12 +7,6 @@ use katalogr_model::{Fragment, Name, RelPath};
 use serde_json::Value;
 
 pub const FORMAT: u64 = 1;
-pub const SUFFIX: &str = ".kshard.json";
-
-/// Location of a shard relative to the project directory: `shards/<repo>/<path>.kshard.json`.
-pub fn shard_path(repo: &str, path: &RelPath) -> Utf8PathBuf {
-    Utf8PathBuf::from(format!("shards/{repo}/{}{SUFFIX}", path.as_str()))
-}
 
 /// Serialise a value with sorted keys, 2-space indentation, LF and one trailing newline.
 pub fn to_sorted_json(v: &Value) -> String {

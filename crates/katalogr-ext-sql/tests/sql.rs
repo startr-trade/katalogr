@@ -1263,11 +1263,13 @@ mod sql {
         }
 
         fn fragment(&self, path: &str) -> Fragment {
-            self.engine
-                .dir()
-                .read_shard("r", &RelPath::new(path).unwrap())
+            let rel = RelPath::new(path).unwrap();
+            let content = self.engine.source("r").unwrap().read(&rel).unwrap().unwrap();
+            let profiles = self.engine.routing_profiles().unwrap();
+            katalogr_engine::queue::extract_for_show(&self.engine, "r", &rel, &content, &profiles)
                 .unwrap()
-                .unwrap()
+                .expect("an extractor handles the file")
+                .fragment
         }
     }
 

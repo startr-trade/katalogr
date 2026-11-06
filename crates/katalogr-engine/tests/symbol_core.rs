@@ -360,17 +360,22 @@ mod symbol_core {
         e.put("a.tx", "sym struct Foo\nsym fn Other\n");
         e.remove("c.tx");
 
-        // The same final shards, stitched from scratch.
+        // The same final files, indexed from scratch.
         let tmp = tempfile::tempdir().unwrap();
-        let dir = project(Utf8PathBuf::from_path_buf(tmp.path().join("kx2")).unwrap());
-        dir.write_shard(&extract("a.tx", "sym struct Foo\nsym fn Other\n"))
-            .unwrap();
-        dir.write_shard(&extract("b.tx", B)).unwrap();
-        let rebuilt = Cache::open(&dir, Instant::now() + Duration::from_secs(5)).unwrap();
+        let root = Utf8PathBuf::from_path_buf(tmp.path().to_path_buf()).unwrap();
+        let work = root.join("work");
+        std::fs::create_dir_all(&work).unwrap();
+        std::fs::write(work.join("a.tx"), "sym struct Foo\nsym fn Other\n").unwrap();
+        std::fs::write(work.join("b.tx"), B).unwrap();
+        let kx2 = root.join("kx2");
+        support::init_project(&kx2);
+        let fresh = support::open_engine(&kx2, &work);
+        support::full_index(&fresh);
+        let rebuilt = fresh.cache();
         let table = |c: &Cache, t: TableId| dump(&c.read().unwrap().raw_scan(t, &[]).unwrap());
         assert_eq!(
             table(&e.cache, TableId::SymbolCore),
-            table(&rebuilt, TableId::SymbolCore)
+            table(rebuilt, TableId::SymbolCore)
         );
         // The symbol rows hold kind ids that depend on the history, so compare the rows.
         assert_eq!(

@@ -225,9 +225,11 @@ mod cli {
         let tmp = tempfile::tempdir().unwrap();
         let (kx, repo) = setup(tmp.path());
         let project = kx.join("projects/demo");
-        for sub in ["profiles", "shards", ".cache"] {
+        for sub in ["profiles", ".cache"] {
             assert!(project.join(sub).is_dir(), "missing {sub}");
         }
+        // FEAT-094: a new project has no shards folder.
+        assert!(!project.join("shards").exists());
         assert!(kx.join(".git").exists());
         assert!(project.join("format.json").is_file());
         let config = std::fs::read_to_string(project.join("config.yaml")).unwrap();
@@ -295,10 +297,10 @@ mod cli {
     }
 
     /// A project holding a polyglot copy of the fixtures, fully indexed with `threads`
-    /// threads; returns the shard tree.
-    fn shards_at(threads: &str) -> std::collections::BTreeMap<String, Vec<u8>> {
+    /// threads; returns the text of each extracted file (`shard show`).
+    fn texts_at(threads: &str) -> std::collections::BTreeMap<String, Vec<u8>> {
         let tmp = tempfile::tempdir().unwrap();
-        let (kx, repo) = setup(tmp.path());
+        let (_kx, repo) = setup(tmp.path());
         let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures");
         for (i, sub) in ["rust/calls", "rust/items", "ts/calls", "md", "sql"]
             .iter()
@@ -325,15 +327,24 @@ mod cli {
             "index failed: {}",
             String::from_utf8_lossy(&out.stderr)
         );
-        let shards = tree_bytes(&kx.join("projects/demo/shards"));
-        assert!(shards.len() > 24, "shards written: {}", shards.len());
-        shards
+        let mut texts = std::collections::BTreeMap::new();
+        for (rel, _) in tree_bytes(&repo) {
+            if rel.starts_with(".git") {
+                continue;
+            }
+            let (code, out, _) = run_raw(&repo, &["shard", "show", &format!("app:{rel}")]);
+            if code == 0 {
+                texts.insert(rel, out.into_bytes());
+            }
+        }
+        assert!(texts.len() > 24, "files extracted: {}", texts.len());
+        texts
     }
 
-    /// R-2. The shards of a full index are byte-identical at 1 and 8 threads.
+    /// R-2. The extracted text of a full index is byte-identical at 1 and 8 threads.
     #[test]
     fn index_threads_identical() {
-        assert_eq!(shards_at("1"), shards_at("8"));
+        assert_eq!(texts_at("1"), texts_at("8"));
     }
 
     /// FEAT-075 R-6. A full index leaves a compacted cache: `meta.compacted_bytes` is set and
@@ -1777,7 +1788,7 @@ mod retrieval {
                 }
             }
         }
-        // A cache rebuilt from the shards answers the same (text carries no watermark).
+        // A cache rebuilt by re-indexing answers the same (text carries no watermark).
         let cache = std::fs::read_dir(repo.parent().unwrap().join("kx/projects/demo/.cache"))
             .unwrap()
             .flatten()
@@ -1785,6 +1796,8 @@ mod retrieval {
             .find(|p| p.file_name().is_some_and(|n| n == "index.redb"))
             .expect("cache file");
         std::fs::remove_file(cache).unwrap();
+        // A lost graph answers empty and queues nothing (FEAT-094 R-9); an index rebuilds it.
+        assert_eq!(run_raw(&repo, &["index", "--full"]).0, 0);
         for (args, want) in first {
             let (code, out, _) = run_raw(&repo, &args);
             assert_eq!(code, 0, "{args:?}");
@@ -1982,7 +1995,7 @@ mod diagnostic {
         let first = traces(&repo);
         assert_eq!(first, traces(&repo), "differs between runs");
         assert!(first.iter().all(|t| !t.is_empty()));
-        // A cache rebuilt from the shards gives byte-identical traces.
+        // A cache rebuilt by re-indexing gives byte-identical traces.
         let cache = std::fs::read_dir(repo.parent().unwrap().join("kx/projects/demo/.cache"))
             .unwrap()
             .flatten()
@@ -1990,6 +2003,7 @@ mod diagnostic {
             .find(|p| p.file_name().is_some_and(|n| n == "index.redb"))
             .expect("cache file");
         std::fs::remove_file(cache).unwrap();
+        assert_eq!(run_raw(&repo, &["index", "--full"]).0, 0);
         assert_eq!(first, traces(&repo), "differs after a cache rebuild");
     }
 }

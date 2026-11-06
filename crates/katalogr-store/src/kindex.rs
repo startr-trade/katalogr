@@ -392,11 +392,6 @@ impl ProjectDir {
         self.project_root.join("shards").is_dir()
     }
 
-    /// `shards/<repo>/<path>.kshard.json` under the project directory.
-    pub fn shard_path(&self, repo: &str, path: &RelPath) -> Utf8PathBuf {
-        self.root.join(shard::shard_path(repo, path))
-    }
-
     pub fn cache_dir(&self) -> Utf8PathBuf {
         self.root.join(".cache")
     }
@@ -404,24 +399,6 @@ impl ProjectDir {
     /// The root of the kindex repository this project lives in.
     pub fn kindex_root(&self) -> &Utf8Path {
         &self.kindex_root
-    }
-
-    pub fn read_shard(&self, repo: &str, path: &RelPath) -> Result<Option<Fragment>, StoreError> {
-        let p = self.shard_path(repo, path);
-        match std::fs::read(&p) {
-            Ok(bytes) => shard::decode(&bytes).map(Some),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
-            Err(e) => Err(StoreError::io(&p, e)),
-        }
-    }
-
-    /// Encode (guarded against this kindex's root too) and write atomically at the shard path
-    /// named by the fragment's provenance.
-    pub fn write_shard(&self, f: &Fragment) -> Result<Utf8PathBuf, StoreError> {
-        let bytes = shard::encode_with_root(f, Some(&self.kindex_root))?;
-        let p = self.shard_path(&f.provenance.repo, &f.provenance.path);
-        write_atomic(&p, &bytes)?;
-        Ok(p)
     }
 
     /// Compares the files people write (`config.yaml`, `format.json`, `profiles/`, `eval/`,
@@ -482,26 +459,6 @@ impl ProjectDir {
         })
     }
 
-    /// Sorted `(repo, path)` of every shard on disk.
-    pub fn list_shards(&self) -> Result<Vec<(String, RelPath)>, StoreError> {
-        let base = self.root.join("shards");
-        let mut out = Vec::new();
-        if !base.is_dir() {
-            return Ok(out);
-        }
-        for repo in std::fs::read_dir(&base).map_err(|e| StoreError::io(&base, e))? {
-            let repo = repo.map_err(|e| StoreError::io(&base, e))?;
-            let Some(rname) = repo.file_name().to_str().map(str::to_string) else {
-                continue;
-            };
-            let rdir = base.join(&rname);
-            if rdir.is_dir() {
-                walk(&rdir, "", &rname, &mut out)?;
-            }
-        }
-        out.sort();
-        Ok(out)
-    }
 }
 
 /// The files a person writes in a project: a file name, or a folder whose files all count.
@@ -544,30 +501,6 @@ fn walk_files(dir: &Utf8Path, prefix: &str, out: &mut Vec<String>) -> Result<(),
             walk_files(&full, &format!("{prefix}{name}/"), out)?;
         } else {
             out.push(format!("{prefix}{name}"));
-        }
-    }
-    Ok(())
-}
-
-fn walk(
-    dir: &Utf8Path,
-    prefix: &str,
-    repo: &str,
-    out: &mut Vec<(String, RelPath)>,
-) -> Result<(), StoreError> {
-    for e in std::fs::read_dir(dir).map_err(|e| StoreError::io(dir, e))? {
-        let e = e.map_err(|e| StoreError::io(dir, e))?;
-        let Some(name) = e.file_name().to_str().map(str::to_string) else {
-            continue;
-        };
-        let rel = format!("{prefix}{name}");
-        let full = dir.join(&name);
-        if full.is_dir() {
-            walk(&full, &format!("{rel}/"), repo, out)?;
-        } else if let Some(stem) = rel.strip_suffix(shard::SUFFIX)
-            && let Ok(p) = RelPath::new(stem)
-        {
-            out.push((repo.to_string(), p));
         }
     }
     Ok(())

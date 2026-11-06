@@ -1,138 +1,91 @@
 mod support;
 
 use camino::Utf8PathBuf;
-use katalogr_engine::Stitcher;
-use katalogr_model::{ExtractInput, Extractor, Fragment, RelPath};
-use katalogr_store::{Cache, Kindex, ProjectConfig, ProjectDir, ProjectName, Reader, RepoConfig};
+use katalogr_model::RelPath;
+use katalogr_store::{Cache, Kindex, ProjectDir, ProjectName, Reader};
 use std::time::{Duration, Instant};
-use support::TestExtractor;
+use support::{drained_graph, file_event, full_index, init_project, open_engine};
 
-fn project(tmp: &tempfile::TempDir) -> ProjectDir {
-    let root = Utf8PathBuf::from_path_buf(tmp.path().join("kx")).unwrap();
-    Kindex::init(&root)
-        .unwrap()
-        .create_project(
-            &ProjectName::new("p").unwrap(),
-            ProjectConfig {
-                repos: vec![RepoConfig::new("r")],
-                ..Default::default()
-            },
-        )
-        .unwrap()
+/// A kindex and a working tree; the tree is indexed through the engine (FEAT-094: the graph is
+/// built by extracting, there are no shard files to write).
+struct Fx {
+    _tmp: tempfile::TempDir,
+    kx: Utf8PathBuf,
+    work: Utf8PathBuf,
 }
 
-fn extract(path: &str, text: &str) -> Fragment {
-    let path = RelPath::new(path).unwrap();
-    TestExtractor
-        .extract(&ExtractInput {
-            repo: "r",
-            path: &path,
-            revision: "ce013625030ba8dba906f756967f9e9ca394464a",
-            content: text.as_bytes(),
-            context: &[],
-        })
-        .unwrap()
+impl Fx {
+    fn new(files: &[(&str, &str)]) -> Fx {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = Utf8PathBuf::from_path_buf(tmp.path().to_path_buf()).unwrap();
+        let (kx, work) = (root.join("kx"), root.join("work"));
+        std::fs::create_dir_all(&work).unwrap();
+        init_project(&kx);
+        let f = Fx {
+            _tmp: tmp,
+            kx,
+            work,
+        };
+        for (p, t) in files {
+            f.write(p, t);
+        }
+        f
+    }
+
+    fn write(&self, path: &str, text: &str) {
+        std::fs::write(self.work.join(path), text).unwrap();
+    }
+
+    fn remove(&self, path: &str) {
+        std::fs::remove_file(self.work.join(path)).unwrap();
+    }
+
+    /// Index everything from scratch, then close the engine.
+    fn index(&self) {
+        let e = open_engine(&self.kx, &self.work);
+        full_index(&e);
+    }
+
+    /// Report the changed paths to a new engine, drain, then close it.
+    fn changed(&self, paths: &[&str]) {
+        let e = open_engine(&self.kx, &self.work);
+        for p in paths {
+            e.inbox().append(&file_event(p)).unwrap();
+        }
+        drained_graph(&e);
+    }
+
+    fn dir(&self) -> ProjectDir {
+        Kindex::open(&self.kx)
+            .unwrap()
+            .project(&ProjectName::new("p").unwrap())
+            .unwrap()
+    }
+
+    /// The graph database, opened once the engine is closed.
+    fn cache(&self) -> Cache {
+        Cache::open(&self.dir(), soon()).unwrap()
+    }
 }
 
 fn soon() -> Instant {
     Instant::now() + Duration::from_secs(5)
 }
 
-mod kindex {}
-
 mod cache {
     use super::*;
     use katalogr_store::StoreError;
 
     #[test]
-    fn schema_8_cache_rebuilds() {
-        let tmp = tempfile::tempdir().unwrap();
-        let dir = project(&tmp);
-        for (p, t) in [
-            ("a.tx", "sym fn A\nexport ns:k A\n"),
-            ("b.tx", "sym fn B\nref B calls ns:k\n"),
-            ("c.tx", "sym fn C\nref C calls ns:k\n"),
-        ] {
-            dir.write_shard(&extract(p, t)).unwrap();
-        }
-        let cache = Cache::open(&dir, soon()).unwrap();
-        let before = cache.read().unwrap().dump_graph().unwrap();
-        {
-            let mut tx = cache.write().unwrap();
-            tx.set_meta("cache_schema", &8u32.to_le_bytes()).unwrap();
-            tx.commit().unwrap();
-        }
-        drop(cache);
-
-        let cache = Cache::open(&dir, soon()).unwrap();
-        assert_eq!(cache.read().unwrap().dump_graph().unwrap(), before);
-    }
-
-    #[test]
-    fn schema_9_cache_rebuilds() {
-        let tmp = tempfile::tempdir().unwrap();
-        let dir = project(&tmp);
-        for (p, t) in [
-            ("a.tx", "sym fn A\nexport ns:k A\n"),
-            ("a2.tx", "sym fn A2\nexport ns:k A2\n"),
-            ("b.tx", "sym fn B\nref B calls ns:k\n"),
-        ] {
-            dir.write_shard(&extract(p, t)).unwrap();
-        }
-        let cache = Cache::open(&dir, soon()).unwrap();
-        let before = cache.read().unwrap().dump_graph().unwrap();
-        {
-            let mut tx = cache.write().unwrap();
-            tx.set_meta("cache_schema", &9u32.to_le_bytes()).unwrap();
-            tx.commit().unwrap();
-        }
-        drop(cache);
-
-        let cache = Cache::open(&dir, soon()).unwrap();
-        let after = cache.read().unwrap().dump_graph().unwrap();
-        assert_eq!(after, before);
-        let fan_rows = after.iter().find(|(n, _)| *n == "fan_out").unwrap().1.len();
-        assert_eq!(fan_rows, 1, "the rebuilt cache has the fan row");
-    }
-
-    #[test]
-    fn schema_12_cache_rebuilds() {
-        let tmp = tempfile::tempdir().unwrap();
-        let dir = project(&tmp);
-        for (p, t) in [
-            ("a.tx", "sym fn A\nexport ns:k A\n"),
-            ("b.tx", "sym fn B\nref B calls ns:k\nref B calls ns:nope\n"),
-        ] {
-            dir.write_shard(&extract(p, t)).unwrap();
-        }
-        let cache = Cache::open(&dir, soon()).unwrap();
-        let before = cache.read().unwrap().dump_graph().unwrap();
-        {
-            let mut tx = cache.write().unwrap();
-            tx.set_meta(
-                "cache_schema",
-                &(katalogr_store::CACHE_SCHEMA - 1).to_le_bytes(),
-            )
-            .unwrap();
-            tx.commit().unwrap();
-        }
-        drop(cache);
-        let cache = Cache::open(&dir, soon()).unwrap();
-        assert_eq!(cache.read().unwrap().dump_graph().unwrap(), before);
-    }
-
-    #[test]
     fn link_order_matches_schema9() {
-        let tmp = tempfile::tempdir().unwrap();
-        let dir = project(&tmp);
         // Kinds are written in the order zz, a, calls, so their vocabulary ids are not in the
         // order of their length-prefixed bytes (a, zz, calls).
-        dir.write_shard(&extract(
+        let fx = Fx::new(&[(
             "a.tx",
             "sym fn A\nsym fn B\nsym fn C\nlink A zz B\nlink A a B\nlink A calls C\nlink A calls B\n",
-        ))
-        .unwrap();
-        let cache = Cache::open(&dir, soon()).unwrap();
+        )]);
+        fx.index();
+        let cache = fx.cache();
         let rx = cache.read().unwrap();
         let kinds = |keys: Vec<katalogr_store::LinkKey>| -> Vec<String> {
             keys.into_iter().map(|k| k.kind.0).collect()
@@ -169,11 +122,9 @@ mod cache {
     #[test]
     fn unresolved_from_artifact_row() {
         use katalogr_store::cache::TableId;
-        let tmp = tempfile::tempdir().unwrap();
-        let dir = project(&tmp);
-        dir.write_shard(&extract("c.tx", "sym fn C\nref C calls ns:nope\n"))
-            .unwrap();
-        let cache = Cache::open(&dir, soon()).unwrap();
+        let fx = Fx::new(&[("c.tx", "sym fn C\nref C calls ns:nope\n")]);
+        fx.index();
+        let cache = fx.cache();
         let rx = cache.read().unwrap();
         let unresolved = rx.unresolved_refs(None).unwrap();
         assert_eq!(unresolved.len(), 1);
@@ -202,9 +153,7 @@ mod cache {
 
     #[test]
     fn prov_dictionary_collected_on_remove() {
-        let tmp = tempfile::tempdir().unwrap();
-        let dir = project(&tmp);
-        for (p, t) in [
+        let fx = Fx::new(&[
             (
                 "a.tx",
                 "sym fn A\nsym fn A2\nlink A calls A2\nexport ns:k A\n",
@@ -213,15 +162,15 @@ mod cache {
                 "b.tx",
                 "sym fn B\nsym fn B2\nlink B calls B2\nref B calls ns:k\n",
             ),
-        ] {
-            dir.write_shard(&extract(p, t)).unwrap();
-        }
-        let cache = Cache::open(&dir, soon()).unwrap();
+        ]);
+        fx.index();
+        let cache = fx.cache();
         let rows = prov_rows(&cache.read().unwrap());
         assert!(rows.iter().any(|v| contains(v, "b.tx")));
         drop(cache);
-        std::fs::remove_file(dir.shard_path("r", &RelPath::new("b.tx").unwrap())).unwrap();
-        let cache = Cache::open(&dir, soon()).unwrap();
+        fx.remove("b.tx");
+        fx.changed(&["b.tx"]);
+        let cache = fx.cache();
         let rows = prov_rows(&cache.read().unwrap());
         assert!(!rows.is_empty());
         assert!(
@@ -233,42 +182,26 @@ mod cache {
 
     #[test]
     fn prov_dictionary_follows_revision() {
-        let tmp = tempfile::tempdir().unwrap();
-        let dir = project(&tmp);
-        dir.write_shard(&extract("a.tx", "sym fn A\nsym fn A2\nlink A calls A2\n"))
-            .unwrap();
-        let cache = Cache::open(&dir, soon()).unwrap();
-        drop(cache);
-        let path = RelPath::new("a.tx").unwrap();
-        let new_rev = "1".repeat(40);
-        let frag = TestExtractor
-            .extract(&ExtractInput {
-                repo: "r",
-                path: &path,
-                revision: &new_rev,
-                content: b"sym fn A\nsym fn A2\nlink A calls A2\nsym fn A3\n",
-                context: &[],
-            })
-            .unwrap();
-        dir.write_shard(&frag).unwrap();
-        let cache = Cache::open(&dir, soon()).unwrap();
-        let rows: Vec<_> = prov_rows(&cache.read().unwrap())
+        let fx = Fx::new(&[("a.tx", "sym fn A\nsym fn A2\nlink A calls A2\n")]);
+        fx.index();
+        let old: Vec<_> = prov_rows(&fx.cache().read().unwrap())
+            .into_iter()
+            .filter(|v| contains(v, "a.tx"))
+            .collect();
+        assert_eq!(old.len(), 1);
+        fx.write("a.tx", "sym fn A\nsym fn A2\nlink A calls A2\nsym fn A3\n");
+        fx.changed(&["a.tx"]);
+        let rows: Vec<_> = prov_rows(&fx.cache().read().unwrap())
             .into_iter()
             .filter(|v| contains(v, "a.tx"))
             .collect();
         assert_eq!(rows.len(), 1, "exactly one row for a.tx");
-        assert!(contains(&rows[0], &new_rev));
-        assert!(!contains(
-            &rows[0],
-            "ce013625030ba8dba906f756967f9e9ca394464a"
-        ));
+        assert_ne!(rows[0], old[0], "the row carries the new revision");
     }
 
     #[test]
     fn dump_independent_of_history() {
         use katalogr_store::cache::TableId;
-        let tmp = tempfile::tempdir().unwrap();
-        let dir = project(&tmp);
         let text = |i: usize, v: usize| {
             format!(
                 "sym fn F{i}\nsym fn G{i}\nlink F{i} calls G{i}\nexport ns:k{i} F{i}\nref G{i} calls ns:k{}\n{}",
@@ -276,15 +209,13 @@ mod cache {
                 "sym fn Extra\n".repeat(v % 2)
             )
         };
+        let fx = Fx::new(&[]);
         // History (b): start from other contents, then edit and delete down to the final files.
         for i in 0..8 {
-            dir.write_shard(&extract(&format!("f{i}.tx"), &text(i, 1)))
-                .unwrap();
+            fx.write(&format!("f{i}.tx"), &text(i, 1));
         }
-        dir.write_shard(&extract("gone.tx", "sym fn Gone\nexport ns:gone Gone\n"))
-            .unwrap();
-        let cache = Cache::open(&dir, soon()).unwrap();
-        drop(cache);
+        fx.write("gone.tx", "sym fn Gone\nexport ns:gone Gone\n");
+        fx.index();
         let mut seed = 7u64;
         let mut next = || {
             seed = seed
@@ -294,24 +225,23 @@ mod cache {
         };
         for round in 0..30 {
             let i = next() % 8;
+            let name = format!("f{i}.tx");
             if round % 5 == 4 {
-                std::fs::remove_file(
-                    dir.shard_path("r", &RelPath::new(&format!("f{i}.tx")).unwrap()),
-                )
-                .ok();
+                std::fs::remove_file(fx.work.join(&name)).ok();
             } else {
-                dir.write_shard(&extract(&format!("f{i}.tx"), &text(i, next())))
-                    .unwrap();
+                fx.write(&name, &text(i, next()));
             }
-            let c = Cache::open(&dir, soon()).unwrap();
-            drop(c);
+            fx.changed(&[&name]);
         }
-        for i in 0..8 {
-            dir.write_shard(&extract(&format!("f{i}.tx"), &text(i, 0)))
-                .unwrap();
+        let mut names: Vec<String> = (0..8).map(|i| format!("f{i}.tx")).collect();
+        for (i, n) in names.iter().enumerate() {
+            fx.write(n, &text(i, 0));
         }
-        std::fs::remove_file(dir.shard_path("r", &RelPath::new("gone.tx").unwrap())).unwrap();
-        let history = Cache::open(&dir, soon()).unwrap();
+        fx.remove("gone.tx");
+        names.push("gone.tx".into());
+        let refs: Vec<&str> = names.iter().map(String::as_str).collect();
+        fx.changed(&refs);
+        let history = fx.cache();
         let h = history.read().unwrap();
         let hist_dump = h.dump_graph().unwrap();
         let hist_links = h.links_all().unwrap();
@@ -320,8 +250,9 @@ mod cache {
         drop(history);
 
         // History (a): one full index of the final files.
-        std::fs::remove_dir_all(dir.cache_dir()).unwrap();
-        let fresh = Cache::open(&dir, soon()).unwrap();
+        std::fs::remove_dir_all(fx.dir().cache_dir()).unwrap();
+        fx.index();
+        let fresh = fx.cache();
         let f = fresh.read().unwrap();
         assert_eq!(f.dump_graph().unwrap(), hist_dump);
         assert_eq!(f.links_all().unwrap(), hist_links);
@@ -355,9 +286,8 @@ mod cache {
         );
     }
 
-    fn sample_project(tmp: &tempfile::TempDir) -> ProjectDir {
-        let dir = project(tmp);
-        for (p, t) in [
+    fn sample_project() -> Fx {
+        let fx = Fx::new(&[
             (
                 "a.tx",
                 "sym fn A\nsym fn A2\nlink A calls A2\nexport ns:k A\n",
@@ -367,19 +297,18 @@ mod cache {
                 "sym fn B\nsym fn B2\nlink B calls B2\nref B calls ns:k\nref B calls ns:nope\n",
             ),
             ("c.tx", "sym fn C\nexport ns:k C\n"),
-        ] {
-            dir.write_shard(&extract(p, t)).unwrap();
-        }
-        dir
+        ]);
+        fx.index();
+        fx
     }
 
     #[test]
     fn rewrite_preserves_dump() {
         use katalogr_store::{CompactMode, CompactOutcome};
         for mode in [CompactMode::Rewrite, CompactMode::InPlace] {
-            let tmp = tempfile::tempdir().unwrap();
-            let dir = sample_project(&tmp);
-            let cache = Cache::open(&dir, soon()).unwrap();
+            let fx = sample_project();
+            let dir = fx.dir();
+            let cache = fx.cache();
             let before = {
                 let rx = cache.read().unwrap();
                 (
@@ -410,24 +339,26 @@ mod cache {
     #[test]
     fn rewrite_shrinks_fragmented_file() {
         use katalogr_store::{CompactMode, CompactOutcome};
-        let tmp = tempfile::tempdir().unwrap();
-        let dir = project(&tmp);
-        let mut cache = Cache::open(&dir, soon()).unwrap();
+        let fx = Fx::new(&[]);
+        let dir = fx.dir();
         for round in 0..20 {
+            let mut paths = Vec::new();
             for i in 0..25 {
                 let n = round * 25 + i;
-                dir.write_shard(&extract(
-                    &format!("f{n:03}.tx"),
+                let name = format!("f{n:03}.tx");
+                fx.write(
+                    &name,
                     &format!(
                         "sym fn F{n}\nsym fn G{n}\nlink F{n} calls G{n}\nexport ns:k{n} F{n}\nref G{n} calls ns:k{}\n",
                         n / 2
                     ),
-                ))
-                .unwrap();
+                );
+                paths.push(name);
             }
-            drop(cache);
-            cache = Cache::open(&dir, soon()).unwrap();
+            let refs: Vec<&str> = paths.iter().map(String::as_str).collect();
+            fx.changed(&refs);
         }
+        let cache = fx.cache();
         assert_eq!(cache.read().unwrap().artifacts().unwrap().len(), 500);
         let before_dump = cache.read().unwrap().dump_graph().unwrap();
         let before = cache.file_bytes().unwrap();
@@ -446,9 +377,9 @@ mod cache {
     #[test]
     fn rewrite_failure_keeps_cache() {
         use katalogr_store::{CompactMode, CompactOutcome};
-        let tmp = tempfile::tempdir().unwrap();
-        let dir = sample_project(&tmp);
-        let cache = Cache::open(&dir, soon()).unwrap();
+        let fx = sample_project();
+        let dir = fx.dir();
+        let cache = fx.cache();
         let before = cache.read().unwrap().dump_graph().unwrap();
         let size = cache.file_bytes().unwrap();
         // A directory where the rewrite file goes: it cannot be removed or created.
@@ -471,9 +402,9 @@ mod cache {
 
     #[test]
     fn orphan_rewrite_file_removed() {
-        let tmp = tempfile::tempdir().unwrap();
-        let dir = sample_project(&tmp);
-        let cache = Cache::open(&dir, soon()).unwrap();
+        let fx = sample_project();
+        let dir = fx.dir();
+        let cache = fx.cache();
         drop(cache);
         let orphan = dir.cache_dir().join(katalogr_store::REWRITE_FILE);
         std::fs::write(&orphan, b"left by a process that stopped").unwrap();
@@ -487,9 +418,9 @@ mod cache {
     #[test]
     fn rewrite_beside_read_only_handle() {
         use katalogr_store::CompactMode;
-        let tmp = tempfile::tempdir().unwrap();
-        let dir = sample_project(&tmp);
-        let cache = Cache::open(&dir, soon()).unwrap();
+        let fx = sample_project();
+        let dir = fx.dir();
+        let cache = fx.cache();
         let Some(old_reader) = Cache::open_reader(&dir).unwrap() else {
             // No byte-range locks on this platform: a reader waits for the writer instead.
             return;
@@ -549,12 +480,12 @@ mod cache {
     #[test]
     fn ordinals_released_with_symbol() {
         use katalogr_store::cache::TableId;
-        let tmp = tempfile::tempdir().unwrap();
-        let dir = project(&tmp);
-        dir.write_shard(&extract("a.tx", "sym fn Alpha\nsym fn Beta\n"))
-            .unwrap();
-        dir.write_shard(&extract("b.tx", "sym fn Gamma\n")).unwrap();
-        let cache = Cache::open(&dir, soon()).unwrap();
+        let fx = Fx::new(&[
+            ("a.tx", "sym fn Alpha\nsym fn Beta\n"),
+            ("b.tx", "sym fn Gamma\n"),
+        ]);
+        fx.index();
+        let cache = fx.cache();
         let n = |rx: &dyn Fn(TableId) -> usize| (rx(TableId::DocOrd), rx(TableId::DocByOrd));
         {
             let rx = cache.read().unwrap();
@@ -562,8 +493,9 @@ mod cache {
             assert_eq!(n(&count), (3, 3));
         }
         drop(cache);
-        std::fs::remove_file(dir.shard_path("r", &RelPath::new("a.tx").unwrap())).unwrap();
-        let cache = Cache::open(&dir, soon()).unwrap();
+        fx.remove("a.tx");
+        fx.changed(&["a.tx"]);
+        let cache = fx.cache();
         let rx = cache.read().unwrap();
         let count = |t| rx.raw_scan(t, &[]).unwrap().len();
         assert_eq!(
@@ -579,9 +511,8 @@ mod cache {
     #[test]
     fn index_errors_all_sorted() {
         use katalogr_store::ErrorRow;
-        let tmp = tempfile::tempdir().unwrap();
-        let dir = project(&tmp);
-        let cache = Cache::open(&dir, soon()).unwrap();
+        let fx = Fx::new(&[]);
+        let cache = fx.cache();
         let row = |m: &str| ErrorRow {
             span: None,
             message: m.to_string(),
@@ -609,9 +540,8 @@ mod cache {
 
     #[test]
     fn busy_retries_until_deadline() {
-        let tmp = tempfile::tempdir().unwrap();
-        let dir = project(&tmp);
-        let _stitcher = Stitcher::new();
+        let fx = Fx::new(&[]);
+        let dir = fx.dir();
         let _held = Cache::open(&dir, soon()).unwrap();
 
         let start = Instant::now();

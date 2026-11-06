@@ -1219,10 +1219,50 @@ mod archtest {
         let src = workspace_root().join("crates/katalogr-dist/src");
         for file in ["views.rs", "view_store.rs"] {
             let text = std::fs::read_to_string(src.join(file)).expect("read source");
-            for banned in ["read_shard", "shard_path", "shard::"] {
+            for banned in [
+                "read_shard",
+                "write_shard",
+                "list_shards",
+                "shard_path",
+                "shard::",
+            ] {
                 assert!(!text.contains(banned), "{file} uses `{banned}`");
             }
         }
+    }
+
+    /// FEAT-094 R-1. The shard file API is gone: no source or test in any crate (but this one,
+    /// which names them) calls a function that reads, writes, lists or locates a shard file.
+    #[test]
+    fn no_shard_file_api() {
+        let root = workspace_root();
+        let mut failures = Vec::new();
+        let crates = std::fs::read_dir(root.join("crates")).expect("crates folder");
+        for krate in crates.flatten() {
+            if krate.file_name() == "katalogr-archtest" {
+                continue;
+            }
+            let mut files = Vec::new();
+            for sub in ["src", "tests"] {
+                rs_files(&krate.path().join(sub), &mut files);
+            }
+            files.sort();
+            for f in files {
+                let text = std::fs::read_to_string(&f).expect("read source");
+                for banned in [
+                    "read_shard(",
+                    "write_shard(",
+                    "list_shards(",
+                    "shard_path(",
+                    "shard::SUFFIX",
+                ] {
+                    if text.contains(banned) {
+                        failures.push(format!("{}: uses `{banned}`", f.display()));
+                    }
+                }
+            }
+        }
+        assert!(failures.is_empty(), "{}", failures.join("\n"));
     }
 
     /// FEAT-035 R-6. Nothing in `katalogr-dist` or `katalogr` writes to a board: no source

@@ -603,6 +603,11 @@ mod api {
             "help",
             // Polls and reindexes until interrupted, like `api`.
             "watch",
+            // Writes a record into the project (`record`), or compares with one (`verify`); its
+            // answers are its own types, not envelopes (FEAT-094 R-14).
+            "audit",
+            // Prints one file's extracted text for a person, writing nothing (FEAT-094 R-13).
+            "shard",
             // Draws a view for a person; the generated views are `view`, served under
             // `/api/v1/views/`.
             "render",

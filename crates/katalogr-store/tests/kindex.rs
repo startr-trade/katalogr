@@ -142,12 +142,14 @@ mod kindex {
         assert!(r.join(".git").exists());
         assert_eq!(
             std::fs::read_to_string(r.join(".gitignore")).unwrap(),
-            "projects/*/.cache/\n"
+            "projects/*/.cache/\nprojects/*/shards/\n"
         );
         let p = k.create_project(&pname("demo"), cfg()).unwrap();
-        for d in ["profiles", "shards", ".cache"] {
+        for d in ["profiles", ".cache"] {
             assert!(p.root().join(d).is_dir(), "{d}");
         }
+        // FEAT-094: a new project has no shards folder.
+        assert!(!p.root().join("shards").exists());
         assert!(p.root().join("format.json").is_file());
         let yaml = std::fs::read_to_string(p.root().join("config.yaml")).unwrap();
         assert!(yaml.find("alpha").unwrap() < yaml.find("zeta").unwrap());
@@ -159,7 +161,7 @@ mod kindex {
         Kindex::init(&r).unwrap();
         assert_eq!(
             std::fs::read_to_string(r.join(".gitignore")).unwrap(),
-            "projects/*/.cache/\n"
+            "projects/*/.cache/\nprojects/*/shards/\n"
         );
         let again = Kindex::open(&r).unwrap();
         assert_eq!(again.projects().unwrap(), vec![pname("demo")]);
@@ -175,18 +177,23 @@ mod kindex {
         let k = Kindex::init(&root(&t)).unwrap();
         let a = k.create_project(&pname("one"), cfg()).unwrap();
         let b = k.create_project(&pname("two"), cfg()).unwrap();
-        let f = fragment();
-        a.write_shard(&f).unwrap();
-        assert_eq!(a.list_shards().unwrap().len(), 1);
-        assert!(b.list_shards().unwrap().is_empty());
-        assert!(b.read_shard("r", &f.provenance.path).unwrap().is_none());
+        // Each project has its own graph database; a write in one is not seen in the other.
+        let dl = || std::time::Instant::now() + std::time::Duration::from_secs(5);
+        {
+            let c = katalogr_store::Cache::open(&a, dl()).unwrap();
+            let mut tx = c.write().unwrap();
+            tx.set_meta("mine", b"one").unwrap();
+            tx.commit().unwrap();
+        }
+        let ca = katalogr_store::Cache::open(&a, dl()).unwrap();
+        let cb = katalogr_store::Cache::open(&b, dl()).unwrap();
+        use katalogr_store::Reader;
         assert_eq!(
-            a.read_shard("r", &f.provenance.path)
-                .unwrap()
-                .unwrap()
-                .extension,
-            "ext"
+            ca.read().unwrap().meta("mine").unwrap().as_deref(),
+            Some(&b"one"[..])
         );
+        assert_eq!(cb.read().unwrap().meta("mine").unwrap(), None);
+        assert_ne!(a.root(), b.root());
         assert_eq!(k.projects().unwrap(), vec![pname("one"), pname("two")]);
     }
 

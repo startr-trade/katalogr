@@ -31,7 +31,7 @@ pub fn family(name: &str) -> Family {
         | "bench.micro_ms"
         | "bench.micro_ratio" => Family::Time,
         "load.index.peak_rss_mib" => Family::Memory,
-        "load.index.shard_bytes" | "load.index.cache_bytes" => Family::Size,
+        "load.index.cache_bytes" => Family::Size,
         "load.index.deterministic" | "load.query.errors" | "load.concurrent.errors" => {
             Family::Exact
         }
@@ -85,12 +85,6 @@ pub fn corpus_samples(r: &CorpusResult) -> Vec<MetricSample> {
         v.push(s(
             "load.index.peak_rss_mib",
             i.peak_rss_mib.p50,
-            Better::Lower,
-            r,
-        ));
-        v.push(s(
-            "load.index.shard_bytes",
-            i.shard_bytes as f64,
             Better::Lower,
             r,
         ));
@@ -205,8 +199,6 @@ pub(crate) fn sample_corpus() -> CorpusResult {
             files_indexed: 100,
             files_per_s: 9.52,
             peak_rss_mib: ms(&[200.0, 210.0, 205.0]),
-            shard_files: 100,
-            shard_bytes: 2_000_000,
             cache_bytes: 9_000_000,
             digests_equal: true,
             digest: "ab".repeat(32),
@@ -301,7 +293,6 @@ fn names_and_directions() {
     assert_eq!(b("load.index.wall_s", None), Better::Lower);
     assert_eq!(b("load.index.files_per_s", None), Better::Higher);
     assert_eq!(b("load.index.peak_rss_mib", None), Better::Lower);
-    assert_eq!(b("load.index.shard_bytes", None), Better::Lower);
     assert_eq!(b("load.index.cache_bytes", None), Better::Lower);
     assert_eq!(b("load.index.deterministic", None), Better::Higher);
     assert_eq!(
@@ -335,7 +326,7 @@ fn names_and_directions() {
         let fam = family(&m.name);
         assert_eq!(fam == Family::None, m.better == Better::Info, "{}", m.name);
     }
-    assert_eq!(tolerance("load.index.shard_bytes").rel, 0.02);
+    assert_eq!(tolerance("load.index.cache_bytes").rel, 0.02);
     assert_eq!(tolerance("load.index.peak_rss_mib").rel, 0.10);
     assert_eq!(tolerance("load.query.p95_ms").abs, 5.0);
     assert_eq!(tolerance("load.query.errors").abs, 0.0);
