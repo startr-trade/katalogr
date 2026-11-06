@@ -909,7 +909,14 @@ mod cli {
         assert_eq!(v["katalogr"], env!("CARGO_PKG_VERSION"));
         assert_eq!(
             v["capabilities"],
-            serde_json::json!(["docs-affected", "impact", "position", "timeline", "view-id", "views"])
+            serde_json::json!([
+                "docs-affected",
+                "impact",
+                "position",
+                "timeline",
+                "view-id",
+                "views"
+            ])
         );
     }
 
