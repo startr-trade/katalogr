@@ -60,7 +60,8 @@ pub use mirror::mirror_drift;
 pub use path::path;
 pub use position::{PositionAnswer, PositionError, PositionRef, VIEW_FORMAT, ViewQuery, view_id};
 pub use rank::{
-    file_symbol_ranks, link_weight, rank, rank_cached_or_live, rank_cached_or_live_with_source, rank_live,
+    file_symbol_ranks, link_weight, rank, rank_cached_or_live, rank_cached_or_live_with_source,
+    rank_live,
 };
 pub use refs::{refs, refs_folded_traced, refs_traced};
 pub use resolve::{resolve, resolve_traced};

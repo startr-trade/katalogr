@@ -49,10 +49,7 @@ pub fn rank_cached_or_live_with_source(
 /// The rank scores of `ids`, bit for bit those of [`rank`]. When the stored rank is current it
 /// reads only those symbols' rows, an absent one being 0.0; otherwise it calls [`rank`] and picks
 /// them out, a symbol that is not there being 0.0 too.
-pub fn file_symbol_ranks(
-    tx: &impl Reader,
-    ids: &[Id],
-) -> Result<BTreeMap<Id, f64>, StoreError> {
+pub fn file_symbol_ranks(tx: &impl Reader, ids: &[Id]) -> Result<BTreeMap<Id, f64>, StoreError> {
     if tx.rank_is_current(RANK_CONTEXT)? {
         let mut out = BTreeMap::new();
         for id in ids {
