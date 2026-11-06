@@ -6,8 +6,8 @@ mod answers;
 mod at;
 mod audit;
 pub use answers::{
-    AnswerCheckReport, AnswerCounters, AnswerMismatch, AnswerRequest, AnswerStats, StoredQuery,
-    validity,
+    AnswerCheckReport, AnswerCounters, AnswerMismatch, AnswerRequest, AnswerStats, DiffQuery,
+    StoredQuery, validity,
 };
 pub use at::position_without_board;
 pub use audit::{AuditOutcome, AuditRecord, PositionText};
@@ -19,6 +19,7 @@ pub use docs_affected::{DEFAULT_DOCS_LIMIT, DocsAffectedParams};
 pub use impact::ImpactInput;
 pub mod contexts;
 pub mod contract;
+pub mod diff;
 pub use katalogr_query::{PositionAnswer, PositionRef, ViewQuery, WorkingSetSummary};
 pub mod doc_blocks;
 pub mod doc_views;

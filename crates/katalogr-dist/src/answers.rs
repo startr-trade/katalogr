@@ -37,6 +37,18 @@ pub enum StoredQuery {
     DeadCode(DeadCodeOptions),
     Map,
     Coverage(CoverageOptions),
+    /// A diff report between two sets of positions (FEAT-095).
+    Diff(DiffQuery),
+}
+
+/// A diff report's question: the repo, both sides' positions, the list limit and the format.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DiffQuery {
+    pub repo: String,
+    pub a: Vec<katalogr_query::PositionRef>,
+    pub b: Vec<katalogr_query::PositionRef>,
+    pub limit: u64,
+    pub render: crate::diff::DiffRender,
 }
 
 fn json_str<T: serde::Serialize>(v: &T) -> String {
@@ -123,6 +135,18 @@ impl StoredQuery {
                 a.insert("suffix_top".into(), o.suffix_top.to_string());
                 "coverage"
             }
+            StoredQuery::Diff(d) => {
+                a.insert("repo".into(), d.repo.clone());
+                a.insert("a".into(), json_str(&d.a));
+                a.insert("b".into(), json_str(&d.b));
+                a.insert("limit".into(), d.limit.to_string());
+                a.insert("render".into(), d.render.name().to_string());
+                a.insert(
+                    "report_format".into(),
+                    crate::diff::REPORT_FORMAT.to_string(),
+                );
+                "diff"
+            }
         };
         ViewQuery {
             op: op.to_string(),
@@ -167,6 +191,18 @@ impl StoredQuery {
                 repo: a.get("repo").cloned(),
                 suffix_top: num(a, "suffix_top")?,
             }),
+            "diff" => {
+                if num::<u32>(a, "report_format")? != crate::diff::REPORT_FORMAT {
+                    return None;
+                }
+                StoredQuery::Diff(DiffQuery {
+                    repo: a.get("repo")?.clone(),
+                    a: serde_json::from_str(a.get("a")?).ok()?,
+                    b: serde_json::from_str(a.get("b")?).ok()?,
+                    limit: num(a, "limit")?,
+                    render: crate::diff::DiffRender::from_name(a.get("render")?)?,
+                })
+            }
             _ => return None,
         })
     }
@@ -200,15 +236,13 @@ pub(crate) fn listing_digest(
     names.sort();
     let mut h = Sha256::new();
     for repo in names {
-        let Some(root) = engine.roots().get(repo.as_str()) else {
+        let Some(source) = engine.source(repo.as_str()) else {
             h.update(repo.as_bytes());
             h.update(b"\n-\n");
             continue;
         };
         let (include, exclude) = engine.repo_filters(repo);
-        let (files, _) =
-            katalogr_engine::scan::list_files_warned(root.as_std_path(), &include, &exclude)?;
-        for f in files {
+        for f in source.list(&include, &exclude)? {
             h.update(repo.as_bytes());
             h.update(b"\n");
             h.update(f.as_str().as_bytes());
@@ -261,7 +295,7 @@ impl AnswerState {
 }
 
 /// An entry computed by a read, written once the read is known to have held.
-struct PendingWrite {
+pub(crate) struct PendingWrite {
     entry: StoredAnswer,
     max_mib: u64,
 }
@@ -292,6 +326,13 @@ impl Katalogr {
         self.answers.compute_hook = Some(hook);
     }
 
+    /// Runs the test hook, if one is set.
+    pub(crate) fn run_compute_hook(&self) {
+        if let Some(h) = &self.answers.compute_hook {
+            h();
+        }
+    }
+
     /// Counts for this facade since it was made.
     pub fn answer_counters(&self) -> AnswerCounters {
         *self.answers.counters.lock().expect("answer counters")
@@ -299,6 +340,12 @@ impl Katalogr {
 
     fn count(&self, f: impl FnOnce(&mut AnswerCounters)) {
         f(&mut self.answers.counters.lock().expect("answer counters"));
+    }
+
+    /// Whether stored answers are on: a clean build identity is set and `answers.max_mib` is
+    /// not 0.
+    pub(crate) fn answers_enabled(&self) -> bool {
+        self.answers.build.is_some() && self.answers_max_mib() > 0
     }
 
     pub(crate) fn answer_store(&self) -> Arc<dyn AnswerStore> {
@@ -341,7 +388,7 @@ impl Katalogr {
     }
 
     /// Writes an entry the read computed, then prunes. Errors become warnings.
-    fn commit_write(&self, p: PendingWrite, warnings: &mut Vec<String>) {
+    pub(crate) fn commit_write(&self, p: PendingWrite, warnings: &mut Vec<String>) {
         let store = self.answer_store();
         match store.put(&p.entry) {
             Ok(PutOutcome::Stored) => {
@@ -357,7 +404,7 @@ impl Katalogr {
 
     /// The read half of [`Katalogr::through_store`]: a hit, or the computed answer with the entry
     /// that should be written once the caller knows the answer held at its position.
-    fn read_through<T: Serialize + DeserializeOwned>(
+    pub(crate) fn read_through<T: Serialize + DeserializeOwned>(
         &self,
         r: &AnswerRequest,
         warnings: &mut Vec<String>,
@@ -439,7 +486,7 @@ impl Katalogr {
             }
             e
         });
-        let usable = self.answers.build.is_some() && self.answers_max_mib() > 0;
+        let usable = self.answers_enabled();
         let mut store_warnings = Vec::new();
         // The entry the read computed, and the positions its ID was computed from.
         let mut deferred: Option<(PendingWrite, Vec<katalogr_query::PositionRef>)> = None;
@@ -590,6 +637,8 @@ impl Katalogr {
                 let parts = self.coverage_parts(engine, o)?;
                 bytes(&crate::coverage_run(engine, o, &parts, tx)?)
             }
+            // Checked against a fresh build by the report's own check.
+            StoredQuery::Diff(_) => return Ok(None),
         }))
     }
 
