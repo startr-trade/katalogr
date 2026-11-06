@@ -1,0 +1,109 @@
+{
+  "$defs": {
+    "SnapshotManifest": {
+      "properties": {
+        "bytes": {
+          "description": "Bytes of the decoded database.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "cache_schema": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "digest": {
+          "description": "64 lower-case hex: the SHA-256 of the decoded database.",
+          "type": "string"
+        },
+        "facts_version": {
+          "type": "string"
+        },
+        "format": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "positions": {
+          "description": "Sorted by repo.",
+          "items": {
+            "$ref": "#/$defs/SnapshotPosition"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "format",
+        "bytes",
+        "positions",
+        "facts_version",
+        "cache_schema",
+        "digest"
+      ],
+      "type": "object"
+    },
+    "SnapshotPosition": {
+      "description": "One repo's position, in the same shape as `PositionRef` of katalogr-query, which this crate\ndoes not depend on. `dirty` is always null in a snapshot.",
+      "properties": {
+        "commit": {
+          "type": "string"
+        },
+        "repo": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "repo",
+        "commit"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "What `snapshot import` did.",
+  "properties": {
+    "facts_match": {
+      "description": "False when this binary computes another facts version over the imported rows.",
+      "type": "boolean"
+    },
+    "manifest": {
+      "$ref": "#/$defs/SnapshotManifest"
+    },
+    "no_root": {
+      "description": "Repos with no root here, which answer from these rows alone.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "rescans": {
+      "description": "Repos a rescan was queued for because `facts_match` is false.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "schema": {
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "warnings": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "schema",
+    "manifest",
+    "facts_match",
+    "rescans",
+    "no_root",
+    "warnings"
+  ],
+  "title": "SnapshotImport",
+  "type": "object"
+}

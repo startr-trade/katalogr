@@ -1,5 +1,7 @@
 //! FEAT-084 T1 and T10: reading a checkout's position, and the shared contract file.
 
+mod support;
+
 mod position {
     use katalogr_engine::position::{
         dirty_hash, load_stat_cache, read_position, read_position_cached, reference_position,
@@ -582,5 +584,77 @@ mod position {
             }
         }
         assert!(failures.is_empty(), "{}", failures.join("\n"));
+    }
+
+    /// FEAT-097 R-13. A repo with no root here but a recorded position answers from its rows
+    /// and counts as exact at that position.
+    #[test]
+    fn rootless_recorded_repo_is_exact() {
+        use camino::Utf8PathBuf;
+        use katalogr_engine::registry::ExtensionRegistry;
+        use katalogr_engine::{Consistency, Engine, QueryOptions, Scope};
+        use std::collections::{BTreeMap, BTreeSet};
+        use std::time::{Duration, Instant};
+
+        let tmp = tempfile::tempdir().unwrap();
+        let kx = Utf8PathBuf::from_path_buf(tmp.path().join("kx")).unwrap();
+        crate::support::init_project(&kx);
+        let dir = || {
+            katalogr_store::Kindex::open(&kx)
+                .unwrap()
+                .project(&katalogr_store::ProjectName::new("p").unwrap())
+                .unwrap()
+        };
+        let commit = "ab".repeat(20);
+        let open = |recorded_only: bool| {
+            let mut e = Engine::open(
+                dir(),
+                ExtensionRegistry::new(),
+                BTreeMap::new(),
+                Instant::now() + Duration::from_secs(10),
+            )
+            .unwrap();
+            if recorded_only {
+                e.set_recorded_only(BTreeSet::from(["r".to_string()]));
+            }
+            e
+        };
+        let read = |e: &Engine| {
+            e.with_consistency(
+                &QueryOptions {
+                    consistency: Consistency::WaitAll,
+                    timeout: Duration::from_secs(5),
+                    scope: Scope::Project,
+                },
+                |_| (),
+            )
+            .unwrap()
+        };
+        {
+            let e = open(false);
+            let mut tx = e.cache().write().unwrap();
+            let json = serde_json::json!({"repo": "r", "commit": commit, "dirty": null});
+            tx.set_meta("position.r", json.to_string().as_bytes())
+                .unwrap();
+            tx.set_meta("position_changed.r", br#"{"over":false,"paths":[]}"#)
+                .unwrap();
+            tx.commit().unwrap();
+            // Without the set, a project with no roots is not exact.
+            let a = read(&e);
+            assert!(!a.exact);
+        }
+        let e = open(true);
+        let a = read(&e);
+        assert!(a.exact, "{a:?}");
+        assert!(!a.stale);
+        assert_eq!(a.positions.len(), 1);
+        assert_eq!(a.positions[0].repo, "r");
+        assert_eq!(a.positions[0].commit.as_deref(), Some(commit.as_str()));
+        assert_eq!(a.positions[0].dirty, None);
+        drop(e);
+        // A repo with no record is not exact merely by being listed.
+        let mut e = open(false);
+        e.set_recorded_only(BTreeSet::from(["unknown".to_string()]));
+        assert!(!read(&e).exact);
     }
 }

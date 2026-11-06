@@ -26,6 +26,7 @@ use crate::cache::{TableId, db, writer_builder};
 use crate::error::StoreError;
 use camino::Utf8Path;
 use redb::{Database, ReadableDatabase, ReadableTable};
+use std::collections::BTreeMap;
 use std::time::Instant;
 
 /// File name of the rewrite target, beside `index.redb`.
@@ -100,18 +101,66 @@ pub struct CompactReport {
     pub millis: u64,
 }
 
+/// What an export copy leaves out and what it changes (FEAT-097). An overlay key with `None`
+/// drops that meta row; with `Some(v)` it replaces or adds the row.
+#[derive(Clone, Debug, Default)]
+pub struct ExportPlan {
+    pub skip: Vec<TableId>,
+    pub meta: BTreeMap<String, Option<Vec<u8>>>,
+}
+
 /// Copies every table of `old` in key order into a new file at `tmp`, then compacts that file.
 pub(crate) fn rewrite(old: &Database, tmp: &Utf8Path, deadline: Instant) -> Result<(), StoreError> {
+    rewrite_with(old, tmp, &ExportPlan::default(), deadline)
+}
+
+/// [`rewrite`] with a plan: the tables it skips come out empty and the meta overlay is applied.
+pub(crate) fn rewrite_with(
+    old: &Database,
+    tmp: &Utf8Path,
+    plan: &ExportPlan,
+    deadline: Instant,
+) -> Result<(), StoreError> {
     let mut new = writer_builder(deadline)
         .create(tmp.as_std_path())
         .map_err(db)?;
+    copy_tables(old, &mut new, plan)?;
+    // The compaction pass gives back the tail redb grew the file by while the rows went in;
+    // without it the fresh file is 1.8 times as large (measured on 861 files).
+    new.compact().map_err(db)?;
+    drop(new);
+    record_size(tmp, deadline)
+}
+
+/// Copies every table of `old`, in key order, into `new`, applying `plan`. The tables are copied
+/// in transactions of about `BATCH_BYTES` of rows, so memory stays bounded on a large cache and a
+/// small one pays for a single commit. A file shared with other processes allows no non-durable
+/// commit, so every commit here is durable. Meta overlay rows are merged in key order, so the
+/// result does not depend on the overlay.
+pub(crate) fn copy_tables(
+    old: &Database,
+    new: &mut Database,
+    plan: &ExportPlan,
+) -> Result<(), StoreError> {
     let rtx = old.begin_read().map_err(db)?;
-    // The tables are copied in transactions of about `BATCH_BYTES` of rows, so memory stays
-    // bounded on a large cache and a small one pays for a single commit. A file shared with other
-    // processes allows no non-durable commit, so every commit here is durable.
     let mut w = new.begin_write().map_err(db)?;
     let mut bytes = 0usize;
     for t in TableId::ALL {
+        if plan.skip.contains(&t) {
+            // The table exists, empty, so readers do not meet a missing one.
+            w.open_table(t.def()).map_err(db)?;
+            continue;
+        }
+        let is_meta = t == TableId::Meta;
+        let added: Vec<(&[u8], &[u8])> = if is_meta {
+            plan.meta
+                .iter()
+                .filter_map(|(k, v)| v.as_ref().map(|v| (k.as_bytes(), v.as_slice())))
+                .collect()
+        } else {
+            Vec::new()
+        };
+        let mut next_added = 0usize;
         let src = rtx.open_table(t.def()).map_err(db)?;
         let mut rows = src.iter().map_err(db)?;
         loop {
@@ -120,12 +169,31 @@ pub(crate) fn rewrite(old: &Database, tmp: &Utf8Path, deadline: Instant) -> Resu
                 let mut dst = w.open_table(t.def()).map_err(db)?;
                 for r in rows.by_ref() {
                     let (k, v) = r.map_err(db)?;
+                    if is_meta {
+                        while next_added < added.len() && added[next_added].0 < k.value() {
+                            let (ak, av) = added[next_added];
+                            dst.insert(ak, av).map_err(db)?;
+                            bytes += ak.len() + av.len();
+                            next_added += 1;
+                        }
+                        let named = std::str::from_utf8(k.value())
+                            .is_ok_and(|name| plan.meta.contains_key(name));
+                        if named {
+                            continue;
+                        }
+                    }
                     dst.insert(k.value(), v.value()).map_err(db)?;
                     bytes += k.value().len() + v.value().len();
                     if bytes >= BATCH_BYTES {
                         full = true;
                         break;
                     }
+                }
+                if !full {
+                    for &(ak, av) in &added[next_added..] {
+                        dst.insert(ak, av).map_err(db)?;
+                    }
+                    next_added = added.len();
                 }
             }
             if !full {
@@ -135,15 +203,11 @@ pub(crate) fn rewrite(old: &Database, tmp: &Utf8Path, deadline: Instant) -> Resu
             w = new.begin_write().map_err(db)?;
             bytes = 0;
         }
+        debug_assert_eq!(next_added, added.len());
     }
     w.commit().map_err(db)?;
     drop(rtx);
-    // The compaction pass gives back the tail redb grew the file by while the rows went in.
-    // The pass gives back the tail redb grew the file by while the rows went in; without it the
-    // fresh file is 1.8 times as large (measured on 861 files).
-    new.compact().map_err(db)?;
-    drop(new);
-    record_size(tmp, deadline)
+    Ok(())
 }
 
 /// Writes `meta.compacted_bytes` into the closed file at `path` as the size it has now. The write

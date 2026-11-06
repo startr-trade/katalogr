@@ -32,6 +32,8 @@ pub mod hooks;
 mod roots;
 mod setup;
 mod shard_show;
+pub mod snapshot;
+pub mod snapshot_import;
 mod symbol_count;
 pub use symbol_count::symbol_count;
 mod span;
@@ -67,12 +69,16 @@ use katalogr_query::{
 };
 pub use katalogr_query::{ReplaceResult, ShowResult};
 pub use katalogr_render as render;
+pub use katalogr_store::SnapshotManifest;
 #[cfg(feature = "web")]
 pub use katalogr_web as web;
 pub use setup::{ProjectCreated, kindex_init, project_init};
+pub use snapshot::SnapshotExport;
+pub use snapshot_import::{SnapshotImport, read_snapshot_manifest};
 pub use threads::{BATCH_BYTES_KEY, THREADS_ENV, THREADS_KEY, resolve_parallelism};
 
-use camino::{Utf8Path, Utf8PathBuf};
+pub use camino::Utf8Path;
+use camino::Utf8PathBuf;
 use katalogr_analytics::{
     CommunityOptions, CommunityReport, CoverageInput, CoverageReport, CycleOptions, CycleReport,
     DEFAULT_SEED, DeadCodeOptions, DeadCodeReport, HubOptions, HubReport, RationaleReport,
@@ -145,6 +151,16 @@ pub fn schemas() -> BTreeMap<&'static str, serde_json::Value> {
         )
         .is_none(),
         "schema name diff is registered twice"
+    );
+    assert!(
+        all.insert("snapshot-manifest", snapshot::manifest_schema())
+            .is_none(),
+        "schema name snapshot-manifest is registered twice"
+    );
+    assert!(
+        all.insert("snapshot-import", snapshot_import::schema())
+            .is_none(),
+        "schema name snapshot-import is registered twice"
     );
     assert!(
         all.insert("position", katalogr_query::position_schema())
@@ -783,7 +799,38 @@ impl Katalogr {
             );
         }
         self.pin_positions(&mut engine, manifest_kind.as_ref())?;
+        self.recorded_only(&mut engine)?;
         self.configure(engine)
+    }
+
+    /// FEAT-097 R-13. A repo the project lists, with no root here and a recorded position (an
+    /// imported snapshot), answers from its rows. It is told apart from a repo with no record,
+    /// which is absent from this index.
+    fn recorded_only(&self, engine: &mut Engine) -> Result<(), DistError> {
+        use std::collections::BTreeSet;
+        let missing: Vec<String> = self
+            .project
+            .config()
+            .repos
+            .iter()
+            .filter(|r| !engine.roots().contains_key(&r.name))
+            .map(|r| r.name.clone())
+            .collect();
+        if missing.is_empty() {
+            return Ok(());
+        }
+        let snap = engine.cache().read()?;
+        let mut only = BTreeSet::new();
+        for repo in missing {
+            if let Some(p) = katalogr_engine::consistency::recorded_position(&snap, &repo)?
+                && p.commit.as_deref().is_some_and(|c| !c.is_empty())
+            {
+                only.insert(repo);
+            }
+        }
+        drop(snap);
+        engine.set_recorded_only(only);
+        Ok(())
     }
 
     /// FEAT-084. Fix the position of every repo this context does not read from a checkout: a

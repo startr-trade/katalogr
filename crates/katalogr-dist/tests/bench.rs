@@ -1318,4 +1318,137 @@ mod bench {
         );
         assert!(secs <= 60.0, "{secs:.1} s is over 60 s");
     }
+
+    // FEAT-097 R-20. The corpus is one git checkout named by `KATALOGR_BENCH_CORPUS_ROOT`, read
+    // in place and never written; it must be clean and committed. The kindexes and the snapshot
+    // live under `~/.cache/katalogr-scratch/FEAT-097/` (or `KATALOGR_SCRATCH`) and are removed
+    // when the bench ends. Run once, under the heavy-job lock, in release:
+    // `flock ~/.cache/heavy-build.lock cargo test -p katalogr-dist --release --features
+    // test-extractor --test bench snapshot_round_trip_budget -- --ignored --nocapture`.
+
+    fn scratch_097() -> tempfile::TempDir {
+        let base = std::env::var("KATALOGR_SCRATCH").map_or_else(
+            |_| {
+                let home = std::env::var("HOME").expect("HOME");
+                PathBuf::from(home).join(".cache/katalogr-scratch/FEAT-097")
+            },
+            PathBuf::from,
+        );
+        std::fs::create_dir_all(&base).unwrap();
+        tempfile::Builder::new()
+            .prefix("bench-")
+            .tempdir_in(base)
+            .unwrap()
+    }
+
+    /// A project `bench` holding the corpus as repo `corpus`, in its own kindex under `dir`.
+    fn project_097(dir: &Path, corpus: &Path) -> Katalogr {
+        let kx = dir.join("kx");
+        kindex_init(&kx).unwrap();
+        // `mark` false: the corpus may be a read-only clone, so no `.katalogr` marker is written.
+        project_init(
+            &kx,
+            "bench",
+            vec![("corpus".to_string(), corpus.to_path_buf())],
+            false,
+        )
+        .unwrap();
+        Katalogr::resolve(
+            &kx,
+            &Overrides {
+                kindex: Some(kx.display().to_string()),
+                project: Some("bench".to_string()),
+                ..Default::default()
+            },
+        )
+        .unwrap()
+    }
+
+    /// Export, import and the index after it, against a cold index (FEAT-097 R-20). Prints each
+    /// wall time, the file size, peak RSS and the load average, then the budgets with PASS or
+    /// MISS. A miss is reported, not fixed: only the graph comparison asserts.
+    #[test]
+    #[ignore]
+    fn snapshot_round_trip_budget() {
+        let corpus = PathBuf::from(
+            std::env::var("KATALOGR_BENCH_CORPUS_ROOT")
+                .expect("set KATALOGR_BENCH_CORPUS_ROOT to a clean git checkout"),
+        );
+        let scratch = scratch_097();
+        let opts = Options {
+            timeout: Some(7200.0),
+            ..Options::default()
+        };
+        let load0 = load();
+
+        // 1. Cold index.
+        let source = project_097(&scratch.path().join("source"), &corpus);
+        let t = Instant::now();
+        let r = source.index(None, true, None, &opts).unwrap();
+        let cold = t.elapsed().as_secs_f64();
+        assert!(!r.stale && !r.timed_out, "cold index did not finish");
+        println!("cold index: {cold:.1} s; load {load0} -> {}", load());
+        let want = source.audit_record(&opts).unwrap().graph_digest;
+
+        // 2. Export.
+        let file = scratch.path().join("corpus.ksnap");
+        let file8 = camino::Utf8PathBuf::from_path_buf(file.clone()).unwrap();
+        let load1 = load();
+        let t = Instant::now();
+        let exported = source.snapshot_export(&file8, &opts).unwrap();
+        let export_s = t.elapsed().as_secs_f64();
+        println!(
+            "export: {export_s:.1} s; file {} bytes from a database of {} bytes; load {load1} -> {}",
+            exported.file_bytes,
+            exported.manifest.bytes,
+            load()
+        );
+        drop(source);
+
+        // 3. Import into an empty project.
+        let target = project_097(&scratch.path().join("target"), &corpus);
+        let load2 = load();
+        let t = Instant::now();
+        let imported = target.snapshot_import(&file8, false, None, &opts).unwrap();
+        let import_s = t.elapsed().as_secs_f64();
+        println!(
+            "import: {import_s:.1} s; facts match {}; load {load2} -> {}",
+            imported.facts_match,
+            load()
+        );
+
+        // 4. Index after the import: the snapshot's commit is the checkout's, so nothing differs.
+        let load3 = load();
+        let t = Instant::now();
+        let r = target.index(None, false, None, &opts).unwrap();
+        let index_s = t.elapsed().as_secs_f64();
+        assert!(
+            !r.stale && !r.timed_out,
+            "index after import did not finish"
+        );
+        println!(
+            "index after import: {index_s:.1} s; load {load3} -> {}",
+            load()
+        );
+
+        // 5. The graph is the same.
+        let have = target.audit_record(&opts).unwrap().graph_digest;
+        assert_eq!(have, want, "the imported graph differs from the source's");
+
+        let saving = 1.0 - (import_s + index_s) / cold;
+        let verdict = |ok: bool| if ok { "PASS" } else { "MISS" };
+        println!(
+            "snapshot_round_trip_budget: peak RSS {} MiB; load now {}",
+            peak_rss_mib(),
+            load()
+        );
+        println!(
+            "  export <= 15 s: {} ({export_s:.1} s)\n  import <= 5 s: {} ({import_s:.1} s)\n  import + index saves >= 90% of a cold index: {} ({:.1}%)\n  snapshot size: {} bytes (recorded, no budget)",
+            verdict(export_s <= 15.0),
+            verdict(import_s <= 5.0),
+            verdict(saving >= 0.9),
+            saving * 100.0,
+            exported.file_bytes
+        );
+    }
 }

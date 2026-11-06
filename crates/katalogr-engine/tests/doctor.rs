@@ -316,6 +316,30 @@ mod doctor {
     }
 
     #[test]
+    fn tracked_snapshot_reported() {
+        let p = healthy();
+        let d = dir(&p);
+        assert!(find(&doctor(&p), "KD-SNP-001").is_none());
+        std::fs::write(d.root().join("copy.ksnap"), b"not a database").unwrap();
+        // Git ignores the file, so it takes a forced add to track it.
+        git(&p.kx, &["add", "-f", "projects/p/copy.ksnap"]);
+        let r = doctor(&p);
+        let f = find(&r, "KD-SNP-001").expect("tracked snapshot");
+        assert_eq!((f.severity, f.count), (Severity::Error, Some(1)));
+        assert_eq!(f.area, "git");
+        assert!(f.message.contains("projects/p"), "{}", f.message);
+        assert!(!f.message.contains("copy.ksnap"), "{}", f.message);
+        let fix = f.fix.as_deref().unwrap();
+        assert!(
+            fix.contains("git -C <kindex-dir> rm --cached <file>"),
+            "{fix}"
+        );
+        assert!(fix.contains("history"), "{fix}");
+        // --skip-git skips the check.
+        assert!(find(&doctor_with(&p, &skip_git()), "KD-SNP-001").is_none());
+    }
+
+    #[test]
     fn no_journal_or_shard_areas() {
         let p = healthy();
         leave_shards(&p);

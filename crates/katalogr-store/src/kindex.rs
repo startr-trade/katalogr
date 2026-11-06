@@ -10,7 +10,7 @@ use std::io::Write;
 
 pub const SHARD_FORMAT: u32 = 2;
 const MIN_KATALOGR: &str = "0.2.0";
-const GITIGNORE: &str = "projects/*/.cache/\nprojects/*/shards/\n";
+const GITIGNORE: &str = "projects/*/.cache/\nprojects/*/shards/\n*.ksnap\n";
 
 fn is_lower_alnum(c: u8) -> bool {
     c.is_ascii_lowercase() || c.is_ascii_digit()
@@ -398,6 +398,25 @@ impl ProjectDir {
     /// The root of the kindex repository this project lives in.
     pub fn kindex_root(&self) -> &Utf8Path {
         &self.kindex_root
+    }
+
+    /// Paths in the kindex repository's git index that end in the snapshot suffix, sorted. Empty
+    /// when the kindex is not a repository. Reads the index only (FEAT-097 R-18).
+    pub fn tracked_snapshots(&self) -> Result<Vec<String>, StoreError> {
+        let git = |e: &dyn std::fmt::Display| StoreError::Git(e.to_string());
+        if !self.kindex_root.join(".git").exists() {
+            return Ok(Vec::new());
+        }
+        let repo = gix::open(self.kindex_root.as_std_path()).map_err(|e| git(&e))?;
+        let index = repo.index_or_empty().map_err(|e| git(&e))?;
+        let mut out: Vec<String> = index
+            .entries()
+            .iter()
+            .map(|e| e.path(&index).to_string())
+            .filter(|p| p.ends_with(crate::snapshot::SNAPSHOT_SUFFIX))
+            .collect();
+        out.sort();
+        Ok(out)
     }
 
     /// Compares the files people write (`config.yaml`, `format.json`, `profiles/`, `eval/`,

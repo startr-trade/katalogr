@@ -654,6 +654,11 @@ pub enum Command {
         #[command(subcommand)]
         action: AuditAction,
     },
+    /// Write the graph to one file, or install such a file as this project's index.
+    Snapshot {
+        #[command(subcommand)]
+        action: SnapshotAction,
+    },
     /// Print what the index holds about one file, as text.
     Shard {
         #[command(subcommand)]
@@ -817,6 +822,38 @@ pub enum AuditAction {
         /// The record file (default: the stored record of the current positions).
         #[arg(value_name = "RECORD")]
         record: Option<String>,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum SnapshotAction {
+    /// Write the context's graph to FILE: a text header with the positions, facts version, cache
+    /// schema and digest, then the compressed database. Refuses when the index is not current,
+    /// a repo is not at a clean commit, or FILE would be tracked by git. The file holds symbol
+    /// names, paths and signature text: keep it as private as the code.
+    Export {
+        /// The file to write (name it `*.ksnap`); it must not exist.
+        #[arg(long, value_name = "FILE")]
+        out: String,
+    },
+    /// Install FILE as the project's base index, atomically. Checks the schema, the repos and the
+    /// digest first. A later read re-extracts only what differs from the snapshot's commits.
+    /// Exits 1 for a damaged file and 5 for a refusal. `--context` is not accepted.
+    Import {
+        file: String,
+        /// Install over an existing index.
+        #[arg(long)]
+        replace: bool,
+        /// The digest to expect, as printed by `snapshot show`; compared before any decoding.
+        #[arg(long, value_name = "HEX")]
+        digest: Option<String>,
+    },
+    /// Print FILE's manifest. Needs no project unless `--verify`.
+    Show {
+        file: String,
+        /// Decode the payload to a temporary file and check its digest.
+        #[arg(long)]
+        verify: bool,
     },
 }
 
