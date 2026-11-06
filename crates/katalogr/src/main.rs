@@ -1,5 +1,6 @@
 //! The katalogr CLI: a thin wrapper over katalogr-dist (ADR-0010).
 
+mod answer_build;
 #[cfg(feature = "api")]
 mod api;
 mod cli;
@@ -87,6 +88,7 @@ fn run(cli: &Cli) -> Result<ExitCode, DistError> {
         Some(Command::Context { action }) => cmd::context::run(cli, action),
         Some(Command::Profiles { action }) => cmd::profiles::run(cli, action),
         Some(Command::Shard { action }) => cmd::shard::run(cli, action),
+        Some(Command::Answers { action }) => cmd::answers::run(cli, action),
         Some(Command::Audit { action }) => cmd::audit::run(cli, action),
         Some(Command::Dangling { kind }) => cmd::dangling::run(cli, kind),
         Some(Command::DocsAffected { since, kind, limit }) => {

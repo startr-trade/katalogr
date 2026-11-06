@@ -4,7 +4,9 @@
 
 use crate::resolve::hit;
 use crate::result::SymbolHit;
+use katalogr_model::Id;
 use katalogr_store::{RANK_CONTEXT, Reader, StoreError, SymbolCore, pagerank};
+use std::collections::BTreeMap;
 
 pub use katalogr_store::{link_weight, row_weight};
 
@@ -42,6 +44,27 @@ pub fn rank_cached_or_live_with_source(
     };
     let hits = cores.into_iter().map(|(_, c)| core_hit(c)).collect();
     Ok((sorted(hits, scores), is_cached))
+}
+
+/// The rank scores of `ids`, bit for bit those of [`rank`]. When the stored rank is current it
+/// reads only those symbols' rows, an absent one being 0.0; otherwise it calls [`rank`] and picks
+/// them out, a symbol that is not there being 0.0 too.
+pub fn file_symbol_ranks(tx: &impl Reader, ids: &[Id]) -> Result<BTreeMap<Id, f64>, StoreError> {
+    if tx.rank_is_current(RANK_CONTEXT)? {
+        let mut out = BTreeMap::new();
+        for id in ids {
+            out.insert(*id, tx.rank_of(*id)?.unwrap_or(0.0));
+        }
+        return Ok(out);
+    }
+    let all: BTreeMap<Id, f64> = rank(tx)?
+        .into_iter()
+        .map(|(hit, score)| (Id::of(&hit.name), score))
+        .collect();
+    Ok(ids
+        .iter()
+        .map(|id| (*id, all.get(id).copied().unwrap_or(0.0)))
+        .collect())
 }
 
 /// The hit of a symbol core.

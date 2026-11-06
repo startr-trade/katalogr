@@ -21,7 +21,7 @@ use katalogr_query::{Explain, SymbolHit};
 use katalogr_store::blob::git_blob_id;
 use katalogr_store::{Reader, StoreError, SymbolRow};
 use serde_json::{Value, json};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use std::io::Write;
 use std::panic::AssertUnwindSafe;
 use std::path::{Path, PathBuf};
@@ -273,14 +273,11 @@ fn pre_read(
             let Some(row) = tx.artifact(artifact.id())? else {
                 return Ok(None);
             };
-            let ranks: BTreeMap<String, f64> = katalogr_query::rank(tx)?
-                .into_iter()
-                .map(|(s, r)| (s.name, r))
-                .collect();
+            let ranks = katalogr_query::file_symbol_ranks(tx, &row.symbols)?;
             let mut symbols = Vec::new();
             for id in &row.symbols {
                 if let Some(s) = tx.symbol(*id)? {
-                    let r = ranks.get(&s.name.canonical()).copied().unwrap_or(0.0);
+                    let r = ranks.get(id).copied().unwrap_or(0.0);
                     symbols.push((s, r));
                 }
             }

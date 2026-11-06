@@ -107,9 +107,8 @@ pub fn workload_for(cx: &Ctx) -> Result<(Workload, bool)> {
         return Ok((w, false));
     }
     let refreshed = path.is_file();
-    let hubs = cx.run_json(&[
-        "--consistency",
-        "stale-ok",
+    let mut hub_args: Vec<&str> = leading_args().to_vec();
+    hub_args.extend([
         "hubs",
         "--level",
         "symbol",
@@ -117,7 +116,8 @@ pub fn workload_for(cx: &Ctx) -> Result<(Workload, bool)> {
         "50",
         "--min-degree",
         "0",
-    ])?;
+    ]);
+    let hubs = cx.run_json(&hub_args)?;
     let w = workload::derive(cx.c, &hubs, cx.s.targets);
     save_workload(&path, &w)?;
     Ok((w, refreshed))
@@ -193,10 +193,28 @@ pub fn run(cx: &mut Ctx) -> Result<(Vec<OpResult>, bool)> {
     Ok((out, refreshed))
 }
 
+/// The arguments before every op: read what is indexed, and compute the answer, since a stored
+/// one would make a repeated query look free (FEAT-096 R-11).
+pub fn leading_args() -> [&'static str; 3] {
+    ["--consistency", "stale-ok", "--fresh"]
+}
+
 /// One invocation of an op through `proc::run`.
 pub fn one(cx: &Ctx, op: &QueryOp) -> Result<RunStats> {
     let args = op.args();
-    let mut full: Vec<&str> = vec!["--consistency", "stale-ok"];
+    let mut full: Vec<&str> = leading_args().to_vec();
     full.extend(args.iter().map(String::as_str));
     proc::run_with_timeout(&mut cx.k.cmd(&full), QUERY_TIMEOUT)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::leading_args;
+
+    #[test]
+    fn ops_pass_fresh() {
+        let a = leading_args();
+        assert!(a.contains(&"--fresh"));
+        assert_eq!(&a[..2], ["--consistency", "stale-ok"]);
+    }
 }

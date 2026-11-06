@@ -461,10 +461,11 @@ pub fn call(cfg: &ServeConfig, name: &str, args: &Value) -> Result<JsonAnswer, U
     if let Some(c) = p.text("context") {
         overrides.context = Some(c.to_string());
     }
-    let k = match Katalogr::resolve(&cfg.root, &overrides) {
+    let mut k = match Katalogr::resolve(&cfg.root, &overrides) {
         Ok(k) => k,
         Err(e) => return Ok(render_json::error(&e)),
     };
+    k.set_answer_build(crate::answer_build::current());
     let budget = p.budget().or(cfg.budget);
     // The same `op` names and argument keys as the CLI, so both give one view ID.
     let mk = |op: &str, args: &[(&str, String)]| -> Options {

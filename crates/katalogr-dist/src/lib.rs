@@ -2,8 +2,13 @@
 //!
 //! All behaviour of the command-line wrapper lives here; the wrapper parses, calls and renders.
 
+mod answers;
 mod at;
 mod audit;
+pub use answers::{
+    AnswerCheckReport, AnswerCounters, AnswerMismatch, AnswerRequest, AnswerStats, StoredQuery,
+    validity,
+};
 pub use at::position_without_board;
 pub use audit::{AuditOutcome, AuditRecord, PositionText};
 mod changes;
@@ -121,6 +126,16 @@ pub fn schemas() -> BTreeMap<&'static str, serde_json::Value> {
         "schema name contract is registered twice"
     );
     assert!(
+        all.insert("answers-check", answers::check_schema())
+            .is_none(),
+        "schema name answers-check is registered twice"
+    );
+    assert!(
+        all.insert("answers-stats", answers::stats_schema())
+            .is_none(),
+        "schema name answers-stats is registered twice"
+    );
+    assert!(
         all.insert("position", katalogr_query::position_schema())
             .is_none(),
         "schema name position is registered twice"
@@ -224,6 +239,9 @@ pub struct Options {
     /// Ranking of `search` and `map` (FEAT-039). The library default is neutral; the CLI asks
     /// for [`Ranking::Default`] unless `--neutral` or `--at` is given.
     pub ranking: Ranking,
+    /// Recompute instead of reading a stored answer; the result is still written (`--fresh`,
+    /// FEAT-096).
+    pub fresh: bool,
 }
 
 /// How `search` and `map` order their answers (FEAT-039).
@@ -303,6 +321,8 @@ pub struct Katalogr {
     view_extra: std::sync::Mutex<Vec<(String, String)>>,
     /// Snapshot folders the timeline reads, from `Overrides::snapshot_dirs`.
     snapshot_dirs: Vec<PathBuf>,
+    /// Stored answers: the build they are valid for, the store and the counts (FEAT-096).
+    answers: answers::AnswerState,
 }
 
 /// Profiles embedded in the binary, applied before the project's own: `(file name, text)`.
@@ -354,6 +374,52 @@ fn builtin_profiles() -> Vec<(String, String)> {
     BUILTIN_PROFILES
         .iter()
         .map(|(n, t)| (n.to_string(), t.to_string()))
+        .collect()
+}
+
+/// What a coverage report takes from the disk (see `Katalogr::coverage_parts`).
+pub(crate) struct CoverageParts {
+    profiles: katalogr_engine::profiles::ProfileSet,
+    unclaimed: BTreeMap<String, Vec<RelPath>>,
+    roots_missing: Vec<String>,
+}
+
+/// The report of `opts` over one snapshot, with the disk side already read.
+pub(crate) fn coverage_run(
+    engine: &Engine,
+    opts: &CoverageOptions,
+    parts: &CoverageParts,
+    tx: &ReadTx,
+) -> Result<CoverageReport, StoreError> {
+    let registry = engine.registry();
+    let language = |ext: &str, path: &RelPath| match registry.by_id(ext) {
+        Some(e) => e.language(path).to_string(),
+        None => ext.to_string(),
+    };
+    let claim = |path: &RelPath| claim_for(registry, &parts.profiles, path);
+    let input = CoverageInput {
+        language: &language,
+        claim: &claim,
+        unclaimed: parts.unclaimed.clone(),
+        roots_missing: parts.roots_missing.clone(),
+        exclude_prefixes: vec![HISTORY_PREFIX.to_string()],
+        repo: opts.repo.clone(),
+        suffix_top: opts.suffix_top,
+    };
+    katalogr_analytics::coverage(tx, &input)
+}
+
+/// Extension id to its code kinds, from the registry (dead-code's `code_kinds`).
+pub(crate) fn registry_code_kinds() -> BTreeMap<String, std::collections::BTreeSet<String>> {
+    build_registry()
+        .extractors()
+        .map(|e| {
+            (
+                e.id().to_string(),
+                e.code_kinds().iter().map(|k| k.to_string()).collect(),
+            )
+        })
+        .filter(|(_, kinds): &(String, std::collections::BTreeSet<String>)| !kinds.is_empty())
         .collect()
 }
 
@@ -607,6 +673,7 @@ impl Katalogr {
             notes: std::sync::Mutex::new(Vec::new()),
             view_extra: std::sync::Mutex::new(Vec::new()),
             snapshot_dirs: overrides.snapshot_dirs.clone(),
+            answers: answers::AnswerState::default(),
         })
     }
 
@@ -1352,6 +1419,9 @@ impl Katalogr {
     /// All symbols by PageRank.
     pub fn map(&self, opts: &Options) -> Result<Reply<Vec<MapEntry>>, DistError> {
         let _extra = self.extra_scope();
+        if !opts.diagnostic && opts.at.is_none() {
+            return self.map_stored(opts);
+        }
         let mut ws = WsRun::default();
         let mut reply = self.query_traced(opts, |tx, diag| {
             let boost = self.ws_boost(opts, tx, &mut ws);
@@ -1362,6 +1432,60 @@ impl Katalogr {
             )?))
         })?;
         ws.finish(&mut reply.report);
+        Ok(reply)
+    }
+
+    /// `map` through the stored answers. The working set that boosts the ranking is part of the
+    /// question, so it joins the key; it is read at most once, whichever path asks first.
+    fn map_stored(&self, opts: &Options) -> Result<Reply<Vec<MapEntry>>, DistError> {
+        struct Boosted {
+            read: bool,
+            boost: Option<katalogr_query::Boost>,
+            ws: WsRun,
+        }
+        let state = std::cell::RefCell::new(Boosted {
+            read: false,
+            boost: None,
+            ws: WsRun::default(),
+        });
+        let read = |tx: &ReadTx| {
+            let mut st = state.borrow_mut();
+            if !st.read {
+                st.read = true;
+                let mut ws = WsRun::default();
+                st.boost = self.ws_boost(opts, tx, &mut ws);
+                st.ws = ws;
+            }
+        };
+        let mut reply = self.stored(
+            opts,
+            &answers::StoredQuery::Map,
+            |tx| {
+                read(tx);
+                // What `ws_boost` added to the question joins the key.
+                let args = self
+                    .view_extra
+                    .lock()
+                    .expect("view_extra lock")
+                    .iter()
+                    .cloned()
+                    .collect();
+                Some(answers::Extra {
+                    inputs: BTreeMap::new(),
+                    args,
+                })
+            },
+            |tx| {
+                read(tx);
+                let st = state.borrow();
+                Ok(Outcome::Found(katalogr_query::map_boosted_traced(
+                    tx,
+                    st.boost.as_ref(),
+                    &mut Diagnostic::off(),
+                )?))
+            },
+        )?;
+        state.into_inner().ws.finish(&mut reply.report);
         Ok(reply)
     }
 
@@ -1544,11 +1668,32 @@ impl Katalogr {
         }
     }
 
+    /// A read of a whole-graph command through the stored answers (FEAT-096). A read at another
+    /// position (`--at`) is computed as before.
+    fn stored<T: serde::Serialize + serde::de::DeserializeOwned>(
+        &self,
+        o: &Options,
+        q: &answers::StoredQuery,
+        extra: impl FnOnce(&ReadTx) -> Option<answers::Extra>,
+        f: impl FnOnce(&ReadTx) -> Result<Outcome<T>, StoreError>,
+    ) -> Result<Reply<T>, DistError> {
+        if o.at.is_some() {
+            return self.query(o, f);
+        }
+        let timeout = o.timeout()?;
+        let consistency = o.consistency.unwrap_or(Consistency::Wait);
+        let engine = self.engine_for(consistency, Instant::now() + timeout)?;
+        self.query_stored(&engine, o, q, extra, f)
+    }
+
     /// Hubs: the nodes with the highest weighted degree.
     pub fn hubs(&self, opts: &HubOptions, o: &Options) -> Result<Reply<HubReport>, DistError> {
-        let mut reply = self.query(o, |tx| {
-            Ok(Outcome::Found(katalogr_analytics::hubs(tx, opts)?))
-        })?;
+        let mut reply = self.stored(
+            o,
+            &answers::StoredQuery::Hubs(opts.clone()),
+            |_| Some(answers::Extra::default()),
+            |tx| Ok(Outcome::Found(katalogr_analytics::hubs(tx, opts)?)),
+        )?;
         if let Outcome::Found(r) = &reply.outcome {
             reply.partial = limit_partial(opts.limit, r.items.len(), None);
         }
@@ -1561,9 +1706,12 @@ impl Katalogr {
         opts: &CommunityOptions,
         o: &Options,
     ) -> Result<Reply<CommunityReport>, DistError> {
-        let mut reply = self.query(o, |tx| {
-            Ok(Outcome::Found(katalogr_analytics::communities(tx, opts)?))
-        })?;
+        let mut reply = self.stored(
+            o,
+            &answers::StoredQuery::Communities(opts.clone()),
+            |_| Some(answers::Extra::default()),
+            |tx| Ok(Outcome::Found(katalogr_analytics::communities(tx, opts)?)),
+        )?;
         if let Outcome::Found(r) = &reply.outcome {
             reply.partial = limit_partial(opts.limit, r.items.len(), Some(r.communities_total));
             let shown: usize = r.items.iter().map(|c| c.top.len()).sum();
@@ -1586,9 +1734,12 @@ impl Katalogr {
         opts: &CycleOptions,
         o: &Options,
     ) -> Result<Reply<CycleReport>, DistError> {
-        let mut reply = self.query(o, |tx| {
-            Ok(Outcome::Found(katalogr_analytics::cycles(tx, opts)?))
-        })?;
+        let mut reply = self.stored(
+            o,
+            &answers::StoredQuery::Cycles(opts.clone()),
+            |_| Some(answers::Extra::default()),
+            |tx| Ok(Outcome::Found(katalogr_analytics::cycles(tx, opts)?)),
+        )?;
         if let Outcome::Found(r) = &reply.outcome {
             reply.partial = limit_partial(opts.limit, r.items.len(), Some(r.cycles_total));
             let shown: usize = r.items.iter().map(|c| c.members.len()).sum();
@@ -1634,37 +1785,61 @@ impl Katalogr {
         let timeout = o.timeout()?;
         let consistency = o.consistency.unwrap_or(Consistency::Wait);
         let engine = self.engine_for(consistency, Instant::now() + timeout)?;
+        let parts = self.coverage_parts(&engine, opts)?;
+        let run = |tx: &ReadTx| Ok(Outcome::Found(coverage_run(&engine, opts, &parts, tx)?));
+        if o.at.is_some() {
+            return self.query_on(&engine, o, run);
+        }
+        // The census walks the disk, so the listing it saw is an input of the stored answer.
+        let named: Vec<String> = self
+            .project
+            .config()
+            .repos
+            .iter()
+            .filter(|r| opts.repo.as_deref().is_none_or(|w| w == r.name))
+            .map(|r| r.name.clone())
+            .collect();
+        let listing = answers::listing_digest(&engine, &named)?;
+        self.query_stored(
+            &engine,
+            o,
+            &answers::StoredQuery::Coverage(opts.clone()),
+            |_| {
+                Some(answers::Extra {
+                    inputs: BTreeMap::from([("listing".to_string(), listing)]),
+                    args: BTreeMap::new(),
+                })
+            },
+            run,
+        )
+    }
+
+    /// The disk side of a coverage report: the profiles, the files no extension claims and the
+    /// repos with no root here. Walks each repository root once.
+    pub(crate) fn coverage_parts(
+        &self,
+        engine: &Engine,
+        opts: &CoverageOptions,
+    ) -> Result<CoverageParts, DistError> {
         let profiles = engine.routing_profiles()?;
         let mut unclaimed = BTreeMap::new();
         let mut roots_missing = Vec::new();
-        for repo in repos {
-            if opts.repo.as_deref().is_some_and(|r| r != repo) {
+        for r in &self.project.config().repos {
+            let repo = r.name.as_str();
+            if opts.repo.as_deref().is_some_and(|w| w != repo) {
                 continue;
             }
-            match katalogr_engine::census::census_with(&engine, repo, &profiles)? {
+            match katalogr_engine::census::census_with(engine, repo, &profiles)? {
                 Some(c) => {
                     unclaimed.insert(repo.to_string(), c.unclaimed);
                 }
                 None => roots_missing.push(repo.to_string()),
             }
         }
-        let registry = engine.registry();
-        let language = |ext: &str, path: &RelPath| match registry.by_id(ext) {
-            Some(e) => e.language(path).to_string(),
-            None => ext.to_string(),
-        };
-        let claim = |path: &RelPath| claim_for(registry, &profiles, path);
-        let input = CoverageInput {
-            language: &language,
-            claim: &claim,
+        Ok(CoverageParts {
+            profiles,
             unclaimed,
             roots_missing,
-            exclude_prefixes: vec![HISTORY_PREFIX.to_string()],
-            repo: opts.repo.clone(),
-            suffix_top: opts.suffix_top,
-        };
-        self.query_on(&engine, o, |tx| {
-            Ok(Outcome::Found(katalogr_analytics::coverage(tx, &input)?))
         })
     }
 
@@ -1674,19 +1849,18 @@ impl Katalogr {
         mut opts: DeadCodeOptions,
         o: &Options,
     ) -> Result<Reply<DeadCodeReport>, DistError> {
-        opts.code_kinds = build_registry()
-            .extractors()
-            .map(|e| {
-                (
-                    e.id().to_string(),
-                    e.code_kinds().iter().map(|k| k.to_string()).collect(),
-                )
-            })
-            .filter(|(_, kinds): &(String, std::collections::BTreeSet<String>)| !kinds.is_empty())
-            .collect();
-        let mut reply = self.query(o, |tx| {
-            Ok(Outcome::Found(katalogr_analytics::dead_code(tx, &opts)?))
-        })?;
+        opts.code_kinds = registry_code_kinds();
+        // The question as asked: the code kinds come from the registry, which the build covers.
+        let asked = answers::StoredQuery::DeadCode(DeadCodeOptions {
+            code_kinds: BTreeMap::new(),
+            ..opts.clone()
+        });
+        let mut reply = self.stored(
+            o,
+            &asked,
+            |_| Some(answers::Extra::default()),
+            |tx| Ok(Outcome::Found(katalogr_analytics::dead_code(tx, &opts)?)),
+        )?;
         if let Outcome::Found(r) = &reply.outcome {
             reply.partial = limit_partial(opts.limit, r.items.len(), Some(r.candidates_total));
         }

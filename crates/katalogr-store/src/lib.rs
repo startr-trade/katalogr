@@ -1,5 +1,6 @@
 //! kindex repository, shard codec, path guard and redb cache (FEAT-003, ADR-0013).
 
+pub mod answers;
 pub mod blob;
 pub mod cache;
 mod codec;
@@ -18,6 +19,10 @@ mod postings;
 pub mod rank;
 pub mod shard;
 
+pub use answers::{
+    ANSWER_FORMAT, AnswerHeader, AnswerListing, AnswerStore, DirAnswerStore, MAX_ANSWER_BYTES,
+    PruneReport, PutOutcome, StoredAnswer,
+};
 pub use cache::PathKey;
 pub use cache::{
     ArtifactRow, BindingRow, CACHE_SCHEMA, Cache, ContractRow, ErrorRow, FanKey, LEXICON_FIELDS,

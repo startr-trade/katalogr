@@ -656,6 +656,9 @@ mod api {
             // Writes a record into the project (`record`), or compares with one (`verify`); its
             // answers are its own types, not envelopes (FEAT-094 R-14).
             "audit",
+            // Inspects and tidies the stored answers of this machine (FEAT-096): a maintenance
+            // command with its own report types, not an envelope.
+            "answers",
             // Prints one file's extracted text for a person, writing nothing (FEAT-094 R-13).
             "shard",
             // Draws a view for a person; the generated views are `view`, served under

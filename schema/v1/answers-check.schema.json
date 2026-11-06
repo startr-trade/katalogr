@@ -1,0 +1,89 @@
+{
+  "$defs": {
+    "AnswerMismatch": {
+      "description": "A stored entry that differs from a fresh computation.",
+      "properties": {
+        "first_difference": {
+          "description": "Byte offset of the first difference.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "op": {
+          "type": "string"
+        },
+        "view_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "view_id",
+        "op",
+        "first_difference"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "What `answers check` found.",
+  "properties": {
+    "checked": {
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "exact": {
+      "description": "False when the checkout's position could not be held for the check.",
+      "type": "boolean"
+    },
+    "matched": {
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "mismatched": {
+      "items": {
+        "$ref": "#/$defs/AnswerMismatch"
+      },
+      "type": "array"
+    },
+    "removed": {
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "schema": {
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "skipped_other_position": {
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "skipped_other_validity": {
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "skipped_unknown_op": {
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "schema",
+    "exact",
+    "checked",
+    "matched",
+    "mismatched",
+    "skipped_other_position",
+    "skipped_other_validity",
+    "skipped_unknown_op",
+    "removed"
+  ],
+  "title": "AnswerCheckReport",
+  "type": "object"
+}

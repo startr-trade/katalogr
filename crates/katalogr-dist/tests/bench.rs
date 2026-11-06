@@ -914,4 +914,247 @@ mod bench {
             );
         }
     }
+
+    /// A scratch directory for FEAT-096, on disk and outside `/tmp`, removed when dropped.
+    fn scratch_096() -> tempfile::TempDir {
+        let base = std::env::var("KATALOGR_SCRATCH").map_or_else(
+            |_| {
+                let home = std::env::var("HOME").expect("HOME");
+                PathBuf::from(home).join(".cache/katalogr-scratch/FEAT-096")
+            },
+            PathBuf::from,
+        );
+        std::fs::create_dir_all(&base).unwrap();
+        tempfile::Builder::new()
+            .prefix("bench-")
+            .tempdir_in(base)
+            .unwrap()
+    }
+
+    /// FEAT-096 R-18: `index_digest` over 15,000 file revisions takes at most 30 ms (median of 9).
+    #[test]
+    #[ignore]
+    fn index_digest_cost() {
+        use katalogr_dist::{kindex_init, project_init};
+        use katalogr_model::RelPath;
+        let tmp = scratch_096();
+        let root = std::fs::canonicalize(tmp.path()).unwrap();
+        let repo = root.join("app");
+        std::fs::create_dir_all(&repo).unwrap();
+        let kx = root.join("kx");
+        kindex_init(&kx).unwrap();
+        project_init(&kx, "demo", vec![("app".into(), repo)], false).unwrap();
+        let dir = Kindex::open(camino::Utf8Path::from_path(&kx).unwrap())
+            .unwrap()
+            .project(&ProjectName::new("demo").unwrap())
+            .unwrap();
+        let cache = Cache::open(
+            &dir,
+            std::time::Instant::now() + std::time::Duration::from_secs(30),
+        )
+        .unwrap();
+        let mut tx = cache.write().unwrap();
+        for i in 0..15_000 {
+            let path = RelPath::new(&format!("dir{}/file{i}.tx", i % 150)).unwrap();
+            tx.put_file_revision("app", &path, &format!("revision-{i}"))
+                .unwrap();
+        }
+        tx.commit().unwrap();
+        let load_before = load();
+        let mut ms = Vec::new();
+        let mut digest = String::new();
+        for _ in 0..9 {
+            let rx = cache.read().unwrap();
+            let t = Instant::now();
+            digest = rx.index_digest().unwrap();
+            ms.push(t.elapsed().as_secs_f64() * 1000.0);
+        }
+        ms.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        let median = ms[4];
+        println!(
+            "index_digest_cost: median {median:.1} ms, max {:.1} ms over 9 reads of 15,000 rows; digest {}; load {load_before} -> {}",
+            ms[8],
+            &digest[..12],
+            load()
+        );
+        assert!(median <= 30.0, "{median:.1} ms is over 30 ms");
+    }
+
+    /// FEAT-096 R-18: a miss (compute, then write) costs at most 10% plus 50 ms over a run with
+    /// the store off, for each command that stores. Medians of 7 runs, interleaved.
+    #[cfg(feature = "test-extractor")]
+    #[test]
+    #[ignore]
+    fn stored_answer_miss_overhead() {
+        use katalogr_analytics::{
+            CommunityOptions, CycleOptions, DeadCodeOptions, DeadConfidence, GraphOptions,
+            HubOptions, Level,
+        };
+        use katalogr_dist::{Katalogr, Options, Overrides, kindex_init, project_init};
+        let git = |dir: &Path, args: &[&str]| {
+            let out = std::process::Command::new("git")
+                .args([
+                    "-c",
+                    "user.name=t",
+                    "-c",
+                    "user.email=t@t",
+                    "-c",
+                    "commit.gpgsign=false",
+                ])
+                .args(args)
+                .current_dir(dir)
+                .output()
+                .unwrap();
+            assert!(out.status.success(), "{args:?}");
+        };
+        let tmp = scratch_096();
+        let root = std::fs::canonicalize(tmp.path()).unwrap();
+        let repo = root.join("app");
+        std::fs::create_dir_all(&repo).unwrap();
+        // 400 files of 40 functions, each calling a few functions of the next file.
+        for f in 0..400 {
+            let mut text = String::new();
+            for n in 0..40 {
+                text.push_str(&format!("sym fn f{f}_{n}\n"));
+            }
+            for n in 0..40 {
+                for k in 0..3 {
+                    text.push_str(&format!(
+                        "link f{f}_{n} calls f{}_{}\n",
+                        (f + 1) % 400,
+                        (n + k) % 40
+                    ));
+                }
+            }
+            std::fs::write(repo.join(format!("m{f}.tx")), text).unwrap();
+        }
+        git(&repo, &["init", "-q", "-b", "main"]);
+        git(&repo, &["add", "."]);
+        git(&repo, &["commit", "-q", "-m", "base"]);
+        let kx = root.join("kx");
+        kindex_init(&kx).unwrap();
+        project_init(&kx, "demo", vec![("app".into(), repo.clone())], true).unwrap();
+        let facade = |build: Option<&str>| {
+            let mut k = Katalogr::resolve(
+                &repo,
+                &Overrides {
+                    kindex: Some(kx.display().to_string()),
+                    ..Overrides::default()
+                },
+            )
+            .unwrap();
+            k.set_answer_build(build.map(str::to_string));
+            k
+        };
+        let off = facade(None);
+        let opts = Options {
+            timeout: Some(3600.0),
+            ..Options::default()
+        };
+        off.index(None, true, None, &opts).unwrap();
+        let on = facade(Some("bench"));
+        let g = || GraphOptions::new(Level::Symbol, true);
+        let fresh = Options {
+            fresh: true,
+            ..opts.clone()
+        };
+        type Run<'a> = Box<dyn Fn(&Katalogr, &Options) + 'a>;
+        let runs: Vec<(&str, Run)> = vec![
+            (
+                "hubs",
+                Box::new(|k, o| {
+                    k.hubs(
+                        &HubOptions {
+                            graph: g(),
+                            min_degree: 0.0,
+                            limit: 50,
+                        },
+                        o,
+                    )
+                    .unwrap();
+                }),
+            ),
+            (
+                "communities",
+                Box::new(|k, o| {
+                    k.communities(
+                        &CommunityOptions {
+                            graph: g(),
+                            seed: 1,
+                            resolution: 1.0,
+                            min_size: 3,
+                            members: 5,
+                            limit: 20,
+                            of: None,
+                        },
+                        o,
+                    )
+                    .unwrap();
+                }),
+            ),
+            (
+                "cycles",
+                Box::new(|k, o| {
+                    k.cycles(
+                        &CycleOptions {
+                            graph: g(),
+                            members: 5,
+                            limit: 20,
+                        },
+                        o,
+                    )
+                    .unwrap();
+                }),
+            ),
+            (
+                "dead-code",
+                Box::new(|k, o| {
+                    k.dead_code(
+                        DeadCodeOptions {
+                            code_kinds: Default::default(),
+                            exclude_kinds: g().exclude_kinds,
+                            internal: false,
+                            min_confidence: DeadConfidence::Low,
+                            path_prefix: None,
+                            limit: 50,
+                        },
+                        o,
+                    )
+                    .unwrap();
+                }),
+            ),
+            (
+                "map",
+                Box::new(|k, o| {
+                    k.map(o).unwrap();
+                }),
+            ),
+        ];
+        let load_before = load();
+        let mut failures = Vec::new();
+        for (name, run) in &runs {
+            let (mut off_ms, mut miss_ms) = (Vec::new(), Vec::new());
+            for _ in 0..7 {
+                let t = Instant::now();
+                run(&off, &opts);
+                off_ms.push(t.elapsed().as_secs_f64() * 1000.0);
+                // `fresh` computes and still writes: the cost of a miss.
+                let t = Instant::now();
+                run(&on, &fresh);
+                miss_ms.push(t.elapsed().as_secs_f64() * 1000.0);
+            }
+            off_ms.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            miss_ms.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            let (base, miss) = (off_ms[3], miss_ms[3]);
+            let line = base * 1.10 + 50.0;
+            println!(
+                "stored_answer_miss_overhead: {name}: store off {base:.1} ms, miss {miss:.1} ms (line {line:.1}); load {load_before} -> {}",
+                load()
+            );
+            if miss > line {
+                failures.push(format!("{name}: {miss:.1} ms over {line:.1}"));
+            }
+        }
+        assert!(failures.is_empty(), "{}", failures.join("; "));
+    }
 }
