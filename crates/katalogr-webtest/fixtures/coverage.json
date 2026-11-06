@@ -1,0 +1,28 @@
+{
+ "schema": 1,
+ "watermark": 0,
+ "pending": 0,
+ "stale": false,
+ "truncated": null,
+ "result": {
+  "by_extension": [
+   {
+    "extension": "rs",
+    "counts": {
+     "files_indexed": 2,
+     "refs_total": 9,
+     "refs_unresolved": 1,
+     "parse_errors": 0
+    }
+   }
+  ]
+ },
+ "positions": [
+  {
+   "repo": "app",
+   "commit": "0123456789abcdef0123456789abcdef01234567",
+   "dirty": null
+  }
+ ],
+ "exact": true
+}

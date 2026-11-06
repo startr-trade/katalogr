@@ -137,8 +137,8 @@ document.documentElement.setAttribute("class", "light");
 function __mk(tag, id, parent) { var e = document.createElement(tag); e.setAttribute("id", id); (parent || document.body).appendChild(e); return e; }
 var __app = __mk("div", "kw-app");
 __mk("h1", "kw-title", __app);
-__mk("input", "kw-search", __app);
-__mk("button", "kw-theme", __app);
+__mk("input", "kw-search", __app).setAttribute("data-kw", "search-input");
+__mk("button", "kw-theme", __app).setAttribute("data-kw", "theme-button");
 __mk("nav", "kw-sidebar", __app);
 __mk("main", "kw-main", __app);
 __mk("script", "kw-views");

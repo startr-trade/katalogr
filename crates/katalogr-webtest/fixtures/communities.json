@@ -1,0 +1,28 @@
+{
+ "schema": 1,
+ "watermark": 0,
+ "pending": 0,
+ "stale": false,
+ "truncated": null,
+ "result": {
+  "items": [
+   {
+    "label": {
+     "name": "repo:app#fn:target"
+    },
+    "size": 3,
+    "files": 2,
+    "cohesion": 0.5,
+    "dir": "src"
+   }
+  ]
+ },
+ "positions": [
+  {
+   "repo": "app",
+   "commit": "0123456789abcdef0123456789abcdef01234567",
+   "dirty": null
+  }
+ ],
+ "exact": true
+}

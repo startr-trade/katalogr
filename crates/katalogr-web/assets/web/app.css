@@ -224,3 +224,56 @@ textarea:focus-visible,
     padding: 1em 1em 3em;
   }
 }
+
+/* Status notices, tabs, controls, the explorer and the time slider. */
+.kw-notice {
+  margin: 0.75em 0;
+  padding: 0.5em 0.75em;
+  background: var(--quote-bg);
+  border-left: 4px solid var(--links);
+}
+
+.kw-notice.kw-info {
+  border-left-color: var(--icons);
+}
+
+.kw-notice.kw-warn {
+  border-left-color: var(--sidebar-active);
+}
+
+.kw-notice.kw-error {
+  border-left-color: var(--sidebar-active);
+  font-weight: bold;
+}
+
+.kw-notice ul {
+  margin: 0.25em 0 0;
+}
+
+.kw-explore {
+  width: 100%;
+  min-height: 480px;
+  border: 1px solid var(--table-border-color);
+  background: var(--bg);
+}
+
+.kw-explore-detail {
+  margin: 0.5em 0;
+}
+
+.kw-tabs a {
+  margin-right: 1em;
+}
+
+.kw-controls label {
+  display: inline-block;
+  margin: 0 1em 0.5em 0;
+}
+
+.kw-slider {
+  margin: 1em 0;
+}
+
+.kw-panel {
+  margin-bottom: 1.5em;
+}

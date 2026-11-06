@@ -1,0 +1,16 @@
+{
+ "api": 1,
+ "contract": 4,
+ "schema": 1,
+ "position_format": 1,
+ "view_format": 1,
+ "katalogr": "0.1.0",
+ "capabilities": [
+  "docs-affected",
+  "position",
+  "timeline",
+  "view-id",
+  "views",
+  "web-view"
+ ]
+}

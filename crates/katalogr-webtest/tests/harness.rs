@@ -18,7 +18,8 @@ mod harness {
     fn fake_dom_collects_text() {
         let b = MapBackend::new().with("/ping", 200, "pong");
         let mut p = Page::open("#/graph", &b);
-        // Placeholders draw nothing, so main starts empty.
+        // The page drew its failure notice for the missing capabilities; clear it.
+        p.eval_json("document.getElementById('kw-main').replaceChildren()");
         assert_eq!(p.text(), "");
         // Build a small tree in <main>, make a request, and click a button.
         p.eval_json(

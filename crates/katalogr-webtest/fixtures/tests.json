@@ -1,0 +1,39 @@
+{
+ "schema": 1,
+ "watermark": 0,
+ "pending": 0,
+ "stale": false,
+ "truncated": null,
+ "result": [
+  {
+   "test": {
+    "name": "repo:app#fn:test_target",
+    "kind": "fn",
+    "path": "src/lib.rs",
+    "span": {
+     "start_line": 3,
+     "start_col": 0,
+     "end_line": 5,
+     "end_col": 1
+    }
+   },
+   "role": "case",
+   "depth": 1,
+   "confidence": "Extracted",
+   "score": 1.0,
+   "seed": "repo:app#fn:target",
+   "chain": [],
+   "requirements": [
+    "REQ-7"
+   ]
+  }
+ ],
+ "positions": [
+  {
+   "repo": "app",
+   "commit": "0123456789abcdef0123456789abcdef01234567",
+   "dirty": null
+  }
+ ],
+ "exact": true
+}
