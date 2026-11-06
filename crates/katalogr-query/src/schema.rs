@@ -2,6 +2,7 @@
 
 use crate::doc_impact::DocImpact;
 use crate::position::PositionAnswer;
+use crate::timeline::Timeline;
 use crate::result::{
     CallerHit, DanglingRef, Envelope, Explain, MapEntry, MirrorDrift, PathStep, RefHit, SearchHit,
     ShowResult, SymbolHit, TestHit, WhyResult,
@@ -30,6 +31,7 @@ pub fn schemas() -> BTreeMap<&'static str, Value> {
         ("explain", to_value(schema_for!(Envelope<Explain>))),
         ("docs-affected", to_value(schema_for!(Envelope<DocImpact>))),
         ("tests", to_value(schema_for!(Envelope<Vec<TestHit>>))),
+        ("timeline", to_value(schema_for!(Envelope<Timeline>))),
     ])
 }
 
