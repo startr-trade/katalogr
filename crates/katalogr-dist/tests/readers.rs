@@ -5,7 +5,7 @@
 mod readers {
     use katalogr_dist::{Consistency, Options, Outcome, Overrides, kindex_init, project_init};
     use katalogr_dist::{Katalogr, session_start};
-    use katalogr_engine::Stitcher;
+
     use katalogr_model::RelPath;
     use katalogr_store::{Cache, Kindex, PendingKey, ProjectName};
     use std::path::{Path, PathBuf};
@@ -58,12 +58,7 @@ mod readers {
     fn writer(s: &Setup) -> Cache {
         let kindex = Kindex::open(camino::Utf8Path::from_path(&s.kx).unwrap()).unwrap();
         let dir = kindex.project(&ProjectName::new("demo").unwrap()).unwrap();
-        Cache::open_or_rebuild(
-            &dir,
-            &Stitcher::new(),
-            Instant::now() + Duration::from_secs(5),
-        )
-        .unwrap()
+        Cache::open(&dir, Instant::now() + Duration::from_secs(5)).unwrap()
     }
 
     /// A drain in flight: a queued path, and the stored rank behind the watermark.

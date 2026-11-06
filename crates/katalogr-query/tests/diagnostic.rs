@@ -2,8 +2,8 @@
 
 use camino::Utf8PathBuf;
 use katalogr_model::{
-    ArtifactName, Confidence, Field, Fragment, Id, LinkKind, Name, Provenance, RelPath, Segment,
-    Span, SymbolName, tokenize,
+    ArtifactName, Confidence, Field, Id, LinkKind, Name, Provenance, RelPath, Segment, Span,
+    SymbolName, tokenize,
 };
 use katalogr_query::{
     DIAG_PACK, DIAG_REFS, DIAG_TERMS, DIAG_TOP, DIAG_WEIGHTS, Diagnostic, PackEntry, PackTrace,
@@ -12,22 +12,10 @@ use katalogr_query::{
 };
 use katalogr_store::{
     Cache, Kindex, LEXICON_FIELDS, LinkEntry, LinkKey, LinkOrigin, LinkRow, ProjectConfig,
-    ProjectName, RANK_CONTEXT, Reader, RepoConfig, Restitch, StoreError, SymbolRow, WriteTx,
-    pagerank,
+    ProjectName, RANK_CONTEXT, Reader, RepoConfig, SymbolRow, WriteTx, pagerank,
 };
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::{Duration, Instant};
-
-struct NoShards;
-
-impl Restitch for NoShards {
-    fn replace_fragment(&self, _: &mut WriteTx, _: Fragment) -> Result<(), StoreError> {
-        Ok(())
-    }
-    fn remove_artifact(&self, _: &mut WriteTx, _: &ArtifactName) -> Result<(), StoreError> {
-        Ok(())
-    }
-}
 
 const SPAN: Span = Span {
     start_line: 1,
@@ -58,9 +46,7 @@ impl Fx {
                 },
             )
             .unwrap();
-        let cache =
-            Cache::open_or_rebuild(&dir, &NoShards, Instant::now() + Duration::from_secs(60))
-                .unwrap();
+        let cache = Cache::open(&dir, Instant::now() + Duration::from_secs(60)).unwrap();
         let path = RelPath::new("f.tx").unwrap();
         Fx {
             _tmp: tmp,

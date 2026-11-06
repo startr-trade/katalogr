@@ -57,6 +57,10 @@ impl Extractor for OpenApiExtractor {
         "openapi"
     }
 
+    fn revision_salt(&self) -> &'static str {
+        "openapi-extract-1"
+    }
+
     fn handles(&self, path: &RelPath) -> bool {
         conventional_name(path)
     }

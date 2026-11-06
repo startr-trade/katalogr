@@ -9,7 +9,6 @@ use camino::{Utf8Path, Utf8PathBuf};
 use katalogr_engine::Engine;
 use katalogr_engine::queue::Processor;
 use katalogr_store::Reader;
-use sha2::{Digest, Sha256};
 use std::process::Command;
 use support::{
     drained_graph, file_event, fresh_index, full_index, init_project, open_engine,
@@ -26,13 +25,11 @@ const REWRITE_ENV: &str = "KATALOGR_CRASH_REWRITE";
 /// The failpoints of a cache rewrite.
 const REWRITE_FAILPOINTS: [&str; 2] = ["before_rewrite_rename", "after_rewrite_rename"];
 
-const FAILPOINTS: [&str; 6] = [
+const FAILPOINTS: [&str; 4] = [
     "after_inbox_rename",
     "after_ingest_commit",
     "before_inbox_delete",
     "after_publish_commit",
-    "mid_renames",
-    "before_journal_clear",
 ];
 
 struct Scenario {
@@ -128,6 +125,20 @@ fn crash_child() {
     }
 }
 
+const KILL_CHILD_ENV: &str = "KATALOGR_KILL_CHILD";
+
+/// The child half of `killed_index_finishes_identical`: indexes everything and is killed by the
+/// parent meanwhile.
+#[test]
+fn kill_child() {
+    let Ok(spec) = std::env::var(KILL_CHILD_ENV) else {
+        return;
+    };
+    let (kx, work) = spec.split_once('|').unwrap();
+    let e = open_engine_threads(Utf8Path::new(kx), Utf8Path::new(work), 1);
+    full_index(&e);
+}
+
 fn acked(s: &Scenario) -> Vec<String> {
     std::fs::read_to_string(s.acks())
         .unwrap_or_default()
@@ -136,17 +147,21 @@ fn acked(s: &Scenario) -> Vec<String> {
         .collect()
 }
 
-fn check_hashes(e: &Engine) {
+/// Every artifact has exactly one file revision, and the other way round.
+fn check_revisions(e: &Engine) {
     let r = e.cache().read().unwrap();
-    let hashes = r.shard_hashes().unwrap();
-    assert_eq!(e.dir().list_shards().unwrap().len(), hashes.len());
-    for ((repo, path), hash) in hashes {
-        let bytes = std::fs::read(e.dir().shard_path(&repo, &path)).unwrap();
-        assert_eq!(<[u8; 32]>::from(Sha256::digest(&bytes)), hash, "{path}");
+    let revisions = r.file_revisions().unwrap();
+    let artifacts = r.artifacts().unwrap();
+    assert_eq!(artifacts.len(), revisions.len());
+    for (_, row) in artifacts {
+        let found = r
+            .file_revision(&row.provenance.repo, &row.provenance.path)
+            .unwrap();
+        assert!(found.is_some(), "{}", row.provenance.path);
     }
 }
 
-mod queue {
+mod crash {
     use super::*;
 
     /// The crash-injection scenario with the child (and the recovering parent) at `threads`.
@@ -196,26 +211,15 @@ mod queue {
                 }
             }
 
-            // After recovery every shard file matches its recorded hash.
-            let mut p = Processor::try_acquire(&e).unwrap().unwrap();
-            p.recover().unwrap();
-            drop(p);
-            assert!(
-                e.cache()
-                    .read()
-                    .unwrap()
-                    .publish_journal()
-                    .unwrap()
-                    .is_empty()
-            );
-            check_hashes(&e);
+            // There is nothing to finish: one commit holds rows and file revisions together.
+            check_revisions(&e);
 
             // Producers re-send what was never acknowledged; then the queue is drained.
             for p in &PATHS[acks.len()..] {
                 e.inbox().append(&file_event(p)).unwrap();
             }
             let graph = drained_graph(&e);
-            check_hashes(&e);
+            check_revisions(&e);
             let fresh_root = Utf8PathBuf::from_path_buf(s._tmp.path().to_path_buf()).unwrap();
             let (_, fresh) = fresh_index(&fresh_root, "fresh", &s.work);
             assert_eq!(
@@ -236,15 +240,6 @@ mod queue {
         no_loss(4);
     }
 
-    /// FEAT-093 R-6. Directories are synced once, after the last rename: a crash in the middle
-    /// of the renames or just before the journal is cleared loses nothing, at 1 and 8 threads.
-    #[test]
-    fn no_loss_after_batched_dir_sync() {
-        for threads in [1, 8] {
-            no_loss_at(threads, &["mid_renames", "before_journal_clear"]);
-        }
-    }
-
     /// FEAT-075 R-7. A process that dies before or after the rename of a cache rewrite loses
     /// nothing: the reopened cache holds the drained graph and every acknowledged event, and no
     /// rewrite file is left behind.
@@ -261,6 +256,46 @@ mod queue {
         assert!(orphan.exists(), "the child left its rewrite file");
         let _e = open_engine(&s.kx, &s.work);
         assert!(!orphan.exists());
+    }
+
+    /// R-3. A child process indexing a tree is killed with SIGKILL at several moments; the
+    /// reopened project drains to the graph a fresh index of the same tree gives.
+    #[test]
+    fn killed_index_finishes_identical() {
+        for delay_ms in [30u64, 120, 400] {
+            let tmp = tempfile::tempdir().unwrap();
+            let root = Utf8PathBuf::from_path_buf(tmp.path().to_path_buf()).unwrap();
+            let (kx, work) = (root.join("kx"), root.join("work"));
+            std::fs::create_dir_all(&work).unwrap();
+            for i in 0..1500 {
+                std::fs::write(
+                    work.join(format!("f{i}.tx")),
+                    format!(
+                        "sym fn F{i}\nexport k:f{i} F{i}\nref F{i} calls k:f{}\n",
+                        i / 2
+                    ),
+                )
+                .unwrap();
+            }
+            init_project(&kx);
+            let mut child = Command::new(std::env::current_exe().unwrap())
+                .args(["--exact", "kill_child", "--nocapture", "--test-threads=1"])
+                .env(KILL_CHILD_ENV, format!("{kx}|{work}"))
+                .env("KATALOGR_THREADS", "1")
+                .spawn()
+                .unwrap();
+            std::thread::sleep(std::time::Duration::from_millis(delay_ms));
+            // `kill` sends SIGKILL.
+            let _ = child.kill();
+            let _ = child.wait();
+
+            let e = open_engine_threads(&kx, &work, 1);
+            check_revisions(&e);
+            let graph = full_index(&e);
+            check_revisions(&e);
+            let (_, fresh) = fresh_index(&root, "fresh", &work);
+            assert_eq!(graph, fresh, "killed after {delay_ms} ms");
+        }
     }
 
     #[test]
@@ -343,7 +378,14 @@ fn seed_interrupted_leaves_no_layer() {
         assert!(!layer.root().join("context.json").exists(), "{name}");
         assert!(dir.contexts().unwrap().is_empty(), "{name}");
         // The base is intact and the layer can be seeded again.
-        assert!(!e.cache().read().unwrap().shard_hashes().unwrap().is_empty());
+        assert!(
+            !e.cache()
+                .read()
+                .unwrap()
+                .file_revisions()
+                .unwrap()
+                .is_empty()
+        );
         drop(e);
         katalogr_store::seed_layer(&dir, &layer, &seed_manifest(&id), seed_dl()).unwrap();
         assert_eq!(dir.contexts().unwrap().len(), 1, "{name}");
@@ -395,11 +437,7 @@ fn layer_child() {
 /// journal paths are relative to the layer root, and the result equals a fresh index.
 #[test]
 fn publish_in_layer_recovers() {
-    for name in [
-        "after_publish_commit",
-        "mid_renames",
-        "before_journal_clear",
-    ] {
+    for name in ["after_publish_commit"] {
         let s = scenario();
         // The scenario's base is indexed; the edits are still on disk. Seed the layer from it.
         let base = katalogr_store::Kindex::open(&s.kx)
@@ -418,23 +456,12 @@ fn publish_in_layer_recovers() {
         assert!(!status.success(), "child survived {name}");
 
         let e = open_layer(&s.kx, &s.work);
-        let mut p = Processor::try_acquire(&e).unwrap().unwrap();
-        p.recover().unwrap();
-        drop(p);
-        assert!(
-            e.cache()
-                .read()
-                .unwrap()
-                .publish_journal()
-                .unwrap()
-                .is_empty()
-        );
-        check_hashes(&e);
+        check_revisions(&e);
         for p in PATHS {
             e.inbox().append(&file_event(p)).unwrap();
         }
         let graph = drained_graph(&e);
-        check_hashes(&e);
+        check_revisions(&e);
         let fresh_root = Utf8PathBuf::from_path_buf(s._tmp.path().to_path_buf()).unwrap();
         let (_, fresh) = fresh_index(&fresh_root, "fresh", &s.work);
         assert_eq!(

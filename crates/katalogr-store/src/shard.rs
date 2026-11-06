@@ -2,20 +2,14 @@
 
 use crate::error::StoreError;
 use crate::guard::scan_for_absolute;
-use camino::{Utf8Path, Utf8PathBuf};
-use katalogr_model::{Fragment, Name, RelPath};
+use camino::Utf8Path;
+use katalogr_model::{Fragment, Name};
 use serde_json::Value;
 
 pub const FORMAT: u64 = 1;
-pub const SUFFIX: &str = ".kshard.json";
-
-/// Location of a shard relative to the project directory: `shards/<repo>/<path>.kshard.json`.
-pub fn shard_path(repo: &str, path: &RelPath) -> Utf8PathBuf {
-    Utf8PathBuf::from(format!("shards/{repo}/{}{SUFFIX}", path.as_str()))
-}
 
 /// Serialise a value with sorted keys, 2-space indentation, LF and one trailing newline.
-pub(crate) fn to_sorted_json(v: &Value) -> String {
+pub fn to_sorted_json(v: &Value) -> String {
     let mut out = String::new();
     write_value(v, 0, &mut out);
     out.push('\n');

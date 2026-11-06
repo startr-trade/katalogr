@@ -342,20 +342,23 @@ mod archtest {
     fn render_is_not_core() {
         let md = metadata(false);
         let mut failures = Vec::new();
-        if workspace_package(&md, "katalogr-render").is_none() {
-            failures.push("package katalogr-render not found".to_string());
-        }
-        for p in core_crates(&md) {
-            if p.name.as_str() == "katalogr-render" {
-                failures.push("katalogr-render must not be in core_crates".to_string());
+        // katalogr-web (FEAT-033) is the web bundle, not core, so it is held to the same rule.
+        for name in ["katalogr-render", "katalogr-web"] {
+            if workspace_package(&md, name).is_none() {
+                failures.push(format!("package {name} not found"));
             }
-            if p.dependencies.iter().any(|d| d.name == "katalogr-render") {
-                failures.push(format!("{} must not depend on katalogr-render", p.name));
+            for p in core_crates(&md) {
+                if p.name.as_str() == name {
+                    failures.push(format!("{name} must not be in core_crates"));
+                }
+                if p.dependencies.iter().any(|d| d.name == name) {
+                    failures.push(format!("{} must not depend on {name}", p.name));
+                }
             }
         }
         assert!(
             failures.is_empty(),
-            "katalogr-render is in the core:\n{}",
+            "a non-core crate is in the core:\n{}",
             failures.join("\n")
         );
     }
@@ -529,7 +532,7 @@ mod archtest {
     ];
 
     /// The facade calls `tools.rs` makes: each exactly once.
-    const MCP_FACADE_CALLS: [&str; 14] = [
+    const MCP_FACADE_CALLS: [&str; 15] = [
         "resolve",
         "find",
         "refs",
@@ -542,6 +545,7 @@ mod archtest {
         "dangling",
         "why",
         "docs_affected",
+        "impact",
         "index",
         "status",
     ];
@@ -756,7 +760,7 @@ mod archtest {
     ];
 
     /// The read calls an op row makes on the facade; each row makes exactly one.
-    const API_READ_CALLS: [&str; 26] = [
+    const API_READ_CALLS: [&str; 29] = [
         "find",
         "view",
         "refs",
@@ -772,6 +776,7 @@ mod archtest {
         "mirrors",
         "status",
         "docs_affected",
+        "impact",
         "position",
         "hubs",
         "cycles",
@@ -783,6 +788,8 @@ mod archtest {
         "context_diff",
         "context_conflicts",
         "doctor",
+        "timeline",
+        "stored_view",
     ];
 
     #[derive(Default)]
@@ -1219,10 +1226,50 @@ mod archtest {
         let src = workspace_root().join("crates/katalogr-dist/src");
         for file in ["views.rs", "view_store.rs"] {
             let text = std::fs::read_to_string(src.join(file)).expect("read source");
-            for banned in ["read_shard", "shard_path", "shard::"] {
+            for banned in [
+                "read_shard",
+                "write_shard",
+                "list_shards",
+                "shard_path",
+                "shard::",
+            ] {
                 assert!(!text.contains(banned), "{file} uses `{banned}`");
             }
         }
+    }
+
+    /// FEAT-094 R-1. The shard file API is gone: no source or test in any crate (but this one,
+    /// which names them) calls a function that reads, writes, lists or locates a shard file.
+    #[test]
+    fn no_shard_file_api() {
+        let root = workspace_root();
+        let mut failures = Vec::new();
+        let crates = std::fs::read_dir(root.join("crates")).expect("crates folder");
+        for krate in crates.flatten() {
+            if krate.file_name() == "katalogr-archtest" {
+                continue;
+            }
+            let mut files = Vec::new();
+            for sub in ["src", "tests"] {
+                rs_files(&krate.path().join(sub), &mut files);
+            }
+            files.sort();
+            for f in files {
+                let text = std::fs::read_to_string(&f).expect("read source");
+                for banned in [
+                    "read_shard(",
+                    "write_shard(",
+                    "list_shards(",
+                    "shard_path(",
+                    "shard::SUFFIX",
+                ] {
+                    if text.contains(banned) {
+                        failures.push(format!("{}: uses `{banned}`", f.display()));
+                    }
+                }
+            }
+        }
+        assert!(failures.is_empty(), "{}", failures.join("\n"));
     }
 
     /// FEAT-035 R-6. Nothing in `katalogr-dist` or `katalogr` writes to a board: no source
@@ -1259,6 +1306,153 @@ mod archtest {
         assert!(
             failures.is_empty(),
             "katalogr must not write to a board:\n{}",
+            failures.join("\n")
+        );
+    }
+
+    /// Every entry under `dir`, files and folders, recursively.
+    fn all_entries(dir: &Path, out: &mut Vec<PathBuf>) {
+        let Ok(rd) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for e in rd.flatten() {
+            let p = e.path();
+            out.push(p.clone());
+            if p.is_dir() {
+                all_entries(&p, out);
+            }
+        }
+    }
+
+    /// FEAT-033 R-6: the web bundle has no build step. Under `crates/katalogr-web` there is no
+    /// `build.rs`, no `package.json`, no `node_modules` and no npm lock file.
+    #[test]
+    fn web_has_no_build_step() {
+        const FORBIDDEN: [&str; 4] = [
+            "build.rs",
+            "package.json",
+            "package-lock.json",
+            "npm-shrinkwrap.json",
+        ];
+        let dir = workspace_root().join("crates/katalogr-web");
+        assert!(dir.is_dir(), "crates/katalogr-web not found");
+        let mut entries = Vec::new();
+        all_entries(&dir, &mut entries);
+        entries.sort();
+        let failures: Vec<String> = entries
+            .iter()
+            .filter(|p| {
+                let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
+                FORBIDDEN.contains(&name) || name == "node_modules"
+            })
+            .map(|p| format!("{}: a build step or npm file", p.display()))
+            .collect();
+        assert!(
+            failures.is_empty(),
+            "the web bundle needs a build step:\n{}",
+            failures.join("\n")
+        );
+    }
+
+    /// FEAT-033 R-2: the web view reads no board. `api/web.rs`, `cmd/serve.rs` and the bundle's
+    /// own scripts (`assets/web/*.js`) never contain the word `kanbanr`, in any case.
+    #[test]
+    fn web_reads_no_board() {
+        let root = workspace_root();
+        let mut files = vec![
+            root.join("crates/katalogr/src/api/web.rs"),
+            root.join("crates/katalogr/src/cmd/serve.rs"),
+        ];
+        let script_dir = root.join("crates/katalogr-web/assets/web");
+        let mut scripts: Vec<PathBuf> = std::fs::read_dir(&script_dir)
+            .expect("assets/web")
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| p.extension().is_some_and(|x| x == "js"))
+            .collect();
+        scripts.sort();
+        assert!(!scripts.is_empty(), "no own scripts found under assets/web");
+        files.extend(scripts);
+        let mut failures = Vec::new();
+        for f in files {
+            let text = std::fs::read_to_string(&f).expect("read web source");
+            if text.to_ascii_lowercase().contains("kanbanr") {
+                failures.push(format!("{}: holds the word `kanbanr`", f.display()));
+            }
+        }
+        assert!(
+            failures.is_empty(),
+            "the web view reads a board:\n{}",
+            failures.join("\n")
+        );
+    }
+
+    /// FEAT-033 R-18: the web checks need only cargo. Nothing under `crates/katalogr-webtest` or
+    /// `crates/katalogr-web` starts a process: no `Command::new`.
+    #[test]
+    fn web_checks_need_only_cargo() {
+        let root = workspace_root();
+        let mut failures = Vec::new();
+        for krate in ["katalogr-webtest", "katalogr-web"] {
+            let mut files = Vec::new();
+            rs_files(&root.join("crates").join(krate), &mut files);
+            files.sort();
+            for f in files {
+                let text = std::fs::read_to_string(&f).expect("read source");
+                for (n, line) in text.lines().enumerate() {
+                    if line.contains("Command::new") {
+                        failures.push(format!("{}:{}: starts a process", f.display(), n + 1));
+                    }
+                }
+            }
+        }
+        assert!(
+            failures.is_empty(),
+            "the web checks need more than cargo:\n{}",
+            failures.join("\n")
+        );
+    }
+
+    /// FEAT-033 R-18: `katalogr-webtest` is the test harness of the web view. It is not
+    /// published, and only `katalogr`'s tests depend on it, as a dev-dependency. The release
+    /// workflow never names it.
+    #[test]
+    fn webtest_not_shipped() {
+        let md = metadata(false);
+        let mut failures = Vec::new();
+        match workspace_package(&md, "katalogr-webtest") {
+            None => failures.push("package katalogr-webtest not found".to_string()),
+            Some(w) => {
+                if w.publish != Some(Vec::new()) {
+                    failures.push("katalogr-webtest must declare `publish = false`".to_string());
+                }
+            }
+        }
+        for p in md.workspace_packages() {
+            for d in p
+                .dependencies
+                .iter()
+                .filter(|d| d.name == "katalogr-webtest")
+            {
+                let allowed =
+                    p.name.as_str() == "katalogr" && d.kind == DependencyKind::Development;
+                if !allowed {
+                    failures.push(format!(
+                        "{} depends on katalogr-webtest ({:?}); only katalogr's tests may, as a dev-dependency",
+                        p.name, d.kind
+                    ));
+                }
+            }
+        }
+        let release =
+            std::fs::read_to_string(workspace_root().join(".github/workflows/release.yml"))
+                .expect("release workflow");
+        if release.contains("katalogr-webtest") {
+            failures.push(".github/workflows/release.yml names katalogr-webtest".to_string());
+        }
+        assert!(
+            failures.is_empty(),
+            "the web test harness would be shipped:\n{}",
             failures.join("\n")
         );
     }

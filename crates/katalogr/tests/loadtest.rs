@@ -268,7 +268,6 @@ mod loadtest {
         assert_eq!(i.wall_s.n, 2);
         assert!(i.files_indexed > 0, "{i:?}");
         assert!(i.files_per_s > 0.0);
-        assert!(i.shard_bytes > 0 && i.shard_files > 0);
         assert!(i.cache_bytes > 0);
         if cfg!(target_os = "linux") {
             assert!(i.peak_rss_mib.p50 > 0.0);
@@ -279,7 +278,7 @@ mod loadtest {
     }
 
     #[test]
-    fn shards_identical_across_runs() {
+    fn graph_identical_across_runs() {
         let f = fixture(0);
         let r = run(&f, phases(true, false, false, false));
         let i = r.index.unwrap();

@@ -5,27 +5,15 @@ mod coverage_calc {
     use katalogr_analytics::metrics::{Better, metric_key};
     use katalogr_analytics::{CoverageInput, CoverageReport, coverage};
     use katalogr_model::{
-        ArtifactName, Confidence, ContractName, ContractRole, ExportKey, Fragment, Id, LinkKind,
-        Name, OutRef, Provenance, RelPath,
+        ArtifactName, Confidence, ContractName, ContractRole, ExportKey, Id, LinkKind, Name,
+        OutRef, Provenance, RelPath,
     };
     use katalogr_store::{
         ArtifactRow, BindingRow, Cache, ContractRow, ErrorRow, Kindex, LinkEntry, LinkKey,
-        LinkOrigin, LinkRow, ProjectConfig, ProjectName, RefId, RepoConfig, Restitch, StoreError,
-        WriteTx,
+        LinkOrigin, LinkRow, ProjectConfig, ProjectName, RefId, RepoConfig, WriteTx,
     };
     use std::collections::BTreeMap;
     use std::time::{Duration, Instant};
-
-    struct NoShards;
-
-    impl Restitch for NoShards {
-        fn replace_fragment(&self, _: &mut WriteTx, _: Fragment) -> Result<(), StoreError> {
-            Ok(())
-        }
-        fn remove_artifact(&self, _: &mut WriteTx, _: &ArtifactName) -> Result<(), StoreError> {
-            Ok(())
-        }
-    }
 
     struct Fx {
         _tmp: tempfile::TempDir,
@@ -45,9 +33,7 @@ mod coverage_calc {
                 },
             )
             .unwrap();
-        let cache =
-            Cache::open_or_rebuild(&dir, &NoShards, Instant::now() + Duration::from_secs(30))
-                .unwrap();
+        let cache = Cache::open(&dir, Instant::now() + Duration::from_secs(30)).unwrap();
         Fx { _tmp: tmp, cache }
     }
 

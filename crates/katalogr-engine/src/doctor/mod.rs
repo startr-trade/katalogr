@@ -1,8 +1,8 @@
 //! `katalogr doctor` (FEAT-064): read-only index health checks with recommended fixes.
 //!
-//! Doctor never replays the journal, rebuilds the cache or quarantines a shard. It opens the
-//! cache read-only ([`katalogr_store::Cache::inspect`]) and reads the shard files, the inbox and
-//! the kindex git repository. Output carries no absolute path, source text or event payload.
+//! Doctor never rebuilds the cache or changes the kindex. It opens the cache read-only
+//! ([`katalogr_store::Cache::inspect`]) and reads the project's files, the inbox and the kindex
+//! git repository. Output carries no absolute path, source text or event payload.
 
 mod checks;
 mod model;
@@ -17,7 +17,7 @@ use crate::error::EngineError;
 use crate::registry::ExtensionRegistry;
 use camino::Utf8PathBuf;
 use checks::{CheckResult, Ran};
-use katalogr_store::{CACHE_SCHEMA, Cache, CacheInspection, InspectedTables, ProjectDir, ShardKey};
+use katalogr_store::{CACHE_SCHEMA, Cache, CacheInspection, InspectedTables, PathKey, ProjectDir};
 use std::collections::BTreeMap;
 use std::fs::File;
 
@@ -75,7 +75,7 @@ impl Run {
 }
 
 /// Runs every check on the project. Takes the processor lock for the whole run when it is
-/// free and exists, so the journal cannot change underneath it.
+/// free and exists, so no processor starts underneath it.
 pub fn run(
     dir: &ProjectDir,
     registry: &ExtensionRegistry,
@@ -109,7 +109,7 @@ pub fn run(
             cache_findings.push(cache_fix(
                 "KD-CCH-001",
                 Severity::Info,
-                "there is no cache yet",
+                "there is no cache yet (a new project, or the graph was deleted)",
                 "katalogr index --full",
             ));
             Ok(Ran::Skipped)
@@ -127,7 +127,7 @@ pub fn run(
             cache_findings.push(cache_fix(
                 "KD-CCH-003",
                 Severity::Warning,
-                &format!("{why}; the next open recreates it"),
+                &format!("{why}; the next open recreates it and queues a rescan"),
                 "katalogr index --full",
             ));
             Ok(Ran::Skipped)
@@ -142,7 +142,7 @@ pub fn run(
                     "KD-CCH-002",
                     Severity::Warning,
                     &format!(
-                        "the cache schema {stored} differs from the supported schema {CACHE_SCHEMA}; the next open rebuilds it"
+                        "the cache schema {stored} differs from the supported schema {CACHE_SCHEMA}; the next index re-extracts"
                     ),
                     "katalogr index",
                 ));
@@ -164,31 +164,17 @@ pub fn run(
         other => r.record("cache", other),
     }
 
-    let files: Result<Vec<ShardKey>, String> =
-        dir.list_shards().map_err(|e| checks::store_kind(&e));
     let tref = tables.as_ref();
-
-    r.record("journal", checks::journal(dir, tref, held, opts));
-    r.record(
-        "shards",
-        match &files {
-            Ok(f) => checks::shards(dir, f, tref, held, opts),
-            Err(k) => Err(k.clone()),
-        },
-    );
     match tref {
         Some(t) => {
+            let files: Vec<PathKey> = t.file_revisions.iter().map(|(k, _)| k.clone()).collect();
+            r.record("revisions", checks::revisions(t));
             r.record("queue", checks::queue(dir, t, opts));
-            r.record(
-                "parse",
-                match &files {
-                    Ok(f) => checks::parse(registry, f, t, opts),
-                    Err(k) => Err(k.clone()),
-                },
-            );
+            r.record("parse", checks::parse(registry, &files, t, opts));
             r.record("profile", checks::profiles(dir, t));
         }
         None => {
+            r.skip("revisions");
             r.skip("queue");
             r.skip("parse");
             r.skip("profile");

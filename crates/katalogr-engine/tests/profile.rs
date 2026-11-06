@@ -201,7 +201,7 @@ mod profile {
         drained_graph(&e.engine);
         assert!(e.contract("channel", "orders").is_some());
         let after = e.revision_of("app.tx");
-        assert_ne!(before, after, "the shard depends on the profile");
+        assert_ne!(before, after, "the extraction depends on the profile");
 
         // A rule that names another extension cannot affect these files: they stay as they are.
         e.write_profile(
@@ -322,7 +322,10 @@ select:
     fn select_routes_file_to_extension() {
         let e = env(&[("app.tx", APP), ("notes.txt", "alpha one\nbeta two\n")]);
         let graph = full_index(&e.engine);
-        assert!(!graph.contains("notes.txt"), "no route, no shard:\n{graph}");
+        assert!(
+            !graph.contains("notes.txt"),
+            "no route, no extraction:\n{graph}"
+        );
 
         // An entry that names an unregistered extension routes nothing.
         e.write_profile(
@@ -370,22 +373,28 @@ select:
     }
 
     #[test]
-    fn deselect_removes_shard() {
+    fn deselect_removes_file() {
         let e = env(&[("app.tx", APP), ("notes.txt", "alpha one\n")]);
         e.write_profile("route.yaml", ROUTE);
         let graph = full_index(&e.engine);
         assert!(graph.contains("r:notes.txt#alt:alpha"), "{graph}");
-        let shard = e
-            .engine
-            .dir()
-            .shard_path("r", &katalogr_model::RelPath::new("notes.txt").unwrap());
-        assert!(shard.exists());
+        let notes = katalogr_model::RelPath::new("notes.txt").unwrap();
+        let has_revision = |e: &Env| {
+            e.engine
+                .cache()
+                .read()
+                .unwrap()
+                .file_revision("r", &notes)
+                .unwrap()
+                .is_some()
+        };
+        assert!(has_revision(&e));
 
-        // Removing the entry leaves no extractor for the path: its shard and symbols go.
+        // Removing the entry leaves no extractor for the path: its revision and symbols go.
         e.write_profile("route.yaml", "profile: route\nversion: 2\nrules: []\n");
         let graph = drained_graph(&e.engine);
         assert!(!graph.contains("notes.txt"), "{graph}");
-        assert!(!shard.exists(), "the stale shard file is removed");
+        assert!(!has_revision(&e), "the stale file revision is removed");
         assert!(graph.contains("r:app.tx#fn:handle_orders"), "{graph}");
     }
 

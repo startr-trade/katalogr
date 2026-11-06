@@ -1,0 +1,113 @@
+{
+ "schema": 1,
+ "pele": "1.7.0",
+ "views": [
+  {
+   "op": "callers",
+   "params": [
+    {
+     "name": "symbol",
+     "type": "string",
+     "required": true
+    },
+    {
+     "name": "depth",
+     "type": "integer",
+     "required": false,
+     "default": "2"
+    },
+    {
+     "name": "max-nodes",
+     "type": "integer",
+     "required": false,
+     "default": "60"
+    }
+   ]
+  },
+  {
+   "op": "contracts",
+   "params": [
+    {
+     "name": "kind",
+     "type": "string",
+     "required": false
+    },
+    {
+     "name": "max-nodes",
+     "type": "integer",
+     "required": false,
+     "default": "60"
+    }
+   ]
+  },
+  {
+   "op": "cycles",
+   "params": [
+    {
+     "name": "level",
+     "type": "enum",
+     "required": false,
+     "default": "package",
+     "values": [
+      "file",
+      "package"
+     ]
+    },
+    {
+     "name": "limit",
+     "type": "integer",
+     "required": false,
+     "default": "5"
+    }
+   ]
+  },
+  {
+   "op": "path",
+   "params": [
+    {
+     "name": "from",
+     "type": "string",
+     "required": true
+    },
+    {
+     "name": "to",
+     "type": "string",
+     "required": true
+    },
+    {
+     "name": "max-len",
+     "type": "integer",
+     "required": false,
+     "default": "6"
+    }
+   ]
+  },
+  {
+   "op": "structure",
+   "params": [
+    {
+     "name": "level",
+     "type": "enum",
+     "required": false,
+     "default": "package",
+     "values": [
+      "file",
+      "package"
+     ]
+    },
+    {
+     "name": "max-nodes",
+     "type": "integer",
+     "required": false,
+     "default": "60"
+    },
+    {
+     "name": "inferred",
+     "type": "boolean",
+     "required": false,
+     "default": "false"
+    }
+   ]
+  }
+ ]
+}

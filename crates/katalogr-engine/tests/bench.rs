@@ -7,8 +7,8 @@ use support::{drained_graph, full_index, init_project, open_engine};
 
 use katalogr_engine::doctor::{DoctorOptions, run};
 use katalogr_engine::registry::ExtensionRegistry;
-use katalogr_model::RelPath;
-use katalogr_store::{Reader, ShardStat};
+use katalogr_model::{Extractor, RelPath};
+use katalogr_store::Reader;
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 
@@ -61,7 +61,7 @@ mod bench {
         );
     }
 
-    /// FEAT-064 R-15: `doctor` on 100,000 shards over 10 repos (5 KB each, stat-matching).
+    /// FEAT-064 R-15: `doctor` on 100,000 files over 10 repos (an artifact and a file revision each).
     #[test]
     #[ignore = "benchmark: run in release with --ignored"]
     fn doctor_100k() {
@@ -98,39 +98,41 @@ mod bench {
                 .unwrap()
         };
 
-        // Shard files and their hash rows. The engine opens the (empty) project first, so the
-        // open does not try to decode the synthetic shards.
+        // One tiny artifact and its file revision per file: what an index of this size holds.
+        // The engine opens the (empty) project first, then the rows go in, chunk by chunk.
         let t = Instant::now();
         let e = open_engine(&kx, &work);
-        let mut rows = Vec::with_capacity(SHARDS);
-        let mut body = vec![b' '; 5000];
-        for i in 0..SHARDS {
-            let (repo, path) = (&repos[i % REPOS], format!("d{}/f{i}.tx", i / 1000));
-            let key = RelPath::new(&path).unwrap();
-            let file = dir.shard_path(repo, &key);
-            std::fs::create_dir_all(file.parent().unwrap()).unwrap();
-            let text = format!("{{\"n\":{i}}}");
-            body[..text.len()].copy_from_slice(text.as_bytes());
-            std::fs::write(&file, &body).unwrap();
-            let stat = ShardStat::of(&std::fs::metadata(&file).unwrap()).unwrap();
-            let hash: [u8; 32] = Sha256::digest(&body).into();
-            rows.push((repo.clone(), key, hash, stat));
-        }
-        {
-            // The rows go in with one transaction.
+        let stitcher = katalogr_engine::Stitcher::new();
+        for chunk in (0..SHARDS).collect::<Vec<_>>().chunks(5000) {
             let mut tx = e.cache().write().unwrap();
-            for (repo, key, hash, stat) in &rows {
-                tx.put_shard_hash_stat(repo, key, hash, *stat).unwrap();
+            for &i in chunk {
+                let (repo, path) = (&repos[i % REPOS], format!("d{}/f{i}.tx", i / 1000));
+                let key = RelPath::new(&path).unwrap();
+                let revision: String = Sha256::digest(format!("{i}").as_bytes())
+                    .iter()
+                    .map(|b| format!("{b:02x}"))
+                    .collect();
+                let frag = support::TestExtractor
+                    .extract(&katalogr_model::ExtractInput {
+                        repo,
+                        path: &key,
+                        revision: &revision[..40],
+                        content: format!("sym fn F{i}\n").as_bytes(),
+                        context: &[],
+                    })
+                    .unwrap();
+                stitcher.replace_fragment(&mut tx, frag).unwrap();
+                tx.put_file_revision(repo, &key, &revision[..40]).unwrap();
             }
             tx.commit().unwrap();
-            assert_eq!(
-                e.cache().read().unwrap().shard_hashes().unwrap().len(),
-                SHARDS
-            );
         }
+        assert_eq!(
+            e.cache().read().unwrap().file_revisions().unwrap().len(),
+            SHARDS
+        );
         drop(e);
         // The kindex is committed, so the git check has nothing to report.
-        for args in [&["add", "-A"][..], &["commit", "-q", "-m", "shards"][..]] {
+        for args in [&["add", "-A"][..], &["commit", "-q", "-m", "files"][..]] {
             let out = std::process::Command::new("git")
                 .args([
                     "-c",
@@ -150,7 +152,7 @@ mod bench {
                 String::from_utf8_lossy(&out.stderr)
             );
         }
-        println!("built {SHARDS} shards in {:?}", t.elapsed());
+        println!("built {SHARDS} files in {:?}", t.elapsed());
 
         let mut registry = ExtensionRegistry::new();
         registry.register(Box::new(support::TestExtractor));
@@ -170,7 +172,7 @@ mod bench {
         assert!(r.findings.is_empty(), "{:?}", r.findings);
         let (without, r) = time(true);
         assert!(r.findings.is_empty(), "{:?}", r.findings);
-        println!("doctor on {SHARDS} shards: {with_git:?} with git, {without:?} with --skip-git");
+        println!("doctor on {SHARDS} files: {with_git:?} with git, {without:?} with --skip-git");
         assert!(with_git < Duration::from_millis(5000), "{with_git:?}");
         assert!(without < Duration::from_millis(1500), "{without:?}");
     }
@@ -199,9 +201,7 @@ mod bench {
             )
             .unwrap();
         let stitcher = Stitcher::new();
-        let cache =
-            Cache::open_or_rebuild(&dir, &stitcher, Instant::now() + Duration::from_secs(60))
-                .unwrap();
+        let cache = Cache::open(&dir, Instant::now() + Duration::from_secs(60)).unwrap();
         let fragments: Vec<_> = (0..FILES)
             .map(|f| {
                 let mut text = String::new();
@@ -257,9 +257,7 @@ mod bench {
             )
             .unwrap();
         let stitcher = Stitcher::new();
-        let cache =
-            Cache::open_or_rebuild(&dir, &stitcher, Instant::now() + Duration::from_secs(60))
-                .unwrap();
+        let cache = Cache::open(&dir, Instant::now() + Duration::from_secs(60)).unwrap();
         (cache, stitcher)
     }
 
@@ -537,12 +535,7 @@ mod bench {
                 katalogr_store::ProjectConfig::default(),
             )
             .unwrap();
-        Cache::open_or_rebuild(
-            &dir,
-            &katalogr_engine::Stitcher::new(),
-            Instant::now() + Duration::from_secs(30),
-        )
-        .unwrap()
+        Cache::open(&dir, Instant::now() + Duration::from_secs(30)).unwrap()
     }
 
     fn id_of(n: u32) -> Id {

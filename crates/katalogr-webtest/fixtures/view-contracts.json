@@ -1,0 +1,66 @@
+{
+ "schema": 1,
+ "view_format": 1,
+ "view_id": "v1-00000000000000000000000000000003",
+ "exact": true,
+ "positions": [
+  {
+   "repo": "app",
+   "commit": "0123456789abcdef0123456789abcdef01234567",
+   "dirty": null
+  }
+ ],
+ "query": {
+  "op": "contracts",
+  "args": {
+   "max-nodes": "60"
+  }
+ },
+ "mermaid": "flowchart LR\n  n1[\"serve\"]\n  n2[\"endpoint:orders\"]\n  n3[\"fetch\"]\n  n1 --> n2\n  n3 --> n2\n",
+ "graph": {
+  "title": "contracts",
+  "nodes": [
+   {
+    "id": "n1",
+    "name": "repo:app#fn:serve",
+    "label": "serve",
+    "kind": "fn",
+    "path": null,
+    "group": null
+   },
+   {
+    "id": "n2",
+    "name": "contract:endpoint:orders",
+    "label": "endpoint:orders",
+    "kind": "contract",
+    "path": null,
+    "group": null
+   },
+   {
+    "id": "n3",
+    "name": "repo:app#fn:fetch",
+    "label": "fetch",
+    "kind": "fn",
+    "path": null,
+    "group": null
+   }
+  ],
+  "edges": [
+   {
+    "from": "n1",
+    "to": "n2",
+    "kind": "provides",
+    "inferred": false
+   },
+   {
+    "from": "n3",
+    "to": "n2",
+    "kind": "consumes",
+    "inferred": false
+   }
+  ],
+  "shown": 3,
+  "total": 3
+ },
+ "pele": "1.7.0"
+}

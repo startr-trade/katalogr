@@ -137,6 +137,10 @@ impl Extractor for TestExtractor {
         "test"
     }
 
+    fn revision_salt(&self) -> &'static str {
+        "test-1"
+    }
+
     fn handles(&self, path: &RelPath) -> bool {
         path.as_str().ends_with(".tx")
     }
@@ -170,6 +174,10 @@ impl Extractor for CountedExtractor {
     fn id(&self) -> &'static str {
         "test"
     }
+
+    fn revision_salt(&self) -> &'static str {
+        "test-1"
+    }
     fn handles(&self, path: &RelPath) -> bool {
         TestExtractor.handles(path)
     }
@@ -192,6 +200,10 @@ pub struct TestGuest(pub &'static str);
 impl Extractor for TestGuest {
     fn id(&self) -> &'static str {
         "tguest"
+    }
+
+    fn revision_salt(&self) -> &'static str {
+        "test-1"
     }
     fn handles(&self, _: &RelPath) -> bool {
         false
@@ -589,6 +601,10 @@ impl Extractor for TestAltExtractor {
         "test-alt"
     }
 
+    fn revision_salt(&self) -> &'static str {
+        "test-1"
+    }
+
     fn handles(&self, _: &RelPath) -> bool {
         false
     }
@@ -767,12 +783,12 @@ pub fn cache_dump(e: &Engine) -> CacheDump {
     // The hash of each shard; the `(size, mtime)` recorded beside it is the file's own, which
     // differs from run to run.
     let hashes = r
-        .raw_scan(TableId::ShardHashes, &[])
+        .raw_scan(TableId::FileRevisions, &[])
         .unwrap()
         .into_iter()
         .map(|(k, v)| (k, v[..32].to_vec()))
         .collect();
-    out.push(("shard_hashes".to_string(), hashes));
+    out.push(("file_revisions".to_string(), hashes));
     out
 }
 
@@ -797,25 +813,58 @@ pub fn dictionary_dump(e: &Engine) -> CacheDump {
     .collect()
 }
 
-/// Every file under the project's `shards/` as `(relative path, bytes)`.
-pub fn shard_bytes(kx: &Utf8Path) -> BTreeMap<String, Vec<u8>> {
-    fn walk(root: &std::path::Path, dir: &std::path::Path, out: &mut BTreeMap<String, Vec<u8>>) {
+/// The `(repo, path)` of every file the graph holds a revision for: the files published.
+pub fn published(e: &Engine) -> Vec<(String, RelPath)> {
+    use katalogr_store::Reader;
+    e.cache()
+        .read()
+        .unwrap()
+        .file_revisions()
+        .unwrap()
+        .into_iter()
+        .map(|(k, _)| k)
+        .collect()
+}
+
+/// One file's fragment, extracted as the planner would and written nowhere (FEAT-094: replaces
+/// reading a shard file).
+pub fn extract_fragment(e: &Engine, repo: &str, path: &str) -> Fragment {
+    let rel = RelPath::new(path).unwrap();
+    let content = e.source(repo).unwrap().read(&rel).unwrap().unwrap();
+    let profiles = e.routing_profiles().unwrap();
+    let x = katalogr_engine::queue::extract_for_show(e, repo, &rel, &content, &profiles)
+        .unwrap()
+        .expect("an extractor handles the file");
+    x.fragment
+}
+
+/// The format 1 text of one file's fragment (see [`extract_fragment`]).
+pub fn extract_text(e: &Engine, repo: &str, path: &str) -> Vec<u8> {
+    katalogr_store::shard::encode(&extract_fragment(e, repo, path)).unwrap()
+}
+
+/// Every file under the repository root `work` as `(relative path, bytes of its extracted
+/// text)`, for the files an extractor handles.
+pub fn extracted_texts(e: &Engine, work: &Utf8Path) -> BTreeMap<String, Vec<u8>> {
+    fn walk(root: &Utf8Path, dir: &Utf8Path, e: &Engine, out: &mut BTreeMap<String, Vec<u8>>) {
         let Ok(rd) = std::fs::read_dir(dir) else {
             return;
         };
-        for e in rd {
-            let p = e.unwrap().path();
+        for ent in rd {
+            let p = Utf8PathBuf::from_path_buf(ent.unwrap().path()).unwrap();
             if p.is_dir() {
-                walk(root, &p, out);
+                walk(root, &p, e, out);
             } else {
-                let rel = p.strip_prefix(root).unwrap().to_string_lossy().to_string();
-                out.insert(rel, std::fs::read(&p).unwrap());
+                let rel = p.strip_prefix(root).unwrap().to_string();
+                let r = RelPath::new(&rel).unwrap();
+                if e.registry().for_path(&r).is_some() {
+                    out.insert(rel.clone(), extract_text(e, "r", &rel));
+                }
             }
         }
     }
-    let root = kx.join("projects/p/shards");
     let mut out = BTreeMap::new();
-    walk(root.as_std_path(), root.as_std_path(), &mut out);
+    walk(work, work, e, &mut out);
     out
 }
 
@@ -831,6 +880,10 @@ pub struct TestProbe {
 impl Extractor for TestProbe {
     fn id(&self) -> &'static str {
         self.id
+    }
+
+    fn revision_salt(&self) -> &'static str {
+        "test-1"
     }
 
     fn handles(&self, path: &RelPath) -> bool {

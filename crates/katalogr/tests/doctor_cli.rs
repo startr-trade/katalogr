@@ -78,12 +78,16 @@ fn healthy(tmp: &Path) -> (PathBuf, PathBuf) {
     (kx, repo)
 }
 
-/// Edits one shard after the commit and indexing: two warnings (cache and git).
+/// After the commit and indexing: a `shards/` folder left by an earlier release (KD-SHD-004)
+/// and an uncommitted change to a file people write (KD-GIT-001): two warnings.
 fn dirty(kx: &Path) {
-    let shard = kx.join("projects/demo/shards/app/a.tx.kshard.json");
-    let mut bytes = std::fs::read(&shard).unwrap();
-    bytes.push(b' ');
-    std::fs::write(shard, bytes).unwrap();
+    let shards = kx.join("projects/demo/shards/app");
+    std::fs::create_dir_all(&shards).unwrap();
+    std::fs::write(shards.join("a.tx.kshard.json"), "{}").unwrap();
+    let config = kx.join("projects/demo/config.yaml");
+    let mut text = std::fs::read_to_string(&config).unwrap();
+    text.push_str("# edited after the commit\n");
+    std::fs::write(config, text).unwrap();
 }
 
 mod doctor_cli {
@@ -101,10 +105,10 @@ mod doctor_cli {
             "{text}{}",
             String::from_utf8_lossy(&out.stderr)
         );
-        assert!(text.contains("summary: healthy; 11 checks"), "{text}");
+        assert!(text.contains("summary: healthy; 10 checks"), "{text}");
         assert!(text.starts_with("katalogr doctor: katalogr "), "{text}");
         assert!(
-            text.contains("shard format 1") && text.contains("cache schema "),
+            text.contains("shard format 2") && text.contains("cache schema "),
             "{text}"
         );
 
@@ -123,7 +127,7 @@ mod doctor_cli {
                 .code(),
             Some(0)
         );
-        // --skip-git leaves the cache warning.
+        // --skip-git leaves the leftover-shards warning.
         assert_eq!(
             katalogr(&repo, &["doctor", "--skip-git"]).status.code(),
             Some(1)
@@ -147,7 +151,6 @@ mod doctor_cli {
         let tmp = tempfile::tempdir().unwrap();
         let (kx, repo) = healthy(tmp.path());
         dirty(&kx);
-        std::fs::write(kx.join("projects/demo/shards/app/.tmp-x.kshard.json"), "{}").unwrap();
         let text = ok_or_fail(&repo, &["doctor", "--verbose"]);
         let json = ok_or_fail(&repo, &["--json", "doctor", "--verbose"]);
         assert_eq!(json.lines().count(), 1, "one JSON object on one line");
@@ -155,7 +158,7 @@ mod doctor_cli {
         assert_eq!(v["schema"], 1);
         assert_eq!(v["healthy"], false);
         let findings = v["findings"].as_array().unwrap();
-        assert!(findings.len() >= 3, "{json}");
+        assert!(findings.len() >= 2, "{json}");
         let mut last = 0;
         for f in findings {
             let code = f["code"].as_str().unwrap();
@@ -176,7 +179,7 @@ mod doctor_cli {
         let s = &v["summary"];
         assert!(
             text.contains(&format!(
-                "summary: {} error, {} warning, {} info; 11 checks",
+                "summary: {} error, {} warning, {} info; 10 checks",
                 s["error"], s["warning"], s["info"]
             )),
             "{text}"
@@ -202,7 +205,8 @@ mod doctor {
         let tmp = tempfile::tempdir().unwrap();
         let (kx, repo) = healthy(tmp.path());
         let project = kx.join("projects/demo");
-        // Indexing sets the undecodable shard aside and records the refused profile.
+        // A shard left by an earlier release, and a refused profile that indexing records.
+        std::fs::create_dir_all(project.join("shards/app")).unwrap();
         std::fs::write(project.join("shards/app/junk.kshard.json"), "x").unwrap();
         std::fs::create_dir_all(project.join("profiles")).unwrap();
         std::fs::write(
@@ -213,8 +217,6 @@ mod doctor {
         ok(&repo, &["index"]);
         // What indexing would fix, left behind.
         dirty(&kx);
-        std::fs::write(project.join("shards/app/.tmp-x.kshard.json"), "{}").unwrap();
-        std::fs::write(project.join("shards/app/new.tx.kshard.json"), "{}").unwrap();
         std::fs::create_dir_all(project.join(".cache/inbox")).unwrap();
         std::fs::write(project.join(".cache/inbox/1-1-aa.json.bad"), "x").unwrap();
         std::fs::write(project.join(".cache/roots.yaml"), "{}\n").unwrap();
@@ -260,8 +262,7 @@ mod doctor {
             saw.push(text);
         }
         for code in [
-            "KD-SHD-001",
-            "KD-JNL-003",
+            "KD-SHD-004",
             "KD-QUE-003",
             "KD-PRF-001",
             "KD-ROOT-001",

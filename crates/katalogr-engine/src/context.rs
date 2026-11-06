@@ -19,15 +19,40 @@ pub(crate) fn hash(bytes: &[u8]) -> [u8; 32] {
     Sha256::digest(bytes).into()
 }
 
-/// The revision an extractor is given: the blob id, followed by `+<16 hex digits of the
-/// context hash>` when the context is not empty. A changed context therefore changes the
-/// revision, so the unchanged file is extracted again.
-pub(crate) fn revision(blob: &str, context: &[u8]) -> String {
-    if context.is_empty() {
-        return blob.to_string();
+/// Bumped when profile or embed application changes the output of extraction for the same
+/// inputs. Part of every file revision.
+pub(crate) const ENGINE_EXTRACT_REVISION: u32 = 1;
+
+/// Everything but the blob id that the output of extracting one file depends on.
+#[derive(Copy, Clone, Debug)]
+pub(crate) struct RevisionFields<'a> {
+    pub extension: &'a str,
+    pub context: &'a [u8],
+    pub profile: Option<[u8; 32]>,
+    pub salt: &'a str,
+    pub embed: Option<[u8; 32]>,
+    pub guests: &'a [u8],
+}
+
+/// The revision an extractor is given: the blob id, then `+<16 hex digits>` of the SHA-256
+/// over these fields in this order: extension id, context bytes, profile hash or nothing,
+/// `ENGINE_EXTRACT_REVISION`, salt, embed signature or nothing, guest key bytes. Each field is
+/// prefixed with its length (u64 little-endian), so one field's end cannot run into the next.
+pub(crate) fn revision_of(blob: &str, fields: &RevisionFields) -> String {
+    fn put(h: &mut Sha256, bytes: &[u8]) {
+        h.update((bytes.len() as u64).to_le_bytes());
+        h.update(bytes);
     }
-    let h = hash(context);
-    let hex: String = h[..8].iter().map(|b| format!("{b:02x}")).collect();
+    let mut h = Sha256::new();
+    put(&mut h, fields.extension.as_bytes());
+    put(&mut h, fields.context);
+    put(&mut h, fields.profile.as_ref().map_or(&[][..], |p| &p[..]));
+    put(&mut h, &ENGINE_EXTRACT_REVISION.to_le_bytes());
+    put(&mut h, fields.salt.as_bytes());
+    put(&mut h, fields.embed.as_ref().map_or(&[][..], |p| &p[..]));
+    put(&mut h, fields.guests);
+    let digest: [u8; 32] = h.finalize().into();
+    let hex: String = digest[..8].iter().map(|b| format!("{b:02x}")).collect();
     format!("{blob}+{hex}")
 }
 
@@ -52,4 +77,107 @@ pub(crate) fn build(
         }
     }
     Ok(ext.build_context(&files).ok())
+}
+
+#[cfg(test)]
+mod revision {
+    use super::*;
+
+    fn base() -> RevisionFields<'static> {
+        RevisionFields {
+            extension: "ext",
+            context: b"ctx",
+            profile: Some([1; 32]),
+            salt: "salt-1",
+            embed: Some([2; 32]),
+            guests: b"guests",
+        }
+    }
+
+    #[test]
+    fn each_input_changes_revision() {
+        let r0 = revision_of("blob", &base());
+        assert_eq!(r0, revision_of("blob", &base()));
+        let variants = [
+            RevisionFields {
+                extension: "other",
+                ..base()
+            },
+            RevisionFields {
+                context: b"ctx2",
+                ..base()
+            },
+            RevisionFields {
+                profile: Some([3; 32]),
+                ..base()
+            },
+            RevisionFields {
+                profile: None,
+                ..base()
+            },
+            RevisionFields {
+                salt: "salt-2",
+                ..base()
+            },
+            RevisionFields {
+                embed: Some([4; 32]),
+                ..base()
+            },
+            RevisionFields {
+                embed: None,
+                ..base()
+            },
+            RevisionFields {
+                guests: b"guests2",
+                ..base()
+            },
+        ];
+        for (i, v) in variants.iter().enumerate() {
+            assert_ne!(
+                r0,
+                revision_of("blob", v),
+                "variant {i} left the revision unchanged"
+            );
+        }
+        assert_ne!(r0, revision_of("blob2", &base()));
+        assert!(r0.starts_with("blob+") && r0.len() == "blob+".len() + 16);
+    }
+
+    #[test]
+    fn extension_id_separates_extractors() {
+        // The same bytes split differently between neighbouring fields must not collide.
+        let a = RevisionFields {
+            extension: "ab",
+            context: b"c",
+            ..base()
+        };
+        let b = RevisionFields {
+            extension: "a",
+            context: b"bc",
+            ..base()
+        };
+        assert_ne!(revision_of("x", &a), revision_of("x", &b));
+        let c = RevisionFields {
+            extension: "md",
+            ..base()
+        };
+        let d = RevisionFields {
+            extension: "text",
+            ..base()
+        };
+        assert_ne!(revision_of("x", &c), revision_of("x", &d));
+    }
+
+    #[test]
+    fn known_vector() {
+        let f = RevisionFields {
+            extension: "ext",
+            context: b"c",
+            profile: None,
+            salt: "s",
+            embed: None,
+            guests: b"",
+        };
+        assert_eq!(revision_of("b", &f), "b+94bd504cb6266431");
+    }
 }

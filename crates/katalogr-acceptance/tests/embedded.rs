@@ -223,13 +223,33 @@ mod embedded {
         }
 
         fn revision(&self, path: &str) -> String {
-            self.engine
-                .dir()
-                .read_shard("r", &RelPath::new(path).unwrap())
+            use katalogr_store::Reader;
+            let h = self
+                .engine
+                .cache()
+                .read()
                 .unwrap()
+                .file_revision("r", &RelPath::new(path).unwrap())
                 .unwrap()
-                .provenance
-                .revision
+                .expect("file revision");
+            h.iter().map(|b| format!("{b:02x}")).collect()
+        }
+
+        /// One file's fragment, extracted as the planner would; nothing is written.
+        fn fragment(&self, path: &str) -> katalogr_model::Fragment {
+            let rel = RelPath::new(path).unwrap();
+            let content = self
+                .engine
+                .source("r")
+                .unwrap()
+                .read(&rel)
+                .unwrap()
+                .unwrap();
+            let profiles = self.engine.routing_profiles().unwrap();
+            katalogr_engine::queue::extract_for_show(&self.engine, "r", &rel, &content, &profiles)
+                .unwrap()
+                .expect("an extractor handles the file")
+                .fragment
         }
     }
 
@@ -275,13 +295,8 @@ mod embedded {
             vec!["r:src/main/resources/db/migration/V1__init.sql#table:billing.orders"]
         );
         assert!(incoming(&l, "app.orders").is_empty());
-        // the shard records where the binding came from
-        let shard = e
-            .engine
-            .dir()
-            .read_shard("r", &RelPath::new("src/db.rs").unwrap())
-            .unwrap()
-            .unwrap();
+        // the fragment records where the binding came from
+        let shard = e.fragment("src/db.rs");
         assert_eq!(shard.bindings.len(), 1);
         assert_eq!(shard.bindings[0].origin.as_deref(), Some("embedded:sql"));
         // the config goes away: everything is `public` again (R-21)

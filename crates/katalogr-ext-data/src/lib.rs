@@ -67,6 +67,10 @@ impl Extractor for DataExtractor {
         "data"
     }
 
+    fn revision_salt(&self) -> &'static str {
+        "data-extract-1"
+    }
+
     /// Always false: data documents are routed to this extension only by a profile `select`.
     fn handles(&self, _: &RelPath) -> bool {
         false

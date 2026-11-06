@@ -14,6 +14,8 @@ mod explain;
 mod find;
 pub mod fold;
 mod hints;
+pub mod impact;
+pub mod impact_seeds;
 mod map;
 mod mirror;
 mod path;
@@ -27,6 +29,7 @@ mod search;
 pub mod show;
 mod step;
 mod tests;
+pub mod timeline;
 mod view_answer;
 mod why;
 pub mod working_set;
@@ -46,6 +49,12 @@ pub use explain::explain;
 pub use find::find;
 pub use fold::{FOLD_FROM, FOLD_SHOWN, Folded};
 pub use hints::{HintSource, hints};
+pub use impact::{
+    DEFAULT_IMPACT_DEPTH, DEFAULT_IMPACT_LIMIT, IMPACT_SKIPPED_KINDS, ImpactContract, ImpactGroup,
+    ImpactHit, ImpactOptions, ImpactReport, ImpactSeed, SEED_BROKEN_REF, SEED_CONTRACT,
+    SEED_CONTRACT_CONSUMERS, SEED_FILE, SEED_ITEM, SEED_SYMBOL, Seed, impact,
+};
+pub use impact_seeds::{seeds_for_changes, seeds_for_file, seeds_for_item, seeds_for_symbol};
 pub use map::{map, map_boosted_traced, map_top, map_top_behind, map_traced};
 pub use mirror::mirror_drift;
 pub use path::path;
@@ -66,6 +75,7 @@ pub use search::{
     SearchParams, search, search_boosted_traced, search_traced, search_with, search_with_traced,
 };
 pub use tests::{DEFAULT_TEST_DEPTH, TestsOptions, tests, tests_for};
+pub use timeline::{PointSource, Timeline, TimelinePoint};
 pub use view_answer::{ViewAnswer, ViewQueryJson, view_schema};
 pub use why::{Blame, DEFAULT_USE_LIMIT, RATIONALE_KINDS, attach_use, why, why_sources, why_use};
 pub use working_set::{Boost, Tier, Weights, WorkingSet, WorkingSetSummary, boost};

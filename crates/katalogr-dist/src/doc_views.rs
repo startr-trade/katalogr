@@ -8,7 +8,7 @@ use crate::doc_blocks::mermaid_fence;
 use crate::{DistError, Katalogr, Options, Outcome};
 use katalogr_query::PositionRef;
 use katalogr_render::{ViewSpec, find_blocks};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
@@ -32,7 +32,7 @@ pub struct SnapshotRequest {
 }
 
 /// `index.json`: the positions, the repos named, and each block with its view ID.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SnapshotIndex {
     pub schema: u32,
     /// Sorted, without repeats.
@@ -44,7 +44,7 @@ pub struct SnapshotIndex {
 }
 
 /// One block of a document and the view that answers it.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SnapshotBlock {
     /// Relative to `--docs`.
     pub doc: String,

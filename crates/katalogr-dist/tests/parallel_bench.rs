@@ -72,7 +72,9 @@ mod bench {
         Run {
             wall,
             stats: e.index_stats(),
-            files: e.dir().list_shards().unwrap().len(),
+            files: katalogr_store::Reader::file_revisions(&e.cache().read().unwrap())
+                .unwrap()
+                .len(),
             graph_len: a.value.len(),
         }
     }

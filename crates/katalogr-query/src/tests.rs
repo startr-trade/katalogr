@@ -32,7 +32,7 @@ impl Default for TestsOptions {
 }
 
 /// Extracted 3, Declared 2, Inferred 1.
-fn strength(c: Confidence) -> u8 {
+pub(crate) fn strength(c: Confidence) -> u8 {
     match c {
         Confidence::Extracted => 3,
         Confidence::Declared => 2,
@@ -40,7 +40,7 @@ fn strength(c: Confidence) -> u8 {
     }
 }
 
-fn from_strength(s: u8) -> Confidence {
+pub(crate) fn from_strength(s: u8) -> Confidence {
     match s {
         3 => Confidence::Extracted,
         2 => Confidence::Declared,
@@ -60,7 +60,7 @@ struct Path {
 }
 
 /// Canonical name of a symbol, artifact or contract; the hex id for anything else.
-fn canon(tx: &impl Reader, id: Id) -> Result<String, StoreError> {
+pub(crate) fn canon(tx: &impl Reader, id: Id) -> Result<String, StoreError> {
     if let Some(s) = tx.symbol(id)? {
         return Ok(s.name.canonical());
     }
@@ -74,7 +74,7 @@ fn canon(tx: &impl Reader, id: Id) -> Result<String, StoreError> {
 }
 
 /// The role of a test node and its hit, when the node carries the `test` fact as a string.
-fn role_of(tx: &impl Reader, id: Id) -> Result<Option<(String, SymbolHit)>, StoreError> {
+pub(crate) fn role_of(tx: &impl Reader, id: Id) -> Result<Option<(String, SymbolHit)>, StoreError> {
     let role = |f: &std::collections::BTreeMap<String, Fact>| match f.get(FACT_TEST) {
         Some(Fact::Str(s)) => Some(s.clone()),
         _ => None,
@@ -319,25 +319,14 @@ mod explain_contract_fixture {
     use crate::{Explain, explain};
     use camino::Utf8PathBuf;
     use katalogr_model::{
-        ArtifactName, Confidence, ContractName, Fragment, Id, LinkKind, Name, Provenance, RelPath,
-        Segment, Span, SymbolName,
+        ArtifactName, Confidence, ContractName, Id, LinkKind, Name, Provenance, RelPath, Segment,
+        Span, SymbolName,
     };
     use katalogr_store::{
         Cache, ContractRow, Kindex, LinkEntry, LinkKey, LinkOrigin, LinkRow, ProjectConfig,
-        ProjectName, RepoConfig, Restitch, StoreError, SymbolRow, WriteTx,
+        ProjectName, RepoConfig, SymbolRow,
     };
     use std::time::{Duration, Instant};
-
-    struct NoShards;
-
-    impl Restitch for NoShards {
-        fn replace_fragment(&self, _: &mut WriteTx, _: Fragment) -> Result<(), StoreError> {
-            Ok(())
-        }
-        fn remove_artifact(&self, _: &mut WriteTx, _: &ArtifactName) -> Result<(), StoreError> {
-            Ok(())
-        }
-    }
 
     const SPAN: Span = Span {
         start_line: 3,
@@ -365,9 +354,7 @@ mod explain_contract_fixture {
                 },
             )
             .unwrap();
-        let cache =
-            Cache::open_or_rebuild(&dir, &NoShards, Instant::now() + Duration::from_secs(60))
-                .unwrap();
+        let cache = Cache::open(&dir, Instant::now() + Duration::from_secs(60)).unwrap();
         let path = RelPath::new("f.tx").unwrap();
         let artifact = ArtifactName {
             repo: "r".into(),

@@ -138,6 +138,7 @@ mod views {
         for q in [
             "contracts",
             "callers?symbol=target&depth=2",
+            "impact?symbol=target&depth=3",
             "path?from=top&to=caller_a",
             "cycles?level=file",
         ] {
@@ -168,6 +169,24 @@ mod views {
         );
         assert_eq!(again.body, r.body);
         assert_eq!(again.header("x-katalogr-view"), Some("hit"));
+    }
+
+    /// R-11. The impact view's API body is the CLI's `--json`, byte for byte.
+    #[test]
+    fn impact_view_api_equals_cli() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (_kx, repo) = project(tmp.path());
+        let server = serve(&repo);
+        let r = get(
+            &server,
+            "/api/v1/views/impact?symbol=target&depth=3&consistency=wait",
+        );
+        assert_eq!(r.status, 200, "{r:?}");
+        let cli_out = ok(
+            &repo,
+            &["--json", "view", "impact", "target", "--depth", "3"],
+        );
+        assert_eq!(r.body, cli_out.trim_end());
     }
 
     /// R-6. `meta` lists the capability `views`.
@@ -204,7 +223,17 @@ mod views {
             .iter()
             .map(|o| o["op"].as_str().unwrap())
             .collect();
-        assert_eq!(ops, ["callers", "contracts", "cycles", "path", "structure"]);
+        assert_eq!(
+            ops,
+            [
+                "callers",
+                "contracts",
+                "cycles",
+                "impact",
+                "path",
+                "structure"
+            ]
+        );
         let callers = &v["views"][0];
         let names: Vec<&str> = callers["params"]
             .as_array()
@@ -233,7 +262,7 @@ mod views {
         let (_kx, repo) = project(tmp.path());
         let server = serve(&repo);
         let v = get(&server, "/api/v1/meta").json();
-        assert_eq!(v["contract"], 3);
+        assert_eq!(v["contract"], 5);
         assert_eq!(v["view_format"], 1);
     }
 

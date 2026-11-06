@@ -1,0 +1,82 @@
+{
+ "schema": 1,
+ "watermark": 0,
+ "pending": 0,
+ "stale": false,
+ "truncated": null,
+ "result": {
+  "points": [
+   {
+    "source": "snapshot",
+    "view_id": "v1-0000000000000000000000000000000a",
+    "query": {
+     "op": "structure",
+     "args": {
+      "inferred": "false",
+      "level": "package",
+      "max-nodes": "60"
+     }
+    },
+    "positions": [
+     {
+      "repo": "app",
+      "commit": "0123456789abcdef0123456789abcdef01234567",
+      "dirty": null
+     }
+    ],
+    "committed": 1700000000,
+    "snapshot": "rel-1"
+   },
+   {
+    "source": "stored-view",
+    "view_id": "v1-0000000000000000000000000000000b",
+    "query": {
+     "op": "callers",
+     "args": {
+      "depth": "2",
+      "max-nodes": "60",
+      "symbol": "target"
+     }
+    },
+    "positions": [
+     {
+      "repo": "app",
+      "commit": "0123456789abcdef0123456789abcdef01234567",
+      "dirty": null
+     }
+    ],
+    "committed": 1700000500,
+    "snapshot": null
+   },
+   {
+    "source": "stored-view",
+    "view_id": "v1-00000000000000000000000000000001",
+    "query": {
+     "op": "structure",
+     "args": {
+      "inferred": "false",
+      "level": "package",
+      "max-nodes": "60"
+     }
+    },
+    "positions": [
+     {
+      "repo": "app",
+      "commit": "0123456789abcdef0123456789abcdef01234567",
+      "dirty": null
+     }
+    ],
+    "committed": 1700001000,
+    "snapshot": null
+   }
+  ]
+ },
+ "positions": [
+  {
+   "repo": "app",
+   "commit": "0123456789abcdef0123456789abcdef01234567",
+   "dirty": null
+  }
+ ],
+ "exact": true
+}

@@ -3,25 +3,13 @@
 
 use camino::Utf8PathBuf;
 use katalogr_model::{
-    ArtifactName, Confidence, Fragment, Id, LinkKind, Name, Provenance, RelPath, Segment, Span,
-    SymbolName,
+    ArtifactName, Confidence, Id, LinkKind, Name, Provenance, RelPath, Segment, Span, SymbolName,
 };
 use katalogr_store::{
     ArtifactRow, Cache, Kindex, LinkEntry, LinkKey, LinkOrigin, LinkRow, ProjectConfig,
-    ProjectName, RepoConfig, Restitch, StoreError, SymbolRow, WriteTx,
+    ProjectName, RepoConfig, SymbolRow, WriteTx,
 };
 use std::time::{Duration, Instant};
-
-struct NoShards;
-
-impl Restitch for NoShards {
-    fn replace_fragment(&self, _: &mut WriteTx, _: Fragment) -> Result<(), StoreError> {
-        Ok(())
-    }
-    fn remove_artifact(&self, _: &mut WriteTx, _: &ArtifactName) -> Result<(), StoreError> {
-        Ok(())
-    }
-}
 
 pub fn open(tmp: &tempfile::TempDir, repos: &[&str]) -> Cache {
     let root = Utf8PathBuf::from_path_buf(tmp.path().join("kx")).unwrap();
@@ -35,7 +23,7 @@ pub fn open(tmp: &tempfile::TempDir, repos: &[&str]) -> Cache {
             },
         )
         .unwrap();
-    Cache::open_or_rebuild(&dir, &NoShards, Instant::now() + Duration::from_secs(60)).unwrap()
+    Cache::open(&dir, Instant::now() + Duration::from_secs(60)).unwrap()
 }
 
 pub fn provenance(repo: &str, path: &RelPath) -> Provenance {
@@ -134,4 +122,65 @@ pub fn link(tx: &mut WriteTx, repo: &str, path: &str, from: Id, kind: &str, to: 
         &link_row(repo, path),
     )
     .unwrap();
+}
+
+/// A link with the given confidence.
+pub fn link_conf(
+    tx: &mut WriteTx,
+    repo: &str,
+    path: &str,
+    from: Id,
+    kind: &str,
+    to: Id,
+    confidence: Confidence,
+) {
+    let mut row = link_row(repo, path);
+    row.entries[0].confidence = confidence;
+    tx.put_link(
+        &LinkKey {
+            from,
+            kind: LinkKind(kind.into()),
+            to,
+        },
+        &row,
+    )
+    .unwrap();
+}
+
+/// Add a contract node with the given role counts; returns its id.
+pub fn contract(
+    tx: &mut WriteTx,
+    kind: &str,
+    key: &str,
+    providers: u32,
+    consumers: u32,
+    declarers: u32,
+) -> Id {
+    let name = katalogr_model::ContractName {
+        kind: kind.into(),
+        key: key.into(),
+    };
+    let id = Id::of(&name.canonical());
+    tx.put_contract(
+        id,
+        &katalogr_store::ContractRow {
+            name,
+            providers,
+            consumers,
+            declarers,
+        },
+    )
+    .unwrap();
+    id
+}
+
+/// Give a symbol the neutral `test` fact with the given role.
+pub fn mark_test(tx: &mut WriteTx, id: Id, role: &str) {
+    use katalogr_store::Reader;
+    let mut row = tx.symbol(id).unwrap().unwrap();
+    row.facts.insert(
+        katalogr_model::insight::FACT_TEST.to_string(),
+        katalogr_model::Fact::Str(role.to_string()),
+    );
+    tx.put_symbol(id, &row).unwrap();
 }

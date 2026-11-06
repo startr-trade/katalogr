@@ -295,6 +295,28 @@
         ]
       },
       {
+        "op": "impact",
+        "params": [
+          {
+            "name": "symbol",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "default": "3",
+            "name": "depth",
+            "required": false,
+            "type": "integer"
+          },
+          {
+            "default": "60",
+            "name": "max-nodes",
+            "required": false,
+            "type": "integer"
+          }
+        ]
+      },
+      {
         "op": "path",
         "params": [
           {

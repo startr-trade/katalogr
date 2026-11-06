@@ -140,12 +140,12 @@ impl Engine {
         deadline: Instant,
     ) -> Result<Engine, EngineError> {
         let stitcher = Stitcher::new();
-        let cache = Cache::open_or_rebuild(&dir, &stitcher, deadline)?;
+        let cache = Cache::open(&dir, deadline)?;
         Ok(Engine::with_cache(dir, cache, stitcher, registry, roots))
     }
 
     /// FEAT-080 R-3. As [`Engine::open`], but a cache held by another writer fails at once with
-    /// `StoreError::Busy` instead of waiting; a free cache is opened and synced against `deadline`.
+    /// `StoreError::Busy` instead of waiting; a free cache is opened against `deadline`.
     pub fn open_try(
         dir: ProjectDir,
         registry: ExtensionRegistry,
@@ -153,7 +153,7 @@ impl Engine {
         deadline: Instant,
     ) -> Result<Engine, EngineError> {
         let stitcher = Stitcher::new();
-        let cache = Cache::open_or_rebuild_busy(&dir, &stitcher, Instant::now(), deadline)?;
+        let cache = Cache::open_busy(&dir, Instant::now(), deadline)?;
         Ok(Engine::with_cache(dir, cache, stitcher, registry, roots))
     }
 
@@ -493,11 +493,7 @@ impl Engine {
             if self.cache.is_reader() {
                 // FEAT-080 R-4. Another process holds the writer; take over only when it is gone.
                 held = match held {
-                    Some(p)
-                        if self
-                            .cache
-                            .try_upgrade(&self.dir, &self.stitcher, deadline)? =>
-                    {
+                    Some(p) if self.cache.try_upgrade(&self.dir, deadline)? => {
                         let mut p = p;
                         // What a reader skipped at the start.
                         p.refresh_embed_signature()?;
@@ -509,7 +505,6 @@ impl Engine {
             }
             match held {
                 Some(mut p) => {
-                    p.recover()?;
                     p.ingest()?;
                     p.process(&scope, DEFAULT_BUDGET, deadline)?;
                     backoff = POLL_START;

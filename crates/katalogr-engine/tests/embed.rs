@@ -4,7 +4,7 @@ mod support;
 use camino::Utf8PathBuf;
 use katalogr_engine::Engine;
 use katalogr_engine::registry::ExtensionRegistry;
-use katalogr_model::{Confidence, ContractName, ContractRole, Fragment, Name, RelPath};
+use katalogr_model::{Confidence, ContractName, ContractRole, Fragment, Name};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use support::{
@@ -50,14 +50,11 @@ impl Env {
 }
 
 fn shard(e: &Engine, path: &str) -> Fragment {
-    e.dir()
-        .read_shard("r", &RelPath::new(path).unwrap())
-        .unwrap()
-        .expect("shard")
+    support::extract_fragment(e, "r", path)
 }
 
 fn shard_bytes(e: &Engine, path: &str) -> Vec<u8> {
-    std::fs::read(e.dir().shard_path("r", &RelPath::new(path).unwrap())).unwrap()
+    support::extract_text(e, "r", path)
 }
 
 fn res(key: &str) -> String {
@@ -164,8 +161,9 @@ mod embed {
         let t = env(&[("a.tx", "sym fn f\nlit f use x\n"), ("tguest.ctx", "a")]);
         let e = t.open("1");
         full_index(&e);
-        let before = t.n();
+        // Reading the text extracts once, as `shard show` does; that is not the index.
         let bytes = shard_bytes(&e, "a.tx");
+        let before = t.n();
         std::fs::write(t.work.join("tguest.ctx"), "a\nsecond line").unwrap();
         e.inbox().append(&file_event("tguest.ctx")).unwrap();
         drained_graph(&e);

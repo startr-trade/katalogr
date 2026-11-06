@@ -5,12 +5,12 @@
 
 use crate::position::PositionRef;
 use schemars::JsonSchema;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 /// The question a view answers, with every default filled in. `op` is the view's op (for
 /// example `structure`), not the op of its view ID.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, JsonSchema)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ViewQueryJson {
     pub op: String,
     pub args: BTreeMap<String, String>,

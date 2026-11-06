@@ -1,0 +1,28 @@
+{
+ "schema": 1,
+ "watermark": 0,
+ "pending": 0,
+ "stale": false,
+ "truncated": null,
+ "result": {
+  "items": [
+   {
+    "symbol": {
+     "name": "repo:app#fn:dup",
+     "path": "src/lib.rs"
+    },
+    "class": "unused",
+    "confidence": "high",
+    "incoming": 0
+   }
+  ]
+ },
+ "positions": [
+  {
+   "repo": "app",
+   "commit": "0123456789abcdef0123456789abcdef01234567",
+   "dirty": null
+  }
+ ],
+ "exact": true
+}

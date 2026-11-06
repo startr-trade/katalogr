@@ -13,11 +13,13 @@ name = "katalogr"
 path = "src/main.rs"
 
 [features]
-default = ["mcp", "api"]
+default = ["mcp", "api", "web"]
 # The optional MCP wrapper for non-Claude hosts (ADR-0023). Off -> no tokio, no rmcp.
 mcp = ["dep:rmcp", "dep:tokio"]
 # The stateless HTTP/JSON API server (FEAT-049, ADR-0010). Off -> no tiny_http, no `api` command.
 api = ["dep:tiny_http"]
+# The embedded read-only web view, `katalogr serve` (FEAT-033). Off -> no bundle in the binary.
+web = ["api", "katalogr-dist/web"]
 
 [dependencies]
 katalogr-dist.workspace = true
@@ -44,17 +46,36 @@ required-features = ["api"]
 name = "views_api"
 required-features = ["api"]
 
+[[test]]
+name = "timeline"
+required-features = ["api"]
+
+[[test]]
+name = "web"
+required-features = ["web"]
+
+[[test]]
+name = "web_links"
+required-features = ["web"]
+
+[[test]]
+name = "bench_web"
+required-features = ["web"]
+
 [dev-dependencies]
 # The `.tx` test extractor gives integration tests symbols to query.
 katalogr-dist = { workspace = true, features = ["test-extractor"] }
 tempfile.workspace = true
+camino.workspace = true
 katalogr-store.workspace = true
 katalogr-model.workspace = true
 fs4.workspace = true
 toml.workspace = true
-camino.workspace = true
 # Reads an index's canonical graph, with the artifact facts (URLs) the CLI does not print.
 katalogr-acceptance = { path = "../katalogr-acceptance" }
 # The load-test harness is exercised end to end against a synthetic corpus (FEAT-068). It is
 # never a normal dependency: archtest::bench_not_shipped.
 katalogr-bench = { workspace = true }
+# `HttpBackend` drives the page's own scripts against a real `katalogr serve`.
+katalogr-webtest = { path = "../katalogr-webtest" }
+katalogr-web.workspace = true

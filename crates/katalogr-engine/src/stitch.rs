@@ -9,10 +9,9 @@ use katalogr_model::{
 };
 use katalogr_store::{
     ArtifactRow, BindingRow, ContractRow, FanKey, LinkEntry, LinkKey, LinkOrigin, LinkRow, Reader,
-    RefId, Restitch, StoreError, SymbolRow, WriteTx,
+    RefId, SymbolRow, WriteTx,
 };
 use std::collections::{BTreeMap, BTreeSet};
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
 /// A reference resolving to at least this many targets (and at least 2) is stored as one fan
@@ -66,10 +65,9 @@ pub struct PreparedFragment {
     pub(crate) docs: Vec<(Id, lexicon::Doc)>,
 }
 
-/// Stateless apart from the delta recorded by the [`Restitch`] entry points.
+/// Stateless: every call takes the transaction it works in.
 #[derive(Default)]
 pub struct Stitcher {
-    recorded: Mutex<StitchDelta>,
     /// Storage threshold of fan rows; 0 (unset) and values below 2 mean `FAN_ROWS_FROM`.
     fan_from: AtomicU32,
     /// Tests only: re-resolve every reference naming a changed key, as before FEAT-093.
@@ -107,11 +105,6 @@ impl Stitcher {
             resolve_all: self.resolve_all.load(Ordering::Relaxed),
             ..Cx::default()
         }
-    }
-
-    /// The delta accumulated by `Restitch` calls since the last take.
-    pub fn take_delta(&self) -> StitchDelta {
-        std::mem::take(&mut *self.recorded.lock().expect("delta lock"))
     }
 
     /// Replace one artifact's fragment and re-resolve exactly the affected references:
@@ -335,27 +328,6 @@ impl Stitcher {
             resolve(tx, &mut cx, r)?;
         }
         Ok(cx.finish())
-    }
-}
-
-impl Restitch for Stitcher {
-    fn replace_fragment(&self, tx: &mut WriteTx, f: Fragment) -> Result<(), StoreError> {
-        let d = Stitcher::replace_fragment(self, tx, f).map_err(into_store)?;
-        self.recorded.lock().expect("delta lock").merge(d);
-        Ok(())
-    }
-
-    fn remove_artifact(&self, tx: &mut WriteTx, a: &ArtifactName) -> Result<(), StoreError> {
-        let d = Stitcher::remove_artifact(self, tx, a).map_err(into_store)?;
-        self.recorded.lock().expect("delta lock").merge(d);
-        Ok(())
-    }
-}
-
-fn into_store(e: EngineError) -> StoreError {
-    match e {
-        EngineError::Store(s) => s,
-        other => StoreError::Stitch(other.to_string()),
     }
 }
 
@@ -992,8 +964,7 @@ mod tests {
             )
             .unwrap();
         let stitcher = Stitcher::new();
-        let c = Cache::open_or_rebuild(&dir, &stitcher, Instant::now() + Duration::from_secs(5))
-            .unwrap();
+        let c = Cache::open(&dir, Instant::now() + Duration::from_secs(5)).unwrap();
         (c, stitcher)
     }
 

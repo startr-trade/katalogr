@@ -23,6 +23,10 @@ impl Extractor for TestExtractor {
         "test"
     }
 
+    fn revision_salt(&self) -> &'static str {
+        "test-1"
+    }
+
     fn patterns(&self) -> &'static [&'static str] {
         &[
             "symbols",

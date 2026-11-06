@@ -17,6 +17,10 @@ impl Extractor for MarkdownExtractor {
         "md"
     }
 
+    fn revision_salt(&self) -> &'static str {
+        "md-extract-1"
+    }
+
     fn handles(&self, p: &RelPath) -> bool {
         let s = p.as_str();
         s.ends_with(".md") || s.ends_with(".markdown")

@@ -275,13 +275,17 @@ pub fn markdown(r: &RunResult) -> String {
     let _ = writeln!(o, "\n## 4. Index\n");
     let _ = writeln!(
         o,
-        "| Corpus | Runs | Wall s (p50) | Min s | Max s | CV | Files indexed | Files/s | Peak RSS MiB (p50) | Shard files | Shard MiB | Cache MiB | Deterministic | Noisy |\n|---|---|---|---|---|---|---|---|---|---|---|---|---|---|"
+        "There are no shard files (FEAT-094): baselines recorded before it are not comparable on the shard columns, which are gone.\n"
+    );
+    let _ = writeln!(
+        o,
+        "| Corpus | Runs | Wall s (p50) | Min s | Max s | CV | Files indexed | Files/s | Peak RSS MiB (p50) | Cache MiB | Deterministic | Noisy |\n|---|---|---|---|---|---|---|---|---|---|---|---|"
     );
     for c in &r.corpora {
         if let Some(i) = &c.index {
             let _ = writeln!(
                 o,
-                "| {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} |",
+                "| {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} |",
                 cell(&c.corpus),
                 i.runs,
                 sec(i.wall_s.p50),
@@ -291,8 +295,6 @@ pub fn markdown(r: &RunResult) -> String {
                 i.files_indexed,
                 ratio(i.files_per_s),
                 mib(i.peak_rss_mib.p50),
-                i.shard_files,
-                bytes_mib(i.shard_bytes),
                 bytes_mib(i.cache_bytes),
                 yes(i.digests_equal),
                 yes(i.noisy),
@@ -374,7 +376,7 @@ pub fn markdown(r: &RunResult) -> String {
     let _ = writeln!(o, "\n## 8. Concurrent queries while indexing\n");
     let _ = writeln!(
         o,
-        "| Corpus | Workers | Index wall s | Slowdown | Queries | Errors | p50 ms | p95 ms | Shards identical | Doctor clean |\n|---|---|---|---|---|---|---|---|---|---|"
+        "| Corpus | Workers | Index wall s | Slowdown | Queries | Errors | p50 ms | p95 ms | Graphs identical | Doctor clean |\n|---|---|---|---|---|---|---|---|---|---|"
     );
     for c in &r.corpora {
         if let Some(k) = &c.concurrent {
@@ -464,7 +466,7 @@ pub fn markdown(r: &RunResult) -> String {
 }
 
 /// Everything the report must call out: aborted corpora, loaded or noisy runs, errors, queries
-/// with a p95 over 1 s, concurrent runs slower than 3 times, shards that differ between runs.
+/// with a p95 over 1 s, concurrent runs slower than 3 times, graphs that differ between runs.
 pub fn findings(r: &RunResult) -> Vec<String> {
     let mut f = Vec::new();
     for c in &r.corpora {
@@ -490,7 +492,7 @@ pub fn findings(r: &RunResult) -> Vec<String> {
                 ));
             }
             if !i.digests_equal {
-                f.push(format!("{n}: shards differ between cold runs"));
+                f.push(format!("{n}: graphs differ between cold runs"));
             }
         }
         for q in &c.queries {
@@ -530,7 +532,7 @@ pub fn findings(r: &RunResult) -> Vec<String> {
             }
             if !k.digest_equal {
                 f.push(format!(
-                    "{n}: concurrent index shards differ from the isolated run"
+                    "{n}: concurrent index graph differs from the isolated run"
                 ));
             }
             if !k.doctor_clean {

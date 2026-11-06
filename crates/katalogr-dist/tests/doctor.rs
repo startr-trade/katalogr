@@ -31,7 +31,7 @@ mod doctor {
         let r = doctor(tmp.path(), &Overrides::default(), &opts()).unwrap();
         assert_eq!(codes(&r), vec!["KD-MRK-001"]);
         assert!(r.exit_failing());
-        assert_eq!(r.checks.len(), 11);
+        assert_eq!(r.checks.len(), 10);
         for c in &r.checks {
             let want = if c.area == "marker" {
                 CheckStatus::Findings
