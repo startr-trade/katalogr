@@ -37,6 +37,8 @@ pub mod render;
 pub mod render_doc;
 pub mod replace;
 pub mod search;
+#[cfg(feature = "web")]
+pub mod serve;
 pub mod session;
 pub mod show;
 pub mod skill;
@@ -65,6 +67,7 @@ pub fn resolve(cli: &Cli) -> Result<Katalogr, DistError> {
             kindex: cli.kindex.clone(),
             project: cli.project.clone(),
             context: context_choice(cli),
+            snapshot_dirs: Vec::new(),
         },
     )
 }
@@ -78,11 +81,24 @@ pub fn context_choice(cli: &Cli) -> Option<String> {
     })
 }
 
+/// [`resolve`], also reading these snapshot folders (FEAT-033).
+pub fn resolve_with_snapshots(
+    cli: &Cli,
+    snapshots: &[std::path::PathBuf],
+) -> Result<Katalogr, DistError> {
+    let cwd =
+        std::env::current_dir().map_err(|e| DistError::Usage(format!("current directory: {e}")))?;
+    let mut o = overrides(cli);
+    o.snapshot_dirs = snapshots.to_vec();
+    Katalogr::resolve(&cwd, &o)
+}
+
 pub fn overrides(cli: &Cli) -> Overrides {
     Overrides {
         kindex: cli.kindex.clone(),
         project: cli.project.clone(),
         context: context_choice(cli),
+        snapshot_dirs: Vec::new(),
     }
 }
 

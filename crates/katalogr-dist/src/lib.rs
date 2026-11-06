@@ -28,6 +28,8 @@ mod test_extractor;
 #[cfg(feature = "test-extractor")]
 pub use test_extractor::extract_calls;
 mod threads;
+mod timeline;
+pub use timeline::DEFAULT_TIMELINE_LIMIT;
 mod view_store;
 pub use view_store::ViewStore;
 mod views;
@@ -52,6 +54,8 @@ use katalogr_query::{
 };
 pub use katalogr_query::{ReplaceResult, ShowResult};
 pub use katalogr_render as render;
+#[cfg(feature = "web")]
+pub use katalogr_web as web;
 pub use setup::{ProjectCreated, kindex_init, project_init};
 pub use threads::{BATCH_BYTES_KEY, THREADS_ENV, THREADS_KEY, resolve_parallelism};
 
@@ -73,7 +77,7 @@ use katalogr_store::{
     CompactMode, CompactOutcome, CompactPolicy, Kindex, ProjectDir, ProjectName, ReadTx, StoreError,
 };
 use std::collections::BTreeMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 /// Every `--json` schema: the query schemas merged with the analytics schemas and `doctor`.
@@ -189,6 +193,8 @@ pub struct Overrides {
     pub project: Option<String>,
     /// `base`, `current` or an id from `context list` (FEAT-043 R-4); `None` is `current`.
     pub context: Option<String>,
+    /// Folders of release snapshots the timeline also reads (FEAT-033); empty is none.
+    pub snapshot_dirs: Vec<PathBuf>,
 }
 
 /// Options for reads. `None` means the command's default.
@@ -286,6 +292,8 @@ pub struct Katalogr {
     /// View-ID arguments a read added while it ran (the working-set hash), taken by
     /// `finish_report`.
     view_extra: std::sync::Mutex<Vec<(String, String)>>,
+    /// Snapshot folders the timeline reads, from `Overrides::snapshot_dirs`.
+    snapshot_dirs: Vec<PathBuf>,
 }
 
 /// Profiles embedded in the binary, applied before the project's own: `(file name, text)`.
@@ -589,6 +597,7 @@ impl Katalogr {
             context,
             notes: std::sync::Mutex::new(Vec::new()),
             view_extra: std::sync::Mutex::new(Vec::new()),
+            snapshot_dirs: overrides.snapshot_dirs.clone(),
         })
     }
 

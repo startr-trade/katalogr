@@ -573,6 +573,7 @@ mod api {
         ("views/impact", "symbol=target"),
         ("views/path", "from=top&to=caller_a"),
         ("views/cycles", ""),
+        ("timeline", ""),
     ];
 
     /// R-3. Every route answers, and a body that has a `schema/v1` file validates against it.
@@ -608,7 +609,8 @@ mod api {
         let routes: Vec<&str> = ROUTES.iter().map(|(r, _)| *r).collect();
         for p in paths.keys() {
             let name = p.trim_start_matches("/api/v1/");
-            if name != "meta" && name != "openapi.json" {
+            // `stored-view` needs a stored ID; `timeline::` tests cover it.
+            if name != "meta" && name != "openapi.json" && name != "stored-view" {
                 assert!(routes.contains(&name), "{name} has no request in ROUTES");
             }
         }
@@ -642,6 +644,8 @@ mod api {
             "session-start",
             "index",
             "api",
+            // The API plus the web view's pages.
+            "serve",
             "mcp",
             "eval",
             "profiles",

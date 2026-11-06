@@ -79,6 +79,13 @@ jobs:
         run: |
           mkdir -p dist
           tar -czf "dist/katalogr-${GITHUB_REF_NAME}-${TARGET}.tar.gz" -C "target/$TARGET/release" katalogr
+      - name: package web bundle (FEAT-033)
+        if: matrix.target == 'x86_64-unknown-linux-musl'
+        shell: bash
+        run: |
+          "target/$TARGET/release/katalogr" serve --write-assets web-bundle
+          mkdir -p dist
+          tar -czf "dist/web-bundle-${GITHUB_REF_NAME}.tar.gz" web-bundle
       - name: package (windows)
         if: runner.os == 'Windows'
         shell: pwsh
@@ -120,6 +127,7 @@ jobs:
             test -f "katalogr-${GITHUB_REF_NAME}-${t}.tar.gz" || { echo "missing archive for $t"; exit 1; }
           done
           test -f "katalogr-${GITHUB_REF_NAME}-x86_64-pc-windows-msvc.zip" || { echo "missing archive for windows"; exit 1; }
+          test -f "web-bundle-${GITHUB_REF_NAME}.tar.gz" || { echo "missing web bundle"; exit 1; }
           test "$(ls katalogr-* | wc -l)" -eq 5 || { echo "unexpected extra archives"; exit 1; }
       - name: create draft release
         shell: bash

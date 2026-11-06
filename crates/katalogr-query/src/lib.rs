@@ -29,6 +29,7 @@ mod search;
 pub mod show;
 mod step;
 mod tests;
+pub mod timeline;
 mod view_answer;
 mod why;
 pub mod working_set;
@@ -74,6 +75,7 @@ pub use search::{
     SearchParams, search, search_boosted_traced, search_traced, search_with, search_with_traced,
 };
 pub use tests::{DEFAULT_TEST_DEPTH, TestsOptions, tests, tests_for};
+pub use timeline::{PointSource, Timeline, TimelinePoint};
 pub use view_answer::{ViewAnswer, ViewQueryJson, view_schema};
 pub use why::{Blame, DEFAULT_USE_LIMIT, RATIONALE_KINDS, attach_use, why, why_sources, why_use};
 pub use working_set::{Boost, Tier, Weights, WorkingSet, WorkingSetSummary, boost};

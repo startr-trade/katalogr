@@ -1,0 +1,54 @@
+{
+ "schema": 1,
+ "view_format": 1,
+ "view_id": "v1-00000000000000000000000000000002",
+ "exact": true,
+ "positions": [
+  {
+   "repo": "app",
+   "commit": "0123456789abcdef0123456789abcdef01234567",
+   "dirty": null
+  }
+ ],
+ "query": {
+  "op": "callers",
+  "args": {
+   "depth": "2",
+   "max-nodes": "60",
+   "symbol": "target"
+  }
+ },
+ "mermaid": "flowchart LR\n  n1[\"caller_a\"]\n  n2[\"target\"]\n  n1 --> n2\n",
+ "graph": {
+  "title": "callers target",
+  "nodes": [
+   {
+    "id": "n1",
+    "name": "repo:app#fn:caller_a",
+    "label": "caller_a",
+    "kind": "fn",
+    "path": null,
+    "group": null
+   },
+   {
+    "id": "n2",
+    "name": "repo:app#fn:target",
+    "label": "target",
+    "kind": "fn",
+    "path": null,
+    "group": null
+   }
+  ],
+  "edges": [
+   {
+    "from": "n1",
+    "to": "n2",
+    "kind": "calls",
+    "inferred": false
+   }
+  ],
+  "shown": 2,
+  "total": 2
+ },
+ "pele": "1.7.0"
+}

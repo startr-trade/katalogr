@@ -1,0 +1,57 @@
+{
+ "schema": 1,
+ "watermark": 0,
+ "pending": 0,
+ "stale": false,
+ "truncated": null,
+ "result": {
+  "symbol": {
+   "name": "repo:app#fn:target",
+   "kind": "fn",
+   "path": "src/lib.rs",
+   "span": {
+    "start_line": 3,
+    "start_col": 0,
+    "end_line": 5,
+    "end_col": 1
+   }
+  },
+  "rationale": [
+   {
+    "kind": "refs-item",
+    "target": "REQ-7",
+    "label": "Orders are kept"
+   },
+   {
+    "kind": "links-to",
+    "target": "docs/a.md",
+    "label": ""
+   }
+  ],
+  "goals": [
+   {
+    "kind": "serves",
+    "target": "G-1",
+    "label": "Traceability"
+   }
+  ],
+  "commits": [
+   {
+    "sha": "0123456789abcdef",
+    "summary": "s",
+    "items": [
+     "REQ-3"
+    ]
+   }
+  ],
+  "note": null
+ },
+ "positions": [
+  {
+   "repo": "app",
+   "commit": "0123456789abcdef0123456789abcdef01234567",
+   "dirty": null
+  }
+ ],
+ "exact": true
+}

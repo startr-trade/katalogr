@@ -19,6 +19,7 @@ mod view_store {
                 kindex: Some(kx.display().to_string()),
                 project: None,
                 context: None,
+                snapshot_dirs: Vec::new(),
             },
         )
         .unwrap()

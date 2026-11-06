@@ -1042,6 +1042,25 @@ pub const OPS: &[Op] = &[
         Call::Project(view_cycles)
     ),
     op!(
+        "timeline",
+        "The stored views and snapshot views, oldest first, for a time slider. Reads no index.",
+        &[dflt(
+            "limit",
+            Ty::Int(1),
+            "1000",
+            "most points returned; the newest are kept"
+        )],
+        Some("timeline"),
+        Call::Project(timeline)
+    ),
+    op!(
+        "stored-view",
+        "The stored bytes of a view by its view ID, as a view route answers them.",
+        &[req("id", "a view ID, `v1-` and 32 hex digits")],
+        Some("view"),
+        Call::Project(stored_view)
+    ),
+    op!(
         "context-conflicts",
         "Contracts that both contexts changed against the base.",
         &[
@@ -1106,6 +1125,16 @@ view_fn!(view_callers, "callers");
 view_fn!(view_impact, "impact");
 view_fn!(view_path, "path");
 view_fn!(view_cycles, "cycles");
+
+/// `GET /api/v1/timeline`: one facade call, no query and no wait.
+fn timeline(k: &Katalogr, a: &Args, _: &Options) -> JsonAnswer {
+    answer(k.timeline(a.int("limit") as usize), render_json::timeline)
+}
+
+/// `GET /api/v1/stored-view`: the stored bytes of one view ID.
+fn stored_view(k: &Katalogr, a: &Args, _: &Options) -> JsonAnswer {
+    answer(k.stored_view(a.str("id")), render_json::view_answer)
+}
 
 /// `GET /api/v1/views/`: the ops and their arguments, sorted by op.
 fn views_catalogue(_: &Path, _: &Overrides, a: &Args, _: &Options) -> JsonAnswer {

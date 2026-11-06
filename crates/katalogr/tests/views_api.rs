@@ -262,7 +262,7 @@ mod views {
         let (_kx, repo) = project(tmp.path());
         let server = serve(&repo);
         let v = get(&server, "/api/v1/meta").json();
-        assert_eq!(v["contract"], 4);
+        assert_eq!(v["contract"], 5);
         assert_eq!(v["view_format"], 1);
     }
 

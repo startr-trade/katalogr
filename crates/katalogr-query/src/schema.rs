@@ -7,6 +7,7 @@ use crate::result::{
     CallerHit, DanglingRef, Envelope, Explain, MapEntry, MirrorDrift, PathStep, RefHit, SearchHit,
     ShowResult, SymbolHit, TestHit, WhyResult,
 };
+use crate::timeline::Timeline;
 use schemars::schema_for;
 use serde_json::Value;
 use std::collections::BTreeMap;
@@ -32,6 +33,7 @@ pub fn schemas() -> BTreeMap<&'static str, Value> {
         ("docs-affected", to_value(schema_for!(Envelope<DocImpact>))),
         ("tests", to_value(schema_for!(Envelope<Vec<TestHit>>))),
         ("impact", to_value(schema_for!(Envelope<ImpactReport>))),
+        ("timeline", to_value(schema_for!(Envelope<Timeline>))),
     ])
 }
 

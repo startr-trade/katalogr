@@ -500,6 +500,11 @@ pub fn plain<R: Serialize>(reply: Reply<R>, fails: fn(&R) -> bool) -> JsonAnswer
     }
 }
 
+/// The timeline: the envelope as it is, with its `Partial` when the newest points were kept.
+pub fn timeline(reply: Reply<katalogr_dist::query::Timeline>) -> JsonAnswer {
+    plain(reply, |_| false)
+}
+
 /// `status`, with the context it read: one shape for the CLI, MCP and the API.
 pub fn status(r: &Report, context: String) -> JsonAnswer {
     let mut a = report(r);

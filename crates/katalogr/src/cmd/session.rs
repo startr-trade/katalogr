@@ -11,6 +11,7 @@ pub fn run(cli: &Cli) -> Result<ExitCode, DistError> {
         kindex: cli.kindex.clone(),
         project: cli.project.clone(),
         context: super::context_choice(cli),
+        snapshot_dirs: Vec::new(),
     };
     print!(
         "{}",
