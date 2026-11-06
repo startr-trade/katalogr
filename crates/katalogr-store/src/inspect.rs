@@ -42,6 +42,8 @@ pub struct InspectedTables {
     pub pending: Vec<(PendingKey, u64)>,
     /// Every stored file revision, sorted by key.
     pub file_revisions: Vec<(PathKey, [u8; 32])>,
+    /// The `(repo, path)` of every stored artifact, sorted.
+    pub artifact_keys: Vec<PathKey>,
     /// Files with at least one index-error row, and the row count.
     pub error_files: Vec<(PathKey, usize)>,
     /// `meta` key `profiles_errors`, as stored.
@@ -117,6 +119,15 @@ fn read_tables(tx: &ReadTx) -> Result<InspectedTables, StoreError> {
         watermark: tx.watermark(crate::rank::RANK_CONTEXT)?,
         pending: tx.pending_entries(None)?,
         file_revisions: tx.file_revisions()?,
+        artifact_keys: {
+            let mut keys: Vec<PathKey> = tx
+                .artifacts()?
+                .into_iter()
+                .map(|(_, a)| (a.name.repo, a.name.path))
+                .collect();
+            keys.sort();
+            keys
+        },
         error_files: tx.index_error_files()?,
         profile_errors_json: tx.meta("profiles_errors")?,
     })

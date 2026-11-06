@@ -4,9 +4,8 @@ use super::model::{DoctorOptions, Finding, Severity};
 use crate::profiles::ProfileError;
 use crate::queue::Inbox;
 use crate::registry::ExtensionRegistry;
-use camino::{Utf8Path, Utf8PathBuf};
+use camino::Utf8PathBuf;
 use katalogr_store::{GitState, InspectedTables, PathKey, ProjectDir, SHARD_FORMAT, StoreError};
-use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 
 /// What a check did: findings (possibly none), or it did not apply.
@@ -41,7 +40,9 @@ fn key_str(k: &PathKey) -> String {
     format!("{}:{}", k.0, k.1.as_str())
 }
 
-const COMMIT_FIX: &str = "git -C <kindex-dir> add projects/<project>/shards && git -C <kindex-dir> commit -m \"index update\"";
+const COMMIT_FIX: &str = "git -C <kindex-dir> add projects/<project> && git -C <kindex-dir> commit -m \"update project\"";
+
+const REMOVE_SHARDS_FIX: &str = "git -C <kindex-dir> rm -r -q projects/<project>/shards && git -C <kindex-dir> commit -m \"remove shards\"";
 
 fn project_name(dir: &ProjectDir) -> String {
     dir.root().file_name().unwrap_or_default().to_string()
@@ -85,13 +86,24 @@ pub fn format_too_new(found: u32, min_katalogr: &str) -> Finding {
     .fix(format!("install katalogr >= {min_katalogr}"))
 }
 
-/// KD-FMT-001/002. Returns the findings and the format number read.
+/// KD-FMT-001/002 and KD-SHD-004. Returns the findings and the format number read.
 pub(crate) fn format(dir: &ProjectDir) -> (Vec<Finding>, Option<u32>) {
     match dir.format_file() {
         Ok(f) => {
             let mut out = Vec::new();
             if f.shard_format > SHARD_FORMAT {
                 out.push(format_too_new(f.shard_format, &f.min_katalogr));
+            }
+            if dir.leftover_shards() {
+                out.push(
+                    Finding::new(
+                        "KD-SHD-004",
+                        Severity::Warning,
+                        "format",
+                        "the project has a shards folder from an earlier release; nothing reads it now",
+                    )
+                    .fix(REMOVE_SHARDS_FIX.replace("<project>", &project_name(dir))),
+                );
             }
             (out, Some(f.shard_format))
         }
@@ -110,7 +122,7 @@ pub(crate) fn format(dir: &ProjectDir) -> (Vec<Finding>, Option<u32>) {
     }
 }
 
-/// KD-LCK-001 and the journal checks need to know whether a processor runs.
+/// KD-LCK-001.
 pub(crate) fn lock(held: bool) -> CheckResult {
     done(if held {
         vec![Finding::new(
@@ -124,140 +136,29 @@ pub(crate) fn lock(held: bool) -> CheckResult {
     })
 }
 
-fn rel_to(base: &Utf8Path, p: &Utf8Path) -> String {
-    p.strip_prefix(base).unwrap_or(p).to_string()
-}
-
-/// The publish journal is gone (FEAT-094): nothing to report. T7 removes the area.
-pub(crate) fn journal(
-    _dir: &ProjectDir,
-    _tables: Option<&InspectedTables>,
-    _held: bool,
-    _o: &DoctorOptions,
-) -> CheckResult {
-    done(Vec::new())
-}
-
-fn quarantined(dir: &ProjectDir) -> Result<Vec<String>, String> {
-    fn walk(dir: &Utf8Path, base: &Utf8Path, out: &mut Vec<String>) -> Result<(), String> {
-        let rd = match std::fs::read_dir(dir) {
-            Ok(rd) => rd,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-            Err(e) => return Err(e.kind().to_string()),
-        };
-        for e in rd {
-            let e = e.map_err(|e| e.kind().to_string())?;
-            let Some(name) = e.file_name().to_str().map(str::to_string) else {
-                continue;
-            };
-            let path = dir.join(name);
-            if e.file_type().map_err(|e| e.kind().to_string())?.is_dir() {
-                walk(&path, base, out)?;
-            } else {
-                out.push(rel_to(base, &path).replacen('/', ":", 1));
-            }
-        }
-        Ok(())
-    }
-    let base = dir.cache_dir().join("quarantine");
-    let mut out = Vec::new();
-    walk(&base, &base, &mut out)?;
-    out.sort();
-    Ok(out)
-}
-
-/// KD-SHD-001 to 003. `tables` is None when the cache could not be read: only quarantine runs.
-pub(crate) fn shards(
-    dir: &ProjectDir,
-    files: &[PathKey],
-    tables: Option<&InspectedTables>,
-    held: bool,
-    o: &DoctorOptions,
-) -> CheckResult {
-    let mut out = Vec::new();
-    // A publish in flight makes the mismatches expected.
-    let sev = if held {
-        Severity::Info
+/// KD-REV-001: the file revisions and the artifacts disagree. Counts only, no keys.
+pub(crate) fn revisions(tables: &InspectedTables) -> CheckResult {
+    let revs: BTreeSet<&PathKey> = tables.file_revisions.iter().map(|(k, _)| k).collect();
+    let arts: BTreeSet<&PathKey> = tables.artifact_keys.iter().collect();
+    let without_artifact = revs.difference(&arts).count();
+    let without_revision = arts.difference(&revs).count();
+    let n = without_artifact + without_revision;
+    done(if n == 0 {
+        Vec::new()
     } else {
-        Severity::Warning
-    };
-    if let Some(t) = tables {
-        let rows: BTreeMap<&PathKey, &[u8; 32]> =
-            t.file_revisions.iter().map(|(k, h)| (k, h)).collect();
-        let mut on_disk: BTreeSet<&PathKey> = BTreeSet::new();
-        let (mut new, mut changed): (Vec<&PathKey>, Vec<&PathKey>) = (Vec::new(), Vec::new());
-        for key in files {
-            on_disk.insert(key);
-            let Some(hash) = rows.get(key) else {
-                new.push(key);
-                continue;
-            };
-            // Until the shards go (FEAT-094 T7), a shard differs when the SHA-256 of its
-            // provenance revision is not the stored file revision.
-            let fragment = dir
-                .read_shard(&key.0, &key.1)
-                .map_err(|e| e.to_string())?
-                .ok_or_else(|| "shard vanished".to_string())?;
-            let digest: [u8; 32] = Sha256::digest(fragment.provenance.revision.as_bytes()).into();
-            if &digest != *hash {
-                changed.push(key);
-            }
-        }
-        let gone: Vec<&PathKey> = rows
-            .keys()
-            .filter(|k| !on_disk.contains(*k))
-            .copied()
-            .collect();
-        if !new.is_empty() || !changed.is_empty() {
-            let n = new.len() + changed.len();
-            out.push(
-                Finding::new(
-                    "KD-SHD-001",
-                    sev,
-                    "shards",
-                    format!(
-                        "{n} shard files are new or differ from the cache ({} new, {} changed)",
-                        new.len(),
-                        changed.len()
-                    ),
-                )
-                .fix("katalogr index")
-                .count(n)
-                .sample(new.iter().chain(changed.iter()).map(|k| key_str(k)), o),
-            );
-        }
-        if !gone.is_empty() {
-            out.push(
-                Finding::new(
-                    "KD-SHD-002",
-                    sev,
-                    "shards",
-                    format!("{} cache hash rows have no shard file", gone.len()),
-                )
-                .fix("katalogr index")
-                .count(gone.len())
-                .sample(gone.iter().map(|k| key_str(k)), o),
-            );
-        }
-    }
-    let q = quarantined(dir)?;
-    if !q.is_empty() {
-        out.push(
+        vec![
             Finding::new(
-                "KD-SHD-003",
+                "KD-REV-001",
                 Severity::Warning,
-                "shards",
+                "revisions",
                 format!(
-                    "{} shard files in quarantine (they could not be decoded)",
-                    q.len()
+                    "{n} files disagree between the file revisions and the artifacts ({without_artifact} revisions without an artifact, {without_revision} artifacts without a revision)"
                 ),
             )
             .fix("katalogr index --full")
-            .count(q.len())
-            .sample(q, o),
-        );
-    }
-    done(out)
+            .count(n),
+        ]
+    })
 }
 
 /// KD-QUE-001 to 003.
@@ -425,15 +326,14 @@ pub(crate) fn git(dir: &ProjectDir, o: &DoctorOptions) -> CheckResult {
             )
             .fix("katalogr kindex init <kindex-dir>"),
         ),
-        GitState::NoCommits { shard_files } => out.push(
+        GitState::NoCommits => out.push(
             Finding::new(
                 "KD-GIT-003",
                 Severity::Info,
                 "git",
-                format!("the kindex repository has no commit ({shard_files} shard files)"),
+                "the kindex repository has no commit yet",
             )
-            .fix(commit_fix(dir))
-            .count(shard_files),
+            .fix(commit_fix(dir)),
         ),
         GitState::Repo {
             modified,
@@ -449,7 +349,7 @@ pub(crate) fn git(dir: &ProjectDir, o: &DoctorOptions) -> CheckResult {
                         Severity::Warning,
                         "git",
                         format!(
-                            "{n} shard files differ from HEAD in the kindex ({} modified, {} added, {} deleted)",
+                            "{n} files people write differ from HEAD in the kindex ({} modified, {} added, {} deleted)",
                             modified.len(),
                             added.len(),
                             deleted.len()
@@ -457,10 +357,7 @@ pub(crate) fn git(dir: &ProjectDir, o: &DoctorOptions) -> CheckResult {
                     )
                     .fix(commit_fix(dir))
                     .count(n)
-                    .sample(
-                        modified.iter().chain(&added).chain(&deleted).map(key_str),
-                        o,
-                    ),
+                    .sample(modified.iter().chain(&added).chain(&deleted).cloned(), o),
                 );
             }
         }

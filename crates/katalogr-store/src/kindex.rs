@@ -1,6 +1,5 @@
 //! The kindex repository and its projects.
 
-use crate::cache::PathKey;
 use crate::context::{ContextId, ContextManifest};
 use crate::error::StoreError;
 use crate::shard;
@@ -284,22 +283,23 @@ impl Kindex {
     }
 }
 
-/// How a project's shard files compare with the kindex git repository's HEAD.
+/// How the files people write in a project (`config.yaml`, `format.json`, `profiles/`, `eval/`
+/// and `audit/`) compare with the kindex git repository's HEAD.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum GitState {
     /// The kindex root is not a git repository.
     NotARepo,
     /// A repository with no commit.
-    NoCommits { shard_files: usize },
+    NoCommits,
     Repo {
         /// HEAD commit id, lower-case hex.
         head: String,
-        /// Shard files whose bytes differ from the blob in HEAD.
-        modified: Vec<PathKey>,
-        /// Shard files with no entry in HEAD.
-        added: Vec<PathKey>,
-        /// Entries in HEAD with no shard file.
-        deleted: Vec<PathKey>,
+        /// Files whose bytes differ from the blob in HEAD.
+        modified: Vec<String>,
+        /// Files with no entry in HEAD.
+        added: Vec<String>,
+        /// Files in HEAD that are gone from disk.
+        deleted: Vec<String>,
     },
 }
 
@@ -424,32 +424,24 @@ impl ProjectDir {
         Ok(p)
     }
 
-    /// The shard bytes `write_shard` would write, with the same guards.
-    pub fn encode_shard(&self, f: &Fragment) -> Result<Vec<u8>, StoreError> {
-        shard::encode_with_root(f, Some(&self.kindex_root))
-    }
-
-    /// Compares every file under `shards/` with the blob in HEAD's tree at the same path
-    /// (`git_blob_id` of the file bytes against the tree entry id). Lists are sorted. Writes
-    /// nothing.
+    /// Compares the files people write (`config.yaml`, `format.json`, `profiles/`, `eval/`,
+    /// `audit/`) with the blob in HEAD's tree at the same path (`git_blob_id` of the file bytes
+    /// against the tree entry id). Lists are sorted paths relative to the project directory.
+    /// Writes nothing.
     pub fn git_state(&self) -> Result<GitState, StoreError> {
         let git = |e: &dyn std::fmt::Display| StoreError::Git(e.to_string());
         if !self.kindex_root.join(".git").exists() {
             return Ok(GitState::NotARepo);
         }
         let repo = gix::open(self.kindex_root.as_std_path()).map_err(|e| git(&e))?;
-        let files = self.list_shards()?;
         let Ok(commit) = repo.head_commit() else {
-            return Ok(GitState::NoCommits {
-                shard_files: files.len(),
-            });
+            return Ok(GitState::NoCommits);
         };
         let project = self.root.file_name().unwrap_or_default();
         let tree = commit.tree().map_err(|e| git(&e))?;
-        let base = format!("projects/{project}/shards");
-        let mut in_head: BTreeMap<PathKey, String> = BTreeMap::new();
+        let mut in_head: BTreeMap<String, String> = BTreeMap::new();
         if let Some(entry) = tree
-            .lookup_entry_by_path(&base)
+            .lookup_entry_by_path(format!("projects/{project}"))
             .map_err(|e| git(&e))?
             .filter(|e| e.mode().is_tree())
         {
@@ -460,18 +452,28 @@ impl ProjectDir {
                 .map_err(|e| git(&e))?;
             collect_tree(&repo, &sub, "", &mut in_head)?;
         }
+        let mut on_disk = Vec::new();
+        for name in HUMAN_FILES {
+            let p = self.root.join(name);
+            if p.is_dir() {
+                walk_files(&p, &format!("{name}/"), &mut on_disk)?;
+            } else if p.is_file() {
+                on_disk.push((*name).to_string());
+            }
+        }
+        on_disk.sort();
         let (mut modified, mut added) = (Vec::new(), Vec::new());
-        for key in files {
-            let file = self.shard_path(&key.0, &key.1);
+        for rel in on_disk {
+            let file = self.root.join(&rel);
             let bytes = std::fs::read(&file).map_err(|e| StoreError::io(&file, e))?;
-            match in_head.remove(&key) {
+            match in_head.remove(&rel) {
                 Some(id) if id == crate::blob::git_blob_id(&bytes) => {}
-                Some(_) => modified.push(key),
-                None => added.push(key),
+                Some(_) => modified.push(rel),
+                None => added.push(rel),
             }
         }
         // What is left in the map has no file.
-        let deleted: Vec<PathKey> = in_head.into_keys().collect();
+        let deleted: Vec<String> = in_head.into_keys().collect();
         Ok(GitState::Repo {
             head: commit.id().to_string(),
             modified,
@@ -502,27 +504,46 @@ impl ProjectDir {
     }
 }
 
-/// Collects `(repo, path) -> blob id` of the shard files below a tree (`<repo>/<path>.kshard.json`).
+/// The files a person writes in a project: a file name, or a folder whose files all count.
+const HUMAN_FILES: &[&str] = &["config.yaml", "format.json", "profiles", "eval", "audit"];
+
+/// Collects `path -> blob id` of the human-written files below a project's tree in HEAD.
 fn collect_tree(
     repo: &gix::Repository,
     tree: &gix::Tree<'_>,
     prefix: &str,
-    out: &mut BTreeMap<PathKey, String>,
+    out: &mut BTreeMap<String, String>,
 ) -> Result<(), StoreError> {
     let git = |e: &dyn std::fmt::Display| StoreError::Git(e.to_string());
     for entry in tree.iter() {
         let entry = entry.map_err(|e| git(&e))?;
         let name = entry.filename().to_string();
+        if prefix.is_empty() && !HUMAN_FILES.contains(&name.as_str()) {
+            continue;
+        }
         let rel = format!("{prefix}{name}");
         if entry.mode().is_tree() {
             let sub = repo.find_tree(entry.oid()).map_err(|e| git(&e))?;
             collect_tree(repo, &sub, &format!("{rel}/"), out)?;
-        } else if entry.mode().is_blob()
-            && let Some(stem) = rel.strip_suffix(shard::SUFFIX)
-            && let Some((r, p)) = stem.split_once('/')
-            && let Ok(p) = RelPath::new(p)
-        {
-            out.insert((r.to_string(), p), entry.oid().to_string());
+        } else if entry.mode().is_blob() {
+            out.insert(rel, entry.oid().to_string());
+        }
+    }
+    Ok(())
+}
+
+/// Every file below `dir`, as `prefix` plus its relative path.
+fn walk_files(dir: &Utf8Path, prefix: &str, out: &mut Vec<String>) -> Result<(), StoreError> {
+    for e in std::fs::read_dir(dir).map_err(|e| StoreError::io(dir, e))? {
+        let e = e.map_err(|e| StoreError::io(dir, e))?;
+        let Some(name) = e.file_name().to_str().map(str::to_string) else {
+            continue;
+        };
+        let full = dir.join(&name);
+        if full.is_dir() {
+            walk_files(&full, &format!("{prefix}{name}/"), out)?;
+        } else {
+            out.push(format!("{prefix}{name}"));
         }
     }
     Ok(())

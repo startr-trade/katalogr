@@ -367,27 +367,6 @@ mod kindex {
         );
     }
 
-    fn frag(path: &str) -> Fragment {
-        let art = ArtifactName::new("r", path).unwrap();
-        Fragment {
-            provenance: prov(path),
-            extension: "ext".into(),
-            artifact: ArtifactNode {
-                name: art,
-                facts: BTreeMap::new(),
-            },
-            symbols: vec![],
-            links: vec![],
-            refs: vec![],
-            exports: vec![],
-            bindings: vec![],
-        }
-    }
-
-    fn key(path: &str) -> (String, RelPath) {
-        ("r".to_string(), RelPath::new(path).unwrap())
-    }
-
     #[test]
     fn git_state_variants() {
         use katalogr_store::GitState;
@@ -403,15 +382,13 @@ mod kindex {
                 },
             )
             .unwrap();
-        for p in ["a.txt", "b.txt", "c.txt"] {
-            dir.write_shard(&frag(p)).unwrap();
+        for p in ["a.yaml", "b.yaml", "c.yaml"] {
+            std::fs::create_dir_all(dir.root().join("profiles")).unwrap();
+            std::fs::write(dir.root().join("profiles").join(p), p).unwrap();
         }
 
         // A repository with no commit.
-        assert_eq!(
-            dir.git_state().unwrap(),
-            GitState::NoCommits { shard_files: 3 }
-        );
+        assert_eq!(dir.git_state().unwrap(), GitState::NoCommits);
 
         // Clean.
         git(&r, &["add", "-A"]);
@@ -429,12 +406,11 @@ mod kindex {
             other => panic!("{other:?}"),
         }
 
-        // Dirty: one edited, one added, one removed.
-        let mut edited = frag("a.txt");
-        edited.extension = "other".into();
-        dir.write_shard(&edited).unwrap();
-        dir.write_shard(&frag("d.txt")).unwrap();
-        std::fs::remove_file(dir.shard_path("r", &RelPath::new("c.txt").unwrap())).unwrap();
+        // Dirty: one edited, one added, one removed. Cache files are not compared.
+        std::fs::write(dir.root().join("profiles/a.yaml"), "edited").unwrap();
+        std::fs::write(dir.root().join("profiles/d.yaml"), "d").unwrap();
+        std::fs::remove_file(dir.root().join("profiles/c.yaml")).unwrap();
+        std::fs::write(dir.cache_dir().join("note"), "x").unwrap();
         match dir.git_state().unwrap() {
             GitState::Repo {
                 modified,
@@ -442,9 +418,9 @@ mod kindex {
                 deleted,
                 ..
             } => {
-                assert_eq!(modified, vec![key("a.txt")]);
-                assert_eq!(added, vec![key("d.txt")]);
-                assert_eq!(deleted, vec![key("c.txt")]);
+                assert_eq!(modified, vec!["profiles/a.yaml".to_string()]);
+                assert_eq!(added, vec!["profiles/d.yaml".to_string()]);
+                assert_eq!(deleted, vec!["profiles/c.yaml".to_string()]);
             }
             other => panic!("{other:?}"),
         }

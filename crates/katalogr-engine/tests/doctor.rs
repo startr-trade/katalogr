@@ -111,8 +111,12 @@ mod doctor {
         r.checks.iter().find(|c| c.area == area).unwrap().status
     }
 
-    /// The publish journal is gone (FEAT-094): a no-op until T7/T10 retire its tests.
-    fn interrupt_publish(_p: &P) {}
+    /// Leaves a `shards/` folder behind, the way an earlier release did.
+    fn leave_shards(p: &P) {
+        let d = dir(p).root().join("shards/r");
+        std::fs::create_dir_all(&d).unwrap();
+        std::fs::write(d.join("a.tx.kshard.json"), "{}").unwrap();
+    }
 
     /// Holds the project's processor lock the way a running processor does.
     fn hold_lock(p: &P) -> std::fs::File {
@@ -140,7 +144,7 @@ mod doctor {
         let r = doctor(&p);
         assert!(r.findings.is_empty(), "{:?}", r.findings);
         assert!(r.healthy && !r.exit_failing());
-        assert_eq!(r.checks.len(), 11);
+        assert_eq!(r.checks.len(), 10);
         assert!(
             r.checks.iter().all(|c| c.status == CheckStatus::Ok),
             "{:?}",
@@ -177,12 +181,17 @@ mod doctor {
                 .unwrap();
             super::support::drained_graph(&e);
         }
-        interrupt_publish(&p);
+        leave_shards(&p);
         let r = doctor(&p);
-        let j = find(&r, "KD-JNL-001").expect("interrupted publish");
-        assert_eq!(j.severity, Severity::Error);
-        assert_eq!(j.area, "journal");
-        assert_eq!(j.fix.as_deref(), Some("katalogr index"));
+        let j = find(&r, "KD-SHD-004").expect("leftover shards");
+        assert_eq!(j.severity, Severity::Warning);
+        assert_eq!(j.area, "format");
+        assert_eq!(
+            j.fix.as_deref(),
+            Some(
+                "git -C <kindex-dir> rm -r -q projects/p/shards && git -C <kindex-dir> commit -m \"remove shards\""
+            )
+        );
         let prf = find(&r, "KD-PRF-001").expect("profile refusal");
         assert_eq!(prf.severity, Severity::Warning);
         assert!(
@@ -214,116 +223,117 @@ mod doctor {
                 .all(|w| w[0].severity >= w[1].severity)
         );
         assert!(r.exit_failing() && !r.healthy);
-        assert_eq!(r.summary.error, 1);
+        assert_eq!((r.summary.error, r.summary.warning), (0, 3));
     }
 
     #[test]
-    fn shard_cache_mismatch_found() {
+    fn leftover_shards_reported() {
         let p = healthy();
-        let d = dir(&p);
-        let path = |s: &str| d.shard_path("r", &RelPath::new(s).unwrap());
-        // Edited after indexing, deleted, and a stray new shard.
-        let mut bytes = std::fs::read(path("a.tx")).unwrap();
-        bytes.push(b' ');
-        std::fs::write(path("a.tx"), bytes).unwrap();
-        std::fs::remove_file(path("b.tx")).unwrap();
-        std::fs::write(path("stray.tx"), "{}").unwrap();
-        let r = doctor_with(
-            &p,
-            &DoctorOptions {
-                verbose: true,
-                skip_git: true,
-                ..Default::default()
-            },
-        );
-        let s1 = find(&r, "KD-SHD-001").expect("changed and new");
-        assert_eq!((s1.severity, s1.count), (Severity::Warning, Some(2)));
-        assert!(s1.message.contains("1 new, 1 changed"), "{}", s1.message);
-        assert_eq!(
-            s1.sample,
-            vec!["r:stray.tx".to_string(), "r:a.tx".to_string()]
-        );
-        let s2 = find(&r, "KD-SHD-002").expect("row without file");
-        assert_eq!(s2.count, Some(1));
-        assert_eq!(s2.sample, vec!["r:b.tx".to_string()]);
-        // Without --verbose no keys are listed.
+        assert!(find(&doctor(&p), "KD-SHD-004").is_none());
+        leave_shards(&p);
         let r = doctor_with(&p, &skip_git());
-        assert!(find(&r, "KD-SHD-001").unwrap().sample.is_empty());
-        // A publish in flight makes both informational.
-        let _lock = hold_lock(&p);
-        let r = doctor_with(&p, &skip_git());
-        assert_eq!(find(&r, "KD-SHD-001").unwrap().severity, Severity::Info);
-        assert_eq!(find(&r, "KD-SHD-002").unwrap().severity, Severity::Info);
-    }
-
-    #[test]
-    fn quarantine_reported() {
-        let p = healthy();
-        let d = dir(&p);
-        std::fs::write(
-            d.shard_path("r", &RelPath::new("junk.tx").unwrap()),
-            "not a shard",
-        )
-        .unwrap();
-        // A normal open sets the undecodable shard aside.
-        let e = open_engine(&p.kx, &p.work);
-        drop(e);
-        let r = doctor_with(
-            &p,
-            &DoctorOptions {
-                verbose: true,
-                skip_git: true,
-                ..Default::default()
-            },
-        );
-        let q = find(&r, "KD-SHD-003").expect("quarantine");
-        assert_eq!((q.severity, q.count), (Severity::Warning, Some(1)));
-        assert_eq!(q.fix.as_deref(), Some("katalogr index --full"));
-        assert_eq!(q.sample, vec!["r:junk.tx.kshard.json".to_string()]);
-    }
-
-    #[test]
-    fn interrupted_publish_found() {
-        let p = healthy();
-        interrupt_publish(&p);
-        let r = doctor_with(&p, &skip_git());
-        let f = find(&r, "KD-JNL-001").expect("journal");
-        assert_eq!((f.severity, f.count), (Severity::Error, Some(2)));
+        let f = find(&r, "KD-SHD-004").expect("leftover shards");
+        assert_eq!((f.severity, f.area.as_str()), (Severity::Warning, "format"));
         assert!(
-            f.message.contains("1 temp files still present"),
+            f.fix
+                .as_deref()
+                .unwrap()
+                .starts_with("git -C <kindex-dir> rm -r -q ")
+        );
+        assert_eq!(status(&r, "format"), CheckStatus::Findings);
+    }
+
+    #[test]
+    fn revision_artifact_mismatch_reported() {
+        let p = healthy();
+        assert!(find(&doctor_with(&p, &skip_git()), "KD-REV-001").is_none());
+        {
+            let e = open_engine(&p.kx, &p.work);
+            let mut tx = e.cache().write().unwrap();
+            tx.put_file_revision("r", &RelPath::new("ghost.tx").unwrap(), "rev")
+                .unwrap();
+            tx.remove_file_revision("r", &RelPath::new("a.tx").unwrap())
+                .unwrap();
+            tx.commit().unwrap();
+        }
+        let r = doctor_with(&p, &skip_git());
+        let f = find(&r, "KD-REV-001").expect("disagree");
+        assert_eq!((f.severity, f.count), (Severity::Warning, Some(2)));
+        assert_eq!(f.area, "revisions");
+        assert_eq!(f.fix.as_deref(), Some("katalogr index --full"));
+        assert!(f.sample.is_empty());
+        assert!(
+            f.message.contains("1 revisions without an artifact"),
             "{}",
             f.message
         );
-        assert_eq!(f.fix.as_deref(), Some("katalogr index"));
-        assert!(find(&r, "KD-JNL-002").is_none() && find(&r, "KD-LCK-001").is_none());
-        assert!(r.exit_failing());
     }
 
     #[test]
-    fn journal_with_processor_is_info() {
-        let p = healthy();
-        interrupt_publish(&p);
-        let _lock = hold_lock(&p);
-        let r = doctor_with(&p, &skip_git());
-        let f = find(&r, "KD-JNL-002").expect("journal while running");
-        assert_eq!(f.severity, Severity::Info);
-        assert!(find(&r, "KD-JNL-001").is_none());
-        assert_eq!(find(&r, "KD-LCK-001").unwrap().severity, Severity::Info);
-        assert!(find(&r, "KD-SHD-001").is_none_or(|f| f.severity == Severity::Info));
-    }
-
-    #[test]
-    fn orphan_temps_found() {
+    fn uncommitted_written_files_found() {
         let p = healthy();
         let d = dir(&p);
-        std::fs::write(d.root().join("shards/r/.tmp-x.kshard.json"), "{}").unwrap();
+        assert!(doctor(&p).findings.is_empty());
+        std::fs::create_dir_all(d.root().join("profiles")).unwrap();
+        std::fs::write(
+            d.root().join("profiles/new.yaml"),
+            "profile: n\nversion: 1\nrules: []\n",
+        )
+        .unwrap();
+        let mut config = std::fs::read_to_string(d.root().join("config.yaml")).unwrap();
+        config.push_str("# edited\n");
+        std::fs::write(d.root().join("config.yaml"), config).unwrap();
+        let r = doctor_with(
+            &p,
+            &DoctorOptions {
+                verbose: true,
+                ..Default::default()
+            },
+        );
+        let f = find(&r, "KD-GIT-001").expect("differs from HEAD");
+        assert_eq!((f.severity, f.count), (Severity::Warning, Some(2)));
+        assert!(
+            f.message.contains("1 modified, 1 added, 0 deleted"),
+            "{}",
+            f.message
+        );
+        assert!(
+            f.fix
+                .as_deref()
+                .unwrap()
+                .contains("git -C <kindex-dir> add projects/p")
+        );
+        assert_eq!(
+            f.sample,
+            vec!["config.yaml".to_string(), "profiles/new.yaml".to_string()]
+        );
+        // Cache and index files are never part of it.
+        assert!(!r.findings.iter().any(|f| f.message.contains("index.redb")));
+        // --skip-git skips the check.
         let r = doctor_with(&p, &skip_git());
-        let f = find(&r, "KD-JNL-003").expect("orphan temp");
-        assert_eq!((f.severity, f.count), (Severity::Warning, Some(1)));
-        assert!(find(&r, "KD-JNL-001").is_none());
-        // With a processor running it is not reported.
-        let _lock = hold_lock(&p);
-        assert!(find(&doctor_with(&p, &skip_git()), "KD-JNL-003").is_none());
+        assert_eq!(status(&r, "git"), CheckStatus::Skipped);
+        assert!(find(&r, "KD-GIT-001").is_none());
+    }
+
+    #[test]
+    fn no_journal_or_shard_areas() {
+        let p = healthy();
+        leave_shards(&p);
+        let r = doctor(&p);
+        let areas: Vec<&str> = r.checks.iter().map(|c| c.area.as_str()).collect();
+        assert!(
+            !areas.contains(&"journal") && !areas.contains(&"shards"),
+            "{areas:?}"
+        );
+        assert!(areas.contains(&"revisions"));
+        assert!(
+            r.findings.iter().all(|f| !f.code.starts_with("KD-JNL")
+                && !["KD-SHD-001", "KD-SHD-002", "KD-SHD-003"].contains(&f.code.as_str())),
+            "{:?}",
+            codes(&r)
+        );
+        let json = serde_json::to_string(&r).unwrap();
+        assert!(!json.contains("\"journal\"") && !json.contains("\"shards\""));
     }
 
     #[test]
@@ -575,7 +585,7 @@ mod doctor {
         let file = d.cache_dir().join("index.redb");
         let bytes = std::fs::read(&file).unwrap();
         std::fs::write(&file, &bytes[..100]).unwrap();
-        std::fs::write(d.root().join("shards/r/.tmp-x.kshard.json"), "{}").unwrap();
+        leave_shards(&p);
         let r = doctor_with(&p, &skip_git());
         let f = find(&r, "KD-CCH-003").expect("corrupt cache");
         assert_eq!(f.severity, Severity::Warning);
@@ -586,51 +596,14 @@ mod doctor {
             "the cache file is untouched"
         );
         // The file-based checks still ran.
-        assert_ne!(status(&r, "shards"), CheckStatus::Skipped);
+        assert_ne!(status(&r, "format"), CheckStatus::Skipped);
         assert_ne!(status(&r, "roots"), CheckStatus::Skipped);
         assert!(
-            find(&r, "KD-JNL-003").is_some(),
-            "orphan temps are still found"
+            find(&r, "KD-SHD-004").is_some(),
+            "leftover shards are still found"
         );
         assert_eq!(status(&r, "queue"), CheckStatus::Skipped);
-    }
-
-    #[test]
-    fn uncommitted_shards_found() {
-        let p = healthy();
-        let d = dir(&p);
-        let path = |s: &str| d.shard_path("r", &RelPath::new(s).unwrap());
-        assert!(doctor(&p).findings.is_empty());
-        let mut bytes = std::fs::read(path("a.tx")).unwrap();
-        bytes.push(b' ');
-        std::fs::write(path("a.tx"), bytes).unwrap();
-        std::fs::write(path("new.tx"), "{}").unwrap();
-        std::fs::remove_file(path("c.tx")).unwrap();
-        let r = doctor_with(
-            &p,
-            &DoctorOptions {
-                verbose: true,
-                ..Default::default()
-            },
-        );
-        let f = find(&r, "KD-GIT-001").expect("differs from HEAD");
-        assert_eq!((f.severity, f.count), (Severity::Warning, Some(3)));
-        assert!(
-            f.message.contains("1 modified, 1 added, 1 deleted"),
-            "{}",
-            f.message
-        );
-        assert!(
-            f.fix
-                .as_deref()
-                .unwrap()
-                .contains("git -C <kindex-dir> add projects/p/shards")
-        );
-        assert_eq!(f.sample.len(), 3);
-        // --skip-git skips the check.
-        let r = doctor_with(&p, &skip_git());
-        assert_eq!(status(&r, "git"), CheckStatus::Skipped);
-        assert!(find(&r, "KD-GIT-001").is_none());
+        assert_eq!(status(&r, "revisions"), CheckStatus::Skipped);
     }
 
     #[test]
@@ -800,7 +773,7 @@ mod doctor {
     #[test]
     fn json_matches_schema() {
         let p = healthy();
-        interrupt_publish(&p);
+        leave_shards(&p);
         let r = doctor(&p);
         assert!(!r.findings.is_empty());
         let v = serde_json::to_value(&r).unwrap();
@@ -810,7 +783,7 @@ mod doctor {
             serde_json::from_str(&std::fs::read_to_string(schema_file()).unwrap()).unwrap();
         validate(&on_disk, &on_disk, &v, "$").unwrap();
         assert_eq!(v["schema"], 1);
-        assert_eq!(v["findings"][0]["severity"], "error");
+        assert_eq!(v["findings"][0]["severity"], "warning");
         // The validator rejects what it should.
         let mut bad = v.clone();
         bad["findings"][0]["severity"] = "fatal".into();
@@ -875,11 +848,10 @@ mod doctor {
     #[test]
     fn does_not_modify_index() {
         let p = healthy();
-        interrupt_publish(&p);
-        std::fs::write(dir(&p).root().join("shards/r/.tmp-x.kshard.json"), "{}").unwrap();
+        leave_shards(&p);
         let before = snapshot(&p.kx);
         let r = doctor(&p);
-        assert!(codes(&r).contains(&"KD-JNL-001"));
+        assert!(codes(&r).contains(&"KD-SHD-004"));
         assert_eq!(
             snapshot(&p.kx),
             before,
