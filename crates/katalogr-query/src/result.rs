@@ -169,7 +169,7 @@ pub struct WhySource {
 }
 
 /// A reference that names something no artifact exports.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct DanglingRef {
     /// The symbol (or artifact) the reference starts at.
     pub from: SymbolHit,
@@ -383,7 +383,7 @@ pub mod cap {
 pub const PARTIAL_NOTE: &str = "absence is not proof";
 
 /// The answer was cut by a cap: more items exist (or may exist) than are shown.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct Partial {
     /// Which cap: one of [`cap`]'s names.
     pub cap: String,
