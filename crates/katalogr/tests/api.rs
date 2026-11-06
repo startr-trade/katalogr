@@ -571,6 +571,7 @@ mod api {
         ("views/contracts", ""),
         ("views/callers", "symbol=target"),
         ("views/impact", "symbol=target"),
+        ("views/lineage", "symbol=target"),
         ("views/path", "from=top&to=caller_a"),
         ("views/cycles", ""),
         ("timeline", ""),

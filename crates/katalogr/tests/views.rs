@@ -201,4 +201,49 @@ mod views {
         assert!(shown < total, "{cut}");
         assert_ne!(all["view_id"], cut["view_id"]);
     }
+
+    /// R-10. A lineage view is stored under its ID, and asked again it is the stored bytes.
+    #[test]
+    fn lineage_view_stored_by_id() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (kx, repo) = project(tmp.path());
+        let v = view_json(&repo, &["lineage", "target"]);
+        let schema = view_schema();
+        validate(&schema, &schema, &v, "$").unwrap_or_else(|e| panic!("{e}\n{v}"));
+        assert_eq!(v["exact"], true, "{v}");
+        assert_eq!(v["query"]["op"], "lineage");
+        assert_eq!(v["query"]["args"]["depth"], "3");
+        let id = v["view_id"].as_str().unwrap().to_string();
+        assert!(stored_path(&kx, &id).exists());
+        // The subject and the caller that links to it are in the graph.
+        let nodes = v["graph"]["nodes"].as_array().unwrap();
+        for n in ["target", "caller_a"] {
+            assert!(
+                nodes
+                    .iter()
+                    .any(|x| x["name"].as_str().unwrap().ends_with(n)),
+                "{n} in {v}"
+            );
+        }
+        let again = view_json(&repo, &["lineage", "target"]);
+        assert_eq!(again, v);
+        let out = ok(&repo, &["view", "--fresh", "lineage", "target"]);
+        assert!(out.contains("same"), "{out}");
+    }
+
+    /// R-10. Over `--max-nodes` the graph says it is partial: it shows fewer nodes than there are.
+    #[test]
+    fn lineage_view_marks_partial_over_max_nodes() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (_kx, repo) = project(tmp.path());
+        let all = view_json(&repo, &["lineage", "target"]);
+        assert_eq!(all["graph"]["shown"], all["graph"]["total"], "{all}");
+        let cut = view_json(&repo, &["lineage", "target", "--max-nodes", "1"]);
+        let (shown, total) = (
+            cut["graph"]["shown"].as_u64().unwrap(),
+            cut["graph"]["total"].as_u64().unwrap(),
+        );
+        assert!(shown < total, "{cut}");
+        assert_ne!(all["view_id"], cut["view_id"]);
+    }
 }

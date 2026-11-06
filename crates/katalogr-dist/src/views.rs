@@ -138,7 +138,7 @@ fn kind_of(name: &str) -> String {
 /// The query line of a spec: the op, its positional words, then its flags in name order.
 fn title_of(spec: &ViewSpec) -> String {
     let positional: &[&str] = match spec.op.as_str() {
-        "callers" | "impact" => &["symbol"],
+        "callers" | "impact" | "lineage" => &["symbol"],
         "path" => &["from", "to"],
         _ => &[],
     };
@@ -222,6 +222,7 @@ impl Katalogr {
             "contracts" => self.view_contracts(spec, opts, title),
             "callers" => self.view_callers(spec, opts, title),
             "impact" => self.view_impact(spec, opts, title),
+            "lineage" => self.view_lineage(spec, opts, title),
             "path" => self.view_path(spec, opts, title),
             "cycles" => self.view_cycles(spec, opts, title),
             other => Err(DistError::usage(format!("unknown view op `{other}`"))),
@@ -389,6 +390,83 @@ impl Katalogr {
                 let others = (report.seeds.len() + report.tests.len()) as u64;
                 let total = report.total.unwrap_or(hits) + others;
                 let g = b.finish(title, total);
+                partial = limit_partial(max, g.shown, g.total);
+                Ok::<_, StoreError>(g)
+            })
+        })?;
+        Ok(with_partial(reply, partial))
+    }
+
+    /// The symbol's lineage: the subject, the contracts its hits pass through, the hits and their
+    /// holders, kept by depth then name up to `max-nodes`. Fields are left out, since the page
+    /// lists them. A hit joins the node it was reached from (`chain[0]`, else the subject), its
+    /// holder joins it as `contains`, and a contract joins it by role.
+    fn view_lineage(
+        &self,
+        spec: &ViewSpec,
+        opts: &Options,
+        title: String,
+    ) -> Result<Reply<ViewGraph>, DistError> {
+        let text = arg(spec, "symbol")?;
+        let depth = number(spec, "depth")?.max(1) as u32;
+        let max = number(spec, "max-nodes")?.max(1);
+        let lopts = katalogr_query::LineageOptions {
+            depth,
+            limit: max,
+            per_group: max,
+            code_kinds: crate::registry_code_kinds(),
+            fold_from: None,
+        };
+        let mut partial = Vec::new();
+        let reply = self.query(opts, |tx| {
+            on_target(tx, text, |root| {
+                let report = katalogr_query::lineage(tx, root, &lopts)?.report;
+                let mut b = Builder::default();
+                b.node(&root.name, &root.kind, Some(&root.path));
+                // Every hit with its group, in the order they are kept.
+                let mut hits: Vec<(&katalogr_query::LineageHit, &str, bool)> = report
+                    .bindings
+                    .iter()
+                    .chain(&report.code)
+                    .flat_map(|g| {
+                        let inferred = g.confidence == katalogr_model::Confidence::Inferred;
+                        g.hits.iter().map(move |h| (h, g.kind.as_str(), inferred))
+                    })
+                    .collect();
+                hits.sort_by(|a, c| (a.0.depth, &a.0.node.name).cmp(&(c.0.depth, &c.0.node.name)));
+                let mut all: BTreeSet<&str> = BTreeSet::from([root.name.as_str()]);
+                for (h, _, _) in &hits {
+                    all.insert(&h.node.name);
+                    all.extend(h.holder.as_deref());
+                    all.extend(h.via.as_deref());
+                }
+                for (h, kind, inferred) in hits {
+                    let mut needed: Vec<&str> = vec![h.node.name.as_str()];
+                    needed.extend(h.holder.as_deref());
+                    needed.extend(h.via.as_deref());
+                    let new = needed
+                        .iter()
+                        .filter(|n| !b.nodes.contains_key(&node_id(n)))
+                        .count();
+                    if b.nodes.len() + new > max {
+                        continue;
+                    }
+                    b.node(&h.node.name, &h.node.kind, Some(&h.node.path));
+                    let to = h.chain.first().map_or(root.name.as_str(), String::as_str);
+                    if !b.nodes.contains_key(&node_id(to)) {
+                        b.node(to, &kind_of(to), None);
+                    }
+                    b.edge(&h.node.name, to, kind, inferred);
+                    if let Some(holder) = &h.holder {
+                        b.node(holder, &kind_of(holder), None);
+                        b.edge(holder, &h.node.name, "contains", false);
+                    }
+                    if let Some(via) = &h.via {
+                        b.node(via, "contract", None);
+                        b.edge(via, &h.node.name, kind, inferred);
+                    }
+                }
+                let g = b.finish(title, all.len() as u64);
                 partial = limit_partial(max, g.shown, g.total);
                 Ok::<_, StoreError>(g)
             })

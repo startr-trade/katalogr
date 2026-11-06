@@ -1016,6 +1016,17 @@ pub const OPS: &[Op] = &[
         Call::Project(view_impact)
     ),
     op!(
+        "views/lineage",
+        "A lineage view at a position: Mermaid and the graph.",
+        &[
+            req("symbol", "canonical name or plain name"),
+            dflt("depth", Ty::Int(1), "3", "contract hops to follow"),
+            MAX_NODES,
+        ],
+        Some("view"),
+        Call::Project(view_lineage)
+    ),
+    op!(
         "views/path",
         "A path view at a position: Mermaid and the graph.",
         &[
@@ -1123,6 +1134,7 @@ view_fn!(view_structure, "structure");
 view_fn!(view_contracts, "contracts");
 view_fn!(view_callers, "callers");
 view_fn!(view_impact, "impact");
+view_fn!(view_lineage, "lineage");
 view_fn!(view_path, "path");
 view_fn!(view_cycles, "cycles");
 

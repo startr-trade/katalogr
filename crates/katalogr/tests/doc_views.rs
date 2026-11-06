@@ -595,6 +595,7 @@ mod doc_views {
                 "contracts",
                 "cycles",
                 "impact",
+                "lineage",
                 "path",
                 "structure"
             ]
