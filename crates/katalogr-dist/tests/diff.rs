@@ -445,29 +445,45 @@ mod diff {
 
     #[test]
     fn each_format_has_its_own_id() {
-        // The page formats arrive with `diff_page`; here the stored query alone shows the
-        // format is part of the ID.
         use katalogr_dist::diff::DiffRender;
-        use katalogr_dist::{StoredQuery, query::view_id};
         let f = fx();
-        let r = report(&f.k, "v1", "v2");
-        let d = found(&r);
-        let q = |render| {
-            StoredQuery::Diff(katalogr_dist::DiffQuery {
-                repo: d.repo.clone(),
-                a: d.a.positions.clone(),
-                b: d.b.positions.clone(),
-                limit: d.limit,
-                render,
-            })
-            .to_view_query()
+        let json = report(&f.k, "v1", "v2");
+        let md =
+            f.k.diff_page(&req("v1", "v2", 200), DiffRender::Markdown, &opts())
+                .unwrap();
+        let html =
+            f.k.diff_page(&req("v1", "v2", 200), DiffRender::Html, &opts())
+                .unwrap();
+        let ids = [
+            json.report.view_id.clone().unwrap(),
+            md.report.view_id.clone().unwrap(),
+            html.report.view_id.clone().unwrap(),
+        ];
+        assert!(
+            ids[0] != ids[1] && ids[1] != ids[2] && ids[0] != ids[2],
+            "{ids:?}"
+        );
+        let Outcome::Found(m) = &md.outcome else {
+            panic!("no page")
         };
-        let ids: Vec<String> = [DiffRender::Json, DiffRender::Markdown, DiffRender::Html]
-            .into_iter()
-            .map(|m| view_id(&d.b.positions, &d.facts_version, &q(m)))
-            .collect();
-        assert_eq!(ids[0], r.report.view_id.clone().unwrap());
-        assert!(ids[0] != ids[1] && ids[1] != ids[2] && ids[0] != ids[2]);
+        let Outcome::Found(h) = &html.outcome else {
+            panic!("no page")
+        };
+        assert!(m.text.starts_with("# Changes in app"));
+        assert!(h.text.starts_with("<!DOCTYPE html>"));
+        assert_eq!(f.ops("diff"), 3);
+        // Each is read back on the second call.
+        let before = f.counters();
+        let again =
+            f.k.diff_page(&req("v1", "v2", 200), DiffRender::Html, &opts())
+                .unwrap();
+        assert_eq!(f.counters().hits, before.hits + 1);
+        assert_eq!(again.outcome, html.outcome);
+        // JSON is not a page.
+        let err =
+            f.k.diff_page(&req("v1", "v2", 200), DiffRender::Json, &opts())
+                .unwrap_err();
+        assert!(err.is_usage());
     }
 
     #[test]
@@ -677,5 +693,78 @@ mod diff {
                 .iter()
                 .all(|s| !s.path.starts_with("@history/"))
         );
+    }
+
+    // ---------------------------------------------------------------- R-17
+
+    fn all_formats(f: &Fx) {
+        use katalogr_dist::diff::DiffRender;
+        report(&f.k, "v1", "v2");
+        for m in [DiffRender::Markdown, DiffRender::Html] {
+            f.k.diff_page(&req("v1", "v2", 200), m, &opts()).unwrap();
+        }
+    }
+
+    #[test]
+    fn answers_check_covers_report() {
+        let f = fx();
+        all_formats(&f);
+        let rep = f.k.answers_check(None, false, &opts()).unwrap();
+        // The three report entries and the side entries that sit at the base's own position.
+        assert!(rep.checked >= 3, "{rep:?}");
+        assert_eq!(rep.matched, rep.checked, "{rep:?}");
+        assert!(rep.mismatched.is_empty());
+    }
+
+    #[test]
+    fn answers_check_finds_tampered_report() {
+        use katalogr_store::StoredAnswer;
+        let f = fx();
+        all_formats(&f);
+        let store = DirAnswerStore::new(
+            camino::Utf8PathBuf::from_path_buf(f.kx.join("projects/demo/.cache/answers")).unwrap(),
+        );
+        let json = f
+            .entries()
+            .into_iter()
+            .find(|e| {
+                e.header.op == "diff"
+                    && e.header.args.get("render").map(String::as_str) == Some("json")
+            })
+            .unwrap();
+        let mut a = store.get(&json.header.view_id).unwrap().unwrap();
+        a.payload.extend_from_slice(b" ");
+        store
+            .put(&StoredAnswer::new(
+                json.header.view_id.clone(),
+                json.header.validity.clone(),
+                json.header.op.clone(),
+                json.header.args.clone(),
+                a.payload,
+            ))
+            .unwrap();
+        let rep = f.k.answers_check(None, false, &opts()).unwrap();
+        assert_eq!(rep.mismatched.len(), 1, "{rep:?}");
+        assert_eq!(rep.mismatched[0].view_id, json.header.view_id);
+        assert_eq!(rep.matched, rep.checked - 1);
+    }
+
+    #[test]
+    fn answers_check_skips_without_contexts() {
+        let f = fx();
+        all_formats(&f);
+        let before = f.k.answers_check(None, false, &opts()).unwrap();
+        f.k.context_prune(0).unwrap();
+        let after = f.k.answers_check(None, false, &opts()).unwrap();
+        // The three report entries are skipped; nothing else changed.
+        assert_eq!(after.checked + 3, before.checked, "{before:?} {after:?}");
+        assert_eq!(
+            after.skipped_other_position,
+            before.skipped_other_position + 3
+        );
+        assert!(after.mismatched.is_empty());
+        for rev in ["v1", "v2"] {
+            assert!(!f.layer(&f.sha(rev)).exists(), "a check starts no index");
+        }
     }
 }

@@ -326,6 +326,11 @@ impl Katalogr {
         self.answers.compute_hook = Some(hook);
     }
 
+    /// The clean build identity, if one is set.
+    pub(crate) fn answers_build(&self) -> Option<&str> {
+        self.answers.build.as_deref()
+    }
+
     /// Runs the test hook, if one is set.
     pub(crate) fn run_compute_hook(&self) {
         if let Some(h) = &self.answers.compute_hook {
@@ -602,7 +607,7 @@ pub struct AnswerStats {
 /// `schema` of both reports.
 pub const ANSWERS_SCHEMA: u32 = 1;
 
-fn first_difference(a: &[u8], b: &[u8]) -> u64 {
+pub(crate) fn first_difference(a: &[u8], b: &[u8]) -> u64 {
     a.iter()
         .zip(b)
         .position(|(x, y)| x != y)
@@ -693,6 +698,40 @@ impl Katalogr {
                         rep.skipped_unknown_op += 1;
                         continue;
                     };
+                    if let StoredQuery::Diff(dq) = &q {
+                        // A report is keyed on its own commits, not on this checkout's position.
+                        let Some(stored) = store.get(&h.view_id)? else {
+                            continue;
+                        };
+                        match self.check_diff(
+                            dq,
+                            &h.view_id,
+                            &h.validity,
+                            &facts,
+                            &stored.payload,
+                            o,
+                        )? {
+                            crate::diff::CheckOne::OtherPosition => rep.skipped_other_position += 1,
+                            crate::diff::CheckOne::OtherValidity => rep.skipped_other_validity += 1,
+                            crate::diff::CheckOne::Checked(None) => {
+                                rep.checked += 1;
+                                rep.matched += 1;
+                            }
+                            crate::diff::CheckOne::Checked(Some(first)) => {
+                                rep.checked += 1;
+                                rep.mismatched.push(AnswerMismatch {
+                                    view_id: h.view_id.clone(),
+                                    op: h.op.clone(),
+                                    first_difference: first,
+                                });
+                                if repair {
+                                    store.remove(&h.view_id)?;
+                                    rep.removed += 1;
+                                }
+                            }
+                        }
+                        continue;
+                    }
                     if katalogr_query::view_id(&st.positions, &facts, &vq) != h.view_id {
                         rep.skipped_other_position += 1;
                         continue;

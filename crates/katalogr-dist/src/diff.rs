@@ -5,8 +5,9 @@
 //! report is found without opening either side's context. A miss builds both sides as commit
 //! contexts, compares them, and stores the report under its view ID.
 
-use crate::answers::AnswerRequest;
+use crate::answers::{AnswerRequest, DiffQuery, first_difference};
 use crate::contexts::{ContextChoice, base_commit_key};
+use crate::diff_render::{to_html, to_markdown};
 use crate::{Consistency, CoverageOptions, DistError, Katalogr, Options, Outcome, Reply, Report};
 use katalogr_analytics::insight_shift::{InsightShifts, InsightSide, insight_shifts};
 use katalogr_analytics::semantic_diff::{DiffOptions, SemanticDiff, semantic_diff};
@@ -17,7 +18,7 @@ use katalogr_analytics::{
 use katalogr_engine::base::resolve_commit;
 use katalogr_engine::history::HISTORY_PREFIX;
 use katalogr_query::{PositionRef, ViewQuery};
-use katalogr_store::{ContextId, Reader};
+use katalogr_store::{ContextId, ContextManifest, Reader};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -536,6 +537,166 @@ impl Katalogr {
             },
             diagnostic: None,
         })
+    }
+}
+
+/// What checking one stored report found.
+pub(crate) enum CheckOne {
+    /// The entry names other positions, or a side's context is not on this machine: a check
+    /// never starts an index.
+    OtherPosition,
+    OtherValidity,
+    /// Compared with a fresh build: `None` when equal, else the first differing byte.
+    Checked(Option<u64>),
+}
+
+impl Katalogr {
+    /// `Markdown` or `Html`, stored under that format's own view ID. `Json` is a usage error.
+    pub fn diff_page(
+        &self,
+        r: &DiffRequest,
+        f: DiffRender,
+        o: &Options,
+    ) -> Result<Reply<DiffPage>, DistError> {
+        if f == DiffRender::Json {
+            return Err(DistError::usage(
+                "a page is Markdown or HTML; the JSON report is `diff_report`",
+            ));
+        }
+        let key = self.diff_key(r, o)?;
+        let q = Self::diff_query(&key, r.limit as u64, f);
+        let req = AnswerRequest {
+            view_id: katalogr_query::view_id(&key.b, &key.facts, &q),
+            op: &q.op,
+            args: q.args.clone(),
+            inputs: BTreeMap::from([("rules".to_string(), key.rules.clone())]),
+            storable: key.storable,
+        };
+        let mut inner: Option<Reply<DiffReport>> = None;
+        let mut failure: Option<DistError> = None;
+        let mut warnings = Vec::new();
+        let (out, pending) = self.read_through(
+            &req,
+            &mut warnings,
+            || match self.diff_report(r, o) {
+                Ok(rep) => {
+                    let text = match &rep.outcome {
+                        Outcome::Found(d) if f == DiffRender::Markdown => to_markdown(d),
+                        Outcome::Found(d) => to_html(d),
+                        _ => String::new(),
+                    };
+                    inner = Some(rep);
+                    Ok(Outcome::Found(DiffPage { text }))
+                }
+                Err(e) => {
+                    failure = Some(e);
+                    Ok(Outcome::NoMatch(String::new()))
+                }
+            },
+            o.fresh,
+        )?;
+        if let Some(e) = failure {
+            return Err(e);
+        }
+        // A page built from a report that was not stored is not stored either.
+        let storable_now = inner.as_ref().is_none_or(|i| {
+            !i.report
+                .warnings
+                .iter()
+                .any(|w| w.contains("is not stored"))
+        });
+        if let Some(p) = pending
+            && storable_now
+        {
+            self.commit_write(p, &mut warnings);
+        }
+        let mut report = match inner {
+            Some(i) => i.report,
+            None => Report {
+                watermark: 0,
+                pending: 0,
+                stale: false,
+                timed_out: false,
+                queued: 0,
+                warnings: Vec::new(),
+                positions: key.b.clone(),
+                exact: true,
+                view_id: None,
+                context: None,
+                working_set: None,
+            },
+        };
+        report.warnings.extend(warnings);
+        report.view_id = Some(req.view_id.clone());
+        Ok(Reply {
+            outcome: out,
+            partial: Vec::new(),
+            folded: Vec::new(),
+            report,
+            diagnostic: None,
+        })
+    }
+
+    /// One stored report against a fresh build, when both sides' contexts are already here.
+    /// `view_id` and `validity` are the listing's; `facts` is the base's.
+    pub(crate) fn check_diff(
+        &self,
+        q: &DiffQuery,
+        view_id: &str,
+        stored_validity: &str,
+        facts: &str,
+        stored: &[u8],
+        o: &Options,
+    ) -> Result<CheckOne, DistError> {
+        let key = DiffKey {
+            repo: q.repo.clone(),
+            a: q.a.clone(),
+            b: q.b.clone(),
+            facts: facts.to_string(),
+            rules: project_rules_digest(&self.project)?,
+            storable: false,
+        };
+        let vq = Self::diff_query(&key, q.limit, q.render);
+        if katalogr_query::view_id(&key.b, &key.facts, &vq) != view_id {
+            return Ok(CheckOne::OtherPosition);
+        }
+        let inputs = BTreeMap::from([("rules".to_string(), key.rules.clone())]);
+        let same_validity = self
+            .answers_build()
+            .is_some_and(|b| crate::answers::validity(b, &inputs) == stored_validity);
+        if !same_validity {
+            return Ok(CheckOne::OtherValidity);
+        }
+        let here = |side: &[PositionRef]| {
+            let commit = key.commit_of(side);
+            self.project
+                .layer(&ContextId::for_commit(&key.repo, &commit))
+                .root()
+                .join(ContextManifest::FILE)
+                .is_file()
+        };
+        if !here(&key.a) || !here(&key.b) {
+            return Ok(CheckOne::OtherPosition);
+        }
+        let fresh_opts = Options {
+            fresh: true,
+            ..o.clone()
+        };
+        let mut notes = BuildNotes::default();
+        let report = self.build_report(&key, q.limit, &fresh_opts, &mut notes)?;
+        let bytes = match q.render {
+            DiffRender::Json => serde_json::to_vec(&report),
+            DiffRender::Markdown => serde_json::to_vec(&DiffPage {
+                text: to_markdown(&report),
+            }),
+            DiffRender::Html => serde_json::to_vec(&DiffPage {
+                text: to_html(&report),
+            }),
+        }
+        .map_err(|e| DistError::usage(format!("a report does not serialise: {e}")))?;
+        Ok(CheckOne::Checked(
+            (bytes != stored).then(|| first_difference(&bytes, stored)),
+        ))
     }
 }
 
