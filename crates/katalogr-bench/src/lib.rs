@@ -112,3 +112,54 @@ mod query {
         }
     }
 }
+
+/// R-16: no corpus clone, kindex or results path lies inside the repository. The patterns are
+/// structural (they name no corpus): a nested repository, the workspace directory, a kindex or
+/// clones directory, a run result or a corpus manifest.
+#[cfg(test)]
+mod privacy {
+    use std::path::Path;
+
+    const SKIP: &[&str] = &[".git", ".claude", "target", "node_modules"];
+    const DIRS: &[&str] = &[".katalogr-loadtest", "kindex", "clones"];
+    const FILES: &[&str] = &["run.json", "corpora.yaml"];
+
+    fn scan(dir: &Path, root: &Path, found: &mut Vec<String>) {
+        for e in std::fs::read_dir(dir).unwrap().flatten() {
+            let name = e.file_name().to_string_lossy().into_owned();
+            let rel = e.path().strip_prefix(root).unwrap().display().to_string();
+            let is_dir = e.file_type().unwrap().is_dir();
+            if name == ".git" && dir != root {
+                found.push(format!("{rel}: nested repository"));
+                continue;
+            }
+            if SKIP.contains(&name.as_str()) {
+                continue;
+            }
+            if is_dir && DIRS.contains(&name.as_str()) {
+                found.push(format!("{rel}: workspace-style directory"));
+            } else if !is_dir && FILES.contains(&name.as_str()) {
+                found.push(format!("{rel}: load-test result or manifest"));
+            }
+            if is_dir {
+                scan(&e.path(), root, found);
+            }
+        }
+    }
+
+    #[test]
+    fn repository_is_clean() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../..")
+            .canonicalize()
+            .unwrap();
+        assert!(root.join("Cargo.toml").is_file(), "not the workspace root");
+        let mut found = Vec::new();
+        scan(&root, &root, &mut found);
+        assert!(
+            found.is_empty(),
+            "inside the repository:\n{}",
+            found.join("\n")
+        );
+    }
+}

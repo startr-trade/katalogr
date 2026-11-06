@@ -171,6 +171,14 @@ mod bench {
         let (without, r) = time(true);
         assert!(r.findings.is_empty(), "{:?}", r.findings);
         println!("doctor on {SHARDS} shards: {with_git:?} with git, {without:?} with --skip-git");
+        println!(
+            "katalogr-bench: doctor_100k_git {:.3} ms",
+            with_git.as_secs_f64() * 1000.0
+        );
+        println!(
+            "katalogr-bench: doctor_100k_skip_git {:.3} ms",
+            without.as_secs_f64() * 1000.0
+        );
         assert!(with_git < Duration::from_millis(5000), "{with_git:?}");
         assert!(without < Duration::from_millis(1500), "{without:?}");
     }

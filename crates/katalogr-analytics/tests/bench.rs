@@ -553,6 +553,10 @@ mod bench {
         };
         let start = Instant::now();
         let r = coverage(&read, &input).unwrap();
+        println!(
+            "katalogr-bench: coverage_100k {:.3} ms",
+            start.elapsed().as_secs_f64() * 1000.0
+        );
         report("coverage_100k", start, 1500);
         println!(
             "coverage: {} refs ({:.1}% resolved, {:.1}% inferred, {:.1}% unresolved), {} dangling contracts",
