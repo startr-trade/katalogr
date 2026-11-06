@@ -151,9 +151,17 @@ mod export_html {
         let data = data_of(&file);
         let mermaid = data["answers"]["views/structure"]["body"]["mermaid"]
             .as_str()
-            .expect("a mermaid field");
-        let mut p = Page::open_file(&file, "#/graph");
-        assert_eq!(p.pele_sources(), [mermaid.to_string()]);
+            .expect("a mermaid field")
+            .to_string();
+        // The page's script engine recurses deeply in a debug build; the
+        // default 2 MiB test-thread stack overflows, so run it on a 64 MiB one.
+        let sources = std::thread::Builder::new()
+            .stack_size(64 * 1024 * 1024)
+            .spawn(move || Page::open_file(&file, "#/graph").pele_sources())
+            .expect("spawn the page thread")
+            .join()
+            .expect("the page thread");
+        assert_eq!(sources, [mermaid]);
     }
 
     #[test]
