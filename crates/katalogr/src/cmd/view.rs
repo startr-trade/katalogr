@@ -25,7 +25,7 @@ pub fn run(
     }
     if words.is_empty() {
         return Err(DistError::Usage(
-            "view wants an op (structure, contracts, callers, path, cycles), `check` or `snapshot`"
+            "view wants an op (structure, contracts, callers, impact, path, cycles), `check` or `snapshot`"
                 .to_string(),
         ));
     }

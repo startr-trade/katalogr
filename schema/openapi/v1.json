@@ -26567,6 +26567,232 @@
         "summary": "A cycles view at a position: Mermaid and the graph."
       }
     },
+    "/api/v1/views/impact": {
+      "get": {
+        "operationId": "views/impact",
+        "parameters": [
+          {
+            "description": "canonical name or plain name",
+            "in": "query",
+            "name": "symbol",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "hops to follow",
+            "in": "query",
+            "name": "depth",
+            "required": false,
+            "schema": {
+              "default": 3.0,
+              "maximum": 4294967295,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "most nodes drawn",
+            "in": "query",
+            "name": "max-nodes",
+            "required": false,
+            "schema": {
+              "default": 60.0,
+              "maximum": 4294967295,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "`current`, `base` or an id from context-list",
+            "in": "query",
+            "name": "context",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "answer for this position",
+            "in": "query",
+            "name": "at",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "freshness requirement",
+            "in": "query",
+            "name": "consistency",
+            "required": false,
+            "schema": {
+              "default": "stale-ok",
+              "enum": [
+                "wait",
+                "wait-all",
+                "stale-ok"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "seconds to wait, at most 120",
+            "in": "query",
+            "name": "timeout",
+            "required": false,
+            "schema": {
+              "minimum": 0,
+              "type": "number"
+            }
+          },
+          {
+            "description": "limit the answer to about this many tokens",
+            "in": "query",
+            "name": "budget",
+            "required": false,
+            "schema": {
+              "maximum": 4294967295,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "include a diagnostic trace",
+            "in": "query",
+            "name": "diagnostic",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "description": "list every hit instead of folding",
+            "in": "query",
+            "name": "expand",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/view"
+                }
+              }
+            },
+            "description": "The same JSON as the CLI prints with `--json`.",
+            "headers": {
+              "ETag": {
+                "description": "The view ID, when the answer is exact",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "304": {
+            "description": "The view ID in `If-None-Match` is the current one."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "A bad or unknown parameter."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Not authenticated."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Denied, or an unexpected Host header."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No match, or no such route."
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Only GET is served."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Ambiguous, or the position is unavailable."
+          },
+          "431": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The request head is over 8 KiB."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "An error."
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The queue is full; retry after 1 second."
+          }
+        },
+        "summary": "An impact view at a position: Mermaid and the graph."
+      }
+    },
     "/api/v1/views/path": {
       "get": {
         "operationId": "views/path",

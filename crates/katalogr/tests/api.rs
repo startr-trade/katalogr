@@ -570,6 +570,7 @@ mod api {
         ("views/structure", ""),
         ("views/contracts", ""),
         ("views/callers", "symbol=target"),
+        ("views/impact", "symbol=target"),
         ("views/path", "from=top&to=caller_a"),
         ("views/cycles", ""),
     ];

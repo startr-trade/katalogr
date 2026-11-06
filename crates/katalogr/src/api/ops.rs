@@ -1005,6 +1005,17 @@ pub const OPS: &[Op] = &[
         Call::Project(view_callers)
     ),
     op!(
+        "views/impact",
+        "An impact view at a position: Mermaid and the graph.",
+        &[
+            req("symbol", "canonical name or plain name"),
+            dflt("depth", Ty::Int(1), "3", "hops to follow"),
+            MAX_NODES,
+        ],
+        Some("view"),
+        Call::Project(view_impact)
+    ),
+    op!(
         "views/path",
         "A path view at a position: Mermaid and the graph.",
         &[
@@ -1092,6 +1103,7 @@ macro_rules! view_fn {
 view_fn!(view_structure, "structure");
 view_fn!(view_contracts, "contracts");
 view_fn!(view_callers, "callers");
+view_fn!(view_impact, "impact");
 view_fn!(view_path, "path");
 view_fn!(view_cycles, "cycles");
 
