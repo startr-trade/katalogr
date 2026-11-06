@@ -9,20 +9,31 @@ window.pele = {
     return { svg: "<svg></svg>" };
   }
 };
+var __cyHandlers = [];
+var __cyAdded = [];
+var __cyIds = {};
+// Fires the handlers registered for `event` on a node with this data, as a tap would.
+function __cyFire(event, data) {
+  var node = { data: function (k) { return k === undefined ? data : data[k]; }, id: function () { return data.id; } };
+  __cyHandlers.filter(function (h) { return h.event === event; }).forEach(function (h) { h.fn({ target: node }); });
+}
 window.cytoscape = function (opts) {
-  __cy.push(opts && opts.elements ? opts.elements : []);
+  var els = opts && opts.elements ? opts.elements : [];
+  __cy.push(els);
+  els.forEach(function (e) { __cyIds[e.data.id] = true; });
   var api = {
-    on: function () { return api; },
+    on: function (event, a, b) { __cyHandlers.push({ event: event, fn: typeof a === "function" ? a : b }); return api; },
     one: function () { return api; },
     layout: function () { return { run: function () {} }; },
     destroy: function () {},
     resize: function () {},
     fit: function () {},
+    style: function () { var s = { fromJson: function () { return s; }, update: function () {} }; return s; },
     nodes: function () { return []; },
     edges: function () { return []; },
     elements: function () { return []; },
-    getElementById: function () { return { empty: function () { return true; } }; },
-    add: function () { return api; }
+    getElementById: function (id) { return { empty: function () { return !__cyIds[id]; } }; },
+    add: function (more) { __cyAdded.push(more); more.forEach(function (e) { __cyIds[e.data.id] = true; }); return api; }
   };
   return api;
 };
