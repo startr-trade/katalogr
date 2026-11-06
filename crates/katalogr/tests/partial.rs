@@ -266,6 +266,9 @@ mod partial {
                     || n == "view.schema.json"
                     // `audit` answers with its own record and outcome types (FEAT-094 R-14).
                     || n == "audit.schema.json"
+                    // `answers check` and `answers stats` answer with their own reports (FEAT-096).
+                    || n == "answers-check.schema.json"
+                    || n == "answers-stats.schema.json"
             }) {
                 continue;
             }

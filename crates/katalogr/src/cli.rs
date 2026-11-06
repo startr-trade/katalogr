@@ -194,6 +194,10 @@ pub struct Cli {
     #[arg(long, global = true, value_name = "TOKENS")]
     pub budget: Option<u64>,
 
+    /// Compute the answer again instead of reading a stored one. The result is still stored.
+    #[arg(long, global = true)]
+    pub fresh: bool,
+
     #[command(subcommand)]
     pub command: Option<Command>,
 }
@@ -628,6 +632,12 @@ pub enum Command {
         #[command(subcommand)]
         action: ProfilesAction,
     },
+    /// Inspect and tidy the stored answers of `hubs`, `communities`, `cycles`, `dead-code`,
+    /// `map` and `coverage`.
+    Answers {
+        #[command(subcommand)]
+        action: AnswersAction,
+    },
     /// Record the index's digest at the current positions, and check a re-index against it.
     Audit {
         #[command(subcommand)]
@@ -728,6 +738,28 @@ pub enum ContextAction {
         /// Keep at most this many.
         #[arg(long, value_name = "N")]
         keep: Option<usize>,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum AnswersAction {
+    /// Compare each stored answer of the current position and build with a fresh computation.
+    /// Exits 0 when all match, 1 when one differs, 5 when the position cannot be held.
+    Check {
+        /// Check at most this many entries, in view-ID order.
+        #[arg(long, value_name = "N")]
+        limit: Option<usize>,
+        /// Remove the entries that differ.
+        #[arg(long)]
+        repair: bool,
+    },
+    /// Count the stored answers and their bytes, by command.
+    Stats,
+    /// Remove the oldest stored answers until at most this size remains.
+    Prune {
+        /// Megabytes to keep (default: the setting `answers.max_mib`).
+        #[arg(long, value_name = "N")]
+        max_mib: Option<u64>,
     },
 }
 

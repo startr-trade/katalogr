@@ -747,6 +747,50 @@ mod mcp {
         ]
     }
 
+    /// FEAT-096 R-15. `map` over MCP gives the answer the CLI gives, from the same stored entry.
+    #[test]
+    fn stored_map_matches_cli() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (_kx, repo) = query_project(tmp.path());
+        let git = |args: &[&str]| {
+            let st = Command::new("git")
+                .current_dir(&repo)
+                .args(args)
+                .env("GIT_CONFIG_GLOBAL", "/dev/null")
+                .env("GIT_CONFIG_SYSTEM", "/dev/null")
+                .status()
+                .unwrap();
+            assert!(st.success(), "git {args:?}");
+        };
+        git(&["init", "-q"]);
+        git(&["config", "user.name", "Test"]);
+        git(&["config", "user.email", "test@example.com"]);
+        git(&["config", "commit.gpgsign", "false"]);
+        git(&["add", "."]);
+        git(&["commit", "-q", "-m", "c1"]);
+        let cli = |args: &[&str]| {
+            let out = Command::new(BIN)
+                .current_dir(&repo)
+                .env_remove("KATALOGR_KINDEX")
+                .env_remove("KATALOGR_PROJECT")
+                .env("KATALOGR_ANSWER_BUILD", "mcp-test")
+                .args(args)
+                .output()
+                .unwrap();
+            assert!(out.status.success(), "{args:?}: {out:?}");
+            String::from_utf8(out.stdout).unwrap()
+        };
+        // The CLI writes the entry; the server must read it and answer alike.
+        let from_cli: Value = serde_json::from_str(&cli(&["--json", "map", "--neutral"])).unwrap();
+        let mut c = Client::spawn(&repo, &[], &[]);
+        c.initialize("2025-06-18");
+        let r = c.call(1, "map", json!({}));
+        let text: Value = serde_json::from_str(&last_text(&r)).unwrap();
+        assert_eq!(text["items"], from_cli["items"]);
+        let stats: Value = serde_json::from_str(&cli(&["--json", "answers", "stats"])).unwrap();
+        assert!(stats["entries"].as_u64().unwrap() >= 1);
+    }
+
     /// R-3. Every answer, text and `structuredContent`, validates against its `schema/v1`
     /// file (ADR-0023 compliance); the candidates of an ambiguous call validate as `find`.
     #[test]

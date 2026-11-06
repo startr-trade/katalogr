@@ -15,8 +15,6 @@ pub fn answer_build_from(env: Option<&str>, sha: &str, dirty: &str) -> Option<St
 }
 
 /// This binary's build identity, or `None` to turn stored answers off.
-// Called by the command layer once FEAT-096 T13 lands.
-#[allow(dead_code)]
 pub fn current() -> Option<String> {
     answer_build_from(
         std::env::var("KATALOGR_ANSWER_BUILD").ok().as_deref(),
