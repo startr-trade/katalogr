@@ -49,6 +49,8 @@ use katalogr_query::{
 };
 pub use katalogr_query::{ReplaceResult, ShowResult};
 pub use katalogr_render as render;
+#[cfg(feature = "web")]
+pub use katalogr_web as web;
 pub use setup::{ProjectCreated, kindex_init, project_init};
 pub use threads::{BATCH_BYTES_KEY, THREADS_ENV, THREADS_KEY, resolve_parallelism};
 

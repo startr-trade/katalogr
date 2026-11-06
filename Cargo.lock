@@ -1970,6 +1970,7 @@ dependencies = [
  "katalogr-query",
  "katalogr-render",
  "katalogr-store",
+ "katalogr-web",
  "regex",
  "schemars",
  "serde",
@@ -2191,6 +2192,16 @@ dependencies = [
  "sha2",
  "tempfile",
  "thiserror",
+]
+
+[[package]]
+name = "katalogr-web"
+version = "0.1.0"
+dependencies = [
+ "katalogr-render",
+ "serde",
+ "serde_json",
+ "sha2",
 ]
 
 [[package]]

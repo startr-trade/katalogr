@@ -17,6 +17,9 @@ pub const VIEW_FORMAT: u32 = 1;
 /// [`CONTRACT_VERSION`].
 pub const CAPABILITIES: &[&str] = &["docs-affected", "position", "view-id", "views"];
 
+/// Reported by a process that serves pages. Never in [`CAPABILITIES`].
+pub const WEB_CAPABILITY: &str = "web-view";
+
 /// What this binary serves.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
 pub struct ContractInfo {
