@@ -45,7 +45,7 @@ fn structured_only_from_2025_06_18() {
     let with = list(true, true);
     assert_eq!(
         with.iter().filter(|t| t.output_schema.is_some()).count(),
-        12
+        13
     );
     for t in list(false, true) {
         assert!(t.output_schema.is_none(), "{}", t.name);
