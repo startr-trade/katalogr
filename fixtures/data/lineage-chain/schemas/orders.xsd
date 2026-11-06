@@ -4,6 +4,7 @@
     <xs:sequence>
       <xs:element name="id" type="xs:string"/>
       <xs:element name="total" type="xs:decimal"/>
+      <xs:element name="orderDate" type="xs:string"/>
     </xs:sequence>
   </xs:complexType>
 </xs:schema>

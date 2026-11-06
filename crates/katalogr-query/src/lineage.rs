@@ -602,6 +602,16 @@ pub fn lineage(
         for f in &fields {
             sources.push((Id::of(&f.node.name), Some(leaf_of_name(&f.node.name))));
         }
+        // The subject's own fields, when the fields listed are another copy's.
+        if !contract_target && field_root != Some(target_id) {
+            let listed: BTreeSet<Id> = fields.iter().map(|f| Id::of(&f.node.name)).collect();
+            for f in fields_of(tx, target_id)? {
+                let id = Id::of(&f.node.name);
+                if !listed.contains(&id) {
+                    sources.push((id, Some(leaf_of_name(&f.node.name))));
+                }
+            }
+        }
         for (from, through) in sources {
             for (key, _) in tx.links_out(from, None)? {
                 let relation = if key.kind.0 == EXTENDS {

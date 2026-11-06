@@ -10,11 +10,21 @@ symbols:
 - fx:schemas/orders.xsd#schema:orders
 - fx:schemas/orders.xsd#type:Order
 - fx:schemas/orders.xsd#type:Order/field:id
+- fx:schemas/orders.xsd#type:Order/field:orderDate
 - fx:schemas/orders.xsd#type:Order/field:total
 - fx:src/client.rs#fn:send
 - fx:src/lib.rs#mod:client
+- fx:src/lib.rs#mod:model
 - fx:src/lib.rs#mod:repo
 - fx:src/lib.rs#mod:server
+- fx:src/model.rs#struct:Line
+- fx:src/model.rs#struct:Line/field:sku
+- fx:src/model.rs#struct:Order
+- fx:src/model.rs#struct:Order/field:id
+- fx:src/model.rs#struct:Order/field:internal
+- fx:src/model.rs#struct:Order/field:lines
+- fx:src/model.rs#struct:Order/field:order_date
+- fx:src/model.rs#struct:Order/field:total
 - fx:src/repo.rs#fn:load_orders
 - fx:src/server.rs#fn:place
 - fx:src/server.rs#fn:routes
@@ -74,6 +84,10 @@ links:
   confidence: Extracted
 - from: fx:schemas/orders.xsd#type:Order
   kind: contains
+  to: fx:schemas/orders.xsd#type:Order/field:orderDate
+  confidence: Extracted
+- from: fx:schemas/orders.xsd#type:Order
+  kind: contains
   to: fx:schemas/orders.xsd#type:Order/field:total
   confidence: Extracted
 - from: fx:schemas/orders.xsd#type:Order
@@ -89,6 +103,10 @@ links:
   kind: declares
   to: fx:src/client.rs
   confidence: Extracted
+- from: fx:src/lib.rs#mod:model
+  kind: declares
+  to: fx:src/model.rs
+  confidence: Extracted
 - from: fx:src/lib.rs#mod:repo
   kind: declares
   to: fx:src/repo.rs
@@ -96,6 +114,39 @@ links:
 - from: fx:src/lib.rs#mod:server
   kind: declares
   to: fx:src/server.rs
+  confidence: Extracted
+- from: fx:src/model.rs#struct:Line
+  kind: contains
+  to: fx:src/model.rs#struct:Line/field:sku
+  confidence: Extracted
+- from: fx:src/model.rs#struct:Order
+  kind: contains
+  to: fx:src/model.rs#struct:Order/field:id
+  confidence: Extracted
+- from: fx:src/model.rs#struct:Order
+  kind: contains
+  to: fx:src/model.rs#struct:Order/field:internal
+  confidence: Extracted
+- from: fx:src/model.rs#struct:Order
+  kind: contains
+  to: fx:src/model.rs#struct:Order/field:lines
+  confidence: Extracted
+- from: fx:src/model.rs#struct:Order
+  kind: contains
+  to: fx:src/model.rs#struct:Order/field:order_date
+  confidence: Extracted
+- from: fx:src/model.rs#struct:Order
+  kind: contains
+  to: fx:src/model.rs#struct:Order/field:total
+  confidence: Extracted
+- from: fx:src/model.rs#struct:Order
+  kind: declares
+  to: contract:schema_type:{urn%3Aexample%3Aorders}Order
+  confidence: Declared
+  produced_by: profile:example-lineage#order-struct-declares
+- from: fx:src/model.rs#struct:Order/field:lines
+  kind: uses-type
+  to: fx:src/model.rs#struct:Line
   confidence: Extracted
 - from: fx:src/repo.rs#fn:load_orders
   kind: consumes
