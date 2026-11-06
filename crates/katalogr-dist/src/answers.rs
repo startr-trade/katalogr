@@ -3,9 +3,7 @@
 //! it when not. A stored answer is only ever served at a clean, exact position, so a hit is
 //! byte-for-byte what a fresh computation would give.
 
-use crate::{
-    Consistency, CoverageOptions, DistError, Katalogr, Options, Outcome, Reply, Report,
-};
+use crate::{Consistency, CoverageOptions, DistError, Katalogr, Options, Outcome, Reply, Report};
 use camino::Utf8PathBuf;
 use katalogr_analytics::{
     CommunityOptions, CycleOptions, DeadCodeOptions, DeadConfidence, GraphOptions, HubOptions,
@@ -277,9 +275,10 @@ impl Katalogr {
     }
 
     pub(crate) fn answer_store(&self) -> Arc<dyn AnswerStore> {
-        self.answers.store.clone().unwrap_or_else(|| {
-            Arc::new(DirAnswerStore::new(answer_store_dir(&self.project)))
-        })
+        self.answers
+            .store
+            .clone()
+            .unwrap_or_else(|| Arc::new(DirAnswerStore::new(answer_store_dir(&self.project))))
     }
 
     /// `answers.max_mib`: the project setting, else [`DEFAULT_MAX_MIB`]. 0 turns the store off.
