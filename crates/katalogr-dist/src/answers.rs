@@ -244,6 +244,14 @@ pub(crate) struct AnswerState {
     build: Option<String>,
     store: Option<Arc<dyn AnswerStore>>,
     counters: Mutex<AnswerCounters>,
+    /// Test support: runs just before an answer is computed.
+    compute_hook: Option<Arc<dyn Fn() + Send + Sync>>,
+}
+
+/// An entry computed by a read, written once the read is known to have held.
+struct PendingWrite {
+    entry: StoredAnswer,
+    max_mib: u64,
 }
 
 /// What a caller adds to a store read once it holds the snapshot: values that enter `validity`
@@ -264,6 +272,12 @@ impl Katalogr {
     #[doc(hidden)]
     pub fn set_answer_store(&mut self, s: Arc<dyn AnswerStore>) {
         self.answers.store = Some(s);
+    }
+
+    /// Test support: run `hook` just before a stored-answer read computes its value.
+    #[doc(hidden)]
+    pub fn set_answer_compute_hook(&mut self, hook: Arc<dyn Fn() + Send + Sync>) {
+        self.answers.compute_hook = Some(hook);
     }
 
     /// Counts for this facade since it was made.
@@ -300,29 +314,60 @@ impl Katalogr {
         compute: impl FnOnce() -> Result<Outcome<T>, StoreError>,
         fresh: bool,
     ) -> Result<Outcome<T>, StoreError> {
+        let (out, pending) = self.read_through(r, warnings, compute, fresh)?;
+        if let Some(p) = pending {
+            self.commit_write(p, warnings);
+        }
+        Ok(out)
+    }
+
+    /// Adds the store's warning once per answer.
+    fn store_warning(e: &StoreError, warnings: &mut Vec<String>) {
+        if !warnings.iter().any(|w| w.starts_with("stored answers:")) {
+            warnings.push(format!("stored answers: {e}"));
+        }
+    }
+
+    /// Writes an entry the read computed, then prunes. Errors become warnings.
+    fn commit_write(&self, p: PendingWrite, warnings: &mut Vec<String>) {
+        let store = self.answer_store();
+        match store.put(&p.entry) {
+            Ok(PutOutcome::Stored) => {
+                self.count(|c| c.writes += 1);
+                if let Err(e) = store.prune(p.max_mib.saturating_mul(1 << 20)) {
+                    Self::store_warning(&e, warnings);
+                }
+            }
+            Ok(PutOutcome::TooLarge) => {}
+            Err(e) => Self::store_warning(&e, warnings),
+        }
+    }
+
+    /// The read half of [`Katalogr::through_store`]: a hit, or the computed answer with the entry
+    /// that should be written once the caller knows the answer held at its position.
+    fn read_through<T: Serialize + DeserializeOwned>(
+        &self,
+        r: &AnswerRequest,
+        warnings: &mut Vec<String>,
+        compute: impl FnOnce() -> Result<Outcome<T>, StoreError>,
+        fresh: bool,
+    ) -> Result<(Outcome<T>, Option<PendingWrite>), StoreError> {
         let max_mib = self.answers_max_mib();
         let Some(build) = self.answers.build.as_deref() else {
-            return compute();
+            return Ok((compute()?, None));
         };
         if !r.storable || max_mib == 0 {
-            return compute();
+            return Ok((compute()?, None));
         }
         let validity = validity(build, &r.inputs);
         let store = self.answer_store();
-        let mut warned = false;
-        let mut warn = |e: &StoreError, warnings: &mut Vec<String>| {
-            if !warned {
-                warned = true;
-                warnings.push(format!("stored answers: {e}"));
-            }
-        };
         if !fresh {
             match store.get(&r.view_id) {
                 Ok(Some(a)) if a.header.validity == validity => {
                     match serde_json::from_slice::<T>(&a.payload) {
                         Ok(v) => {
                             self.count(|c| c.hits += 1);
-                            return Ok(Outcome::Found(v));
+                            return Ok((Outcome::Found(v), None));
                         }
                         Err(_) => {
                             let _ = store.remove(&r.view_id);
@@ -333,36 +378,30 @@ impl Katalogr {
                 Ok(_) => self.count(|c| c.misses += 1),
                 Err(e) => {
                     self.count(|c| c.misses += 1);
-                    warn(&e, warnings);
+                    Self::store_warning(&e, warnings);
                 }
             }
         }
         let out = compute()?;
+        let mut pending = None;
         if let Outcome::Found(v) = &out {
             match serde_json::to_vec(v) {
                 Ok(payload) => {
-                    let entry = StoredAnswer::new(
-                        r.view_id.clone(),
-                        validity,
-                        r.op.to_string(),
-                        r.args.clone(),
-                        payload,
-                    );
-                    match store.put(&entry) {
-                        Ok(PutOutcome::Stored) => {
-                            self.count(|c| c.writes += 1);
-                            if let Err(e) = store.prune(max_mib.saturating_mul(1 << 20)) {
-                                warn(&e, warnings);
-                            }
-                        }
-                        Ok(PutOutcome::TooLarge) => {}
-                        Err(e) => warn(&e, warnings),
-                    }
+                    pending = Some(PendingWrite {
+                        entry: StoredAnswer::new(
+                            r.view_id.clone(),
+                            validity,
+                            r.op.to_string(),
+                            r.args.clone(),
+                            payload,
+                        ),
+                        max_mib,
+                    });
                 }
-                Err(e) => warn(&StoreError::Row(e.to_string()), warnings),
+                Err(e) => Self::store_warning(&StoreError::Row(e.to_string()), warnings),
             }
         }
-        Ok(out)
+        Ok((out, pending))
     }
 
     /// Reply for a command: opens the state read, builds the request, calls `through_store`.
@@ -390,6 +429,8 @@ impl Katalogr {
         });
         let usable = self.answers.build.is_some() && self.answers_max_mib() > 0;
         let mut store_warnings = Vec::new();
+        // The entry the read computed, and the positions its ID was computed from.
+        let mut deferred: Option<(PendingWrite, Vec<katalogr_query::PositionRef>)> = None;
         let a = engine.with_consistency_state(
             &QueryOptions {
                 consistency: consistency.into(),
@@ -418,9 +459,25 @@ impl Katalogr {
                     inputs,
                     storable: st.positions.iter().all(|p| p.dirty.is_none()),
                 };
-                self.through_store(&req, &mut store_warnings, || f(tx), o.fresh)
+                let run = || {
+                    if let Some(h) = &self.answers.compute_hook {
+                        h();
+                    }
+                    f(tx)
+                };
+                let (out, pending) = self.read_through(&req, &mut store_warnings, run, o.fresh)?;
+                deferred = pending.map(|p| (p, st.positions.clone()));
+                Ok(out)
             },
         )?;
+        // Store only an answer that held: exact once the value was computed, at the very
+        // positions its ID was made from. Otherwise it is returned, not stored.
+        if let Some((p, positions)) = deferred
+            && a.exact
+            && a.positions == positions
+        {
+            self.commit_write(p, &mut store_warnings);
+        }
         let mut warnings = a.warnings;
         warnings.extend(store_warnings);
         let mut reply = Reply {

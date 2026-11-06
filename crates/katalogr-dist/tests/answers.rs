@@ -1139,4 +1139,35 @@ mod answers {
         assert_eq!(pruned.removed, 5);
         assert!(f.entries().is_empty());
     }
+
+    #[test]
+    fn edit_during_compute_not_stored() {
+        let mut f = fx();
+        let file = f.repo.join("g.tx");
+        let text = format!("{GRAPH}sym fn edited\n");
+        f.k.set_answer_compute_hook(Arc::new(move || {
+            std::fs::write(&file, &text).unwrap();
+        }));
+        let r = f.k.hubs(&hub_opts(), &opts()).unwrap();
+        assert!(matches!(r.outcome, Outcome::Found(_)));
+        assert!(!r.report.exact, "an edit while computing makes it inexact");
+        assert!(f.entries().is_empty(), "nothing was stored");
+        assert_eq!(f.k.answer_counters().writes, 0);
+        // The next read finds the edit, so the position is dirty and still stores nothing; after
+        // a commit it computes (a miss) and stores.
+        let mut g = f.fresh_facade(None);
+        g.set_answer_build(Some("b1".into()));
+        let c = g.hubs(&hub_opts(), &opts()).unwrap();
+        assert!(c.report.positions[0].dirty.is_some());
+        assert!(f.entries().is_empty());
+        f.commit("edited");
+        let before = g.answer_counters();
+        g.hubs(&hub_opts(), &opts()).unwrap();
+        let after = g.answer_counters();
+        assert_eq!(
+            (after.misses, after.writes),
+            (before.misses + 1, before.writes + 1)
+        );
+        assert_eq!(f.entries().len(), 1);
+    }
 }
