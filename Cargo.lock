@@ -2579,6 +2579,7 @@ dependencies = [
  "layout-rs",
  "schemars",
  "serde",
+ "serde_json",
  "sha2",
 ]
 

@@ -5,6 +5,7 @@
 //! never names. It reads nothing from the index; callers build the graph.
 
 pub mod assets;
+pub mod cytoscape;
 pub mod dot;
 pub mod graph;
 pub mod graphml;
@@ -17,6 +18,7 @@ pub mod svg;
 #[allow(unused_imports)] // empty until its task lands
 pub use assets::*;
 #[allow(unused_imports)] // empty until its task lands
+pub use cytoscape::*;
 pub use dot::*;
 pub use graph::*;
 #[allow(unused_imports)] // empty until its task lands
