@@ -1,6 +1,9 @@
 [workspace]
 resolver = "3"
 members = ["crates/*"]
+# FEAT-033 batch 1 holds only the vendored assets of katalogr-web, with no manifest yet. T2 adds
+# the manifest and removes this line.
+exclude = ["crates/katalogr-web"]
 
 [workspace.package]
 version = "0.1.0"
