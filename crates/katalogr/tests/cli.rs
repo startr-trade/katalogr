@@ -904,13 +904,25 @@ mod cli {
         .unwrap();
         validate(&schema, &schema, &v, "$").unwrap_or_else(|e| panic!("{e}\n{v}"));
         assert_eq!(v["api"], 1);
-        assert_eq!(v["contract"], 3);
+        assert_eq!(v["contract"], 4);
         assert_eq!(v["schema"], 1);
         assert_eq!(v["katalogr"], env!("CARGO_PKG_VERSION"));
         assert_eq!(
             v["capabilities"],
-            serde_json::json!(["docs-affected", "position", "view-id", "views"])
+            serde_json::json!(["docs-affected", "impact", "position", "view-id", "views"])
         );
+    }
+
+    /// R-10 (FEAT-028): `katalogr contract --json` lists `impact` and raises the contract to 4.
+    #[test]
+    fn contract_lists_impact() {
+        let tmp = tempfile::tempdir().unwrap();
+        let out = katalogr(tmp.path(), &["--json", "contract"]);
+        assert_eq!(out.status.code(), Some(0), "{out:?}");
+        let v: Value = serde_json::from_slice(&out.stdout).expect("json");
+        assert_eq!(v["contract"], 4);
+        let caps = v["capabilities"].as_array().expect("capabilities");
+        assert!(caps.iter().any(|c| c == "impact"), "{caps:?}");
     }
 
     /// The `.tx` query project as a git repository with a document that links to `target`,
