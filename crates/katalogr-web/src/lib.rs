@@ -129,15 +129,13 @@ pub fn asset(name: &str) -> Option<&'static Asset> {
     assets().iter().find(|a| a.name == name)
 }
 
-/// `"<first 16 hex of SHA-256 of text>"`, with the quotes, computed once per asset.
-///
-/// An `Asset` that is not in the bundle gets its tag computed and kept for the life of the
-/// process, which only a caller building its own `Asset` can reach.
-pub fn etag(asset: &Asset) -> &'static str {
+/// `"<first 16 hex of SHA-256 of text>"`, with the quotes. Computed once for each bundled asset
+/// and copied out; an `Asset` that is not in the bundle gets its tag computed on the call.
+pub fn etag(asset: &Asset) -> String {
     let (assets, etags) = table();
     match assets.iter().position(|a| a.name == asset.name) {
-        Some(i) => etags[i].as_str(),
-        None => Box::leak(compute_etag(asset.text).into_boxed_str()),
+        Some(i) => etags[i].clone(),
+        None => compute_etag(asset.text),
     }
 }
 

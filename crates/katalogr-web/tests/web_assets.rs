@@ -134,6 +134,7 @@ mod web_assets {
             }
             assert!(asset(a.name).is_some());
             assert!(etag(a).starts_with('"') && etag(a).len() == 18);
+            assert_eq!(etag(a), etag(a));
         }
         assert!(asset("../app.css").is_none());
         assert!(asset("a/b").is_none());
