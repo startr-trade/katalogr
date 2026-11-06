@@ -375,6 +375,8 @@ pub mod cap {
     pub const BUDGET: &str = "budget";
     /// Members listed per community or cycle.
     pub const MEMBERS: &str = "members";
+    /// `lineage --per-group`.
+    pub const PER_GROUP: &str = "per-group";
 }
 
 /// Said with every partial answer.

@@ -224,6 +224,17 @@ pub fn field(
 /// Add an artifact with symbols that have their own segments, kinds and facts; returns the
 /// symbol ids in order.
 pub fn artifact_with(tx: &mut WriteTx, repo: &str, path: &str, syms: Vec<Sym>) -> Vec<Id> {
+    artifact_ext(tx, repo, path, "tx", syms)
+}
+
+/// [`artifact_with`] for an artifact of the given extension.
+pub fn artifact_ext(
+    tx: &mut WriteTx,
+    repo: &str,
+    path: &str,
+    extension: &str,
+    syms: Vec<Sym>,
+) -> Vec<Id> {
     let rel = RelPath::new(path).unwrap();
     let name = ArtifactName {
         repo: repo.into(),
@@ -269,7 +280,7 @@ pub fn artifact_with(tx: &mut WriteTx, repo: &str, path: &str, syms: Vec<Sym>) -
         aid,
         &ArtifactRow {
             name,
-            extension: "tx".into(),
+            extension: extension.into(),
             provenance: provenance(repo, &rel),
             facts: Default::default(),
             symbols: sorted,
