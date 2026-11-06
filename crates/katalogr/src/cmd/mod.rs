@@ -36,6 +36,8 @@ pub mod render;
 pub mod render_doc;
 pub mod replace;
 pub mod search;
+#[cfg(feature = "web")]
+pub mod serve;
 pub mod session;
 pub mod show;
 pub mod skill;

@@ -63,6 +63,8 @@ pub fn quick_config(workers: usize, queue: usize) -> ApiConfig {
         cors_origin: None,
         overrides: Overrides::default(),
         start_dir: std::env::temp_dir(),
+        web: false,
+        name: "api",
     }
 }
 

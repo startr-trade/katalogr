@@ -70,6 +70,8 @@ fn run(cli: &Cli) -> Result<ExitCode, DistError> {
             cors_origin.clone(),
             snapshots,
         ),
+        #[cfg(feature = "web")]
+        Some(Command::Serve(args)) => cmd::serve::run(cli, args),
         #[cfg(feature = "mcp")]
         Some(Command::Mcp {
             root,

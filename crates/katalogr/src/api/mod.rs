@@ -11,6 +11,8 @@ pub mod openapi;
 pub mod ops;
 #[cfg(test)]
 pub mod test_support;
+#[cfg(feature = "web")]
+pub mod web;
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -43,6 +45,10 @@ pub struct ApiConfig {
     /// Kindex and project, as the CLI.
     pub overrides: Overrides,
     pub start_dir: PathBuf,
+    /// Also answer `GET /` and `GET /assets/<name>` (`katalogr serve`, FEAT-033).
+    pub web: bool,
+    /// The command name, for the start-up and request log lines.
+    pub name: &'static str,
 }
 
 /// Provisional default (FEAT-049 T9 replaces it from the benchmark).
@@ -134,11 +140,12 @@ pub fn run_announcing(
     auth: Arc<dyn Authorizer>,
     stop: &AtomicBool,
 ) -> Result<(), DistError> {
+    let name = cfg.name;
     let (tx, rx) = mpsc::channel();
     thread::scope(|s| {
         s.spawn(move || {
             if let Ok(addr) = rx.recv() {
-                eprintln!("katalogr api: listening on http://{addr}");
+                eprintln!("katalogr {name}: listening on http://{addr}");
             }
         });
         run_with(cfg, auth, stop, OPS, Some(tx))
@@ -253,7 +260,8 @@ fn serve(shared: &Shared, req: tiny_http::Request) {
         .and_then(|p| p.strip_prefix(http::PREFIX))
         .unwrap_or("-");
     eprintln!(
-        "katalogr api: {method} {op} {} {}ms",
+        "katalogr {}: {method} {op} {} {}ms",
+        shared.cfg.name,
         out.status,
         started.elapsed().as_millis()
     );
@@ -288,8 +296,26 @@ fn route(
     headers: &[(String, String)],
     head_len: usize,
 ) -> Result<Out, HttpError> {
-    let target = parse_target(method, url, head_len)?;
     let (path, query) = url.split_once('?').unwrap_or((url, ""));
+    #[cfg(feature = "web")]
+    if shared.cfg.web && !path.starts_with(http::PREFIX) {
+        // A page: the same limits, authorizer and Host check as the API, then the bundle.
+        http::check_head(method, head_len)?;
+        let head = RequestHead {
+            method,
+            path,
+            query,
+            headers,
+        };
+        shared
+            .auth
+            .check(&head)
+            .map_err(|d| HttpError::new(d.status, "denied", d.message))?;
+        check_host(shared.bound, head.header("host"))
+            .map_err(|d| HttpError::new(d.status, "denied", d.message))?;
+        return web::answer(path, headers);
+    }
+    let target = parse_target(method, url, head_len)?;
     let head = RequestHead {
         method,
         path,
@@ -305,8 +331,14 @@ fn route(
     match target.op.as_str() {
         "meta" => {
             ops::Args::parse(&[], &target.params)?;
-            let body = serde_json::to_string(&katalogr_dist::contract::contract_info())
-                .expect("serialise contract");
+            let mut info = katalogr_dist::contract::contract_info();
+            if shared.cfg.web {
+                // Only a process that serves pages says so.
+                info.capabilities
+                    .push(katalogr_dist::contract::WEB_CAPABILITY.to_string());
+                info.capabilities.sort();
+            }
+            let body = serde_json::to_string(&info).expect("serialise contract");
             Ok(Out::json(200, body))
         }
         "openapi.json" => {

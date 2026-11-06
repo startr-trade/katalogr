@@ -106,6 +106,39 @@ pub enum ViewAction {
     },
 }
 
+/// The arguments of `katalogr serve`.
+#[cfg(feature = "web")]
+#[derive(Debug, clap::Args)]
+pub struct ServeArgs {
+    /// Address to listen on; only loopback addresses are served.
+    #[arg(long, default_value = "127.0.0.1:7878", value_name = "ADDR")]
+    pub listen: std::net::SocketAddr,
+    /// Worker threads (default: the core count, at most 8).
+    #[arg(long, value_name = "N")]
+    pub workers: Option<usize>,
+    /// Requests that may wait for a worker; more get 503 (default: 64).
+    #[arg(long, value_name = "N")]
+    pub queue: Option<usize>,
+    /// A read never processes the queue (the hosted form).
+    #[arg(long)]
+    pub no_process: bool,
+    /// Send CORS headers for exactly this origin.
+    #[arg(long, value_name = "ORIGIN")]
+    pub cors_origin: Option<String>,
+    /// A folder of view snapshots, or a folder of such folders, that the time slider also
+    /// reads. Repeatable.
+    #[arg(long, value_name = "DIR")]
+    pub snapshots: Vec<std::path::PathBuf>,
+    /// Write the bundle (`index.html` and `assets/`) into this folder and exit. Needs no
+    /// project and serves nothing.
+    #[arg(long, value_name = "DIR")]
+    pub write_assets: Option<std::path::PathBuf>,
+    /// With `--write-assets`: the address of the API the written page calls, in place of the
+    /// same origin.
+    #[arg(long, value_name = "URL")]
+    pub api_base: Option<String>,
+}
+
 /// How sure a dead-code candidate is.
 #[derive(Debug, Clone, Copy, ValueEnum)]
 #[value(rename_all = "kebab-case")]
@@ -408,6 +441,10 @@ pub enum Command {
         #[arg(long, value_name = "DIR")]
         snapshots: Vec<std::path::PathBuf>,
     },
+    /// Serve the read-only web view and the HTTP/JSON API on one loopback address
+    /// (the API of `katalogr api`, plus `GET /` and `GET /assets/<name>`).
+    #[cfg(feature = "web")]
+    Serve(ServeArgs),
     /// Keep the index fresh for edits made outside Claude: poll the checkout's position and
     /// reindex when it changes. Runs until interrupted.
     Watch {

@@ -598,6 +598,8 @@ mod api {
             "session-start",
             "index",
             "api",
+            // The API plus the web view's pages.
+            "serve",
             "mcp",
             "eval",
             "profiles",

@@ -99,20 +99,7 @@ pub struct Target {
 /// 431 over [`MAX_HEAD_BYTES`]; 405 for any method but GET; 404 outside [`PREFIX`]; 400 for a
 /// malformed or repeated parameter.
 pub fn parse_target(method: &str, url: &str, head_len: usize) -> Result<Target, HttpError> {
-    if head_len > MAX_HEAD_BYTES {
-        return Err(HttpError::new(
-            431,
-            "header-too-large",
-            format!("request head over {MAX_HEAD_BYTES} bytes"),
-        ));
-    }
-    if method != "GET" {
-        return Err(HttpError::new(
-            405,
-            "method-not-allowed",
-            "only GET is served",
-        ));
-    }
+    check_head(method, head_len)?;
     let (path, query) = url.split_once('?').unwrap_or((url, ""));
     let op = path
         .strip_prefix(PREFIX)
@@ -130,6 +117,25 @@ pub fn parse_target(method: &str, url: &str, head_len: usize) -> Result<Target, 
         op: op.to_string(),
         params,
     })
+}
+
+/// The limits every request meets first: 431 over [`MAX_HEAD_BYTES`], 405 for any method but GET.
+pub fn check_head(method: &str, head_len: usize) -> Result<(), HttpError> {
+    if head_len > MAX_HEAD_BYTES {
+        return Err(HttpError::new(
+            431,
+            "header-too-large",
+            format!("request head over {MAX_HEAD_BYTES} bytes"),
+        ));
+    }
+    if method != "GET" {
+        return Err(HttpError::new(
+            405,
+            "method-not-allowed",
+            "only GET is served",
+        ));
+    }
+    Ok(())
 }
 
 /// `views/` and `views/<op>`: the one place a route has a second segment (FEAT-088).

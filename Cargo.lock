@@ -2274,6 +2274,8 @@ dependencies = [
  "katalogr-dist",
  "katalogr-model",
  "katalogr-store",
+ "katalogr-web",
+ "katalogr-webtest",
  "rmcp",
  "serde_json",
  "tempfile",
