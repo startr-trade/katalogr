@@ -701,6 +701,25 @@ pub enum Command {
         #[arg(long, default_value_t = crate::cmd::impact::DEFAULT_TEST, value_name = "N")]
         test_depth: u32,
     },
+    /// What a type, schema element, symbol or contract is and where it goes: where it is
+    /// declared, its fields, related types, what binds to it, code, contracts, and where the
+    /// answer stops.
+    Lineage {
+        /// Canonical name or plain name of a symbol, or a contract name.
+        text: String,
+        /// How many contract hops to follow.
+        #[arg(long, default_value_t = crate::cmd::lineage::DEFAULT_DEPTH, value_name = "N")]
+        depth: u32,
+        /// Most hits in all groups.
+        #[arg(long, default_value_t = crate::cmd::lineage::DEFAULT_LIMIT, value_name = "N")]
+        limit: usize,
+        /// Most hits listed per group.
+        #[arg(long, default_value_t = crate::cmd::lineage::DEFAULT_PER_GROUP, value_name = "N")]
+        per_group: usize,
+        /// List every hit up to the limit, with no folding and no per-group cap.
+        #[arg(long)]
+        expand: bool,
+    },
     /// List, add and remove contexts: the base, each checkout's own, and pinned commits.
     Context {
         #[command(subcommand)]

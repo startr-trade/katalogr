@@ -28,13 +28,19 @@ impl Builder<'_> {
                 ast::Item::Struct(s) => {
                     if let Some(name) = s.name() {
                         let facts = self.facts(s.visibility(), s.attrs(), s.syntax());
-                        self.simple("struct", name.text(), s.syntax(), facts);
+                        let id = self.simple("struct", name.text(), s.syntax(), facts);
+                        self.enter("struct", name.text(), id);
+                        self.field_list(s.field_list());
+                        self.leave();
                     }
                 }
                 ast::Item::Union(u) => {
                     if let Some(name) = u.name() {
                         let facts = self.facts(u.visibility(), u.attrs(), u.syntax());
-                        self.simple("union", name.text(), u.syntax(), facts);
+                        let id = self.simple("union", name.text(), u.syntax(), facts);
+                        self.enter("union", name.text(), id);
+                        self.field_list(u.record_field_list().map(ast::FieldList::RecordFieldList));
+                        self.leave();
                     }
                 }
                 ast::Item::Const(c) => {
@@ -252,9 +258,94 @@ impl Builder<'_> {
                 );
                 let vid = self.add_symbol("variant", vname.text(), v.syntax(), facts);
                 self.export_item(&[&name, vname.text()], vid);
+                if v.field_list().is_some() {
+                    self.enter("variant", vname.text(), vid);
+                    self.field_list(v.field_list());
+                    self.leave();
+                }
             }
         }
         self.leave();
+    }
+
+    /// The fields of a struct, union or enum variant: `field` symbols named by identifier, or by
+    /// position for a tuple field, below the current nesting (FEAT-101).
+    fn field_list(&mut self, list: Option<ast::FieldList>) {
+        match list {
+            Some(ast::FieldList::RecordFieldList(l)) => {
+                for f in l.fields() {
+                    let (Some(name), Some(ty)) = (f.name(), f.ty()) else {
+                        continue;
+                    };
+                    let facts = self.facts(f.visibility(), f.attrs(), f.syntax());
+                    self.field(name.text(), &ty, f.syntax(), facts);
+                }
+            }
+            Some(ast::FieldList::TupleFieldList(l)) => {
+                for (i, f) in l.fields().enumerate() {
+                    let Some(ty) = f.ty() else { continue };
+                    let facts = self.facts(f.visibility(), f.attrs(), f.syntax());
+                    self.field(&i.to_string(), &ty, f.syntax(), facts);
+                }
+            }
+            None => {}
+        }
+    }
+
+    /// One `field` symbol with the neutral shape facts, and a `uses-type` reference to each
+    /// type of this project that its written type names.
+    fn field(
+        &mut self,
+        name: &str,
+        ty: &ast::Type,
+        node: &ra_ap_syntax::SyntaxNode,
+        mut facts: BTreeMap<String, Fact>,
+    ) {
+        let sh = crate::fields::shape(&ty.syntax().text().to_string());
+        facts.insert("field_type".to_string(), Fact::Str(sh.field_type));
+        facts.insert("required".to_string(), Fact::Bool(sh.required));
+        facts.insert("many".to_string(), Fact::Bool(sh.many));
+        let id = self.add_symbol("field", name, node, facts);
+        let mut seen: Vec<Vec<ExportKey>> = Vec::new();
+        for pt in ty.syntax().descendants().filter_map(ast::PathType::cast) {
+            let Some(path) = pt.path() else { continue };
+            let Some(segs) = crate::bindings::segments_of(&path) else {
+                continue;
+            };
+            let Some(cands) = self.own_type_candidates(&segs) else {
+                continue;
+            };
+            if seen.contains(&cands) {
+                continue;
+            }
+            seen.push(cands.clone());
+            let span = self.span_of(path.syntax());
+            self.add_ref(id, "uses-type", span, cands, Confidence::Extracted);
+        }
+    }
+
+    /// Candidates for a type path, only when it is certainly this crate's own: it starts
+    /// `crate`, `self` or `super`, is bound by a `use`, or is a single name declared in this
+    /// file; it is not a standard type; and every candidate is an item of this crate.
+    fn own_type_candidates(&self, segs: &[String]) -> Option<Vec<ExportKey>> {
+        let first = segs.first()?;
+        if segs.len() == 1 && crate::fields::STD_TYPES.contains(&first.as_str()) {
+            return None;
+        }
+        let eligible = matches!(first.as_str(), "crate" | "self" | "super")
+            || self.scope().bindings.contains_key(first)
+            || (segs.len() == 1 && self.type_names.contains(first));
+        if !eligible {
+            return None;
+        }
+        let own = self.own.as_ref()?;
+        let cands = self.candidates(segs, true);
+        let ok = !cands.is_empty()
+            && cands.iter().all(|c| {
+                c.namespace == crate::extract::NS_ITEM
+                    && (c.key == *own || c.key.starts_with(&format!("{own}::")))
+            });
+        ok.then_some(cands)
     }
 
     fn tr(&mut self, t: &ast::Trait) {

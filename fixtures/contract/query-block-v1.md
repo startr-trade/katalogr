@@ -12,12 +12,12 @@ Rules:
 - The fence is three or more backticks or tildes, indented at most three spaces. A fence
   inside a longer or different fence is content, not a block. An unclosed fence is not a block.
 - The body is exactly one line. An empty body, or a body of two lines, is invalid.
-- The operations are `structure`, `contracts`, `callers`, `impact`, `path` and `cycles`. Any other word
+- The operations are `structure`, `contracts`, `callers`, `impact`, `lineage`, `path` and `cycles`. Any other word
   is invalid.
 - A flag is `--name value` or `--name=value`. A switch may stand alone, or take `true` or
   `false`. A flag may be given once. An unknown flag is invalid.
 - Positional arguments come in the operation's own number: none for `structure`, `contracts`
-  and `cycles`, one for `callers` and `impact` (a symbol), two for `path` (from, to). More or fewer is
+  and `cycles`, one for `callers`, `impact` and `lineage` (a symbol), two for `path` (from, to). More or fewer is
   invalid. A word with spaces is wrapped in double quotes.
 - A number is a whole number above 0. A word flag takes one of its listed words.
 
@@ -63,6 +63,12 @@ callers "Config load" --max-nodes 10
 
 ```katalogr-query
 impact parse_config --depth 2 --max-nodes 40
+```
+
+### valid
+
+```katalogr-query
+lineage Order --depth 2 --max-nodes 40
 ```
 
 ### valid

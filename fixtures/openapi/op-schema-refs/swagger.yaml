@@ -1,0 +1,28 @@
+swagger: "2.0"
+info:
+  title: Items API
+  version: "1.0"
+basePath: /v2
+paths:
+  /items:
+    get:
+      operationId: listItems
+      responses:
+        "200":
+          description: ok
+          schema:
+            $ref: '#/definitions/Item'
+    post:
+      operationId: addItem
+      parameters:
+        - name: body
+          in: body
+          schema:
+            $ref: '#/definitions/Item'
+      responses:
+        "201": {description: created}
+definitions:
+  Item:
+    type: object
+    properties:
+      sku: {type: string}

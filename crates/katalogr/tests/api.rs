@@ -414,6 +414,45 @@ mod api {
         assert_eq!(r.status, 400, "{r:?}");
     }
 
+    /// FEAT-101 R-9. The `lineage` body is byte for byte what `lineage --json` prints, for the
+    /// text and for the depth, limit, per-group and expand arguments.
+    #[test]
+    fn lineage_body_equals_cli_json() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (_kx, repo) = project(tmp.path());
+        let server = serve(&repo, &[]);
+        let cases: &[(&str, &[&str])] = &[
+            ("lineage?text=target", &["lineage", "target"]),
+            (
+                "lineage?text=target&depth=1&limit=5&per-group=2",
+                &[
+                    "lineage",
+                    "target",
+                    "--depth",
+                    "1",
+                    "--limit",
+                    "5",
+                    "--per-group",
+                    "2",
+                ],
+            ),
+            (
+                "lineage?text=target&expand=true",
+                &["lineage", "target", "--expand"],
+            ),
+        ];
+        for (route, args) in cases {
+            let r = get(&server, &format!("/api/v1/{route}&consistency=wait"));
+            assert_eq!(r.status, 200, "{route}: {r:?}");
+            let mut full = vec!["--json", "--consistency", "wait"];
+            full.extend_from_slice(args);
+            let out = cli(&repo, &full);
+            assert!(out.status.success(), "{args:?}: {out:?}");
+            let want = String::from_utf8(out.stdout).unwrap();
+            assert_eq!(r.body, want.trim_end(), "{route}: {r:?}");
+        }
+    }
+
     /// R-3. `context` and `at` are parameters; a position nothing holds is 409.
     #[test]
     fn context_and_at_params() {
@@ -584,6 +623,7 @@ mod api {
         ("status", ""),
         ("docs-affected", ""),
         ("impact", "text=target"),
+        ("lineage", "text=target"),
         ("position", ""),
         ("hubs", ""),
         ("cycles", ""),
@@ -600,6 +640,7 @@ mod api {
         ("views/contracts", ""),
         ("views/callers", "symbol=target"),
         ("views/impact", "symbol=target"),
+        ("views/lineage", "symbol=target"),
         ("views/path", "from=top&to=caller_a"),
         ("views/cycles", ""),
         ("timeline", ""),

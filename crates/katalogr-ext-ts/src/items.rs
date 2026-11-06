@@ -65,7 +65,7 @@ pub struct Builder<'s> {
     /// Top-level functions, classes and constants holding functions, by name.
     pub(crate) callable: HashMap<String, Id>,
     /// Every top-level named symbol, by name (first declaration wins).
-    declared: HashMap<String, Id>,
+    pub(crate) declared: HashMap<String, Id>,
     ordinals: HashMap<Vec<Segment>, u32>,
     /// `export { local as exported }` without a source, resolved after the declarations.
     export_locals: Vec<(String, String, Span)>,
@@ -82,6 +82,8 @@ pub struct Builder<'s> {
     pub(crate) glue: Option<String>,
     /// Inside the methods of a class that implements or extends something.
     in_derived_class: bool,
+    /// Type names mentioned by fields, resolved once every declaration is known (FEAT-101).
+    pub(crate) field_refs: Vec<(Id, crate::fields::TypeRef)>,
 }
 
 fn is_function(e: &Expression<'_>) -> bool {
@@ -132,6 +134,7 @@ impl<'s> Builder<'s> {
             rel_names: std::cell::OnceCell::new(),
             glue: ctx.wasm.glue_of(path.as_str()).map(|p| p.key.clone()),
             in_derived_class: false,
+            field_refs: Vec::new(),
         }
     }
 
@@ -367,7 +370,8 @@ impl<'s> Builder<'s> {
                         self.declare_class(c, span, true, true, pending);
                     }
                     ExportDefaultDeclarationKind::TSInterfaceDeclaration(i) => {
-                        self.simple(i.id.name.as_str(), "interface", span, true, true);
+                        let id = self.simple_id(i.id.name.as_str(), "interface", span, true, true);
+                        self.interface_fields(id, i.id.name.as_str(), i);
                     }
                     other => {
                         let expr = other.to_expression();
@@ -523,10 +527,14 @@ impl<'s> Builder<'s> {
                 self.declare_class(c, span, exported, false, pending)
             }
             Declaration::TSInterfaceDeclaration(i) => {
-                self.simple(i.id.name.as_str(), "interface", span, exported, false)
+                let id = self.simple_id(i.id.name.as_str(), "interface", span, exported, false);
+                self.interface_fields(id, i.id.name.as_str(), i);
+                true
             }
             Declaration::TSTypeAliasDeclaration(t) => {
-                self.simple(t.id.name.as_str(), "type", span, exported, false)
+                let id = self.simple_id(t.id.name.as_str(), "type", span, exported, false);
+                self.type_alias_fields(id, t.id.name.as_str(), t);
+                true
             }
             Declaration::TSEnumDeclaration(e) => {
                 self.simple(e.id.name.as_str(), "enum", span, exported, false)
@@ -589,10 +597,23 @@ impl<'s> Builder<'s> {
         exported: bool,
         default: bool,
     ) -> bool {
+        self.simple_id(name, kind, span, exported, default);
+        true
+    }
+
+    /// [`Builder::simple`], returning the symbol's id.
+    fn simple_id(
+        &mut self,
+        name: &str,
+        kind: &str,
+        span: Span,
+        exported: bool,
+        default: bool,
+    ) -> Id {
         let facts = Self::base_facts(exported, default, false);
         let id = self.add_symbol(vec![Self::seg(kind, name)], kind, span, facts);
         self.register(name, id, false, exported, default);
-        true
+        id
     }
 
     fn declare_function<'p, 'a>(
@@ -695,9 +716,13 @@ impl<'s> Builder<'s> {
                         pending.push(Pending::Func(mid, &m.value));
                     }
                 }
-                ClassElement::PropertyDefinition(_)
-                | ClassElement::AccessorProperty(_)
-                | ClassElement::StaticBlock(_) => pending.push(Pending::ClassElement(cid, el)),
+                ClassElement::PropertyDefinition(p) => {
+                    self.class_property_field(cid, &name, p);
+                    pending.push(Pending::ClassElement(cid, el));
+                }
+                ClassElement::AccessorProperty(_) | ClassElement::StaticBlock(_) => {
+                    pending.push(Pending::ClassElement(cid, el));
+                }
                 _ => {}
             }
         }
@@ -756,6 +781,7 @@ impl<'s> Builder<'s> {
 
     /// Resolve `export { a as b }` and `export default a` once every declaration is known.
     pub fn finish_exports(&mut self) {
+        self.resolve_field_types();
         for (local, exported, span) in std::mem::take(&mut self.export_locals) {
             if let Some(b) = self.imports.get(&local).cloned() {
                 let cands = match b {

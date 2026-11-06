@@ -20,7 +20,7 @@
   {"id":"trends","title":"Trends","needs":"metrics","absent":"Stored metric samples aren't in this version of katalogr."}]},
  {"id":"dependencies","title":"Dependencies and vulnerabilities","link":false,"nav":true,"kind":"panels","needs":"dependencies",
   "absent":"Dependency and vulnerability data isn't in this version of katalogr."},
- {"id":"type-lineage","title":"Type lineage","link":false,"nav":true,"kind":"panels","needs":"type-lineage",
+ {"id":"type-lineage","title":"Type lineage","link":false,"nav":true,"kind":"lineage","needs":"type-lineage",
   "absent":"Type lineage isn't in this version of katalogr."},
  {"id":"symbol","title":"Symbol","link":false,"nav":false,"kind":"symbol","needs":null,"absent":null},
  {"id":"search","title":"Search","link":false,"nav":false,"kind":"search","needs":null,"absent":null}]}

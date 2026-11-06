@@ -226,6 +226,126 @@ mod ts {
         );
     }
 
+    fn field_fact(g: &Graph, name: &str, key: &str) -> Value {
+        let n = &g.nodes[&format!("fx:src/types.ts#{name}")];
+        let f = &n["facts"][key];
+        f.as_object()
+            .and_then(|o| o.values().next())
+            .cloned()
+            .unwrap_or(Value::Null)
+    }
+
+    #[test]
+    fn interface_members_recorded() {
+        let g = check("type-fields");
+        assert_eq!(
+            g.nodes["fx:src/types.ts#interface:Order/field:id"]["kind"],
+            "field"
+        );
+        assert_eq!(
+            field_fact(&g, "interface:Order/field:id", "doc"),
+            "The identifier."
+        );
+        assert_eq!(
+            field_fact(&g, "interface:Order/field:id", "signature"),
+            "id: string"
+        );
+        assert_eq!(
+            field_fact(&g, "interface:Order/field:stamp", "readonly"),
+            true
+        );
+        // Methods and index signatures are not fields.
+        assert!(!g.symbols.iter().any(|s| s.contains("field:describe")));
+        assert!(!g.symbols.iter().any(|s| s.contains("field:key")));
+        let contains = g.links.iter().any(|l| {
+            l.kind == "contains"
+                && l.from == "fx:src/types.ts#interface:Order"
+                && l.to == "fx:src/types.ts#interface:Order/field:id"
+        });
+        assert!(contains);
+    }
+
+    #[test]
+    fn class_properties_recorded() {
+        let g = check("type-fields");
+        // A `#private` name keeps its `#` (percent-encoded in the canonical name).
+        assert!(
+            g.symbols
+                .contains("fx:src/types.ts#class:Cart/field:%23secret")
+        );
+        assert_eq!(field_fact(&g, "class:Cart/field:total", "static"), true);
+        assert_eq!(field_fact(&g, "class:Cart/field:note", "required"), false);
+        assert_eq!(field_fact(&g, "class:Cart/field:items", "many"), true);
+        // Constructor parameter properties are not fields.
+        assert!(!g.symbols.iter().any(|s| s.contains("field:owner")));
+    }
+
+    #[test]
+    fn type_alias_members_recorded() {
+        let g = check("type-fields");
+        assert!(g.symbols.contains("fx:src/types.ts#type:LineBox/field:qty"));
+        // An intersection takes the members of its object parts; a union has no member set.
+        assert!(g.symbols.contains("fx:src/types.ts#type:Both/field:extra"));
+        assert!(!g.symbols.iter().any(|s| s.contains("type:Choice/field")));
+    }
+
+    #[test]
+    fn field_shape_mapping() {
+        let g = check("type-fields");
+        let shape = |n: &str| {
+            let n = format!("interface:Order/field:{n}");
+            (
+                field_fact(&g, &n, "field_type"),
+                field_fact(&g, &n, "required"),
+                field_fact(&g, &n, "many"),
+            )
+        };
+        let v = |s: &str, r: bool, m: bool| (Value::from(s), Value::from(r), Value::from(m));
+        assert_eq!(shape("id"), v("string", true, false));
+        assert_eq!(shape("note"), v("string", false, false));
+        assert_eq!(shape("lines"), v("Line", true, true));
+        assert_eq!(shape("first"), v("m.Line", true, false));
+        assert_eq!(shape("blob"), v("binary", true, false));
+        assert_eq!(shape("kind"), v("string", true, false));
+        assert_eq!(shape("maybe"), v("number", false, false));
+        assert_eq!(shape("tags"), v("object", true, false));
+        assert_eq!(shape("stamp"), v("datetime", true, false));
+    }
+
+    #[test]
+    fn fields_revision_salt() {
+        use katalogr_model::Extractor;
+        assert!(TsExtractor.revision_salt().ends_with(";fields-1"));
+        assert!(TsExtractor.patterns().contains(&"type-fields"));
+    }
+
+    #[test]
+    fn field_type_refs_relative_only() {
+        let g = check("type-fields");
+        let uses: BTreeSet<(String, String)> = g
+            .links
+            .iter()
+            .filter(|l| l.kind == "uses-type")
+            .map(|l| {
+                (
+                    l.from.rsplit('#').next().unwrap().to_string(),
+                    l.to.rsplit('#').next().unwrap().to_string(),
+                )
+            })
+            .collect();
+        let want: BTreeSet<(String, String)> = [
+            ("class:Cart/field:items", "interface:Order"),
+            ("interface:Order/field:first", "interface:Line"),
+            ("interface:Order/field:lines", "interface:Line"),
+            ("interface:Order/field:local", "interface:Tag"),
+        ]
+        .into_iter()
+        .map(|(a, b)| (a.to_string(), b.to_string()))
+        .collect();
+        // The package type (`Moment`) and globals (`Record`, `Date`) emit nothing.
+        assert_eq!(uses, want);
+    }
+
     #[test]
     fn import_export_resolution() {
         check("relative-imports");

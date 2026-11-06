@@ -140,14 +140,27 @@ pub(crate) fn rank_edges(
 /// [`row_weight`]. Links whose ends are not both symbols, and links from a symbol to itself,
 /// are ignored.
 pub fn pagerank(tx: &impl Reader, symbols: &[(Id, SymbolRow)]) -> Result<Vec<f64>, StoreError> {
-    let n = symbols.len();
-    if n == 0 {
+    if symbols.is_empty() {
         return Ok(Vec::new());
     }
-    let index: BTreeMap<Id, usize> = symbols
+    // A field is part of its owner: it takes no rank and is no node of the rank graph, so the
+    // code symbols rank as they did before fields existed (FEAT-101). Its entry is 0.0.
+    let is_field = |row: &SymbolRow| {
+        row.facts
+            .contains_key(katalogr_model::structure::FIELD_TYPE)
+    };
+    let nodes: Vec<usize> = (0..symbols.len())
+        .filter(|i| !is_field(&symbols[*i].1))
+        .collect();
+    let n = nodes.len();
+    let mut out = vec![0.0f64; symbols.len()];
+    if n == 0 {
+        return Ok(out);
+    }
+    let index: BTreeMap<Id, usize> = nodes
         .iter()
         .enumerate()
-        .map(|(i, (id, _))| (*id, i))
+        .map(|(k, i)| (symbols[*i].0, k))
         .collect();
     let mut out_weight = vec![0.0f64; n];
     let edges = rank_edges(tx, &index, &mut out_weight)?;
@@ -163,7 +176,10 @@ pub fn pagerank(tx: &impl Reader, symbols: &[(Id, SymbolRow)]) -> Result<Vec<f64
         }
         r = next;
     }
-    Ok(r)
+    for (k, i) in nodes.into_iter().enumerate() {
+        out[i] = r[k];
+    }
+    Ok(out)
 }
 
 #[cfg(test)]

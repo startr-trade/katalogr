@@ -10,10 +10,11 @@ pub mod format;
 
 use camino::Utf8Path;
 use format::{ProfileDoc, Rule};
-use katalogr_model::{Fragment, KeyNormaliser};
+use katalogr_model::structure::FIELD_TYPE;
+use katalogr_model::{Fragment, Id, KeyNormaliser, Name};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 pub use eval::origin;
 
@@ -70,6 +71,9 @@ pub struct ProfileSet {
     norms: Norms,
     /// `(project file, built-in file)` for each built-in a project file replaced by name.
     overridden: Vec<(String, String)>,
+    /// Extensions that declare `code_kinds`, while `extract.code_fields` is off: their fragments
+    /// lose every symbol with the `field_type` fact before the rules run (FEAT-101).
+    fields_off: BTreeSet<String>,
 }
 
 /// The registered key normalisers, in registration order.
@@ -370,8 +374,19 @@ impl ProfileSet {
         self.loaded.iter().all(|l| l.doc.rules.is_empty())
     }
 
+    /// The extensions (those that declare `code_kinds`) whose fragments drop code fields:
+    /// `extract.code_fields` is off. Folded into [`ProfileSet::hash_for`] and honoured by
+    /// [`ProfileSet::apply`].
+    pub fn with_code_fields_off(mut self, extensions: BTreeSet<String>) -> ProfileSet {
+        self.fields_off = extensions;
+        self
+    }
+
     /// Run every rule, in order, on `f`.
     pub fn apply(&self, f: &mut Fragment) {
+        if self.fields_off.contains(&f.extension) {
+            drop_code_fields(f);
+        }
         let scope = self
             .rules()
             .any(|(_, r)| r.uses_scope())
@@ -444,6 +459,31 @@ impl ProfileSet {
                 }
             }
         }
+        if self.fields_off.contains(extension) {
+            any = true;
+            h.update(b"extract.code_fields=off");
+        }
         any.then(|| h.finalize().into())
     }
+}
+
+/// Remove every symbol with the neutral `field_type` fact, and every link, reference, binding
+/// and export from or to one. Schema fields never reach here: only extensions that declare
+/// `code_kinds` are asked (FEAT-101 R-23).
+fn drop_code_fields(f: &mut Fragment) {
+    let gone: BTreeSet<Id> = f
+        .symbols
+        .iter()
+        .filter(|s| s.facts.contains_key(FIELD_TYPE))
+        .map(|s| s.name.id())
+        .collect();
+    if gone.is_empty() {
+        return;
+    }
+    f.symbols.retain(|s| !gone.contains(&s.name.id()));
+    f.links
+        .retain(|l| !gone.contains(&l.from) && !gone.contains(&l.to));
+    f.refs.retain(|r| !gone.contains(&r.from));
+    f.bindings.retain(|b| !gone.contains(&b.symbol));
+    f.exports.retain(|e| !gone.contains(&e.target));
 }

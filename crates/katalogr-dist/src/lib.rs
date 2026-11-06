@@ -16,6 +16,7 @@ mod claude;
 mod deps;
 mod docs_affected;
 mod impact;
+mod lineage;
 pub use deps::{DEFAULT_DEPS_LIMIT, DEFAULT_USED_BY_LIMIT, DepsOptions};
 pub use docs_affected::{DEFAULT_DOCS_LIMIT, DocsAffectedParams};
 pub use impact::ImpactInput;

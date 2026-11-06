@@ -22,6 +22,10 @@ const MIN_PREFIX: usize = 3;
 const MAX_EXPANSIONS: usize = 50;
 /// A prefix-only term contributes this fraction of its BM25 value.
 const PREFIX_FACTOR: f64 = 0.5;
+/// A field (a symbol with the neutral `field_type` fact) is ordered as if its score were this
+/// fraction of itself, so it ranks below a non-field with an equal or better score. The printed
+/// score stays the BM25 score. Provisional (FEAT-101); the idea is `resolve`'s plain-name rule.
+const FIELD_FACTOR: f64 = 0.5;
 
 /// Scores are printed with six decimal places.
 pub(crate) fn round6(x: f64) -> f64 {
@@ -247,8 +251,17 @@ pub fn search_boosted_traced(
             .map(|m| (m.0, m.1))
             .collect();
         matched.retain(|m| !m.2 || !exact.contains(&(m.0, m.1)));
+        let ordered = boost.map_or(a.score, |b| b.apply(a.score, row.artifact));
+        let ordered = if row
+            .facts
+            .contains_key(katalogr_model::structure::FIELD_TYPE)
+        {
+            ordered * FIELD_FACTOR
+        } else {
+            ordered
+        };
         hits.push((
-            boost.map_or(a.score, |b| b.apply(a.score, row.artifact)),
+            ordered,
             id,
             SearchHit {
                 symbol: hit(&row),

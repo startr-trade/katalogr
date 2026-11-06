@@ -276,7 +276,7 @@ mod mcp {
         c.send(json!({"jsonrpc": "2.0", "id": "two", "method": "tools/list"}));
         let list = c.recv();
         assert_eq!(list["id"], "two");
-        assert!(list["result"]["tools"].as_array().unwrap().len() == 15);
+        assert!(list["result"]["tools"].as_array().unwrap().len() == 16);
         let found = c.call(3, "find", json!({"text": "target"}));
         assert_eq!(found["result"]["isError"], false, "{found}");
         let out = last_text(&found);
@@ -486,6 +486,7 @@ mod mcp {
                 "why",
                 "docs-affected",
                 "impact",
+                "lineage",
                 "index",
                 "status"
             ]
@@ -538,7 +539,7 @@ mod mcp {
             assert_eq!(t["outputSchema"], want, "{name}");
             with_schema += 1;
         }
-        assert_eq!(with_schema, 13);
+        assert_eq!(with_schema, 14);
         // A client on an older protocol gets none.
         drop(c);
         let mut c = Client::spawn(&repo, &[], &["--output-schemas"]);
@@ -568,6 +569,7 @@ mod mcp {
             "why",
             "docs-affected",
             "impact",
+            "lineage",
             "index",
             "status",
         ] {
@@ -746,6 +748,12 @@ mod mcp {
                 "impact",
                 vec!["impact", "target"],
             ),
+            (
+                "lineage",
+                json!({"text": "target"}),
+                "lineage",
+                vec!["lineage", "target"],
+            ),
         ]
     }
 
@@ -859,6 +867,45 @@ mod mcp {
         let r = c.call(99, "impact", json!({"range": "HEAD~1..HEAD", "at": "HEAD"}));
         assert_eq!(r["result"]["isError"], true, "{r}");
         assert_eq!(exit_meta(&r), 2, "{r}");
+    }
+
+    /// FEAT-101 R-9. The `lineage` tool answers as `katalogr lineage --json` does, for the
+    /// text and for the depth, limit, per-group and expand arguments.
+    #[test]
+    fn lineage_tool_matches_cli() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (_kx, repo) = query_project(tmp.path());
+        let mut c = Client::spawn(&repo, &[], &[]);
+        c.initialize("2025-06-18");
+        let cases: Vec<(Value, Vec<&str>)> = vec![
+            (json!({"text": "target"}), vec!["lineage", "target"]),
+            (
+                json!({"text": "target", "depth": 1, "limit": 5, "per_group": 2}),
+                vec![
+                    "lineage",
+                    "target",
+                    "--depth",
+                    "1",
+                    "--limit",
+                    "5",
+                    "--per-group",
+                    "2",
+                ],
+            ),
+            (
+                json!({"text": "target", "expand": true}),
+                vec!["lineage", "target", "--expand"],
+            ),
+        ];
+        for (i, (args, cli)) in cases.into_iter().enumerate() {
+            let mut full = vec!["--json"];
+            full.extend(cli.iter().copied());
+            let (code, out, err) = run_raw(&repo, &full);
+            let r = c.call(i as u64 + 1, "lineage", args.clone());
+            assert_eq!(r["result"]["isError"], false, "{args}: {r} {err}");
+            assert_eq!(last_text(&r).trim_end(), out.trim_end(), "{args}");
+            assert_eq!(exit_meta(&r), code as i64, "{args}");
+        }
     }
 
     /// FEAT-086 R-8. The `docs-affected` tool answers as the CLI's `--json` does.

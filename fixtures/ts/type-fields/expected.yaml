@@ -1,0 +1,149 @@
+mode: exact
+symbols:
+- fx:src/model.ts#interface:Line
+- fx:src/model.ts#interface:Line/field:sku
+- fx:src/types.ts#class:Cart
+- fx:src/types.ts#class:Cart/field:%23secret
+- fx:src/types.ts#class:Cart/field:items
+- fx:src/types.ts#class:Cart/field:note
+- fx:src/types.ts#class:Cart/field:total
+- fx:src/types.ts#class:Cart/method:constructor
+- fx:src/types.ts#class:Cart/method:sum
+- fx:src/types.ts#interface:Order
+- fx:src/types.ts#interface:Order/field:blob
+- fx:src/types.ts#interface:Order/field:count
+- fx:src/types.ts#interface:Order/field:first
+- fx:src/types.ts#interface:Order/field:id
+- fx:src/types.ts#interface:Order/field:kind
+- fx:src/types.ts#interface:Order/field:lines
+- fx:src/types.ts#interface:Order/field:local
+- fx:src/types.ts#interface:Order/field:maybe
+- fx:src/types.ts#interface:Order/field:note
+- fx:src/types.ts#interface:Order/field:stamp
+- fx:src/types.ts#interface:Order/field:tags
+- fx:src/types.ts#interface:Order/field:when
+- fx:src/types.ts#interface:Tag
+- fx:src/types.ts#interface:Tag/field:label
+- fx:src/types.ts#type:Both
+- fx:src/types.ts#type:Both/field:extra
+- fx:src/types.ts#type:Choice
+- fx:src/types.ts#type:LineBox
+- fx:src/types.ts#type:LineBox/field:qty
+- fx:src/types.ts#type:LineBox/field:sku
+links:
+- from: fx:src/model.ts#interface:Line
+  kind: contains
+  to: fx:src/model.ts#interface:Line/field:sku
+  confidence: Extracted
+- from: fx:src/types.ts
+  kind: imports
+  to: fx:src/model.ts
+  confidence: Extracted
+- from: fx:src/types.ts
+  kind: imports
+  to: fx:src/model.ts#interface:Line
+  confidence: Extracted
+- from: fx:src/types.ts#class:Cart
+  kind: contains
+  to: fx:src/types.ts#class:Cart/field:%23secret
+  confidence: Extracted
+- from: fx:src/types.ts#class:Cart
+  kind: contains
+  to: fx:src/types.ts#class:Cart/field:items
+  confidence: Extracted
+- from: fx:src/types.ts#class:Cart
+  kind: contains
+  to: fx:src/types.ts#class:Cart/field:note
+  confidence: Extracted
+- from: fx:src/types.ts#class:Cart
+  kind: contains
+  to: fx:src/types.ts#class:Cart/field:total
+  confidence: Extracted
+- from: fx:src/types.ts#class:Cart
+  kind: contains
+  to: fx:src/types.ts#class:Cart/method:constructor
+  confidence: Extracted
+- from: fx:src/types.ts#class:Cart
+  kind: contains
+  to: fx:src/types.ts#class:Cart/method:sum
+  confidence: Extracted
+- from: fx:src/types.ts#class:Cart/field:items
+  kind: uses-type
+  to: fx:src/types.ts#interface:Order
+  confidence: Extracted
+- from: fx:src/types.ts#interface:Order
+  kind: contains
+  to: fx:src/types.ts#interface:Order/field:blob
+  confidence: Extracted
+- from: fx:src/types.ts#interface:Order
+  kind: contains
+  to: fx:src/types.ts#interface:Order/field:count
+  confidence: Extracted
+- from: fx:src/types.ts#interface:Order
+  kind: contains
+  to: fx:src/types.ts#interface:Order/field:first
+  confidence: Extracted
+- from: fx:src/types.ts#interface:Order
+  kind: contains
+  to: fx:src/types.ts#interface:Order/field:id
+  confidence: Extracted
+- from: fx:src/types.ts#interface:Order
+  kind: contains
+  to: fx:src/types.ts#interface:Order/field:kind
+  confidence: Extracted
+- from: fx:src/types.ts#interface:Order
+  kind: contains
+  to: fx:src/types.ts#interface:Order/field:lines
+  confidence: Extracted
+- from: fx:src/types.ts#interface:Order
+  kind: contains
+  to: fx:src/types.ts#interface:Order/field:local
+  confidence: Extracted
+- from: fx:src/types.ts#interface:Order
+  kind: contains
+  to: fx:src/types.ts#interface:Order/field:maybe
+  confidence: Extracted
+- from: fx:src/types.ts#interface:Order
+  kind: contains
+  to: fx:src/types.ts#interface:Order/field:note
+  confidence: Extracted
+- from: fx:src/types.ts#interface:Order
+  kind: contains
+  to: fx:src/types.ts#interface:Order/field:stamp
+  confidence: Extracted
+- from: fx:src/types.ts#interface:Order
+  kind: contains
+  to: fx:src/types.ts#interface:Order/field:tags
+  confidence: Extracted
+- from: fx:src/types.ts#interface:Order
+  kind: contains
+  to: fx:src/types.ts#interface:Order/field:when
+  confidence: Extracted
+- from: fx:src/types.ts#interface:Order/field:first
+  kind: uses-type
+  to: fx:src/model.ts#interface:Line
+  confidence: Extracted
+- from: fx:src/types.ts#interface:Order/field:lines
+  kind: uses-type
+  to: fx:src/model.ts#interface:Line
+  confidence: Extracted
+- from: fx:src/types.ts#interface:Order/field:local
+  kind: uses-type
+  to: fx:src/types.ts#interface:Tag
+  confidence: Extracted
+- from: fx:src/types.ts#interface:Tag
+  kind: contains
+  to: fx:src/types.ts#interface:Tag/field:label
+  confidence: Extracted
+- from: fx:src/types.ts#type:Both
+  kind: contains
+  to: fx:src/types.ts#type:Both/field:extra
+  confidence: Extracted
+- from: fx:src/types.ts#type:LineBox
+  kind: contains
+  to: fx:src/types.ts#type:LineBox/field:qty
+  confidence: Extracted
+- from: fx:src/types.ts#type:LineBox
+  kind: contains
+  to: fx:src/types.ts#type:LineBox/field:sku
+  confidence: Extracted

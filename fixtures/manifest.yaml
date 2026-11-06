@@ -6,6 +6,7 @@ technologies:
     key-tree:
       - data/key-tree
       - data/codec-chain
+      - data/lineage-chain
     parse-error:
       - data/broken
     xml:
@@ -72,6 +73,8 @@ technologies:
     operations:
       - openapi/yaml-v3
       - openapi/json-v3
+    operation-schema-refs:
+      - openapi/op-schema-refs
     parse-error:
       - openapi/broken
     plain-artifact:
@@ -108,6 +111,8 @@ technologies:
       - rust/rationale
     test-marks:
       - rust/tests
+    type-fields:
+      - rust/type-fields
     re-export:
       - rust/use-and-reexport
     string-calls:
@@ -215,6 +220,8 @@ technologies:
       - ts/require
     test-marks:
       - ts/tests
+    type-fields:
+      - ts/type-fields
     string-calls:
       - ts/string-calls
     wasm-glue:

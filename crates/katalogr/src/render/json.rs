@@ -500,6 +500,19 @@ pub fn plain<R: Serialize>(reply: Reply<R>, fails: fn(&R) -> bool) -> JsonAnswer
     }
 }
 
+/// `lineage`: the envelope as it is, with the folds of the answer.
+pub fn lineage(reply: Reply<katalogr_dist::query::LineageReport>) -> JsonAnswer {
+    let exit = exit_for(&reply);
+    match reply.outcome {
+        Outcome::Found(r) => {
+            let mut e = envelope(&reply.report, None, reply.partial, r, Vec::new(), None);
+            e.folded = reply.folded;
+            found(exit, &reply.report, line(&e))
+        }
+        other => other_outcome(exit, &reply.report, other, None, None),
+    }
+}
+
 /// The timeline: the envelope as it is, with its `Partial` when the newest points were kept.
 pub fn timeline(reply: Reply<katalogr_dist::query::Timeline>) -> JsonAnswer {
     plain(reply, |_| false)

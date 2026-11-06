@@ -111,6 +111,22 @@ const OPS: &[Op] = &[
         ],
     },
     Op {
+        name: "lineage",
+        positional: &["symbol"],
+        flags: &[
+            Flag {
+                name: "depth",
+                kind: Kind::Number,
+                default: "3",
+            },
+            Flag {
+                name: "max-nodes",
+                kind: Kind::Number,
+                default: "60",
+            },
+        ],
+    },
+    Op {
         name: "path",
         positional: &["from", "to"],
         flags: &[Flag {
@@ -430,6 +446,7 @@ fn catalogue_is_sorted_and_complete() {
             "contracts",
             "cycles",
             "impact",
+            "lineage",
             "path",
             "structure"
         ]
@@ -467,6 +484,11 @@ fn parses_every_op() {
     assert_eq!(
         args(&s),
         [("depth", "3"), ("max-nodes", "60"), ("symbol", "load")]
+    );
+    let s = ViewSpec::parse("lineage Order --depth 2").unwrap();
+    assert_eq!(
+        args(&s),
+        [("depth", "2"), ("max-nodes", "60"), ("symbol", "Order")]
     );
     let s = ViewSpec::parse("path a b --max-len 9").unwrap();
     assert_eq!(args(&s), [("from", "a"), ("max-len", "9"), ("to", "b")]);

@@ -1,0 +1,5 @@
+type: '{urn:example:orders}Order'
+table: orders
+columns:
+  order_id: id
+  amount: total

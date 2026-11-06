@@ -480,6 +480,33 @@ fn impact(k: &Katalogr, a: &Args, o: &Options) -> JsonAnswer {
     })
 }
 
+fn lineage(k: &Katalogr, a: &Args, o: &Options) -> JsonAnswer {
+    let text = a.str("text");
+    let (depth, limit, per_group) = (
+        a.int("depth"),
+        a.int("limit") as usize,
+        a.int("per-group") as usize,
+    );
+    let expand = a.flag("expand");
+    let o = Options {
+        expand,
+        ..q(
+            o,
+            a,
+            "lineage",
+            &crate::cmd::lineage::args(text, depth, limit, per_group, expand),
+        )
+    };
+    answer(
+        k.lineage(
+            text,
+            crate::cmd::lineage::options(depth, limit, per_group),
+            &o,
+        ),
+        render_json::lineage,
+    )
+}
+
 fn position(start: &Path, overrides: &Overrides, a: &Args, o: &Options) -> JsonAnswer {
     let repo = a.opt("repo");
     let result = match Katalogr::resolve(start, overrides) {
@@ -850,6 +877,18 @@ pub const OPS: &[Op] = &[
         Call::Project(impact)
     ),
     op!(
+        "lineage",
+        "What a type, schema element, symbol or contract is and where it goes.",
+        &[
+            TEXT,
+            dflt("depth", Ty::Int(1), "3", "contract hops to follow"),
+            dflt("limit", Ty::Int(1), "200", "most hits in all groups"),
+            dflt("per-group", Ty::Int(1), "10", "most hits listed per group"),
+        ],
+        Some("lineage"),
+        Call::Project(lineage)
+    ),
+    op!(
         "status",
         "Index watermark, pending changes and staleness.",
         &[],
@@ -1049,6 +1088,17 @@ pub const OPS: &[Op] = &[
         Call::Project(view_impact)
     ),
     op!(
+        "views/lineage",
+        "A lineage view at a position: Mermaid and the graph.",
+        &[
+            req("symbol", "canonical name or plain name"),
+            dflt("depth", Ty::Int(1), "3", "contract hops to follow"),
+            MAX_NODES,
+        ],
+        Some("view"),
+        Call::Project(view_lineage)
+    ),
+    op!(
         "views/path",
         "A path view at a position: Mermaid and the graph.",
         &[
@@ -1156,6 +1206,7 @@ view_fn!(view_structure, "structure");
 view_fn!(view_contracts, "contracts");
 view_fn!(view_callers, "callers");
 view_fn!(view_impact, "impact");
+view_fn!(view_lineage, "lineage");
 view_fn!(view_path, "path");
 view_fn!(view_cycles, "cycles");
 

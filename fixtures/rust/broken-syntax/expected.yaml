@@ -1,8 +1,13 @@
 mode: exact
 symbols:
-  - "fx:Cargo.toml#crate:broken"
-  - "fx:src/lib.rs#fn:before"
-  - "fx:src/lib.rs#fn:last"
-  - "fx:src/lib.rs#fn:unfinished"
-  - "fx:src/lib.rs#struct:After"
+- fx:Cargo.toml#crate:broken
+- fx:src/lib.rs#fn:before
+- fx:src/lib.rs#fn:last
+- fx:src/lib.rs#fn:unfinished
+- fx:src/lib.rs#struct:After
+- fx:src/lib.rs#struct:After/field:n
 links:
+- from: fx:src/lib.rs#struct:After
+  kind: contains
+  to: fx:src/lib.rs#struct:After/field:n
+  confidence: extracted

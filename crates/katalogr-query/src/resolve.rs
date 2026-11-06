@@ -2,6 +2,7 @@
 
 use crate::diagnostic::{Diagnostic, RoutingTrace};
 use crate::result::{Resolution, SymbolHit};
+use katalogr_model::structure::FIELD_TYPE;
 use katalogr_model::{AnyName, Id, LinkKind, Name, Span, parse_name};
 use katalogr_store::{Reader, StoreError, SymbolRow};
 use std::collections::BTreeSet;
@@ -119,7 +120,7 @@ pub fn resolve_traced(
         };
         let before = found.len();
         if !found.is_empty() {
-            found = collapse_aliases(tx, found)?;
+            found = prefer_non_fields(tx, collapse_aliases(tx, found)?)?;
         }
         let name = ["canonical", "plain", "plain_ci"][tier];
         match found.len() {
@@ -136,6 +137,33 @@ pub fn resolve_traced(
     }
     record(diag, text, None, 0, 0);
     Ok(Resolution::None)
+}
+
+/// When the candidates hold symbols both with and without the neutral `field_type` fact, the
+/// ones with it are dropped: a field named `id` should not make `id` ambiguous wherever
+/// something else has the same plain name. A field is still found by its canonical name, and
+/// by its plain name when nothing else matches.
+fn prefer_non_fields(
+    tx: &impl Reader,
+    found: Vec<SymbolHit>,
+) -> Result<Vec<SymbolHit>, StoreError> {
+    if found.len() < 2 {
+        return Ok(found);
+    }
+    let ids: Vec<Id> = found.iter().map(|h| Id::of(&h.name)).collect();
+    let is_field: Vec<bool> = tx
+        .symbols_many(&ids)?
+        .into_iter()
+        .map(|r| r.is_some_and(|r| r.facts.contains_key(FIELD_TYPE)))
+        .collect();
+    if !is_field.iter().any(|f| *f) || is_field.iter().all(|f| *f) {
+        return Ok(found);
+    }
+    Ok(found
+        .into_iter()
+        .zip(is_field)
+        .filter_map(|(h, f)| (!f).then_some(h))
+        .collect())
 }
 
 const ALIAS_KINDS: [&str; 2] = ["use", "reexport"];

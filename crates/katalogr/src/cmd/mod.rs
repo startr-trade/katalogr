@@ -27,6 +27,7 @@ pub mod hubs;
 pub mod impact;
 pub mod index;
 pub mod kindex;
+pub mod lineage;
 pub mod map;
 #[cfg(feature = "mcp")]
 pub mod mcp;

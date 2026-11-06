@@ -112,6 +112,7 @@ pub fn planned_keys(d: &ExportData) -> Vec<String> {
         &PlanOptions {
             with_source: d.with_source,
         },
+        &d.capabilities,
     ));
     calls.iter().map(answer_key).collect()
 }
