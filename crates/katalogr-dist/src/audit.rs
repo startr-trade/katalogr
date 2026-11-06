@@ -7,7 +7,6 @@
 
 use crate::error::DistError;
 use crate::{Consistency, Katalogr, Options};
-use camino::Utf8Path;
 use katalogr_engine::{QueryOptions, Scope, canonical_graph};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -136,12 +135,13 @@ impl Katalogr {
     /// facts version, positions, digest.
     pub fn audit_verify(
         &self,
-        record: Option<&Utf8Path>,
+        record: Option<&std::path::Path>,
         opts: &Options,
     ) -> Result<AuditOutcome, DistError> {
         let now = self.audit_now(opts)?;
         let file = match record {
-            Some(p) => p.to_owned(),
+            Some(p) => camino::Utf8PathBuf::from_path_buf(p.to_path_buf())
+                .map_err(|p| DistError::usage(format!("{}: not UTF-8", p.display())))?,
             None => self.project.root().join("audit").join(now.file_name()),
         };
         let text = match std::fs::read_to_string(&file) {

@@ -44,9 +44,9 @@ mod determinism {
         kindex_init(&kx).unwrap();
         project_init(&kx, "demo", vec![("app".into(), repo.clone())], true).unwrap();
         let config = kx.join("projects/demo/config.yaml");
-        let mut text = std::fs::read_to_string(&config).unwrap();
-        assert!(!text.contains("settings:"), "{text}");
-        text.push_str(&format!("settings:\n  index.threads: {threads}\n"));
+        let text = std::fs::read_to_string(&config).unwrap();
+        assert!(text.contains("settings: {}"), "{text}");
+        let text = text.replace("settings: {}", &format!("settings:\n  index.threads: {threads}"));
         std::fs::write(config, text).unwrap();
         Built {
             _tmp: tmp,

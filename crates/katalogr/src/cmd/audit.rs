@@ -1,6 +1,5 @@
 //! `katalogr audit record` and `katalogr audit verify [<record>]` (FEAT-094 R-14).
 
-use camino::Utf8Path;
 use katalogr_dist::{AuditOutcome, DistError};
 
 use crate::cli::{AuditAction, Cli};
@@ -29,7 +28,7 @@ pub fn run(cli: &Cli, action: &AuditAction) -> Result<ExitCode, DistError> {
             Ok(ExitCode::Ok)
         }
         AuditAction::Verify { record } => {
-            let outcome = k.audit_verify(record.as_deref().map(Utf8Path::new), &options(cli))?;
+            let outcome = k.audit_verify(record.as_deref().map(std::path::Path::new), &options(cli))?;
             if cli.json {
                 println!(
                     "{}",

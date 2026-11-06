@@ -142,7 +142,7 @@ mod audit {
         };
         std::fs::write(&file, serde_json::to_string(&wrong).unwrap()).unwrap();
         assert_eq!(
-            k.audit_verify(Some(&file), &opts()).unwrap(),
+            k.audit_verify(Some(file.as_std_path()), &opts()).unwrap(),
             AuditOutcome::Mismatch {
                 expected: "0".repeat(64),
                 found: r.graph_digest
@@ -179,7 +179,7 @@ mod audit {
         let file = record_file(&s, &r);
         git(&s.repo, &["commit", "-q", "--allow-empty", "-m", "c2"]);
         let k = katalogr(&s);
-        match k.audit_verify(Some(&file), &opts()).unwrap() {
+        match k.audit_verify(Some(file.as_std_path()), &opts()).unwrap() {
             AuditOutcome::NotAtPosition {
                 want,
                 have,

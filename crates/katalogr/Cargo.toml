@@ -22,7 +22,6 @@ api = ["dep:tiny_http"]
 [dependencies]
 katalogr-dist.workspace = true
 anyhow.workspace = true
-camino.workspace = true
 clap.workspace = true
 serde_json.workspace = true
 rmcp = { workspace = true, optional = true }
@@ -49,6 +48,7 @@ required-features = ["api"]
 # The `.tx` test extractor gives integration tests symbols to query.
 katalogr-dist = { workspace = true, features = ["test-extractor"] }
 tempfile.workspace = true
+camino.workspace = true
 katalogr-store.workspace = true
 katalogr-model.workspace = true
 fs4.workspace = true
