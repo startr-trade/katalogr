@@ -42,7 +42,7 @@ mod harness {
         assert!(!p.has("missing"));
         p.fire("go", "click", None, &b);
         assert_eq!(p.text(), "Title\nGo\n200:pong");
-        assert_eq!(p.requests(), ["/ping"]);
+        assert_eq!(p.requests(), ["/api/v1/meta", "/ping"]);
         assert_eq!(p.markup_writes(), ["<b>x</b>"]);
         assert!(p.pele_sources().is_empty());
         assert_eq!(
