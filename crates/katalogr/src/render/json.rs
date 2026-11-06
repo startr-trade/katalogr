@@ -530,7 +530,8 @@ pub fn view(
     let exit = exit_for(&reply);
     match reply.outcome {
         Outcome::Found(g) => {
-            let e = envelope(&reply.report, None, reply.partial, g, Vec::new(), None);
+            let mut e = envelope(&reply.report, None, reply.partial, g, Vec::new(), None);
+            e.workspace = reply.workspace;
             found(exit, &reply.report, line(&e))
         }
         other => other_outcome(exit, &reply.report, other, budget_tokens, None),
