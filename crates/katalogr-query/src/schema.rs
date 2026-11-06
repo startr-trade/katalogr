@@ -2,11 +2,11 @@
 
 use crate::doc_impact::DocImpact;
 use crate::position::PositionAnswer;
-use crate::timeline::Timeline;
 use crate::result::{
     CallerHit, DanglingRef, Envelope, Explain, MapEntry, MirrorDrift, PathStep, RefHit, SearchHit,
     ShowResult, SymbolHit, TestHit, WhyResult,
 };
+use crate::timeline::Timeline;
 use schemars::schema_for;
 use serde_json::Value;
 use std::collections::BTreeMap;

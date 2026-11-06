@@ -31,7 +31,10 @@ mod tests {
             .output()
             .expect("git runs");
         assert!(out.status.success(), "git {args:?}: {out:?}");
-        String::from_utf8(out.stdout).expect("utf8").trim().to_string()
+        String::from_utf8(out.stdout)
+            .expect("utf8")
+            .trim()
+            .to_string()
     }
 
     #[test]
@@ -40,7 +43,15 @@ mod tests {
         git(dir.path(), &["init", "-q"]);
         git(
             dir.path(),
-            &["-c", "commit.gpgsign=false", "commit", "-q", "--allow-empty", "-m", "first"],
+            &[
+                "-c",
+                "commit.gpgsign=false",
+                "commit",
+                "-q",
+                "--allow-empty",
+                "-m",
+                "first",
+            ],
         );
         let head = git(dir.path(), &["rev-parse", "HEAD"]);
         assert_eq!(commit_time(dir.path(), &head), Some(1_700_000_000));
