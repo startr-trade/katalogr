@@ -671,6 +671,8 @@ mod api {
         ("search", "terms=caller"),
         ("dangling", ""),
         ("deps", ""),
+        ("workspace-status", ""),
+        ("workspace-map", ""),
         ("mirrors", ""),
         ("status", ""),
         ("docs-affected", ""),
@@ -792,7 +794,12 @@ mod api {
             "render",
         ];
         // Served at another path.
-        let elsewhere = [("contract", "meta"), ("view", "views/")];
+        let elsewhere = [
+            ("contract", "meta"),
+            ("view", "views/"),
+            // `workspace add` and `workspace locate` write; `status` and `map` have routes.
+            ("workspace", "workspace-status"),
+        ];
         let doc = {
             let server = serve(&repo, &[]);
             get(&server, "/api/v1/openapi.json").json()
