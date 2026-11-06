@@ -2593,6 +2593,7 @@ dependencies = [
  "postcard",
  "proptest",
  "redb",
+ "schemars",
  "serde",
  "serde_json",
  "serde_yaml_ng",

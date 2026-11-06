@@ -18,6 +18,7 @@ pub mod marker;
 mod postings;
 pub mod rank;
 pub mod shard;
+pub mod snapshot;
 
 pub use answers::{
     ANSWER_FORMAT, AnswerHeader, AnswerListing, AnswerStore, DirAnswerStore, MAX_ANSWER_BYTES,
@@ -43,4 +44,9 @@ pub use kindex::{
 pub use rank::{
     PAGERANK_DAMPING, PAGERANK_ITERATIONS, RANK_CONTEXT, fan_weight, link_weight, pagerank,
     row_weight,
+};
+pub use snapshot::{
+    IMPORT_FILE, MAX_MANIFEST_BYTES, SNAPSHOT_FORMAT, SNAPSHOT_MAGIC, SNAPSHOT_SUFFIX,
+    SnapshotManifest, SnapshotPosition, decode_snapshot, install_snapshot, read_manifest,
+    write_snapshot,
 };
