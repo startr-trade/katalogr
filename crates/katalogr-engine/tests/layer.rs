@@ -165,13 +165,9 @@ mod context {
         let rows = e.cache().read().unwrap().index_errors("r", &p).unwrap();
         assert!(!rows.is_empty(), "the copy carries the errors");
         rescan(&e);
-        // `bad.tx` failed to extract, so it has no file revision and is tried again; `ok.tx`
-        // is unchanged from the seed and is not. The errors are there either way.
-        assert_eq!(
-            n.load(Ordering::SeqCst),
-            1,
-            "only the failed file is retried"
-        );
+        // Both files are unchanged from the seed, the failed one included: its revision is
+        // stored beside its error rows, so nothing is extracted.
+        assert_eq!(n.load(Ordering::SeqCst), 0, "nothing is extracted");
         assert_eq!(
             e.cache().read().unwrap().index_errors("r", &p).unwrap(),
             rows

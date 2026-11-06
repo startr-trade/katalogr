@@ -256,7 +256,10 @@ impl<'a> Processor<'a> {
                     tx.remove_file_revision(&key.repo, &key.path)?;
                     tx.put_index_errors(&key.repo, &key.path, &[])?;
                 }
-                Ready::Failed(message) => {
+                Ready::Failed(message, revision) => {
+                    if let Some(revision) = revision {
+                        tx.put_file_revision(&key.repo, &key.path, &revision)?;
+                    }
                     tx.put_index_errors(
                         &key.repo,
                         &key.path,

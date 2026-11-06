@@ -33,7 +33,8 @@ pub(super) enum Action {
         source_len: u64,
     },
     Delete,
-    Failed(String),
+    /// The message, and the file revision to store with it (`None` for a history path).
+    Failed(String, Option<String>),
 }
 
 pub(super) struct Planned {
@@ -263,7 +264,7 @@ pub(super) fn plan_one(env: &PlanEnv, key: &PendingKey) -> Result<Action, Engine
                 source_len: content.len() as u64,
             })
         }
-        Err(e) => Ok(Action::Failed(e.to_string())),
+        Err(e) => Ok(Action::Failed(e.to_string(), Some(revision))),
     }
 }
 
@@ -349,7 +350,7 @@ fn plan_history(
         } else {
             Action::Skip
         }),
-        Err(e) => Ok(Action::Failed(e.to_string())),
+        Err(e) => Ok(Action::Failed(e.to_string(), None)),
     }
 }
 
@@ -370,7 +371,8 @@ pub(super) enum Ready {
         source_len: u64,
     },
     Delete,
-    Failed(String),
+    /// The message, and the file revision to store with it (`None` for a history path).
+    Failed(String, Option<String>),
 }
 
 /// Run the absolute-path guard on a `Replace` and prepare its stitch inputs. Other actions pass
@@ -380,7 +382,7 @@ pub(super) fn prepare_one(engine: &Engine, p: Planned) -> Result<Prepared, Engin
     let ready = match action {
         Action::Skip => Ready::Skip,
         Action::Delete => Ready::Delete,
-        Action::Failed(m) => Ready::Failed(m),
+        Action::Failed(m, r) => Ready::Failed(m, r),
         Action::Replace {
             fragment,
             errors,
@@ -392,7 +394,7 @@ pub(super) fn prepare_one(engine: &Engine, p: Planned) -> Result<Prepared, Engin
                 return Ok(Prepared {
                     key,
                     seq,
-                    ready: Ready::Failed(format!("shard refused: {g}")),
+                    ready: Ready::Failed(format!("shard refused: {g}"), None),
                 });
             }
             let revision = fragment.provenance.revision.clone();

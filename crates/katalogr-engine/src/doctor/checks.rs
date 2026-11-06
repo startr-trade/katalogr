@@ -140,7 +140,12 @@ pub(crate) fn lock(held: bool) -> CheckResult {
 pub(crate) fn revisions(tables: &InspectedTables) -> CheckResult {
     let revs: BTreeSet<&PathKey> = tables.file_revisions.iter().map(|(k, _)| k).collect();
     let arts: BTreeSet<&PathKey> = tables.artifact_keys.iter().collect();
-    let without_artifact = revs.difference(&arts).count();
+    // A file whose extraction failed has a revision and error rows, and no artifact.
+    let failed: BTreeSet<&PathKey> = tables.error_files.iter().map(|(k, _)| k).collect();
+    let without_artifact = revs
+        .difference(&arts)
+        .filter(|k| !failed.contains(*k))
+        .count();
     let without_revision = arts.difference(&revs).count();
     let n = without_artifact + without_revision;
     done(if n == 0 {

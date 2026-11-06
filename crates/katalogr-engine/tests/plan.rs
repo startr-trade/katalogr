@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 use support::{TestExtractor, drained_graph, init_project};
 
 /// The test format with `ctx.tx` as its context file, counting extractions.
-struct Counting(Arc<AtomicUsize>);
+struct Counting(Arc<AtomicUsize>, Arc<AtomicUsize>);
 
 impl Extractor for Counting {
     fn id(&self) -> &'static str {
@@ -21,7 +21,7 @@ impl Extractor for Counting {
     }
 
     fn revision_salt(&self) -> &'static str {
-        "test-1"
+        ["test-1", "test-2"][self.1.load(Ordering::SeqCst)]
     }
 
     fn handles(&self, path: &RelPath) -> bool {
@@ -54,6 +54,7 @@ struct Fx {
     work: Utf8PathBuf,
     e: Engine,
     count: Arc<AtomicUsize>,
+    salt: Arc<AtomicUsize>,
 }
 
 fn fixture() -> Fx {
@@ -70,8 +71,9 @@ fn fixture() -> Fx {
         .project(&ProjectName::new("p").unwrap())
         .unwrap();
     let count = Arc::new(AtomicUsize::new(0));
+    let salt = Arc::new(AtomicUsize::new(0));
     let mut reg = ExtensionRegistry::new();
-    reg.register(Box::new(Counting(count.clone())));
+    reg.register(Box::new(Counting(count.clone(), salt.clone())));
     let roots = BTreeMap::from([("r".to_string(), work.clone())]);
     let e = Engine::open(dir, reg, roots, Instant::now() + Duration::from_secs(10)).unwrap();
     Fx {
@@ -79,6 +81,7 @@ fn fixture() -> Fx {
         work,
         e,
         count,
+        salt,
     }
 }
 
@@ -175,8 +178,8 @@ mod plan {
         );
     }
 
-    /// R-12. A file whose extraction failed has an index-error row and no file revision; when
-    /// the file is deleted the row goes, by an event and by a rescan.
+    /// R-12. A path whose only trace is an index-error row (a graph written before failed files
+    /// kept their revision) loses the row when the file is deleted, by a rescan and by an event.
     #[test]
     fn deleted_file_with_only_errors_removed() {
         let f = fixture();
@@ -185,10 +188,14 @@ mod plan {
         let bad = RelPath::new("bad.tx").unwrap();
         let errors = |f: &Fx| f.e.cache().read().unwrap().index_errors("r", &bad).unwrap();
         assert!(!errors(&f).is_empty(), "the failed extraction is recorded");
-        assert!(
-            !f.paths().contains(&"bad.tx".to_string()),
-            "and has no revision"
-        );
+        // Drop the revision a failed file keeps, leaving only the error row.
+        let drop_revision = |f: &Fx| {
+            let mut tx = f.e.cache().write().unwrap();
+            tx.remove_file_revision("r", &bad).unwrap();
+            tx.commit().unwrap();
+            assert!(!f.paths().contains(&"bad.tx".to_string()));
+        };
+        drop_revision(&f);
         // A rescan after the file is gone removes the row.
         std::fs::remove_file(f.work.join("bad.tx")).unwrap();
         f.rescan();
@@ -201,6 +208,7 @@ mod plan {
         std::fs::write(f.work.join("bad.tx"), [0xffu8, 0xfe, 0x00]).unwrap();
         f.rescan();
         assert!(!errors(&f).is_empty());
+        drop_revision(&f);
         std::fs::remove_file(f.work.join("bad.tx")).unwrap();
         f.e.inbox()
             .append(&NewEvent::file(
@@ -211,5 +219,54 @@ mod plan {
             .unwrap();
         drained_graph(&f.e);
         assert!(errors(&f).is_empty());
+    }
+
+    /// A failed extraction stores the file's revision beside its error rows, so an unchanged
+    /// failed file is not extracted again by a rescan.
+    #[test]
+    fn failed_file_not_retried_unchanged() {
+        let f = fixture();
+        std::fs::write(f.work.join("bad.tx"), [0xffu8, 0xfe, 0x00]).unwrap();
+        f.rescan();
+        let bad = RelPath::new("bad.tx").unwrap();
+        let r = f.e.cache().read().unwrap();
+        assert!(!r.index_errors("r", &bad).unwrap().is_empty());
+        assert!(
+            r.file_revision("r", &bad).unwrap().is_some(),
+            "revision stored"
+        );
+        drop(r);
+        let first = f.extractions();
+        f.rescan();
+        assert_eq!(
+            f.extractions(),
+            first,
+            "the unchanged failed file is not retried"
+        );
+        assert!(
+            !f.e.cache()
+                .read()
+                .unwrap()
+                .index_errors("r", &bad)
+                .unwrap()
+                .is_empty(),
+            "its errors are kept"
+        );
+        // A content change tries it again.
+        std::fs::write(f.work.join("bad.tx"), [0xffu8, 0xfd, 0x00]).unwrap();
+        f.rescan();
+        assert_eq!(f.extractions(), first + 1);
+    }
+
+    /// A changed revision salt retries the failed file, with every other file.
+    #[test]
+    fn failed_file_retried_on_salt_change() {
+        let f = fixture();
+        std::fs::write(f.work.join("bad.tx"), [0xffu8, 0xfe, 0x00]).unwrap();
+        f.rescan();
+        let first = f.extractions();
+        f.salt.store(1, Ordering::SeqCst);
+        f.rescan();
+        assert_eq!(f.extractions(), first + 4, "a.tx, b.tx, ctx.tx and bad.tx");
     }
 }
