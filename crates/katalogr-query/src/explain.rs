@@ -5,6 +5,7 @@ use crate::resolve::hit;
 use crate::result::{ContractEnd, ContractInfo, Explain, LinkBrief, SymbolHit};
 use crate::show::fact_text;
 use crate::why::RATIONALE_KINDS;
+use katalogr_model::structure::FIELD_TYPE;
 use katalogr_model::{Confidence, Id, Name, Span};
 use katalogr_store::{LinkKey, Reader, StoreError};
 
@@ -129,9 +130,21 @@ pub fn explain(tx: &impl Reader, s: &SymbolHit, per_side: usize) -> Result<Expla
         };
     };
 
+    // The fields of a type are part of it and are not listed among its links; a field's own
+    // answer lists its links as any symbol's does.
+    let skip_fields = !row.facts.contains_key(FIELD_TYPE);
+    let is_field = |id: Id| -> Result<bool, StoreError> {
+        Ok(skip_fields
+            && tx
+                .symbol(id)?
+                .is_some_and(|r| r.facts.contains_key(FIELD_TYPE)))
+    };
     let mut outgoing: Vec<LinkBrief> = Vec::new();
     let mut items: Vec<String> = Vec::new();
     for (key, _) in tx.links_out(id, None)? {
+        if is_field(key.to)? {
+            continue;
+        }
         let other = node_name(tx, key.to)?;
         if RATIONALE_KINDS.contains(&key.kind.0.as_str()) {
             items.push(other.clone());
@@ -145,6 +158,9 @@ pub fn explain(tx: &impl Reader, s: &SymbolHit, per_side: usize) -> Result<Expla
     }
     let mut incoming: Vec<LinkBrief> = Vec::new();
     for key in tx.links_in(id)? {
+        if is_field(key.from)? {
+            continue;
+        }
         let other = node_name(tx, key.from)?;
         let full = LinkKey {
             from: key.from,
