@@ -94,6 +94,8 @@ technologies:
       - rust/rationale
     test-marks:
       - rust/tests
+    type-fields:
+      - rust/type-fields
     re-export:
       - rust/use-and-reexport
     string-calls:

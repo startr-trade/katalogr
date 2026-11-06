@@ -484,6 +484,169 @@ mod rust {
         ));
     }
 
+    const LIB: &str = "src/lib.rs#";
+
+    fn ff(g: &Graph, n: &str, k: &str) -> Option<Value> {
+        fact(g.sym(&format!("{LIB}{n}")), k)
+    }
+
+    fn shape_of(g: &Graph, n: &str) -> (Option<Value>, Option<Value>, Option<Value>) {
+        (
+            ff(g, n, "field_type"),
+            ff(g, n, "required"),
+            ff(g, n, "many"),
+        )
+    }
+
+    #[test]
+    fn struct_fields_recorded() {
+        let g = index_case("type-fields");
+        assert_expected("type-fields", &g);
+        let id = "struct:Order/field:id";
+        assert_eq!(g.sym(&format!("{LIB}{id}"))["kind"], "field");
+        assert_eq!(ff(&g, id, "vis"), Some("pub".into()));
+        assert_eq!(ff(&g, id, "doc"), Some("The identifier.".into()));
+        assert_eq!(ff(&g, id, "signature"), Some("pub id: String".into()));
+        assert!(g.has_link(
+            &format!("{LIB}struct:Order"),
+            "contains",
+            &format!("{LIB}{id}"),
+            "extracted"
+        ));
+        // A field of a type nested in a module sits below that type.
+        assert_eq!(
+            g.sym(&format!("{LIB}mod:model/struct:Line/field:sku"))["kind"],
+            "field"
+        );
+        // Fields get no exports, and are no entry points.
+        assert_eq!(ff(&g, id, "root"), None);
+    }
+
+    #[test]
+    fn tuple_fields_by_position() {
+        let g = index_case("type-fields");
+        assert_eq!(
+            shape_of(&g, "struct:Pair/field:0"),
+            (
+                Some("integer".into()),
+                Some(true.into()),
+                Some(false.into())
+            )
+        );
+        assert_eq!(
+            ff(&g, "struct:Pair/field:1", "field_type"),
+            Some("Line".into())
+        );
+        assert_eq!(
+            ff(&g, "enum:Event/variant:Moved/field:0", "field_type"),
+            Some("string".into())
+        );
+    }
+
+    #[test]
+    fn union_fields_recorded() {
+        let g = index_case("type-fields");
+        assert_eq!(
+            ff(&g, "union:Raw/field:word", "field_type"),
+            Some("integer".into())
+        );
+        assert_eq!(
+            ff(&g, "union:Raw/field:real", "field_type"),
+            Some("number".into())
+        );
+        assert!(g.has_link(
+            &format!("{LIB}union:Raw"),
+            "contains",
+            &format!("{LIB}union:Raw/field:real"),
+            "extracted"
+        ));
+    }
+
+    #[test]
+    fn variant_fields_recorded() {
+        let g = index_case("type-fields");
+        assert!(g.has_link(
+            &format!("{LIB}enum:Event/variant:Placed"),
+            "contains",
+            &format!("{LIB}enum:Event/variant:Placed/field:id"),
+            "extracted"
+        ));
+        assert_eq!(
+            ff(&g, "enum:Event/variant:Placed/field:id", "field_type"),
+            Some("string".into())
+        );
+        // A unit variant has no field; a record variant holds named ones.
+        assert!(!g.symbols.keys().any(|k| k.contains("variant:Done/field")));
+        assert_eq!(
+            g.symbols
+                .keys()
+                .filter(|k| k.contains("variant:Placed/field:"))
+                .count(),
+            2
+        );
+    }
+
+    #[test]
+    fn field_shape_mapping() {
+        let g = index_case("type-fields");
+        let t = |s: &str| Some(Value::from(s));
+        let b = |v: bool| Some(Value::from(v));
+        for (n, want) in [
+            ("id", (t("string"), b(true), b(false))),
+            ("note", (t("string"), b(false), b(false))),
+            ("lines", (t("Line"), b(true), b(true))),
+            ("blob", (t("binary"), b(true), b(false))),
+            ("tags", (t("object"), b(true), b(false))),
+            ("first", (t("crate::model::Line"), b(true), b(false))),
+            ("count", (t("integer"), b(true), b(false))),
+            ("ratio", (t("number"), b(true), b(false))),
+            ("paid", (t("boolean"), b(true), b(false))),
+            ("when", (t("chrono::DateTime"), b(true), b(false))),
+            ("local", (t("Order"), b(false), b(false))),
+        ] {
+            assert_eq!(
+                shape_of(&g, &format!("struct:Order/field:{n}")),
+                want,
+                "{n}"
+            );
+        }
+    }
+
+    #[test]
+    fn fields_revision_salt() {
+        assert!(RustExtractor.revision_salt().ends_with(";fields-1"));
+        assert!(RustExtractor.patterns().contains(&"type-fields"));
+    }
+
+    #[test]
+    fn field_type_refs_local_only() {
+        let g = index_case("type-fields");
+        let uses: BTreeSet<(String, String)> = g
+            .links_of_kind("uses-type")
+            .into_iter()
+            .map(|l| {
+                (
+                    l.0.rsplit('#').next().unwrap().to_string(),
+                    l.2.rsplit('#').next().unwrap().to_string(),
+                )
+            })
+            .collect();
+        let line = "mod:model/struct:Line";
+        let want: BTreeSet<(String, String)> = [
+            ("struct:Order/field:first", line),
+            ("struct:Order/field:lines", line),
+            ("struct:Order/field:local", "struct:Order"),
+            ("struct:Pair/field:1", line),
+            ("enum:Event/variant:Placed/field:line", line),
+            ("enum:Event/variant:Moved/field:1", line),
+        ]
+        .into_iter()
+        .map(|(a, b)| (a.to_string(), b.to_string()))
+        .collect();
+        // No reference to a standard type or to the external date type.
+        assert_eq!(uses, want);
+    }
+
     #[test]
     fn impl_links_type_and_trait() {
         let g = index_case("impls");

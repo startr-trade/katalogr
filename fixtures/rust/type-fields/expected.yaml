@@ -1,0 +1,153 @@
+mode: exact
+symbols:
+- fx:Cargo.toml#crate:type-fields
+- fx:src/lib.rs#enum:Event
+- fx:src/lib.rs#enum:Event/variant:Done
+- fx:src/lib.rs#enum:Event/variant:Moved
+- fx:src/lib.rs#enum:Event/variant:Moved/field:0
+- fx:src/lib.rs#enum:Event/variant:Moved/field:1
+- fx:src/lib.rs#enum:Event/variant:Placed
+- fx:src/lib.rs#enum:Event/variant:Placed/field:id
+- fx:src/lib.rs#enum:Event/variant:Placed/field:line
+- fx:src/lib.rs#mod:model
+- fx:src/lib.rs#mod:model/struct:Line
+- fx:src/lib.rs#mod:model/struct:Line/field:sku
+- fx:src/lib.rs#struct:Order
+- fx:src/lib.rs#struct:Order/field:blob
+- fx:src/lib.rs#struct:Order/field:count
+- fx:src/lib.rs#struct:Order/field:first
+- fx:src/lib.rs#struct:Order/field:id
+- fx:src/lib.rs#struct:Order/field:lines
+- fx:src/lib.rs#struct:Order/field:local
+- fx:src/lib.rs#struct:Order/field:note
+- fx:src/lib.rs#struct:Order/field:paid
+- fx:src/lib.rs#struct:Order/field:ratio
+- fx:src/lib.rs#struct:Order/field:tags
+- fx:src/lib.rs#struct:Order/field:when
+- fx:src/lib.rs#struct:Pair
+- fx:src/lib.rs#struct:Pair/field:0
+- fx:src/lib.rs#struct:Pair/field:1
+- fx:src/lib.rs#union:Raw
+- fx:src/lib.rs#union:Raw/field:real
+- fx:src/lib.rs#union:Raw/field:word
+links:
+- from: fx:src/lib.rs#enum:Event
+  kind: contains
+  to: fx:src/lib.rs#enum:Event/variant:Done
+  confidence: extracted
+- from: fx:src/lib.rs#enum:Event
+  kind: contains
+  to: fx:src/lib.rs#enum:Event/variant:Moved
+  confidence: extracted
+- from: fx:src/lib.rs#enum:Event
+  kind: contains
+  to: fx:src/lib.rs#enum:Event/variant:Placed
+  confidence: extracted
+- from: fx:src/lib.rs#enum:Event/variant:Moved
+  kind: contains
+  to: fx:src/lib.rs#enum:Event/variant:Moved/field:0
+  confidence: extracted
+- from: fx:src/lib.rs#enum:Event/variant:Moved
+  kind: contains
+  to: fx:src/lib.rs#enum:Event/variant:Moved/field:1
+  confidence: extracted
+- from: fx:src/lib.rs#enum:Event/variant:Moved/field:1
+  kind: uses-type
+  to: fx:src/lib.rs#mod:model/struct:Line
+  confidence: extracted
+- from: fx:src/lib.rs#enum:Event/variant:Placed
+  kind: contains
+  to: fx:src/lib.rs#enum:Event/variant:Placed/field:id
+  confidence: extracted
+- from: fx:src/lib.rs#enum:Event/variant:Placed
+  kind: contains
+  to: fx:src/lib.rs#enum:Event/variant:Placed/field:line
+  confidence: extracted
+- from: fx:src/lib.rs#enum:Event/variant:Placed/field:line
+  kind: uses-type
+  to: fx:src/lib.rs#mod:model/struct:Line
+  confidence: extracted
+- from: fx:src/lib.rs#mod:model
+  kind: contains
+  to: fx:src/lib.rs#mod:model/struct:Line
+  confidence: extracted
+- from: fx:src/lib.rs#mod:model/struct:Line
+  kind: contains
+  to: fx:src/lib.rs#mod:model/struct:Line/field:sku
+  confidence: extracted
+- from: fx:src/lib.rs#struct:Order
+  kind: contains
+  to: fx:src/lib.rs#struct:Order/field:blob
+  confidence: extracted
+- from: fx:src/lib.rs#struct:Order
+  kind: contains
+  to: fx:src/lib.rs#struct:Order/field:count
+  confidence: extracted
+- from: fx:src/lib.rs#struct:Order
+  kind: contains
+  to: fx:src/lib.rs#struct:Order/field:first
+  confidence: extracted
+- from: fx:src/lib.rs#struct:Order
+  kind: contains
+  to: fx:src/lib.rs#struct:Order/field:id
+  confidence: extracted
+- from: fx:src/lib.rs#struct:Order
+  kind: contains
+  to: fx:src/lib.rs#struct:Order/field:lines
+  confidence: extracted
+- from: fx:src/lib.rs#struct:Order
+  kind: contains
+  to: fx:src/lib.rs#struct:Order/field:local
+  confidence: extracted
+- from: fx:src/lib.rs#struct:Order
+  kind: contains
+  to: fx:src/lib.rs#struct:Order/field:note
+  confidence: extracted
+- from: fx:src/lib.rs#struct:Order
+  kind: contains
+  to: fx:src/lib.rs#struct:Order/field:paid
+  confidence: extracted
+- from: fx:src/lib.rs#struct:Order
+  kind: contains
+  to: fx:src/lib.rs#struct:Order/field:ratio
+  confidence: extracted
+- from: fx:src/lib.rs#struct:Order
+  kind: contains
+  to: fx:src/lib.rs#struct:Order/field:tags
+  confidence: extracted
+- from: fx:src/lib.rs#struct:Order
+  kind: contains
+  to: fx:src/lib.rs#struct:Order/field:when
+  confidence: extracted
+- from: fx:src/lib.rs#struct:Order/field:first
+  kind: uses-type
+  to: fx:src/lib.rs#mod:model/struct:Line
+  confidence: extracted
+- from: fx:src/lib.rs#struct:Order/field:lines
+  kind: uses-type
+  to: fx:src/lib.rs#mod:model/struct:Line
+  confidence: extracted
+- from: fx:src/lib.rs#struct:Order/field:local
+  kind: uses-type
+  to: fx:src/lib.rs#struct:Order
+  confidence: extracted
+- from: fx:src/lib.rs#struct:Pair
+  kind: contains
+  to: fx:src/lib.rs#struct:Pair/field:0
+  confidence: extracted
+- from: fx:src/lib.rs#struct:Pair
+  kind: contains
+  to: fx:src/lib.rs#struct:Pair/field:1
+  confidence: extracted
+- from: fx:src/lib.rs#struct:Pair/field:1
+  kind: uses-type
+  to: fx:src/lib.rs#mod:model/struct:Line
+  confidence: extracted
+- from: fx:src/lib.rs#union:Raw
+  kind: contains
+  to: fx:src/lib.rs#union:Raw/field:real
+  confidence: extracted
+- from: fx:src/lib.rs#union:Raw
+  kind: contains
+  to: fx:src/lib.rs#union:Raw/field:word
+  confidence: extracted
