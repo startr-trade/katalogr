@@ -33,11 +33,13 @@ pub struct WorkspaceMap {
     pub edges: Vec<ProjectEdge>,
 }
 
+/// The projects providing and consuming one contract.
+type Ends<'a> = (BTreeSet<&'a str>, BTreeSet<&'a str>);
+
 /// Pure. Takes only rows the user can read. Counts each contract once per (consumer, provider,
 /// kind). Skips a pair of ends in one project. Sorted.
 pub fn workspace_map(projects: &[String], rows: &[ContractEndRow]) -> WorkspaceMap {
-    // (kind, contract) to the projects providing and consuming it.
-    let mut by_contract: BTreeMap<(&str, &str), (BTreeSet<&str>, BTreeSet<&str>)> = BTreeMap::new();
+    let mut by_contract: BTreeMap<(&str, &str), Ends<'_>> = BTreeMap::new();
     for r in rows {
         let entry = by_contract
             .entry((r.contract_kind.as_str(), r.contract.as_str()))

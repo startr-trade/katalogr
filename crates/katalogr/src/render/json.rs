@@ -144,6 +144,7 @@ fn found(exit: ExitCode, report: &Report, stdout: String) -> JsonAnswer {
 }
 
 /// The envelope of a list within the budget, with the hints for `command` (none when empty).
+#[allow(clippy::too_many_arguments)]
 fn list_envelope<T: Serialize>(
     report: &Report,
     items: Vec<T>,
