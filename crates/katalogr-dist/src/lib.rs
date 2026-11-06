@@ -53,7 +53,7 @@ mod views;
 mod workspace;
 mod workspace_join;
 pub use views::{FreshCheck, ViewBytes};
-pub use workspace::{MAX_IMPACT_ROUNDS, PEERS_SETTING, PeerSpec, RootsAccess};
+pub use workspace::{MAX_IMPACT_ROUNDS, PEERS_SETTING, PeerSpec, RootsAccess, WorkspaceStatus};
 pub mod watch;
 pub mod working_set;
 
@@ -166,6 +166,16 @@ pub fn schemas() -> BTreeMap<&'static str, serde_json::Value> {
         all.insert("snapshot-import", snapshot_import::schema())
             .is_none(),
         "schema name snapshot-import is registered twice"
+    );
+    assert!(
+        all.insert("workspace-map", workspace::map_schema())
+            .is_none(),
+        "schema name workspace-map is registered twice"
+    );
+    assert!(
+        all.insert("workspace-status", workspace::status_schema())
+            .is_none(),
+        "schema name workspace-status is registered twice"
     );
     assert!(
         all.insert("position", katalogr_query::position_schema())

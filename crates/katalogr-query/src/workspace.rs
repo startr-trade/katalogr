@@ -234,7 +234,9 @@ pub fn filter_report(
     // A name that parses to a symbol or artifact is restricted when its repo and path are not
     // readable; contracts and text that is no name belong to no repo.
     let restricted = |name: &str| match parse_name(name) {
-        Ok(AnyName::Symbol(s)) => !access.can_read(project, &s.artifact.repo, s.artifact.path.as_str()),
+        Ok(AnyName::Symbol(s)) => {
+            !access.can_read(project, &s.artifact.repo, s.artifact.path.as_str())
+        }
         Ok(AnyName::Artifact(a)) => !access.can_read(project, &a.repo, a.path.as_str()),
         _ => false,
     };

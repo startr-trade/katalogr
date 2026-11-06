@@ -85,8 +85,8 @@ pub use view_answer::{ViewAnswer, ViewQueryJson, view_schema};
 pub use why::{Blame, DEFAULT_USE_LIMIT, RATIONALE_KINDS, attach_use, why, why_sources, why_use};
 pub use working_set::{Boost, Tier, Weights, WorkingSet, WorkingSetSummary, boost};
 pub use workspace::{
-    LinkKeys, PeerEnd, SourceAccess, Wanted, filter_report, link_keys, parse_wanted, peer_contract_ends,
-    peer_export_ends,
+    LinkKeys, PeerEnd, SourceAccess, Wanted, filter_report, link_keys, parse_wanted,
+    peer_contract_ends, peer_export_ends,
 };
 
 /// Re-exported so wrappers can bound on it without a direct dependency.

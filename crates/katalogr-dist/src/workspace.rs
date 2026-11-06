@@ -3,12 +3,15 @@
 //! and nothing is stored across projects (ADR-0038).
 
 use crate::error::DistError;
-use crate::{Katalogr, build_registry, roots};
+use crate::{Katalogr, Options, Outcome, Reply, build_registry, roots};
 use camino::{Utf8Path, Utf8PathBuf};
+use katalogr_analytics::{ContractEndRow, WorkspaceMap, workspace_map};
 use katalogr_engine::Engine;
 use katalogr_engine::consistency::recorded_position;
-use katalogr_query::{PeerState, PositionRef, SourceAccess};
+use katalogr_model::{AnyName, parse_name};
+use katalogr_query::{ContractEnds, PeerState, PositionRef, SourceAccess, contract_map};
 use katalogr_store::{Kindex, ProjectDir, ProjectName, Reader, StoreError};
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
@@ -406,5 +409,110 @@ impl Katalogr {
             .iter()
             .map(|s| open_one(s, &locations, &own, deadline))
             .collect())
+    }
+}
+
+/// The user can read every end of the reading project.
+struct Everything;
+
+impl SourceAccess for Everything {
+    fn can_read(&self, _project: &str, _repo: &str, _path: &str) -> bool {
+        true
+    }
+}
+
+/// The ends of `map` the user can read, as rows of project `project`.
+fn rows_of(
+    project: &str,
+    map: &[ContractEnds],
+    access: &dyn SourceAccess,
+    out: &mut Vec<ContractEndRow>,
+) {
+    for c in map {
+        for (role, ends) in [
+            ("provides", &c.providers),
+            ("consumes", &c.consumers),
+            ("declares", &c.declarers),
+        ] {
+            for e in ends {
+                let repo = match parse_name(&e.name) {
+                    Ok(AnyName::Symbol(s)) => s.artifact.repo,
+                    Ok(AnyName::Artifact(a)) => a.repo,
+                    _ => continue,
+                };
+                if access.can_read(project, &repo, &e.path) {
+                    out.push(ContractEndRow {
+                        project: project.to_string(),
+                        contract_kind: c.kind.clone(),
+                        contract: c.contract.clone(),
+                        role: role.to_string(),
+                        repo,
+                    });
+                }
+            }
+        }
+    }
+}
+
+/// `katalogr workspace status --json`: the state of each named peer.
+#[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]
+pub struct WorkspaceStatus {
+    /// The `--json` result schema version.
+    pub schema: u32,
+    pub peers: Vec<PeerState>,
+}
+
+impl WorkspaceStatus {
+    pub fn new(peers: Vec<PeerState>) -> WorkspaceStatus {
+        WorkspaceStatus {
+            schema: katalogr_query::RESULT_SCHEMA_VERSION,
+            peers,
+        }
+    }
+}
+
+pub(crate) fn status_schema() -> serde_json::Value {
+    schemars::schema_for!(WorkspaceStatus).to_value()
+}
+
+pub(crate) fn map_schema() -> serde_json::Value {
+    schemars::schema_for!(katalogr_query::Envelope<WorkspaceMap>).to_value()
+}
+
+impl Katalogr {
+    /// `katalogr workspace map`: which project consumes what another provides, over the contracts
+    /// of this project and its peers. Only ends the user can read count.
+    pub fn workspace_map(&self, opts: &Options) -> Result<Reply<WorkspaceMap>, DistError> {
+        let _extra = self.extra_scope();
+        let mut peers = self.peers_for_read(opts)?;
+        let own = self.own_name();
+        let mut rows: Vec<ContractEndRow> = Vec::new();
+        let mut reply = self.query(opts, |tx| {
+            let local = contract_map(tx, None, usize::MAX)?;
+            rows_of(&own, &local.items, &Everything, &mut rows);
+            Ok(Outcome::Found(WorkspaceMap {
+                projects: Vec::new(),
+                edges: Vec::new(),
+            }))
+        })?;
+        let mut projects = vec![own];
+        projects.extend(peers.iter().map(|p| p.spec.project.clone()));
+        let (snaps, mut failed) = crate::workspace_join::snapshots(&peers);
+        for (i, (p, snap)) in peers.iter().zip(&snaps).enumerate() {
+            let Some(tx) = snap else { continue };
+            match contract_map(tx, None, usize::MAX) {
+                Ok(m) => rows_of(&p.spec.project, &m.items, &p.access, &mut rows),
+                Err(_) => {
+                    failed.insert(i);
+                }
+            }
+        }
+        drop(snaps);
+        for i in failed {
+            crate::workspace_join::mark_unavailable(&mut peers[i]);
+        }
+        reply.outcome = Outcome::Found(workspace_map(&projects, &rows));
+        crate::workspace_join::attach(&mut reply, &peers, Vec::new(), Vec::new());
+        Ok(reply)
     }
 }

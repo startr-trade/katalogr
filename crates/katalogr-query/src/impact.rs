@@ -8,10 +8,10 @@ use crate::dangling::referrer;
 use crate::doc_impact::DOC_LINK_KINDS;
 use crate::resolve::{contract_node_hit, hit};
 use crate::result::{ConfidenceSchema, Partial, SymbolHit, TestHit, cap};
-use crate::workspace::PeerEnd;
 use crate::tests::{
     DEFAULT_TEST_DEPTH, TestsOptions, canon, from_strength, role_of, strength, tests_for,
 };
+use crate::workspace::PeerEnd;
 use katalogr_model::insight::FACT_TEST;
 use katalogr_model::{AnyName, Confidence, Fact, Id, LinkKind, Name, parse_name};
 use katalogr_store::{LinkKey, Reader, StoreError};

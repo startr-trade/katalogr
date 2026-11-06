@@ -33,7 +33,7 @@ impl Katalogr {
 
 /// Marks a peer whose snapshot could not be read: an I/O or store error never fails the local
 /// answer.
-fn mark_unavailable(p: &mut OpenPeer) {
+pub(crate) fn mark_unavailable(p: &mut OpenPeer) {
     p.state.state = "unavailable".to_string();
     p.state.fix = Some(index_fix(&p.spec));
     p.engine = None;
