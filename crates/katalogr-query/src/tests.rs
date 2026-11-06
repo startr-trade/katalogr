@@ -32,7 +32,7 @@ impl Default for TestsOptions {
 }
 
 /// Extracted 3, Declared 2, Inferred 1.
-fn strength(c: Confidence) -> u8 {
+pub(crate) fn strength(c: Confidence) -> u8 {
     match c {
         Confidence::Extracted => 3,
         Confidence::Declared => 2,
@@ -40,7 +40,7 @@ fn strength(c: Confidence) -> u8 {
     }
 }
 
-fn from_strength(s: u8) -> Confidence {
+pub(crate) fn from_strength(s: u8) -> Confidence {
     match s {
         3 => Confidence::Extracted,
         2 => Confidence::Declared,
@@ -60,7 +60,7 @@ struct Path {
 }
 
 /// Canonical name of a symbol, artifact or contract; the hex id for anything else.
-fn canon(tx: &impl Reader, id: Id) -> Result<String, StoreError> {
+pub(crate) fn canon(tx: &impl Reader, id: Id) -> Result<String, StoreError> {
     if let Some(s) = tx.symbol(id)? {
         return Ok(s.name.canonical());
     }
@@ -74,7 +74,7 @@ fn canon(tx: &impl Reader, id: Id) -> Result<String, StoreError> {
 }
 
 /// The role of a test node and its hit, when the node carries the `test` fact as a string.
-fn role_of(tx: &impl Reader, id: Id) -> Result<Option<(String, SymbolHit)>, StoreError> {
+pub(crate) fn role_of(tx: &impl Reader, id: Id) -> Result<Option<(String, SymbolHit)>, StoreError> {
     let role = |f: &std::collections::BTreeMap<String, Fact>| match f.get(FACT_TEST) {
         Some(Fact::Str(s)) => Some(s.clone()),
         _ => None,

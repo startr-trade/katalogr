@@ -156,4 +156,49 @@ mod views {
         let other = view_json(&repo, &["structure", "--level", "file"]);
         assert_ne!(plain["view_id"], other["view_id"]);
     }
+
+    /// R-11. An impact view is stored under its ID, and asked again it is the stored bytes.
+    #[test]
+    fn impact_view_stored_by_id() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (kx, repo) = project(tmp.path());
+        let v = view_json(&repo, &["impact", "target"]);
+        let schema = view_schema();
+        validate(&schema, &schema, &v, "$").unwrap_or_else(|e| panic!("{e}\n{v}"));
+        assert_eq!(v["exact"], true, "{v}");
+        assert_eq!(v["query"]["op"], "impact");
+        assert_eq!(v["query"]["args"]["depth"], "3");
+        let id = v["view_id"].as_str().unwrap().to_string();
+        assert!(stored_path(&kx, &id).exists());
+        // The chain target <- caller_a <- caller_b <- top is in the graph.
+        let nodes = v["graph"]["nodes"].as_array().unwrap();
+        for n in ["caller_a", "caller_b", "top"] {
+            assert!(
+                nodes
+                    .iter()
+                    .any(|x| x["name"].as_str().unwrap().ends_with(n)),
+                "{n} in {v}"
+            );
+        }
+        let again = view_json(&repo, &["impact", "target"]);
+        assert_eq!(again, v);
+        let out = ok(&repo, &["view", "--fresh", "impact", "target"]);
+        assert!(out.contains("same"), "{out}");
+    }
+
+    /// R-11. Over `--max-nodes` the graph says it is partial: it shows fewer nodes than there are.
+    #[test]
+    fn impact_view_marks_partial_over_max_nodes() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (_kx, repo) = project(tmp.path());
+        let all = view_json(&repo, &["impact", "target"]);
+        assert_eq!(all["graph"]["shown"], all["graph"]["total"], "{all}");
+        let cut = view_json(&repo, &["impact", "target", "--max-nodes", "1"]);
+        let (shown, total) = (
+            cut["graph"]["shown"].as_u64().unwrap(),
+            cut["graph"]["total"].as_u64().unwrap(),
+        );
+        assert!(shown < total, "{cut}");
+        assert_ne!(all["view_id"], cut["view_id"]);
+    }
 }

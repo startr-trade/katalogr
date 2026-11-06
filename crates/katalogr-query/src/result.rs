@@ -29,7 +29,7 @@ struct SpanSchema {
 #[derive(JsonSchema)]
 #[schemars(rename = "Confidence")]
 #[allow(dead_code)]
-enum ConfidenceSchema {
+pub(crate) enum ConfidenceSchema {
     Extracted,
     Inferred,
     Declared,

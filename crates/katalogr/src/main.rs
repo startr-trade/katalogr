@@ -60,6 +60,7 @@ fn run(cli: &Cli) -> Result<ExitCode, DistError> {
             queue,
             no_process,
             cors_origin,
+            snapshots,
         }) => cmd::api::run(
             cli,
             *listen,
@@ -67,7 +68,10 @@ fn run(cli: &Cli) -> Result<ExitCode, DistError> {
             *queue,
             *no_process,
             cors_origin.clone(),
+            snapshots,
         ),
+        #[cfg(feature = "web")]
+        Some(Command::Serve(args)) => cmd::serve::run(cli, args),
         #[cfg(feature = "mcp")]
         Some(Command::Mcp {
             root,
@@ -88,6 +92,28 @@ fn run(cli: &Cli) -> Result<ExitCode, DistError> {
         Some(Command::DocsAffected { since, kind, limit }) => {
             cmd::docs_affected::run(cli, since.as_deref(), kind, *limit)
         }
+        Some(Command::Impact {
+            symbol,
+            file,
+            range,
+            since,
+            item,
+            depth,
+            limit,
+            test_depth,
+        }) => cmd::impact::run(
+            cli,
+            &cmd::impact::Input {
+                symbol: symbol.as_deref(),
+                file: file.as_deref(),
+                range: range.as_deref(),
+                since: since.as_deref(),
+                item: item.as_deref(),
+            },
+            *depth,
+            *limit,
+            *test_depth,
+        ),
         Some(Command::Mirrors { kind }) => cmd::mirrors::run(cli, kind),
         Some(Command::Hubs {
             level,

@@ -21,10 +21,38 @@ pub fn run(
     queue: Option<usize>,
     no_process: bool,
     cors_origin: Option<String>,
+    snapshots: &[std::path::PathBuf],
+) -> Result<ExitCode, DistError> {
+    serve(
+        cli,
+        listen,
+        workers,
+        queue,
+        no_process,
+        cors_origin,
+        snapshots,
+        false,
+        "api",
+    )
+}
+
+/// The API server; with `web` it also answers the web view's pages (`katalogr serve`).
+#[allow(clippy::too_many_arguments)]
+pub fn serve(
+    cli: &Cli,
+    listen: SocketAddr,
+    workers: Option<usize>,
+    queue: Option<usize>,
+    no_process: bool,
+    cors_origin: Option<String>,
+    snapshots: &[std::path::PathBuf],
+    web: bool,
+    name: &'static str,
 ) -> Result<ExitCode, DistError> {
     let start_dir =
         std::env::current_dir().map_err(|e| DistError::Usage(format!("current directory: {e}")))?;
-    let overrides = overrides(cli);
+    let mut overrides = overrides(cli);
+    overrides.snapshot_dirs = snapshots.to_vec();
     Katalogr::resolve(&start_dir, &overrides).map_err(|e| DistError::Usage(e.to_string()))?;
     let cfg = ApiConfig {
         listen,
@@ -34,6 +62,8 @@ pub fn run(
         cors_origin,
         overrides,
         start_dir,
+        web,
+        name,
     };
     crate::api::run_announcing(cfg, Arc::new(Localhost), &AtomicBool::new(false))?;
     Ok(ExitCode::Ok)

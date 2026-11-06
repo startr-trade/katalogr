@@ -7,7 +7,9 @@
 //! ID (equal bytes) leave one file. A store failure never fails a read.
 
 use crate::DistError;
+use katalogr_query::{PositionRef, ViewQueryJson};
 use katalogr_store::ProjectDir;
+use serde::Deserialize;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::SystemTime;
@@ -34,9 +36,35 @@ pub struct ViewStore {
 }
 
 /// `v1-` and 32 lower-case hex digits: the only IDs that name a file.
-fn valid_id(id: &str) -> bool {
+pub(crate) fn valid_id(id: &str) -> bool {
     id.strip_prefix(ID_PREFIX).is_some_and(|h| {
         h.len() == ID_HEX && h.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
+    })
+}
+
+/// What the timeline reads of a stored view: its ID, its question and the positions it covers.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StoredHead {
+    pub view_id: String,
+    pub query: ViewQueryJson,
+    pub positions: Vec<PositionRef>,
+}
+
+/// The only fields of an entry the timeline parses; the rest of the body is skipped.
+#[derive(Deserialize)]
+struct HeadFields {
+    view_id: String,
+    query: ViewQueryJson,
+    positions: Vec<PositionRef>,
+}
+
+/// Parses the head of a view body, and checks its `view_id` against the one the file is named for.
+pub(crate) fn parse_head(bytes: &[u8], expected_id: &str) -> Option<StoredHead> {
+    let h: HeadFields = serde_json::from_slice(bytes).ok()?;
+    (h.view_id == expected_id).then_some(StoredHead {
+        view_id: h.view_id,
+        query: h.query,
+        positions: h.positions,
     })
 }
 
@@ -72,6 +100,27 @@ impl ViewStore {
         let bytes = std::fs::read(self.path_of(id)).ok()?;
         let v: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
         (v.get("view_id").and_then(serde_json::Value::as_str) == Some(id)).then_some(bytes)
+    }
+
+    /// The `limit` most recently written entries, newest first, plus how many entries exist.
+    /// An unreadable or mismatched entry is skipped, as `get` would treat it.
+    pub fn list(&self, limit: usize) -> (Vec<StoredHead>, usize) {
+        let mut entries = self.entries();
+        let total = entries.len();
+        entries.sort_by(|a, b| (b.modified, &b.id).cmp(&(a.modified, &a.id)));
+        let mut heads = Vec::new();
+        for e in entries {
+            if heads.len() >= limit {
+                break;
+            }
+            let Ok(bytes) = std::fs::read(&e.path) else {
+                continue;
+            };
+            if let Some(h) = parse_head(&bytes, &e.id) {
+                heads.push(h);
+            }
+        }
+        (heads, total)
     }
 
     /// Atomic, and may be called at once by many processes. The caller turns an error into a
@@ -194,4 +243,66 @@ fn entry_id(path: &Path) -> Option<String> {
     let name = path.file_name()?.to_str()?;
     let id = name.strip_suffix(&format!(".{EXT}"))?;
     valid_id(id).then(|| id.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    fn store(dir: &Path) -> ViewStore {
+        ViewStore {
+            root: dir.to_path_buf(),
+            cap_bytes: u64::MAX,
+        }
+    }
+
+    fn id(n: u8) -> String {
+        format!("v1-{:032x}", n)
+    }
+
+    fn body(id: &str, op: &str) -> String {
+        format!(
+            r#"{{"schema":1,"view_id":"{id}","positions":[{{"repo":"r","commit":null,"dirty":null}}],"query":{{"op":"{op}","args":{{}}}},"mermaid":"x"}}"#
+        )
+    }
+
+    fn put_at(s: &ViewStore, id: &str, text: &str, age_secs: u64) {
+        s.put(id, text.as_bytes()).unwrap();
+        let f = std::fs::File::options()
+            .write(true)
+            .open(s.path_of(id))
+            .unwrap();
+        f.set_modified(SystemTime::now() - Duration::from_secs(age_secs))
+            .unwrap();
+    }
+
+    #[test]
+    fn list_newest_first() {
+        let t = tempfile::tempdir().unwrap();
+        let s = store(t.path());
+        put_at(&s, &id(1), &body(&id(1), "a"), 300);
+        put_at(&s, &id(2), &body(&id(2), "b"), 100);
+        put_at(&s, &id(3), &body(&id(3), "c"), 200);
+        let (heads, total) = s.list(2);
+        assert_eq!(total, 3);
+        let ids: Vec<&str> = heads.iter().map(|h| h.view_id.as_str()).collect();
+        assert_eq!(ids, [id(2).as_str(), id(3).as_str()]);
+        assert_eq!(heads[0].query.op, "b");
+        assert_eq!(heads[0].positions[0].repo, "r");
+    }
+
+    #[test]
+    fn list_skips_bad_entries() {
+        let t = tempfile::tempdir().unwrap();
+        let s = store(t.path());
+        put_at(&s, &id(1), &body(&id(1), "a"), 400);
+        put_at(&s, &id(2), "not json", 300);
+        put_at(&s, &id(3), &body(&id(9), "c"), 200);
+        put_at(&s, &id(4), r#"{"view_id":"x"}"#, 100);
+        let (heads, total) = s.list(10);
+        assert_eq!(total, 4);
+        assert_eq!(heads.len(), 1);
+        assert_eq!(heads[0].view_id, id(1));
+    }
 }

@@ -437,6 +437,32 @@ fn docs_affected(k: &Katalogr, a: &Args, o: &Options) -> JsonAnswer {
     })
 }
 
+fn impact(k: &Katalogr, a: &Args, o: &Options) -> JsonAnswer {
+    let nonempty = |key: &str| a.opt(key).filter(|s| !s.is_empty());
+    let input = crate::cmd::impact::Input {
+        symbol: nonempty("text"),
+        file: nonempty("file"),
+        range: nonempty("range"),
+        since: nonempty("since"),
+        item: nonempty("item"),
+    };
+    let (depth, limit, test_depth) = (a.int("depth"), a.int("limit") as usize, a.int("test-depth"));
+    let facade = match input.parse(a.opt("at")) {
+        Ok(f) => f,
+        Err(e) => return render_json::error(&e),
+    };
+    let iopts = crate::cmd::impact::options(depth, limit, test_depth);
+    let o = q(
+        o,
+        a,
+        "impact",
+        &crate::cmd::impact::args(&input, depth, limit, test_depth),
+    );
+    answer(k.impact(&facade, &iopts, &o), |r| {
+        render_json::plain(r, |_| false)
+    })
+}
+
 fn position(start: &Path, overrides: &Overrides, a: &Args, o: &Options) -> JsonAnswer {
     let repo = a.opt("repo");
     let result = match Katalogr::resolve(start, overrides) {
@@ -633,8 +659,8 @@ macro_rules! op {
     };
 }
 
-/// Every route. Impact, flows, checks and exports add a row each when their items land; the
-/// `docs-affected` row is FEAT-086's.
+/// Every route. Flows, checks and exports add a row each when their items land; the
+/// `docs-affected` row is FEAT-086's and the `impact` row is FEAT-028's.
 pub const OPS: &[Op] = &[
     op!(
         "find",
@@ -751,6 +777,44 @@ pub const OPS: &[Op] = &[
         ],
         Some("docs-affected"),
         Call::Project(docs_affected)
+    ),
+    op!(
+        "impact",
+        "What a symbol, file, change range or item reaches, and the tests over it.",
+        &[
+            opt(
+                "text",
+                Ty::Str,
+                "symbol or contract, canonical or plain name"
+            ),
+            opt(
+                "file",
+                Ty::Str,
+                "`<repo>:<path>`, or a path in the marked repository"
+            ),
+            opt("range", Ty::Str, "change range `BASE..HEAD`"),
+            opt(
+                "since",
+                Ty::Str,
+                "changes since a revision or clean position"
+            ),
+            opt("item", Ty::Str, "board item code"),
+            dflt("depth", Ty::Int(0), "3", "call hops to follow"),
+            dflt(
+                "limit",
+                Ty::Int(1),
+                "500",
+                "most nodes in the groups, and most tests"
+            ),
+            dflt(
+                "test-depth",
+                Ty::Int(0),
+                "3",
+                "hops the tests section follows"
+            ),
+        ],
+        Some("impact"),
+        Call::Project(impact)
     ),
     op!(
         "status",
@@ -941,6 +1005,17 @@ pub const OPS: &[Op] = &[
         Call::Project(view_callers)
     ),
     op!(
+        "views/impact",
+        "An impact view at a position: Mermaid and the graph.",
+        &[
+            req("symbol", "canonical name or plain name"),
+            dflt("depth", Ty::Int(1), "3", "hops to follow"),
+            MAX_NODES,
+        ],
+        Some("view"),
+        Call::Project(view_impact)
+    ),
+    op!(
         "views/path",
         "A path view at a position: Mermaid and the graph.",
         &[
@@ -965,6 +1040,25 @@ pub const OPS: &[Op] = &[
         ],
         Some("view"),
         Call::Project(view_cycles)
+    ),
+    op!(
+        "timeline",
+        "The stored views and snapshot views, oldest first, for a time slider. Reads no index.",
+        &[dflt(
+            "limit",
+            Ty::Int(1),
+            "1000",
+            "most points returned; the newest are kept"
+        )],
+        Some("timeline"),
+        Call::Project(timeline)
+    ),
+    op!(
+        "stored-view",
+        "The stored bytes of a view by its view ID, as a view route answers them.",
+        &[req("id", "a view ID, `v1-` and 32 hex digits")],
+        Some("view"),
+        Call::Project(stored_view)
     ),
     op!(
         "context-conflicts",
@@ -1028,8 +1122,19 @@ macro_rules! view_fn {
 view_fn!(view_structure, "structure");
 view_fn!(view_contracts, "contracts");
 view_fn!(view_callers, "callers");
+view_fn!(view_impact, "impact");
 view_fn!(view_path, "path");
 view_fn!(view_cycles, "cycles");
+
+/// `GET /api/v1/timeline`: one facade call, no query and no wait.
+fn timeline(k: &Katalogr, a: &Args, _: &Options) -> JsonAnswer {
+    answer(k.timeline(a.int("limit") as usize), render_json::timeline)
+}
+
+/// `GET /api/v1/stored-view`: the stored bytes of one view ID.
+fn stored_view(k: &Katalogr, a: &Args, _: &Options) -> JsonAnswer {
+    answer(k.stored_view(a.str("id")), render_json::view_answer)
+}
 
 /// `GET /api/v1/views/`: the ops and their arguments, sorted by op.
 fn views_catalogue(_: &Path, _: &Overrides, a: &Args, _: &Options) -> JsonAnswer {

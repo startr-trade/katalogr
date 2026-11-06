@@ -123,3 +123,64 @@ pub fn link(tx: &mut WriteTx, repo: &str, path: &str, from: Id, kind: &str, to: 
     )
     .unwrap();
 }
+
+/// A link with the given confidence.
+pub fn link_conf(
+    tx: &mut WriteTx,
+    repo: &str,
+    path: &str,
+    from: Id,
+    kind: &str,
+    to: Id,
+    confidence: Confidence,
+) {
+    let mut row = link_row(repo, path);
+    row.entries[0].confidence = confidence;
+    tx.put_link(
+        &LinkKey {
+            from,
+            kind: LinkKind(kind.into()),
+            to,
+        },
+        &row,
+    )
+    .unwrap();
+}
+
+/// Add a contract node with the given role counts; returns its id.
+pub fn contract(
+    tx: &mut WriteTx,
+    kind: &str,
+    key: &str,
+    providers: u32,
+    consumers: u32,
+    declarers: u32,
+) -> Id {
+    let name = katalogr_model::ContractName {
+        kind: kind.into(),
+        key: key.into(),
+    };
+    let id = Id::of(&name.canonical());
+    tx.put_contract(
+        id,
+        &katalogr_store::ContractRow {
+            name,
+            providers,
+            consumers,
+            declarers,
+        },
+    )
+    .unwrap();
+    id
+}
+
+/// Give a symbol the neutral `test` fact with the given role.
+pub fn mark_test(tx: &mut WriteTx, id: Id, role: &str) {
+    use katalogr_store::Reader;
+    let mut row = tx.symbol(id).unwrap().unwrap();
+    row.facts.insert(
+        katalogr_model::insight::FACT_TEST.to_string(),
+        katalogr_model::Fact::Str(role.to_string()),
+    );
+    tx.put_symbol(id, &row).unwrap();
+}

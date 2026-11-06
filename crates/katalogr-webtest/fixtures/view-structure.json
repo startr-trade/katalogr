@@ -1,0 +1,54 @@
+{
+ "schema": 1,
+ "view_format": 1,
+ "view_id": "v1-00000000000000000000000000000001",
+ "exact": true,
+ "positions": [
+  {
+   "repo": "app",
+   "commit": "0123456789abcdef0123456789abcdef01234567",
+   "dirty": null
+  }
+ ],
+ "query": {
+  "op": "structure",
+  "args": {
+   "inferred": "false",
+   "level": "package",
+   "max-nodes": "60"
+  }
+ },
+ "mermaid": "flowchart LR\n  n1[\"app\"]\n  n2[\"lib\"]\n  n1 --> n2\n",
+ "graph": {
+  "title": "structure --level package",
+  "nodes": [
+   {
+    "id": "n1",
+    "name": "repo:app",
+    "label": "app",
+    "kind": "package",
+    "path": null,
+    "group": null
+   },
+   {
+    "id": "n2",
+    "name": "repo:lib",
+    "label": "lib",
+    "kind": "package",
+    "path": null,
+    "group": null
+   }
+  ],
+  "edges": [
+   {
+    "from": "n1",
+    "to": "n2",
+    "kind": "calls",
+    "inferred": false
+   }
+  ],
+  "shown": 2,
+  "total": 2
+ },
+ "pele": "1.7.0"
+}
