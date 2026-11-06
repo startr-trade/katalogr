@@ -37,6 +37,7 @@ pub mod render_doc;
 pub mod replace;
 pub mod search;
 pub mod session;
+pub mod shard;
 pub mod show;
 pub mod skill;
 pub mod status;

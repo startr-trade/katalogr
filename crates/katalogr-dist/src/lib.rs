@@ -18,6 +18,7 @@ pub mod eval;
 pub mod hooks;
 mod roots;
 mod setup;
+mod shard_show;
 mod span;
 #[cfg(feature = "test-extractor")]
 mod test_extractor;

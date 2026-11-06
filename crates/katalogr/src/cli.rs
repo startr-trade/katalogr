@@ -319,7 +319,7 @@ pub enum Command {
         /// Lowest severity that makes the command exit 1.
         #[arg(long, value_enum, default_value = "warning", value_name = "LEVEL")]
         fail_on: FailOn,
-        /// Do not compare the shard files with the kindex git repository.
+        /// Do not compare the files people write with the kindex git repository.
         #[arg(long)]
         skip_git: bool,
         /// List up to a few repo-relative keys for each finding.
@@ -539,6 +539,11 @@ pub enum Command {
         #[command(subcommand)]
         action: ProfilesAction,
     },
+    /// Print what the index holds about one file, as text.
+    Shard {
+        #[command(subcommand)]
+        action: ShardAction,
+    },
     /// Compare mirrored copies of a structure: contracts with two or more declarers. Exits 1
     /// when a field is missing on one side or differs in type, required or many.
     Mirrors {
@@ -629,6 +634,19 @@ pub enum ContextAction {
         /// Keep at most this many.
         #[arg(long, value_name = "N")]
         keep: Option<usize>,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum ShardAction {
+    /// Extract one file as the indexer would and print its fragment in shard text form (format
+    /// 1). Reads the working tree, or the file's blob at `--commit`; writes nothing.
+    Show {
+        /// `<repo>:<path>`, for example `app:src/lib.rs`.
+        target: String,
+        /// Read the file at this revision instead of the working tree.
+        #[arg(long, value_name = "REV")]
+        commit: Option<String>,
     },
 }
 

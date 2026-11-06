@@ -976,6 +976,110 @@ mod cli {
         assert_eq!(v["result"]["changed_files"], 1);
         assert!(v["exact"].is_boolean());
     }
+
+    fn git_in(root: &Path, args: &[&str]) {
+        let st = Command::new("git")
+            .current_dir(root)
+            .args(args)
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .status()
+            .expect("run git");
+        assert!(st.success(), "git {args:?} failed");
+    }
+
+    /// Every file below `root` (outside `.git`) with its length and modification time.
+    fn tree_state(root: &Path) -> std::collections::BTreeMap<String, (u64, std::time::SystemTime)> {
+        fn walk(
+            dir: &Path,
+            root: &Path,
+            out: &mut std::collections::BTreeMap<String, (u64, std::time::SystemTime)>,
+        ) {
+            for e in std::fs::read_dir(dir).unwrap() {
+                let e = e.unwrap();
+                let path = e.path();
+                if e.file_name() == ".git" {
+                    continue;
+                }
+                if e.file_type().unwrap().is_dir() {
+                    walk(&path, root, out);
+                } else {
+                    let m = e.metadata().unwrap();
+                    out.insert(
+                        path.strip_prefix(root).unwrap().display().to_string(),
+                        (m.len(), m.modified().unwrap()),
+                    );
+                }
+            }
+        }
+        let mut out = std::collections::BTreeMap::new();
+        walk(root, root, &mut out);
+        out
+    }
+
+    /// R-13. The text form is shard format 1, sorted JSON, for the file as it is on disk.
+    #[test]
+    fn shard_show_prints_format_one() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (_kx, repo) = query_project(tmp.path());
+        let (code, out, err) = run_raw(&repo, &["shard", "show", "app:lib.tx"]);
+        assert_eq!(code, 0, "{err}");
+        let v: serde_json::Value = serde_json::from_str(&out).expect("shard text is JSON");
+        assert_eq!(v["format"], 1);
+        assert!(out.ends_with("}\n") && !out.contains('\r'));
+        assert!(out.contains("\"target\""), "{out}");
+        assert_eq!(v["provenance"]["path"], "lib.tx");
+        // A repo the project does not have is a usage error; a missing file is exit 4.
+        assert_eq!(run_raw(&repo, &["shard", "show", "nope:lib.tx"]).0, 2);
+        assert_eq!(run_raw(&repo, &["shard", "show", "lib.tx"]).0, 2);
+        assert_eq!(run_raw(&repo, &["shard", "show", "app:absent.tx"]).0, 4);
+        // No extractor handles this file.
+        assert_eq!(run_raw(&repo, &["shard", "show", "app:a.zzz"]).0, 4);
+    }
+
+    /// R-13. `--commit` reads the blob at that revision, whatever the working tree holds now.
+    #[test]
+    fn shard_show_at_commit() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (_kx, repo) = query_project(tmp.path());
+        git_in(&repo, &["init", "-q"]);
+        git_in(&repo, &["config", "user.name", "Test"]);
+        git_in(&repo, &["config", "user.email", "test@example.com"]);
+        git_in(&repo, &["config", "commit.gpgsign", "false"]);
+        git_in(&repo, &["add", "lib.tx"]);
+        git_in(&repo, &["commit", "-q", "-m", "c1"]);
+        std::fs::write(repo.join("lib.tx"), "sym fn replaced\n").unwrap();
+        let (code, now, err) = run_raw(&repo, &["shard", "show", "app:lib.tx"]);
+        assert_eq!(code, 0, "{err}");
+        assert!(now.contains("replaced") && !now.contains("\"target\""));
+        let (code, then, err) =
+            run_raw(&repo, &["shard", "show", "app:lib.tx", "--commit", "HEAD"]);
+        assert_eq!(code, 0, "{err}");
+        assert!(
+            then.contains("\"target\"") && !then.contains("replaced"),
+            "{then}"
+        );
+        assert_eq!(
+            run_raw(
+                &repo,
+                &["shard", "show", "app:lib.tx", "--commit", "no-such-rev"]
+            )
+            .0,
+            1,
+            "a bad revision is an error"
+        );
+    }
+
+    /// R-13. Showing a shard changes no file in the kindex, the cache or the repository.
+    #[test]
+    fn shard_show_writes_nothing() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (_kx, repo) = query_project(tmp.path());
+        let before = tree_state(tmp.path());
+        let (code, _, err) = run_raw(&repo, &["shard", "show", "app:user.tx"]);
+        assert_eq!(code, 0, "{err}");
+        assert_eq!(tree_state(tmp.path()), before);
+    }
 }
 
 mod query {
