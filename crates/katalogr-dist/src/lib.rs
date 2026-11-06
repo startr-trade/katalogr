@@ -50,7 +50,9 @@ pub use timeline::DEFAULT_TIMELINE_LIMIT;
 mod view_store;
 pub use view_store::ViewStore;
 mod views;
+mod workspace;
 pub use views::{FreshCheck, ViewBytes};
+pub use workspace::{MAX_IMPACT_ROUNDS, PEERS_SETTING, PeerSpec, RootsAccess};
 pub mod watch;
 pub mod working_set;
 
@@ -271,6 +273,8 @@ pub struct Options {
     /// Recompute instead of reading a stored answer; the result is still written (`--fresh`,
     /// FEAT-096).
     pub fresh: bool,
+    /// Read the reading project alone, even when it names peers (`--no-peers`, FEAT-020).
+    pub no_peers: bool,
 }
 
 /// How `search` and `map` order their answers (FEAT-039).

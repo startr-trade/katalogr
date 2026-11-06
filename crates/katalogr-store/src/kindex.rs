@@ -354,6 +354,28 @@ impl ProjectDir {
         self.root != self.project_root
     }
 
+    /// Sets one key of `settings` in `config.yaml`, keeping its sorted form, by `write_atomic`.
+    /// Commits nothing. Fails on a layer (`is_layer`). Reads the file again, so a setting written
+    /// since this handle opened is kept; `config()` still shows the handle's own copy.
+    pub fn set_setting(&self, key: &str, value: serde_yaml_ng::Value) -> Result<(), StoreError> {
+        let cpath = self.project_root.join("config.yaml");
+        if self.is_layer() {
+            return Err(StoreError::Parse {
+                path: cpath.to_string(),
+                message: "a context layer has no settings of its own".into(),
+            });
+        }
+        let parse = |e: serde_yaml_ng::Error| StoreError::Parse {
+            path: cpath.to_string(),
+            message: e.to_string(),
+        };
+        let mut config: ProjectConfig =
+            serde_yaml_ng::from_str(&read_to_string(&cpath)?).map_err(parse)?;
+        config.settings.insert(key.to_string(), value);
+        let yaml = serde_yaml_ng::to_string(&config).map_err(parse)?;
+        write_atomic(&cpath, yaml.as_bytes())
+    }
+
     /// Manifests under `.cache/contexts/`, sorted by id; an unreadable one is skipped.
     pub fn contexts(&self) -> Result<Vec<ContextManifest>, StoreError> {
         let dir = self.project_root.join(".cache").join("contexts");
