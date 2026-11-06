@@ -6,6 +6,7 @@ technologies:
     key-tree:
       - data/key-tree
       - data/codec-chain
+      - data/lineage-chain
     parse-error:
       - data/broken
     xml:
