@@ -88,6 +88,7 @@ KW.render = function () {
   else if (row.kind === "panels") { KW.views.panels(route, row, section, live); }
   else if (row.kind === "symbol") { KW.views.symbol(route, section, live); }
   else if (row.kind === "search") { KW.views.search(route, section, live); }
+  else if (row.kind === "lineage") { KW.views.lineage(route, section, live); }
 };
 
 KW.boot = function () {

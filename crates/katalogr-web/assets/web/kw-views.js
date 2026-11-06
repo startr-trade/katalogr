@@ -283,6 +283,9 @@ KW.views = (function () {
       function draw() {
         var r = explain.result || {};
         section.appendChild(D().h("h2", { "data-kw": "symbol-name" }, [sym.name]));
+        if (KW.state.capabilities.indexOf("type-lineage") >= 0) {
+          section.appendChild(D().h("p", {}, [D().link("Type lineage", KW.core.buildLink("type-lineage", { symbol: sym.name }), { "data-kw": "symbol-lineage" })]));
+        }
         section.appendChild(D().h("p", {}, [sym.kind + " " + sym.path + ":" + line]));
         if (r.signature) { section.appendChild(D().h("pre", { "data-kw": "symbol-signature" }, [r.signature])); }
         if (r.doc) { section.appendChild(D().h("p", { "data-kw": "symbol-doc" }, [r.doc])); }
@@ -342,5 +345,11 @@ KW.views = (function () {
     });
   }
 
-  return { graph: graph, serviceMap: serviceMap, symbol: symbol, search: search, panels: panels, absent: absent, slider: slider };
+  /* ---- type lineage (kw-lineage.js) ---- */
+
+  function lineage(route, section, live) {
+    KW.lineage.draw(route, section, live, { notes: notes, diagramAndExplore: diagramAndExplore });
+  }
+
+  return { graph: graph, serviceMap: serviceMap, symbol: symbol, search: search, panels: panels, absent: absent, slider: slider, lineage: lineage };
 })();

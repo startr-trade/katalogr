@@ -26,12 +26,13 @@ const CSS: &str = "text/css";
 const TXT: &str = "text/plain";
 
 /// Scripts of the page after Pele, in load order.
-const SCRIPT_NAMES: [&str; 7] = [
+const SCRIPT_NAMES: [&str; 8] = [
     "cytoscape.min.js",
     "kw-core.js",
     "kw-dom.js",
     "kw-diagram.js",
     "kw-explore.js",
+    "kw-lineage.js",
     "kw-views.js",
     "kw-main.js",
 ];
@@ -86,6 +87,11 @@ fn table() -> &'static (Vec<Asset>, Vec<String>) {
                 name: "kw-explore.js",
                 mime: JS,
                 text: include_str!("../assets/web/kw-explore.js"),
+            },
+            Asset {
+                name: "kw-lineage.js",
+                mime: JS,
+                text: include_str!("../assets/web/kw-lineage.js"),
             },
             Asset {
                 name: "kw-views.js",
