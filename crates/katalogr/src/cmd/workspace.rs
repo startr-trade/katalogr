@@ -3,7 +3,7 @@
 use katalogr_dist::DistError;
 
 use crate::cli::{Cli, WorkspaceAction};
-use crate::cmd::{options, resolve};
+use crate::cmd::{options, options_for, resolve};
 use crate::exit::ExitCode;
 use crate::render;
 
@@ -15,7 +15,7 @@ pub fn run(cli: &Cli, action: &WorkspaceAction) -> Result<ExitCode, DistError> {
             Ok(render::workspace_status(cli, peers))
         }
         WorkspaceAction::Map => {
-            let reply = k.workspace_map(&options(cli))?;
+            let reply = k.workspace_map(&options_for(cli, "workspace-map", &[]))?;
             Ok(render::workspace_map(cli, reply))
         }
         WorkspaceAction::Add { peer, alias } => {

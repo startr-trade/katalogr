@@ -20,6 +20,7 @@ pub const COMMON_PARAMS: &[&str] = &[
     "budget",
     "diagnostic",
     "expand",
+    "no-peers",
 ];
 
 /// What authorisation sees of a request: method, path, query and headers. The fields are the

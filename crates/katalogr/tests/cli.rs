@@ -915,7 +915,7 @@ mod cli {
         .unwrap();
         validate(&schema, &schema, &v, "$").unwrap_or_else(|e| panic!("{e}\n{v}"));
         assert_eq!(v["api"], 1);
-        assert_eq!(v["contract"], 6);
+        assert_eq!(v["contract"], 7);
         assert_eq!(v["schema"], 1);
         assert_eq!(v["katalogr"], env!("CARGO_PKG_VERSION"));
         assert_eq!(
@@ -927,7 +927,8 @@ mod cli {
                 "position",
                 "timeline",
                 "view-id",
-                "views"
+                "views",
+                "workspace"
             ])
         );
     }
@@ -939,9 +940,21 @@ mod cli {
         let out = katalogr(tmp.path(), &["--json", "contract"]);
         assert_eq!(out.status.code(), Some(0), "{out:?}");
         let v: Value = serde_json::from_slice(&out.stdout).expect("json");
-        assert_eq!(v["contract"], 6);
+        assert_eq!(v["contract"], 7);
         let caps = v["capabilities"].as_array().expect("capabilities");
         assert!(caps.iter().any(|c| c == "impact"), "{caps:?}");
+    }
+
+    /// FEAT-020 R-14: `katalogr contract --json` lists `workspace`.
+    #[test]
+    fn contract_lists_workspace() {
+        let tmp = tempfile::tempdir().unwrap();
+        let out = katalogr(tmp.path(), &["--json", "contract"]);
+        assert_eq!(out.status.code(), Some(0), "{out:?}");
+        let v: Value = serde_json::from_slice(&out.stdout).expect("json");
+        assert_eq!(v["contract"], 7);
+        let caps = v["capabilities"].as_array().expect("capabilities");
+        assert!(caps.iter().any(|c| c == "workspace"), "{caps:?}");
     }
 
     /// FEAT-007 R-8: `katalogr contract --json` lists `deps` and raises the contract to 6.
@@ -951,7 +964,7 @@ mod cli {
         let out = katalogr(tmp.path(), &["--json", "contract"]);
         assert_eq!(out.status.code(), Some(0), "{out:?}");
         let v: Value = serde_json::from_slice(&out.stdout).expect("json");
-        assert_eq!(v["contract"], 6);
+        assert_eq!(v["contract"], 7);
         let caps = v["capabilities"].as_array().expect("capabilities");
         assert!(caps.iter().any(|c| c == "deps"), "{caps:?}");
     }

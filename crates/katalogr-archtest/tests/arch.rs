@@ -746,7 +746,7 @@ mod archtest {
     ];
 
     /// Facade or function names that edit source files, settings, hooks, the index or the project.
-    const API_DENIED_NAMES: [&str; 11] = [
+    const API_DENIED_NAMES: [&str; 13] = [
         "replace",
         "notify",
         "add_root",
@@ -758,10 +758,12 @@ mod archtest {
         "context_prune",
         "project_init",
         "kindex_init",
+        "workspace_add",
+        "workspace_locate",
     ];
 
     /// The read calls an op row makes on the facade; each row makes exactly one.
-    const API_READ_CALLS: [&str; 30] = [
+    const API_READ_CALLS: [&str; 32] = [
         "find",
         "view",
         "refs",
@@ -792,6 +794,8 @@ mod archtest {
         "doctor",
         "timeline",
         "stored_view",
+        "workspace_status",
+        "workspace_map",
     ];
 
     #[derive(Default)]

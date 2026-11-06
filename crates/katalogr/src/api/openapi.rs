@@ -33,6 +33,8 @@ fn schema_text(name: &str) -> Option<&'static str> {
         "tests" => include_str!("../../../../schema/v1/tests.schema.json"),
         "view" => include_str!("../../../../schema/v1/view.schema.json"),
         "why" => include_str!("../../../../schema/v1/why.schema.json"),
+        "workspace-map" => include_str!("../../../../schema/v1/workspace-map.schema.json"),
+        "workspace-status" => include_str!("../../../../schema/v1/workspace-status.schema.json"),
         _ => return None,
     })
 }

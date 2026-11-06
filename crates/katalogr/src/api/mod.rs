@@ -448,7 +448,7 @@ fn execute(shared: &Shared, op: &Op, args: &Args) -> JsonAnswer {
         view: None,
         ranking: katalogr_dist::Ranking::Neutral,
         fresh: false,
-        no_peers: false,
+        no_peers: args.flag("no-peers"),
     };
     let waits = mode != Consistency::StaleOk;
     let gate;
