@@ -368,7 +368,10 @@ impl Katalogr {
     }
 
     pub(crate) fn note(&self, text: String) {
-        self.notes.lock().expect("notes lock").push(text);
+        let mut notes = self.notes.lock().expect("notes lock");
+        if !notes.contains(&text) {
+            notes.push(text);
+        }
     }
 
     /// The `ProjectDir` for the chosen context, seeding it first when it is this checkout's

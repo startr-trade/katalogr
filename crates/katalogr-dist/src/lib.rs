@@ -761,7 +761,38 @@ impl Katalogr {
             );
         }
         self.pin_positions(&mut engine, manifest_kind.as_ref())?;
+        self.recorded_only(&mut engine)?;
         self.configure(engine)
+    }
+
+    /// FEAT-097 R-13. A repo the project lists, with no root here and a recorded position (an
+    /// imported snapshot), answers from its rows. It is told apart from a repo with no record,
+    /// which is absent from this index.
+    fn recorded_only(&self, engine: &mut Engine) -> Result<(), DistError> {
+        use std::collections::BTreeSet;
+        let missing: Vec<String> = self
+            .project
+            .config()
+            .repos
+            .iter()
+            .filter(|r| !engine.roots().contains_key(&r.name))
+            .map(|r| r.name.clone())
+            .collect();
+        if missing.is_empty() {
+            return Ok(());
+        }
+        let snap = engine.cache().read()?;
+        let mut only = BTreeSet::new();
+        for repo in missing {
+            if let Some(p) = katalogr_engine::consistency::recorded_position(&snap, &repo)?
+                && p.commit.as_deref().is_some_and(|c| !c.is_empty())
+            {
+                only.insert(repo);
+            }
+        }
+        drop(snap);
+        engine.set_recorded_only(only);
+        Ok(())
     }
 
     /// FEAT-084. Fix the position of every repo this context does not read from a checkout: a

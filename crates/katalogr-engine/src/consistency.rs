@@ -784,6 +784,15 @@ impl Engine {
         recorded: BTreeMap<String, PositionRef>,
         warnings: &mut Vec<String>,
     ) -> Result<(Vec<PositionRef>, bool), EngineError> {
+        // FEAT-097 R-13. Said on every read, since the answer is not from a checkout.
+        for repo in &self.recorded_only {
+            if let Some(commit) = recorded.get(repo).and_then(|p| p.commit.as_deref()) {
+                warnings.push(format!(
+                    "repo {repo} has no checkout here: answering from its imported index at {}",
+                    &commit[..commit.len().min(12)]
+                ));
+            }
+        }
         let not_exact = |recorded: BTreeMap<String, PositionRef>| {
             (recorded.into_values().collect::<Vec<_>>(), false)
         };

@@ -650,4 +650,98 @@ mod snapshot {
         assert!(tx.pending_entries(None).unwrap().is_empty());
         assert_eq!(tx.event_count("worktree").unwrap(), 0);
     }
+
+    /// A machine with the project but no clone of the repo: the snapshot imported, no root.
+    fn no_clone(s: &Setup) -> (Setup, Katalogr) {
+        let t = second_machine(s);
+        let out = exported(s);
+        katalogr(&t)
+            .snapshot_import(&out, false, None, &opts())
+            .unwrap();
+        std::fs::remove_file(t.kx.join("projects/demo/.cache/roots.yaml")).ok();
+        let k = rootless(&t);
+        (t, k)
+    }
+
+    fn rootless(t: &Setup) -> Katalogr {
+        Katalogr::resolve(
+            std::path::Path::new("/"),
+            &Overrides {
+                kindex: Some(t.kx.display().to_string()),
+                project: Some("demo".into()),
+                ..Default::default()
+            },
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn no_clone_answers_find() {
+        let _g = serial();
+        let s = setup();
+        let (_t, k) = no_clone(&s);
+        let r = k.find("alpha", &opts()).unwrap();
+        assert!(
+            matches!(&r.outcome, katalogr_dist::Outcome::Found(h) if !h.is_empty()),
+            "{:?}",
+            r.report
+        );
+        assert!(r.report.exact, "{:?}", r.report);
+        assert!(!r.report.stale);
+    }
+
+    #[test]
+    fn no_clone_reports_positions_and_warning() {
+        let _g = serial();
+        let s = setup();
+        let commit = head(&s.repo);
+        let (_t, k) = no_clone(&s);
+        let r = k.find("alpha", &opts()).unwrap();
+        assert_eq!(r.report.positions.len(), 1);
+        assert_eq!(r.report.positions[0].repo, "app");
+        assert_eq!(
+            r.report.positions[0].commit.as_deref(),
+            Some(commit.as_str())
+        );
+        assert_eq!(r.report.positions[0].dirty, None);
+        let want = format!(
+            "repo app has no checkout here: answering from its imported index at {}",
+            &commit[..12]
+        );
+        assert!(r.report.warnings.contains(&want), "{:?}", r.report.warnings);
+    }
+
+    #[test]
+    fn no_clone_view_id_matches_source_machine() {
+        let _g = serial();
+        let s = setup();
+        let view = |k: &Katalogr| {
+            let o = Options {
+                view: Some(katalogr_dist::ViewQuery {
+                    op: "find".into(),
+                    args: std::collections::BTreeMap::from([("text".into(), "alpha".into())]),
+                }),
+                ..opts()
+            };
+            k.find("alpha", &o).unwrap().report.view_id
+        };
+        let source = view(&katalogr(&s));
+        assert!(source.is_some());
+        let (_t, k) = no_clone(&s);
+        assert_eq!(view(&k), source);
+    }
+
+    #[test]
+    fn no_clone_show_says_no_checkout() {
+        let _g = serial();
+        let s = setup();
+        let (_t, k) = no_clone(&s);
+        let r = k.show("alpha", false, &opts()).unwrap();
+        match r.outcome {
+            katalogr_dist::Outcome::NoMatch(m) => {
+                assert_eq!(m, "repo app has no checkout here");
+            }
+            other => panic!("expected NoMatch, got {other:?}"),
+        }
+    }
 }
