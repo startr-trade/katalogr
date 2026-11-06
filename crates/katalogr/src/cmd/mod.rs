@@ -45,6 +45,7 @@ pub mod session;
 pub mod shard;
 pub mod show;
 pub mod skill;
+pub mod snapshot;
 pub mod status;
 pub mod tests;
 pub mod version;

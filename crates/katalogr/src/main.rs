@@ -90,6 +90,7 @@ fn run(cli: &Cli) -> Result<ExitCode, DistError> {
         Some(Command::Shard { action }) => cmd::shard::run(cli, action),
         Some(Command::Answers { action }) => cmd::answers::run(cli, action),
         Some(Command::Audit { action }) => cmd::audit::run(cli, action),
+        Some(Command::Snapshot { action }) => cmd::snapshot::run(cli, action),
         Some(Command::Dangling { kind }) => cmd::dangling::run(cli, kind),
         Some(Command::DocsAffected { since, kind, limit }) => {
             cmd::docs_affected::run(cli, since.as_deref(), kind, *limit)

@@ -25,6 +25,8 @@ pub struct SnapshotExport {
     pub schema: u32,
     pub manifest: SnapshotManifest,
     pub file_bytes: u64,
+    /// Repos left out because they have no root here and no rows.
+    pub warnings: Vec<String>,
 }
 
 pub(crate) fn refused(message: impl Into<String>) -> DistError {
@@ -172,6 +174,7 @@ impl Katalogr {
                 schema: 1,
                 manifest,
                 file_bytes,
+                warnings,
             })
         })();
         let _ = std::fs::remove_file(&tmp);
@@ -182,4 +185,9 @@ impl Katalogr {
 
 pub(crate) fn absolute(p: &Utf8Path) -> Result<Utf8PathBuf, DistError> {
     crate::setup::absolute(p.as_std_path())
+}
+
+/// The JSON Schema of a [`SnapshotManifest`] (`snapshot show --json`).
+pub fn manifest_schema() -> serde_json::Value {
+    schemars::schema_for!(SnapshotManifest).to_value()
 }

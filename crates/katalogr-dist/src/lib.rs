@@ -66,11 +66,12 @@ use katalogr_query::{
 };
 pub use katalogr_query::{ReplaceResult, ShowResult};
 pub use katalogr_render as render;
+pub use katalogr_store::SnapshotManifest;
 #[cfg(feature = "web")]
 pub use katalogr_web as web;
 pub use setup::{ProjectCreated, kindex_init, project_init};
 pub use snapshot::SnapshotExport;
-pub use snapshot_import::SnapshotImport;
+pub use snapshot_import::{SnapshotImport, read_snapshot_manifest};
 pub use threads::{BATCH_BYTES_KEY, THREADS_ENV, THREADS_KEY, resolve_parallelism};
 
 use camino::{Utf8Path, Utf8PathBuf};
@@ -138,6 +139,16 @@ pub fn schemas() -> BTreeMap<&'static str, serde_json::Value> {
         all.insert("answers-stats", answers::stats_schema())
             .is_none(),
         "schema name answers-stats is registered twice"
+    );
+    assert!(
+        all.insert("snapshot-manifest", snapshot::manifest_schema())
+            .is_none(),
+        "schema name snapshot-manifest is registered twice"
+    );
+    assert!(
+        all.insert("snapshot-import", snapshot_import::schema())
+            .is_none(),
+        "schema name snapshot-import is registered twice"
     );
     assert!(
         all.insert("position", katalogr_query::position_schema())

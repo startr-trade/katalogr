@@ -154,3 +154,13 @@ impl Katalogr {
         Ok(manifest)
     }
 }
+
+/// The JSON Schema of a [`SnapshotImport`] (`snapshot import --json`).
+pub fn schema() -> serde_json::Value {
+    schemars::schema_for!(SnapshotImport).to_value()
+}
+
+/// The manifest of `file`, read from its header alone: no project is needed.
+pub fn read_snapshot_manifest(file: &Utf8Path) -> Result<SnapshotManifest, DistError> {
+    Ok(read_manifest(file)?)
+}

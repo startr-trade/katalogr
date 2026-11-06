@@ -22,6 +22,7 @@ api = ["dep:tiny_http"]
 web = ["api", "katalogr-dist/web"]
 
 [dependencies]
+camino.workspace = true
 katalogr-dist.workspace = true
 anyhow.workspace = true
 clap.workspace = true
