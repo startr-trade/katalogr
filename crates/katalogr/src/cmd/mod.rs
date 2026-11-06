@@ -17,6 +17,7 @@ pub mod docs_affected;
 pub mod doctor;
 pub mod eval;
 pub mod explain;
+pub mod export;
 pub mod find;
 pub mod hook;
 pub mod hooks;

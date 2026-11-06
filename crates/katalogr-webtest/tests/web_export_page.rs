@@ -19,7 +19,11 @@ mod web_export {
         let kept: Vec<&str> = qs
             .split('&')
             .filter(|x| !x.is_empty())
-            .filter(|x| !["consistency=", "timeout=", "at="].iter().any(|v| x.starts_with(v)))
+            .filter(|x| {
+                !["consistency=", "timeout=", "at="]
+                    .iter()
+                    .any(|v| x.starts_with(v))
+            })
             .collect();
         if kept.is_empty() {
             op.to_string()
@@ -48,7 +52,10 @@ mod web_export {
                 assert!(k == "meta" || planned.contains(&k), "{k} is not planned");
             }
             // `show` asks for the signature unless the file was made with the source.
-            let asked_signature = p.requests().iter().any(|r| r.starts_with("/api/v1/show?") && r.contains("signature=true"));
+            let asked_signature = p
+                .requests()
+                .iter()
+                .any(|r| r.starts_with("/api/v1/show?") && r.contains("signature=true"));
             assert_eq!(asked_signature, !with_source);
         }
     }
@@ -71,12 +78,19 @@ mod web_export {
                     continue;
                 }
                 asked += 1;
-                assert!(planned.contains(&k), "{}: {k} is not planned ({planned:?})", view.id);
+                assert!(
+                    planned.contains(&k),
+                    "{}: {k} is not planned ({planned:?})",
+                    view.id
+                );
             }
         }
         assert!(asked >= 6, "only {asked} requests were checked");
         // The graph page's controls may ask for either level, and both are held.
-        for level in ["views/structure?level=package", "views/structure?level=file"] {
+        for level in [
+            "views/structure?level=package",
+            "views/structure?level=file",
+        ] {
             assert!(planned.contains(&level.to_string()), "{level}");
         }
     }
@@ -105,9 +119,15 @@ mod web_export {
     #[test]
     fn find_filters_embedded_symbols() {
         let mut d = canned(false);
-        let sym = |n: &str| json!({"name": n, "kind": "fn", "path": "src/lib.rs",
-            "span": {"start_line": 1, "start_col": 0, "end_line": 1, "end_col": 1}});
-        d.symbols = vec![sym("repo:app#fn:Alpha"), sym("repo:app#fn:beta"), sym("repo:app#fn:alphabet")];
+        let sym = |n: &str| {
+            json!({"name": n, "kind": "fn", "path": "src/lib.rs",
+            "span": {"start_line": 1, "start_col": 0, "end_line": 1, "end_col": 1}})
+        };
+        d.symbols = vec![
+            sym("repo:app#fn:Alpha"),
+            sym("repo:app#fn:beta"),
+            sym("repo:app#fn:alphabet"),
+        ];
         let mut p = Page::open_file(&single_file(&d), "#/health");
         let r = p.eval_json(
             "(function () { var r; window.KW_TRANSPORT('/api/v1/find?consistency=wait&text=ALPH&timeout=10', \
@@ -121,7 +141,10 @@ mod web_export {
         // The search box reaches the same list.
         p.navigate("#/search?q=alph", &NoBackend);
         let t = p.text();
-        assert!(t.contains("repo:app#fn:Alpha") && t.contains("repo:app#fn:alphabet"), "{t}");
+        assert!(
+            t.contains("repo:app#fn:Alpha") && t.contains("repo:app#fn:alphabet"),
+            "{t}"
+        );
         assert!(!t.contains("repo:app#fn:beta"), "{t}");
     }
 
@@ -144,7 +167,10 @@ mod web_export {
         let mut p = Page::open_file(&single_file(&d), "#/health");
         let t = p.text();
         assert!(t.contains("Positions: app@0123456789ab"), "{t}");
-        assert!(t.contains("This export holds the 2 most connected of 9 symbols."), "{t}");
+        assert!(
+            t.contains("This export holds the 2 most connected of 9 symbols."),
+            "{t}"
+        );
         assert!(p.has("positions"));
     }
 }

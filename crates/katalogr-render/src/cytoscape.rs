@@ -112,7 +112,12 @@ mod tests {
     }
 
     fn edge(from: &str, to: &str, kind: &str) -> ViewEdge {
-        ViewEdge { from: from.into(), to: to.into(), kind: kind.into(), inferred: false }
+        ViewEdge {
+            from: from.into(),
+            to: to.into(),
+            kind: kind.into(),
+            inferred: false,
+        }
     }
 
     #[test]
@@ -152,7 +157,10 @@ mod tests {
     fn missing_fields_left_out() {
         let g = ViewGraph {
             title: "t".into(),
-            nodes: vec![node("n1", "core/lib", None, None), node("n2", "x", Some("p.rs"), Some("app"))],
+            nodes: vec![
+                node("n1", "core/lib", None, None),
+                node("n2", "x", Some("p.rs"), Some("app")),
+            ],
             edges: vec![],
             shown: 1,
             total: 5,

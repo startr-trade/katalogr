@@ -64,6 +64,55 @@ pub enum RenderAction {
     },
 }
 
+/// Output format of `export graph`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+#[value(rename_all = "kebab-case")]
+pub enum GraphFormat {
+    Dot,
+    Graphml,
+    Json,
+}
+
+/// The arguments of `katalogr export html` (FEAT-034). `--at` and `--timeout` are the global
+/// flags.
+#[cfg(feature = "web")]
+#[derive(Debug, clap::Args)]
+pub struct ExportHtmlArgs {
+    /// The file to write.
+    #[arg(long, value_name = "FILE")]
+    pub out: std::path::PathBuf,
+    /// The most connected symbols that get a page in the file.
+    #[arg(long, default_value_t = 200, value_name = "N")]
+    pub max_symbols: usize,
+    /// Also put source lines in the file; by default it holds signatures and doc comments only.
+    #[arg(long)]
+    pub with_source: bool,
+}
+
+/// The arguments of `katalogr export graph` (FEAT-034).
+#[derive(Debug, clap::Args)]
+pub struct ExportGraphArgs {
+    /// `dot`, `graphml` or `json` (Cytoscape elements).
+    #[arg(long, value_enum, value_name = "FORMAT")]
+    pub format: Option<GraphFormat>,
+    /// The file to write.
+    #[arg(long, value_name = "FILE")]
+    pub out: Option<std::path::PathBuf>,
+    /// The view: an op, then its arguments and flags, as `view` takes them.
+    #[arg(allow_hyphen_values = true, value_name = "OP [ARGS]")]
+    pub words: Vec<String>,
+}
+
+/// Static exports for reviewers (FEAT-034).
+#[derive(Debug, Subcommand)]
+pub enum ExportAction {
+    /// Write one self-contained offline file holding the web view's views and their data.
+    #[cfg(feature = "web")]
+    Html(ExportHtmlArgs),
+    /// Write one view as DOT, GraphML or Cytoscape JSON, for Gephi, yEd or Cytoscape.
+    Graph(ExportGraphArgs),
+}
+
 /// Document modes of `view` (FEAT-035).
 #[derive(Debug, Subcommand)]
 pub enum ViewAction {
@@ -354,6 +403,12 @@ pub enum Command {
         /// The view: an op, then its arguments and flags.
         #[arg(allow_hyphen_values = true, value_name = "OP [ARGS]")]
         words: Vec<String>,
+    },
+    /// Write static files for reviewers: `html` (one offline file with the web view's views) or
+    /// `graph` (one view as DOT, GraphML or JSON).
+    Export {
+        #[command(subcommand)]
+        action: ExportAction,
     },
     /// Describe a symbol: signature, doc, links and rationale.
     Explain {

@@ -143,7 +143,7 @@ fn print_next(next: &[String]) {
     }
 }
 
-fn note_stale(report: &Report) {
+pub(crate) fn note_stale(report: &Report) {
     for w in stale_warnings(report) {
         eprintln!("katalogr: warning: {w}");
     }

@@ -646,6 +646,8 @@ mod api {
             "api",
             // The API plus the web view's pages.
             "serve",
+            // Writes a file for reviewers (FEAT-034).
+            "export",
             "mcp",
             "eval",
             "profiles",

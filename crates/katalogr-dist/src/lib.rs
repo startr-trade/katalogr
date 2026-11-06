@@ -677,6 +677,11 @@ impl Katalogr {
         })
     }
 
+    /// The machine-local root of each repo, as text. For checks that no export holds one.
+    pub fn root_paths(&self) -> Vec<String> {
+        self.roots.values().map(|r| r.to_string()).collect()
+    }
+
     pub fn project(&self) -> &ProjectDir {
         &self.project
     }

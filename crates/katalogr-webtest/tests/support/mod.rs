@@ -88,7 +88,12 @@ pub fn canned(with_source: bool) -> ExportData {
     put(&mut d, "explain", &[("symbol", SYMBOL)], fx("explain"));
     put(&mut d, "why", &[("location", "src/lib.rs:3")], fx("why"));
     put(&mut d, "tests", &[("text", SYMBOL)], fx("tests"));
-    put(&mut d, "views/callers", &[("symbol", SYMBOL)], fx("view-callers"));
+    put(
+        &mut d,
+        "views/callers",
+        &[("symbol", SYMBOL)],
+        fx("view-callers"),
+    );
     let mut show = vec![("symbol", SYMBOL)];
     if !with_source {
         show.push(("signature", "true"));

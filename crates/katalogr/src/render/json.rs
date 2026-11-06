@@ -105,7 +105,7 @@ pub(super) fn set_packing(trace: &mut Option<Trace>, strings: &[String], budget:
 /// The exit code of a reply: ambiguity, no match, a stale file, or a timed-out wait. A timed-out
 /// wait is stale whatever the outcome, since a no-match or ambiguous answer may only reflect
 /// what was not indexed yet; the outcome stays in the output (FEAT-080 R-5).
-pub(super) fn exit_for<T>(reply: &Reply<T>) -> ExitCode {
+pub(crate) fn exit_for<T>(reply: &Reply<T>) -> ExitCode {
     match &reply.outcome {
         Outcome::Ambiguous(_) | Outcome::NoMatch(_) if reply.report.timed_out => ExitCode::Stale,
         Outcome::Ambiguous(_) => ExitCode::Ambiguous,
