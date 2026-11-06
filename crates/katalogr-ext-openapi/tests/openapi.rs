@@ -400,4 +400,126 @@ paths:
                 .is_empty()
         );
     }
+
+    /// The `uses-type` references of an operation, as `(operation, candidate keys)`, sorted.
+    fn op_refs(f: &Fragment) -> Vec<(String, Vec<String>)> {
+        let mut v: Vec<(String, Vec<String>)> = f
+            .refs
+            .iter()
+            .filter(|r| r.kind.0 == "uses-type")
+            .filter_map(|r| {
+                let from = f.symbols.iter().find(|s| s.name.id() == r.from)?;
+                (from.kind == "operation").then(|| {
+                    (
+                        from.name.canonical(),
+                        r.candidates.iter().map(|c| c.key.clone()).collect(),
+                    )
+                })
+            })
+            .collect();
+        v.sort();
+        v
+    }
+
+    #[test]
+    fn operation_refs_request_and_response_types() {
+        let (f, errors) = run("openapi.yaml", &fixture("op-schema-refs", "openapi.yaml"));
+        assert!(errors.is_empty(), "{errors:?}");
+        let by_op = |op: &str| -> Vec<String> {
+            op_refs(&f)
+                .into_iter()
+                .filter(|(o, _)| o.ends_with(op))
+                .map(|(_, c)| c.last().cloned().unwrap_or_default())
+                .collect()
+        };
+        // Request body and responses, a response nested in an array, and a parameter's schema;
+        // one reference per distinct type.
+        assert_eq!(by_op("POST%20%2Forders"), ["{}Order", "{}Problem"]);
+        assert_eq!(by_op("GET%20%2Forders%2F{id}"), ["{}Filter", "{}Order"]);
+        // A reference is made at the `$ref` value's span, inside the operation.
+        let post = f
+            .symbols
+            .iter()
+            .find(|s| s.name.canonical().ends_with("POST%20%2Forders"))
+            .unwrap();
+        let r = f
+            .refs
+            .iter()
+            .find(|r| r.from == post.name.id() && r.kind.0 == "uses-type")
+            .unwrap();
+        let sp = r.span.unwrap();
+        assert!(sp.start_line > post.span.start_line && sp.end_line <= post.span.end_line);
+        assert_eq!(r.confidence, Confidence::Extracted);
+    }
+
+    #[test]
+    fn swagger2_refs() {
+        let (f, errors) = run("swagger.yaml", &fixture("op-schema-refs", "swagger.yaml"));
+        assert!(errors.is_empty(), "{errors:?}");
+        let got: Vec<(String, String)> = op_refs(&f)
+            .into_iter()
+            .map(|(o, c)| (o, c.last().cloned().unwrap()))
+            .collect();
+        assert_eq!(
+            got,
+            [
+                (
+                    "fx:swagger.yaml#operation:GET%20%2Fitems".to_string(),
+                    "{}Item".to_string()
+                ),
+                (
+                    "fx:swagger.yaml#operation:POST%20%2Fitems".to_string(),
+                    "{}Item".to_string()
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn shared_component_not_followed() {
+        // `404` refers to `#/components/responses/NotFound`, which holds a `Problem`: no
+        // reference, so GET /orders/{id} reaches Problem only if it names it itself.
+        let (f, _) = run("openapi.yaml", &fixture("op-schema-refs", "openapi.yaml"));
+        let get = op_refs(&f)
+            .into_iter()
+            .filter(|(o, _)| o.ends_with("GET%20%2Forders%2F{id}"))
+            .flat_map(|(_, c)| c)
+            .collect::<Vec<_>>();
+        assert!(get.iter().all(|k| !k.contains("Problem")), "{get:?}");
+        assert!(
+            f.refs
+                .iter()
+                .all(|r| r.candidates.iter().all(|c| !c.key.contains("NotFound")))
+        );
+    }
+
+    #[test]
+    fn unresolved_ref_is_dangling() {
+        // A reference to a schema the document does not hold is still made, and nothing in the
+        // fragment exports its keys, so it stays unresolved and `dangling` lists it.
+        let (f, _) = run("openapi.yaml", &fixture("op-schema-refs", "openapi.yaml"));
+        let ghost: Vec<_> = op_refs(&f)
+            .into_iter()
+            .filter(|(o, _)| o.ends_with("GET%20%2Fghost"))
+            .collect();
+        assert_eq!(ghost.len(), 1);
+        let keys = &ghost[0].1;
+        assert!(keys.iter().any(|k| k == "{}Missing"), "{keys:?}");
+        assert!(
+            !f.exports
+                .iter()
+                .any(|e| keys.contains(&e.key.key) && e.key.namespace == "schema-type"),
+        );
+    }
+
+    #[test]
+    fn revision_salt_set() {
+        let salt = OpenApiExtractor.revision_salt();
+        assert_eq!(salt, "openapi-extract-2");
+        assert!(
+            OpenApiExtractor
+                .patterns()
+                .contains(&"operation-schema-refs")
+        );
+    }
 }

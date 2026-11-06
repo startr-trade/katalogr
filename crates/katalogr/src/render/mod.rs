@@ -198,7 +198,7 @@ fn print_next(next: &[String]) {
     }
 }
 
-fn note_stale(report: &Report) {
+pub(crate) fn note_stale(report: &Report) {
     for w in stale_warnings(report) {
         eprintln!("katalogr: warning: {w}");
     }
@@ -1473,6 +1473,153 @@ fn impact_lines(r: &katalogr_dist::query::ImpactReport) -> Vec<String> {
                 c.consumers
             ));
         }
+    }
+    out
+}
+
+/// `lineage`: the subject, then a block each for `declared in:`, `fields:`, `related:`,
+/// `bindings:`, `code:`, `contracts:` and `stops:`; an empty block is omitted, and `stops:` is
+/// always printed when the answer has boundaries.
+pub fn lineage(cli: &Cli, reply: Reply<katalogr_dist::query::LineageReport>) -> ExitCode {
+    if cli.json {
+        return emit(&json::lineage(reply));
+    }
+    let code = exit_for(&reply);
+    match reply.outcome {
+        Outcome::Found(r) => {
+            note_stale(&reply.report);
+            for l in lineage_lines(&r, &reply.folded) {
+                println!("{l}");
+            }
+            print_partial(&reply.partial);
+        }
+        other => other_outcomes(cli, &reply.report, other, None),
+    }
+    code
+}
+
+fn lineage_groups(
+    out: &mut Vec<String>,
+    title: &str,
+    groups: &[katalogr_dist::query::LineageGroup],
+) {
+    if groups.is_empty() {
+        return;
+    }
+    out.push(format!("{title}:"));
+    for g in groups {
+        out.push(format!(
+            "  {}, {}, {}: {}",
+            g.kind,
+            g.node_kind,
+            format!("{:?}", g.confidence).to_lowercase(),
+            g.total
+        ));
+        for h in &g.hits {
+            let mut line = format!("    {}  depth {}", h.node.name, h.depth);
+            if let Some(v) = &h.via {
+                line.push_str(&format!("  via {v}"));
+            }
+            if let Some(v) = &h.holder {
+                line.push_str(&format!("  in {v}"));
+            }
+            if let Some(role) = &h.role {
+                line.push_str(&format!("  [{role}]"));
+            }
+            out.push(line);
+        }
+    }
+}
+
+fn lineage_lines(
+    r: &katalogr_dist::query::LineageReport,
+    folds: &[katalogr_dist::query::Fold],
+) -> Vec<String> {
+    let mut out = vec![format!(
+        "lineage of {} ({}); project {}",
+        r.subject.name,
+        r.subject.kind,
+        r.projects.join(", ")
+    )];
+    if let Some(o) = &r.owner {
+        out.push(format!("  field of {}", o.name));
+    }
+    if !r.declared_in.is_empty() {
+        out.push("declared in:".to_string());
+        out.extend(r.declared_in.iter().map(|h| format!("  {}", h.name)));
+    }
+    if !r.fields.is_empty() {
+        out.push("fields:".to_string());
+        for f in &r.fields {
+            let indent = "  ".repeat(f.depth as usize);
+            out.push(format!(
+                "{indent}{}  {}{}{}",
+                f.node.name.rsplit('/').next().unwrap_or(&f.node.name),
+                f.field_type.as_deref().unwrap_or("?"),
+                if f.required == Some(false) {
+                    "  optional"
+                } else {
+                    ""
+                },
+                if f.many == Some(true) { "  many" } else { "" },
+            ));
+            for m in &f.mapped_by {
+                out.push(format!(
+                    "{indent}  mapped by {}  {} [{}]",
+                    m.node.name,
+                    m.kind,
+                    format!("{:?}", m.confidence).to_lowercase()
+                ));
+            }
+            for c in &f.copies {
+                out.push(format!(
+                    "{indent}  copy {}  [inferred, {}]",
+                    c.node.name, c.by
+                ));
+            }
+        }
+        if !r.unpaired_fields.is_empty() {
+            out.push("  unpaired in copies:".to_string());
+            out.extend(r.unpaired_fields.iter().map(|h| format!("    {}", h.name)));
+        }
+    }
+    if !r.related.is_empty() {
+        out.push("related:".to_string());
+        for x in &r.related {
+            let through = x
+                .through_field
+                .as_deref()
+                .map(|f| format!("  through {f}"))
+                .unwrap_or_default();
+            out.push(format!("  {}  {}{through}", x.relation, x.node.name));
+        }
+    }
+    lineage_groups(&mut out, "bindings", &r.bindings);
+    for f in folds {
+        out.push(format!(
+            "  folded  {}  {}  {} targets  {} hits  [Inferred]  (--expand lists all)",
+            f.kind, f.key, f.targets, f.hits
+        ));
+    }
+    lineage_groups(&mut out, "code", &r.code);
+    if !r.contracts.is_empty() {
+        out.push("contracts:".to_string());
+        for c in &r.contracts {
+            out.push(format!(
+                "  {}  ({} providers, {} consumers){}",
+                c.contract,
+                c.providers,
+                c.consumers,
+                c.open
+                    .as_deref()
+                    .map(|o| format!("  {o}"))
+                    .unwrap_or_default()
+            ));
+        }
+    }
+    if !r.boundaries.is_empty() {
+        out.push("stops:".to_string());
+        out.extend(r.boundaries.iter().map(|b| format!("  {b}")));
     }
     out
 }

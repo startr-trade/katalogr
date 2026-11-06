@@ -39,6 +39,63 @@ pub fn extract_schemas(
     Vec::new()
 }
 
+/// The API kind the document names (if any) and its dialect word.
+fn dialect_of(doc: &Node) -> (Option<&'static str>, &'static str) {
+    let api = ["openapi", "swagger", "asyncapi"]
+        .iter()
+        .find(|k| doc.get(k).is_some())
+        .copied();
+    let dialect = match api {
+        Some("openapi") => "openapi-3",
+        Some("swagger") => "swagger-2",
+        Some(_) => "asyncapi",
+        None => {
+            let sch = text(doc, "$schema").unwrap_or("");
+            ["draft-04", "draft-06", "draft-07", "2019-09", "2020-12"]
+                .into_iter()
+                .find(|d| sch.contains(d))
+                .unwrap_or("unknown")
+        }
+    };
+    (api, dialect)
+}
+
+/// The document's `$id` (or draft-04 `id`) without its fragment, when it has a non-empty one.
+fn namespace_of(doc: &Node, dialect: &str) -> Option<String> {
+    let id =
+        text(doc, "$id").or_else(|| (dialect == "draft-04").then(|| text(doc, "id")).flatten())?;
+    let id = id.split('#').next().unwrap_or("");
+    (!id.is_empty()).then(|| id.to_string())
+}
+
+/// Emits a `uses-type` reference from symbol `from` for the JSON Schema `$ref` text `raw`,
+/// resolved exactly as a field's `$ref` is, against document `doc`. A `$ref` that names no
+/// schema emits nothing.
+pub fn reference_type(
+    b: &mut Builder,
+    doc: &Node,
+    repo: &str,
+    path: &RelPath,
+    from: usize,
+    raw: &str,
+    span: Span,
+) {
+    let (_, dialect) = dialect_of(doc);
+    let ns = namespace_of(doc, dialect);
+    let mut w = W {
+        b,
+        repo,
+        path,
+        has_id: ns.is_some(),
+        ns: ns.unwrap_or_default(),
+        root_name: None,
+        external: BTreeSet::new(),
+    };
+    if let Some((_, refs, import)) = w.resolve(raw) {
+        w.emit(from, "uses-type", refs, import, span);
+    }
+}
+
 struct W<'a> {
     b: &'a mut Builder,
     repo: &'a str,
@@ -120,31 +177,11 @@ impl<'a> W<'a> {
         if !doc.is_map() {
             return;
         }
-        let api = ["openapi", "swagger", "asyncapi"]
-            .iter()
-            .find(|k| doc.get(k).is_some())
-            .copied();
-        let dialect = match api {
-            Some("openapi") => "openapi-3",
-            Some("swagger") => "swagger-2",
-            Some(_) => "asyncapi",
-            None => {
-                let sch = text(doc, "$schema").unwrap_or("");
-                ["draft-04", "draft-06", "draft-07", "2019-09", "2020-12"]
-                    .into_iter()
-                    .find(|d| sch.contains(d))
-                    .unwrap_or("unknown")
-            }
-        };
+        let (api, dialect) = dialect_of(doc);
         self.b.artifact_fact("dialect", s(dialect));
-        let id =
-            text(doc, "$id").or_else(|| (dialect == "draft-04").then(|| text(doc, "id")).flatten());
-        if let Some(id) = id {
-            let id = id.split('#').next().unwrap_or("");
-            if !id.is_empty() {
-                self.ns = id.to_string();
-                self.has_id = true;
-            }
+        if let Some(id) = namespace_of(doc, dialect) {
+            self.ns = id;
+            self.has_id = true;
         }
         self.b
             .artifact_fact("namespace", Fact::Str(self.ns.clone()));

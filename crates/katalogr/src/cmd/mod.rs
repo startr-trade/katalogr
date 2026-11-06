@@ -19,6 +19,7 @@ pub mod docs_affected;
 pub mod doctor;
 pub mod eval;
 pub mod explain;
+pub mod export;
 pub mod find;
 pub mod hook;
 pub mod hooks;
@@ -26,6 +27,7 @@ pub mod hubs;
 pub mod impact;
 pub mod index;
 pub mod kindex;
+pub mod lineage;
 pub mod map;
 #[cfg(feature = "mcp")]
 pub mod mcp;

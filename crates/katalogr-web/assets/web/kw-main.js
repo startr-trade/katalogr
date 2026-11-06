@@ -62,6 +62,13 @@ KW.sidebar = function (activeId) {
   });
 };
 
+/* A single-file export names the positions it reflects, and says when it cut the symbols. */
+KW.exportHeader = function (main) {
+  var d = KW.staticData();
+  main.appendChild(KW.dom.h("p", { "class": "kw-positions", "data-kw": "positions" }, [KW.core.positionsLine(d.positions)]));
+  KW.core.exportCutNotes(d.partial).forEach(function (t) { main.appendChild(KW.dom.notice(t, "info")); });
+};
+
 KW.render = function () {
   var route = KW.core.parseRoute(location.hash);
   var view = route.view || "graph";
@@ -71,6 +78,7 @@ KW.render = function () {
   var main = document.getElementById("kw-main");
   main.replaceChildren();
   KW.state.explorer = null;
+  if (KW.static) { KW.exportHeader(main); }
   var row = KW.state.manifest.views.filter(function (v) { return v.id === view; })[0];
   KW.sidebar(row && row.nav ? view : "");
   if (!row) {
@@ -88,6 +96,7 @@ KW.render = function () {
   else if (row.kind === "panels") { KW.views.panels(route, row, section, live); }
   else if (row.kind === "symbol") { KW.views.symbol(route, section, live); }
   else if (row.kind === "search") { KW.views.search(route, section, live); }
+  else if (row.kind === "lineage") { KW.views.lineage(route, section, live); }
 };
 
 KW.boot = function () {

@@ -2,7 +2,7 @@
 //! (FEAT-014 section 4): its version, base paths and operations, in document order.
 
 use crate::route;
-use katalogr_ext_data::tree::{Entry, Node};
+use katalogr_ext_data::tree::{Entry, Node, Scalar, Value};
 use katalogr_model::{Fact, Span};
 use std::collections::BTreeMap;
 
@@ -34,6 +34,8 @@ pub struct Op {
     pub facts: BTreeMap<String, Fact>,
     /// The normalised route key, when the method and path normalise.
     pub route: Option<String>,
+    /// Schema references under the operation, sorted by text, without repeats, each with its span.
+    pub schema_refs: Vec<(String, Span)>,
 }
 
 /// `openapi: 3.x` gives V3, `swagger: 2.0` gives V2.
@@ -129,6 +131,44 @@ fn doc_of(op: &Node) -> Option<String> {
     Some(line[..end].to_string())
 }
 
+/// The `$ref` texts under the operation's `requestBody`, `responses` and `parameters`, at any
+/// depth (which covers Swagger 2.0's `schema` there too), that name a schema: those starting
+/// `#/components/schemas/` or `#/definitions/`, or not starting `#`. A reference to a shared
+/// `#/components/responses/...` is not followed. Sorted by text, without repeats; a repeated
+/// text keeps its first span.
+fn schema_refs(op: &Node) -> Vec<(String, Span)> {
+    fn walk(n: &Node, out: &mut BTreeMap<String, Span>) {
+        if n.is_map() {
+            for e in n.entries() {
+                if e.key == "$ref"
+                    && let Value::Scalar(Scalar::Str(_)) = e.value.value
+                    && let Some(t) = e.value.as_text()
+                {
+                    let ok = t.starts_with("#/components/schemas/")
+                        || t.starts_with("#/definitions/")
+                        || !t.starts_with('#');
+                    if ok && !t.is_empty() {
+                        out.entry(t.to_string()).or_insert(e.value.span);
+                    }
+                } else {
+                    walk(&e.value, out);
+                }
+            }
+        } else {
+            for i in n.items() {
+                walk(i, out);
+            }
+        }
+    }
+    let mut found = BTreeMap::new();
+    for key in ["requestBody", "responses", "parameters"] {
+        if let Some(n) = op.get(key) {
+            walk(n, &mut found);
+        }
+    }
+    found.into_iter().collect()
+}
+
 /// The operations of `root`, in document order.
 pub fn operations(root: &Node, version: Version) -> Vec<Op> {
     let mut out = Vec::new();
@@ -178,6 +218,7 @@ pub fn operations(root: &Node, version: Version) -> Vec<Op> {
                 key_span: oe.key_span,
                 facts,
                 route,
+                schema_refs: schema_refs(&oe.value),
             });
         }
     }

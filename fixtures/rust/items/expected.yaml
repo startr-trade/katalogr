@@ -1,41 +1,117 @@
 mode: exact
 symbols:
-  - "fx:Cargo.toml#crate:items"
-  - "fx:src/lib.rs#const:LIMIT"
-  - "fx:src/lib.rs#enum:Kind"
-  - "fx:src/lib.rs#enum:Kind/variant:Branch"
-  - "fx:src/lib.rs#enum:Kind/variant:Leaf"
-  - "fx:src/lib.rs#enum:Kind/variant:Pair"
-  - "fx:src/lib.rs#fn:fetch"
-  - "fx:src/lib.rs#fn:helper"
-  - "fx:src/lib.rs#fn:platform"
-  - "fx:src/lib.rs#fn:platform~2"
-  - "fx:src/lib.rs#fn:raw"
-  - "fx:src/lib.rs#impl:Graph"
-  - "fx:src/lib.rs#impl:Graph/fn:add_node"
-  - "fx:src/lib.rs#impl:Visit%20for%20Graph"
-  - "fx:src/lib.rs#impl:Visit%20for%20Graph/fn:visit"
-  - "fx:src/lib.rs#macro:twice"
-  - "fx:src/lib.rs#mod:shapes"
-  - "fx:src/lib.rs#mod:shapes/fn:origin"
-  - "fx:src/lib.rs#mod:shapes/struct:Point"
-  - "fx:src/lib.rs#static:GREETING"
-  - "fx:src/lib.rs#struct:Graph"
-  - "fx:src/lib.rs#trait:Visit"
-  - "fx:src/lib.rs#trait:Visit/fn:name"
-  - "fx:src/lib.rs#trait:Visit/fn:visit"
-  - "fx:src/lib.rs#type:Id"
-  - "fx:src/lib.rs#union:Bits"
+- fx:Cargo.toml#crate:items
+- fx:src/lib.rs#const:LIMIT
+- fx:src/lib.rs#enum:Kind
+- fx:src/lib.rs#enum:Kind/variant:Branch
+- fx:src/lib.rs#enum:Kind/variant:Branch/field:0
+- fx:src/lib.rs#enum:Kind/variant:Leaf
+- fx:src/lib.rs#enum:Kind/variant:Pair
+- fx:src/lib.rs#enum:Kind/variant:Pair/field:left
+- fx:src/lib.rs#enum:Kind/variant:Pair/field:right
+- fx:src/lib.rs#fn:fetch
+- fx:src/lib.rs#fn:helper
+- fx:src/lib.rs#fn:platform
+- fx:src/lib.rs#fn:platform~2
+- fx:src/lib.rs#fn:raw
+- fx:src/lib.rs#impl:Graph
+- fx:src/lib.rs#impl:Graph/fn:add_node
+- fx:src/lib.rs#impl:Visit%20for%20Graph
+- fx:src/lib.rs#impl:Visit%20for%20Graph/fn:visit
+- fx:src/lib.rs#macro:twice
+- fx:src/lib.rs#mod:shapes
+- fx:src/lib.rs#mod:shapes/fn:origin
+- fx:src/lib.rs#mod:shapes/struct:Point
+- fx:src/lib.rs#mod:shapes/struct:Point/field:x
+- fx:src/lib.rs#mod:shapes/struct:Point/field:y
+- fx:src/lib.rs#static:GREETING
+- fx:src/lib.rs#struct:Graph
+- fx:src/lib.rs#struct:Graph/field:nodes
+- fx:src/lib.rs#trait:Visit
+- fx:src/lib.rs#trait:Visit/fn:name
+- fx:src/lib.rs#trait:Visit/fn:visit
+- fx:src/lib.rs#type:Id
+- fx:src/lib.rs#union:Bits
+- fx:src/lib.rs#union:Bits/field:float
+- fx:src/lib.rs#union:Bits/field:int
 links:
-  - { from: "fx:src/lib.rs#enum:Kind", kind: contains, to: "fx:src/lib.rs#enum:Kind/variant:Branch", confidence: extracted }
-  - { from: "fx:src/lib.rs#enum:Kind", kind: contains, to: "fx:src/lib.rs#enum:Kind/variant:Leaf", confidence: extracted }
-  - { from: "fx:src/lib.rs#enum:Kind", kind: contains, to: "fx:src/lib.rs#enum:Kind/variant:Pair", confidence: extracted }
-  - { from: "fx:src/lib.rs#impl:Graph", kind: contains, to: "fx:src/lib.rs#impl:Graph/fn:add_node", confidence: extracted }
-  - { from: "fx:src/lib.rs#impl:Graph", kind: implements-for, to: "fx:src/lib.rs#struct:Graph", confidence: extracted }
-  - { from: "fx:src/lib.rs#impl:Visit%20for%20Graph", kind: contains, to: "fx:src/lib.rs#impl:Visit%20for%20Graph/fn:visit", confidence: extracted }
-  - { from: "fx:src/lib.rs#impl:Visit%20for%20Graph", kind: implements, to: "fx:src/lib.rs#trait:Visit", confidence: extracted }
-  - { from: "fx:src/lib.rs#impl:Visit%20for%20Graph", kind: implements-for, to: "fx:src/lib.rs#struct:Graph", confidence: extracted }
-  - { from: "fx:src/lib.rs#mod:shapes", kind: contains, to: "fx:src/lib.rs#mod:shapes/fn:origin", confidence: extracted }
-  - { from: "fx:src/lib.rs#mod:shapes", kind: contains, to: "fx:src/lib.rs#mod:shapes/struct:Point", confidence: extracted }
-  - { from: "fx:src/lib.rs#trait:Visit", kind: contains, to: "fx:src/lib.rs#trait:Visit/fn:name", confidence: extracted }
-  - { from: "fx:src/lib.rs#trait:Visit", kind: contains, to: "fx:src/lib.rs#trait:Visit/fn:visit", confidence: extracted }
+- from: fx:src/lib.rs#enum:Kind
+  kind: contains
+  to: fx:src/lib.rs#enum:Kind/variant:Branch
+  confidence: extracted
+- from: fx:src/lib.rs#enum:Kind
+  kind: contains
+  to: fx:src/lib.rs#enum:Kind/variant:Leaf
+  confidence: extracted
+- from: fx:src/lib.rs#enum:Kind
+  kind: contains
+  to: fx:src/lib.rs#enum:Kind/variant:Pair
+  confidence: extracted
+- from: fx:src/lib.rs#enum:Kind/variant:Branch
+  kind: contains
+  to: fx:src/lib.rs#enum:Kind/variant:Branch/field:0
+  confidence: extracted
+- from: fx:src/lib.rs#enum:Kind/variant:Pair
+  kind: contains
+  to: fx:src/lib.rs#enum:Kind/variant:Pair/field:left
+  confidence: extracted
+- from: fx:src/lib.rs#enum:Kind/variant:Pair
+  kind: contains
+  to: fx:src/lib.rs#enum:Kind/variant:Pair/field:right
+  confidence: extracted
+- from: fx:src/lib.rs#impl:Graph
+  kind: contains
+  to: fx:src/lib.rs#impl:Graph/fn:add_node
+  confidence: extracted
+- from: fx:src/lib.rs#impl:Graph
+  kind: implements-for
+  to: fx:src/lib.rs#struct:Graph
+  confidence: extracted
+- from: fx:src/lib.rs#impl:Visit%20for%20Graph
+  kind: contains
+  to: fx:src/lib.rs#impl:Visit%20for%20Graph/fn:visit
+  confidence: extracted
+- from: fx:src/lib.rs#impl:Visit%20for%20Graph
+  kind: implements
+  to: fx:src/lib.rs#trait:Visit
+  confidence: extracted
+- from: fx:src/lib.rs#impl:Visit%20for%20Graph
+  kind: implements-for
+  to: fx:src/lib.rs#struct:Graph
+  confidence: extracted
+- from: fx:src/lib.rs#mod:shapes
+  kind: contains
+  to: fx:src/lib.rs#mod:shapes/fn:origin
+  confidence: extracted
+- from: fx:src/lib.rs#mod:shapes
+  kind: contains
+  to: fx:src/lib.rs#mod:shapes/struct:Point
+  confidence: extracted
+- from: fx:src/lib.rs#mod:shapes/struct:Point
+  kind: contains
+  to: fx:src/lib.rs#mod:shapes/struct:Point/field:x
+  confidence: extracted
+- from: fx:src/lib.rs#mod:shapes/struct:Point
+  kind: contains
+  to: fx:src/lib.rs#mod:shapes/struct:Point/field:y
+  confidence: extracted
+- from: fx:src/lib.rs#struct:Graph
+  kind: contains
+  to: fx:src/lib.rs#struct:Graph/field:nodes
+  confidence: extracted
+- from: fx:src/lib.rs#trait:Visit
+  kind: contains
+  to: fx:src/lib.rs#trait:Visit/fn:name
+  confidence: extracted
+- from: fx:src/lib.rs#trait:Visit
+  kind: contains
+  to: fx:src/lib.rs#trait:Visit/fn:visit
+  confidence: extracted
+- from: fx:src/lib.rs#union:Bits
+  kind: contains
+  to: fx:src/lib.rs#union:Bits/field:float
+  confidence: extracted
+- from: fx:src/lib.rs#union:Bits
+  kind: contains
+  to: fx:src/lib.rs#union:Bits/field:int
+  confidence: extracted

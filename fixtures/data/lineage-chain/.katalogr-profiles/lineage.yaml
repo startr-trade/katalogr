@@ -1,0 +1,26 @@
+profile: example-lineage        # synthetic example; real conventions live in the project's kindex
+version: 2
+select:
+  - { extension: data, path: 'stores/*.yaml' }
+rules:
+  - id: axum-post
+    when: { extension: rust, on: all, each: str_calls, matches: '^(?:[A-Za-z_][A-Za-z0-9_.]*)?\.route\("([^"]*)", (?:.*[^A-Za-z0-9_])?post\((?:([A-Za-z_][A-Za-z0-9_]*(?:::[A-Za-z_][A-Za-z0-9_]*)*)\))?' }
+    emit: { bind: { contract: { kind: http_route, key: 'POST $1' }, role: provides, normalise: http_route, holder: '$2' } }
+  - id: client-method
+    when: { extension: rust, on: all, each: str_calls, matches: '^(?:self\.)?[A-Za-z0-9_]*(?:client|http)\.(get|post|put|delete|patch|head)\("([^"]*)"' }
+    emit: { bind: { contract: { kind: http_route, key: '$1 $2' }, role: consumes, normalise: http_route, confidence: inferred } }
+  - id: store-uses-table
+    when: { extension: data, kind: doc, path: 'stores/*.yaml' }
+    emit:
+      bind: { contract: { kind: sql_table, key: 'public.${scope:table}' }, role: consumes }
+  - id: store-type
+    when: { extension: data, kind: key, path: 'stores/*.yaml', fact: pointer, matches: '^/type$' }
+    emit: { ref: { kind: uses-type, candidates: [ { ns: schema-type, key: '${fact:value}' } ] } }
+  - id: store-column-mapping
+    when: { extension: data, kind: key, path: 'stores/*.yaml', fact: pointer, matches: '^/columns/([^/]+)$' }
+    emit:
+      ref: { kind: maps-to, candidates: [ { ns: schema-member, key: '${scope:type}/${fact:value}' } ] }
+      fact: { wire_format: 'column', wire_field: '$1' }
+  - id: order-struct-declares
+    when: { extension: rust, kind: struct, name: '^Order$', path: 'src/model.rs' }
+    emit: { bind: { contract: { kind: schema_type, key: '{urn:example:orders}Order' }, role: declares } }

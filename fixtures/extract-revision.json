@@ -20,12 +20,12 @@
     "salt": "md-extract-1"
   },
   "openapi": {
-    "digest": "a0692d6a7449cb44138d0707325b913716c9496330ff1f9eb3e20b81d6328f42",
-    "salt": "openapi-extract-1"
+    "digest": "b51b4ea65a3317a8ba0ebf0c67e889c19574e7dfbda1c40dbb8fbac927fe76e7",
+    "salt": "openapi-extract-2"
   },
   "rust": {
-    "digest": "2d2931388ac23b86b8102182faede9ac001a0628e6308057803e5be7ccc33975",
-    "salt": "rust-extract-3;tests-1;rest-1;rest-2;rest-3"
+    "digest": "00bc9fe5dcf92f02e9ba370c1c2339c18d8d7155637402072bfe420bf90917e9",
+    "salt": "rust-extract-3;tests-1;rest-1;rest-2;rest-3;fields-1"
   },
   "sql": {
     "digest": "0b2ae8635c26c86e60cba2a6a5ade2e1bbeb67fd6a8813d0101ea104f4cd6005",
@@ -36,8 +36,8 @@
     "salt": "text-extract-1"
   },
   "ts": {
-    "digest": "08764bf081e186854f157f51a15be0e0a1fa818e0213d8855420d88e779ea9c6",
-    "salt": "ts-extract-3;tests-1;rest-1;rest-2;rest-3"
+    "digest": "051b1eda709dfb636aa69b6ef618fdcec5f1bee6b0cf4021af2924c1270751dd",
+    "salt": "ts-extract-3;tests-1;rest-1;rest-2;rest-3;fields-1"
   },
   "xsd": {
     "digest": "5436b22d8bfd48487b1931be45306546e161608fb52dd45510e107aad815d05b",

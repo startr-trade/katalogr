@@ -59,6 +59,24 @@
 //!   cargo test -p katalogr-bench --release --test budget concurrent_query_budget -- --ignored --nocapture
 //! ```
 
+//! FEAT-101 R-24: `code_fields_corpus_cost` and `code_fields_self_cost` index a tree three times
+//! with the project setting `extract.code_fields` false and three times with it true, with the
+//! same release binary, and compare the median graph size and the median full-index wall. They
+//! fail when a ratio is over its limit, and print both medians, the ratios and the load average.
+//! The corpus comes from the environment, so no name or path is kept here:
+//!
+//! ```text
+//! KATALOGR_BIN=<release binary> \
+//! KATALOGR_BUDGET_REPOS=name=/path/to/clone[,name2=/path2] \
+//! KATALOGR_FIELDS_LIMITS=size_pct=15,wall_pct=10 \
+//!   cargo test -p katalogr-bench --release --test budget code_fields_corpus_cost -- --ignored --nocapture
+//!
+//! KATALOGR_BIN=<release binary> \
+//! KATALOGR_FIELDS_SELF_TREE=/path/to/this/repository \
+//! KATALOGR_FIELDS_SELF_LIMITS=size_pct=25,wall_pct=10 \
+//!   cargo test -p katalogr-bench --release --test budget code_fields_self_cost -- --ignored --nocapture
+//! ```
+
 mod bench {
     use camino::{Utf8Path, Utf8PathBuf};
     use katalogr_bench::katalogr::Katalogr;
@@ -550,6 +568,151 @@ mod bench {
             failures.push("the graph differs from the index run alone".into());
         }
         assert!(failures.is_empty(), "{}", failures.join("; "));
+    }
+
+    /// `size_pct=..,wall_pct=..` from the environment.
+    fn fields_limits(name: &str) -> (f64, f64) {
+        let spec = env(name);
+        let get = |k: &str| -> f64 {
+            spec.split(',')
+                .find_map(|kv| kv.split_once('=').filter(|(n, _)| n.trim() == k))
+                .unwrap_or_else(|| panic!("{name} lacks `{k}`"))
+                .1
+                .trim()
+                .parse()
+                .unwrap_or_else(|_| panic!("{name}: `{k}` is not a number"))
+        };
+        (get("size_pct"), get("wall_pct"))
+    }
+
+    fn median_of(xs: &[f64]) -> f64 {
+        katalogr_bench::stats::median(xs)
+    }
+
+    /// One full index of `repos` into a fresh kindex with `extract.code_fields` set to `on`:
+    /// the graph size in bytes and the wall in seconds.
+    fn index_with_fields(bin: &Utf8Path, repos: &str, on: bool) -> (f64, f64) {
+        let tmp = tempfile::tempdir().expect("temporary kindex");
+        let kindex = Utf8Path::from_path(tmp.path())
+            .expect("UTF-8 temporary directory")
+            .join("kx");
+        let mut init = Command::new(bin);
+        init.args([
+            "--kindex",
+            kindex.as_str(),
+            "kindex",
+            "init",
+            kindex.as_str(),
+        ]);
+        ok(init, "kindex init");
+        let mut project = Command::new(bin);
+        project.args(["--kindex", kindex.as_str(), "project", "init", PROJECT]);
+        for r in repos.split(',') {
+            project.args(["--repo", r]);
+        }
+        project.arg("--mark");
+        ok(project, "project init");
+
+        // The setting goes into the project's `config.yaml`.
+        let project_dir = kindex.join("projects").join(PROJECT);
+        let path = project_dir.join("config.yaml");
+        let text = std::fs::read_to_string(&path).expect("config.yaml");
+        let mut doc: serde_yaml_ng::Value = serde_yaml_ng::from_str(&text).expect("config parses");
+        let map = doc.as_mapping_mut().expect("config is a mapping");
+        let settings_key = serde_yaml_ng::Value::String("settings".into());
+        let mut settings = match map.remove(&settings_key) {
+            Some(serde_yaml_ng::Value::Mapping(m)) => m,
+            _ => serde_yaml_ng::Mapping::new(),
+        };
+        settings.insert(
+            serde_yaml_ng::Value::String("extract.code_fields".into()),
+            serde_yaml_ng::Value::Bool(on),
+        );
+        map.insert(settings_key, serde_yaml_ng::Value::Mapping(settings));
+        std::fs::write(&path, serde_yaml_ng::to_string(&doc).expect("config")).expect("write");
+
+        let k = Katalogr {
+            bin: bin.to_path_buf(),
+            kindex: kindex.clone(),
+            project: PROJECT.into(),
+        };
+        let mut index = k.cmd(&["index", "--full"]);
+        index.env("KATALOGR_THREADS", "4");
+        let run =
+            run_with_timeout(&mut index, Duration::from_secs(7200)).expect("run index --full");
+        assert!(!run.timed_out, "index --full timed out (code_fields {on})");
+        assert_eq!(
+            run.status,
+            Some(0),
+            "{}",
+            String::from_utf8_lossy(&run.stderr)
+        );
+        let size = cache_bytes(&project_dir).expect("cache size") as f64;
+        (size, run.wall.as_secs_f64())
+    }
+
+    /// Three runs of each setting, interleaved so drift in the machine's load falls on both.
+    fn code_fields_cost(bin: &Utf8Path, repos: &str, limits: (f64, f64), label: &str) {
+        let load_before = load_average();
+        let (mut off, mut on) = (Vec::new(), Vec::new());
+        for _ in 0..3 {
+            off.push(index_with_fields(bin, repos, false));
+            on.push(index_with_fields(bin, repos, true));
+        }
+        let load_after = load_average();
+        let col = |v: &[(f64, f64)], i: usize| -> Vec<f64> {
+            v.iter().map(|r| if i == 0 { r.0 } else { r.1 }).collect()
+        };
+        let (size_off, size_on) = (median_of(&col(&off, 0)), median_of(&col(&on, 0)));
+        let (wall_off, wall_on) = (median_of(&col(&off, 1)), median_of(&col(&on, 1)));
+        let size_pct = (size_on / size_off - 1.0) * 100.0;
+        let wall_pct = (wall_on / wall_off - 1.0) * 100.0;
+        println!(
+            "{label}: load {load_before} to {load_after}: graph median off {:.1} MiB, on {:.1} MiB, \
+             ratio {:.3} ({size_pct:+.1}%, limit {:.0}%); full index median off {wall_off:.1} s, \
+             on {wall_on:.1} s, ratio {:.3} ({wall_pct:+.1}%, limit {:.0}%)",
+            size_off / MIB,
+            size_on / MIB,
+            size_on / size_off,
+            limits.0,
+            wall_on / wall_off,
+            limits.1,
+        );
+        assert!(
+            size_pct <= limits.0,
+            "{label}: graph size +{size_pct:.1}% is over +{:.0}%",
+            limits.0
+        );
+        assert!(
+            wall_pct <= limits.1,
+            "{label}: full-index wall +{wall_pct:.1}% is over +{:.0}%",
+            limits.1
+        );
+    }
+
+    #[test]
+    #[ignore = "benchmark: needs a corpus; see the module comment"]
+    fn code_fields_corpus_cost() {
+        let bin = Utf8PathBuf::from(env("KATALOGR_BIN"));
+        code_fields_cost(
+            &bin,
+            &env("KATALOGR_BUDGET_REPOS"),
+            fields_limits("KATALOGR_FIELDS_LIMITS"),
+            "corpus",
+        );
+    }
+
+    #[test]
+    #[ignore = "benchmark: needs this repository's tree; see the module comment"]
+    fn code_fields_self_cost() {
+        let bin = Utf8PathBuf::from(env("KATALOGR_BIN"));
+        let tree = env("KATALOGR_FIELDS_SELF_TREE");
+        code_fields_cost(
+            &bin,
+            &format!("self={tree}"),
+            fields_limits("KATALOGR_FIELDS_SELF_LIMITS"),
+            "self",
+        );
     }
 
     /// FEAT-096 R-17: stored answers of the whole-graph commands are fast, and agree with the

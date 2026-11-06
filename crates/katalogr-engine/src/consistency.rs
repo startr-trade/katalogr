@@ -375,12 +375,22 @@ impl Engine {
             .map(|(n, t)| (n.as_str(), t.as_str()))
             .collect();
         let normalisers = self.registry().normalisers();
-        Ok(ProfileSet::load_full(
+        let mut report = ProfileSet::load_full(
             self.dir().project_root(),
             &builtins,
             &previous,
             &normalisers,
-        ))
+        );
+        if !crate::code_fields_enabled(&self.dir().config().settings) {
+            let off = self
+                .registry()
+                .extractors()
+                .filter(|e| !e.code_kinds().is_empty())
+                .map(|e| e.id().to_string())
+                .collect();
+            report.set = std::mem::take(&mut report.set).with_code_fields_off(off);
+        }
+        Ok(report)
     }
 
     pub fn dir(&self) -> &ProjectDir {

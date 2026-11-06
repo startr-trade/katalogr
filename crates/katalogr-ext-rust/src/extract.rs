@@ -106,6 +106,9 @@ pub(crate) struct Builder<'a> {
     pub ranges: HashMap<TextRange, Id>,
     /// Calls that pass a token-like string, by the symbol whose body holds them (FEAT-014).
     pub str_calls: BTreeMap<Id, Vec<StrCall>>,
+    /// Names of the types (structs, enums, unions, traits, aliases) declared anywhere in the
+    /// file: the unqualified names a field may refer to in its own project (FEAT-101).
+    pub type_names: std::collections::BTreeSet<String>,
 }
 
 pub fn extract(input: &ExtractInput) -> Result<Fragment, ExtractError> {
@@ -187,6 +190,7 @@ pub fn extract_full(input: &ExtractInput) -> Result<Extraction, ExtractError> {
         trait_impl: false,
         ranges: HashMap::new(),
         str_calls: BTreeMap::new(),
+        type_names: std::collections::BTreeSet::new(),
     };
 
     let mut facts: BTreeMap<String, Fact> = BTreeMap::new();
@@ -223,6 +227,11 @@ pub fn extract_full(input: &ExtractInput) -> Result<Extraction, ExtractError> {
         },
         artifact.id(),
     );
+    b.type_names = tree
+        .syntax()
+        .descendants()
+        .filter_map(|n| match_type_name(&n))
+        .collect();
     b.items(tree.items().collect());
     // Rationale markers go to the innermost symbol that holds the comment, else to the file.
     for (owner_id, markers) in crate::rationale::collect(tree.syntax(), text, &b.lines, &b.ranges) {
@@ -319,6 +328,18 @@ pub fn extract_full(input: &ExtractInput) -> Result<Extraction, ExtractError> {
         errors,
         embedded,
     })
+}
+
+/// The name of a type declaration node.
+fn match_type_name(n: &SyntaxNode) -> Option<String> {
+    use ast::HasName;
+    let name = ast::Struct::cast(n.clone())
+        .and_then(|x| x.name())
+        .or_else(|| ast::Enum::cast(n.clone()).and_then(|x| x.name()))
+        .or_else(|| ast::Union::cast(n.clone()).and_then(|x| x.name()))
+        .or_else(|| ast::Trait::cast(n.clone()).and_then(|x| x.name()))
+        .or_else(|| ast::TypeAlias::cast(n.clone()).and_then(|x| x.name()))?;
+    Some(name.text().to_string())
 }
 
 impl Builder<'_> {

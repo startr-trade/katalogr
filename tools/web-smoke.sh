@@ -7,6 +7,12 @@
 #                                 browser, and require an <svg> (Pele) and a <canvas> (Cytoscape)
 #                                 in the dumped DOM. Prints the drawing time of each page.
 #
+#   tools/web-smoke.sh --file PATH
+#                                 open an exported file (`katalogr export html --out PATH`) by
+#                                 file:// in a headless browser, with no server, and require a
+#                                 diagram's <svg> in the dumped DOM. FEAT-034: this too stays
+#                                 outside the required gate, and needs a browser on PATH.
+#
 # Exit codes: 0 pass; 1 a page lacks its <svg> or <canvas>, or the server did not start;
 #             77 no browser found (chromium, chromium-browser or google-chrome).
 # Set KATALOGR_BIN to use a prebuilt binary instead of building one.
@@ -21,6 +27,35 @@ done
 if [ -z "$browser" ]; then
   echo "web-smoke: no browser (chromium, chromium-browser or google-chrome) on PATH" >&2
   exit 77
+fi
+
+# A snap-packaged browser cannot write a profile under /tmp; give it one under its own folder.
+smoke_profile() { # <fallback dir>
+  if [ "$(readlink -f "$(command -v "$browser")")" = "/usr/bin/snap" ]; then
+    mkdir -p "$HOME/snap/chromium/common/katalogr-web-smoke"
+    echo "$HOME/snap/chromium/common/katalogr-web-smoke"
+  else
+    echo "$1"
+  fi
+}
+
+if [ "${1:-}" = "--file" ]; then
+  file="${2:-}"
+  if [ -z "$file" ] || [ ! -f "$file" ]; then
+    echo "web-smoke: --file wants an exported file that exists" >&2
+    exit 2
+  fi
+  file="$(cd "$(dirname "$file")" && pwd)/$(basename "$file")"
+  tmp="$(mktemp -d "${TMPDIR:-/tmp}/katalogr-web-smoke.XXXXXX")"
+  trap 'rm -rf "$tmp"' EXIT
+  dom="$("$browser" --headless=new --no-sandbox --disable-gpu --user-data-dir="$(smoke_profile "$tmp/profile")" \
+    --dump-dom --virtual-time-budget=5000 "file://$file#/graph" 2>/dev/null || true)"
+  if grep -q '<svg' <<<"$dom"; then
+    echo "web-smoke: ok   $file <svg found (opened from disk, no server)"
+    exit 0
+  fi
+  echo "web-smoke: FAIL $file no <svg in the DOM" >&2
+  exit 1
 fi
 
 bin="${KATALOGR_BIN:-}"

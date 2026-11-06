@@ -4,6 +4,7 @@ symbols:
 - fx:src/lib/index.ts#fn:main
 - fx:src/lib/util.ts#fn:helper
 - fx:src/types.d.ts#interface:T
+- fx:src/types.d.ts#interface:T/field:id
 links:
 - from: fx:src/a.ts
   kind: imports
@@ -36,4 +37,8 @@ links:
 - from: fx:src/a.ts#const:run
   kind: calls
   to: fx:src/lib/util.ts#fn:helper
+  confidence: Extracted
+- from: fx:src/types.d.ts#interface:T
+  kind: contains
+  to: fx:src/types.d.ts#interface:T/field:id
   confidence: Extracted

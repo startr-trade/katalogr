@@ -1,6 +1,7 @@
 //! The embedded read-only web view: a page, its scripts and styles, and the vendored graph
 //! library, all text embedded in the binary. Nothing is fetched at build or run time.
 
+pub mod export;
 pub mod manifest;
 
 use sha2::{Digest, Sha256};
@@ -19,19 +20,20 @@ pub const VIEWS_JSON: &str = include_str!("../assets/web/views.json");
 /// The version of the vendored graph library.
 pub const CYTOSCAPE_VERSION: &str = "3.34.4";
 
-const INDEX_HTML: &str = include_str!("../assets/web/index.html");
+pub(crate) const INDEX_HTML: &str = include_str!("../assets/web/index.html");
 
 const JS: &str = "text/javascript";
 const CSS: &str = "text/css";
 const TXT: &str = "text/plain";
 
 /// Scripts of the page after Pele, in load order.
-const SCRIPT_NAMES: [&str; 7] = [
+const SCRIPT_NAMES: [&str; 8] = [
     "cytoscape.min.js",
     "kw-core.js",
     "kw-dom.js",
     "kw-diagram.js",
     "kw-explore.js",
+    "kw-lineage.js",
     "kw-views.js",
     "kw-main.js",
 ];
@@ -88,6 +90,11 @@ fn table() -> &'static (Vec<Asset>, Vec<String>) {
                 text: include_str!("../assets/web/kw-explore.js"),
             },
             Asset {
+                name: "kw-lineage.js",
+                mime: JS,
+                text: include_str!("../assets/web/kw-lineage.js"),
+            },
+            Asset {
                 name: "kw-views.js",
                 mime: JS,
                 text: include_str!("../assets/web/kw-views.js"),
@@ -96,6 +103,11 @@ fn table() -> &'static (Vec<Asset>, Vec<String>) {
                 name: "kw-main.js",
                 mime: JS,
                 text: include_str!("../assets/web/kw-main.js"),
+            },
+            Asset {
+                name: "kw-static.js",
+                mime: JS,
+                text: include_str!("../assets/web/kw-static.js"),
             },
             Asset {
                 name: "views.json",

@@ -16,7 +16,10 @@ KW.core = (function () {
     noRequirements: "No requirements are linked to this symbol. They appear when a project's board is indexed.",
     noTests: "No tests are linked to this symbol.",
     nothingStored: "Nothing is stored for this view yet, so there is no history to show. Stored points appear after a view is answered exactly, or when a snapshot folder is given with --snapshots.",
-    unknownView: "There is no such view."
+    unknownView: "There is no such view.",
+    /* Only a single-file export (kw-static.js) produces these two. */
+    notInExport: "This isn't in this export. Run katalogr serve on the project to see it, or export again with a larger --max-symbols.",
+    fixedPosition: "This file is fixed at one position, so there is no history to show."
   };
 
   function decode(s) {
@@ -91,6 +94,7 @@ KW.core = (function () {
   /* What to say about a failed request: {text, detail, items}. A status of 0 (or none) means
      the transport failed. `items` lists held positions or candidate symbols, as plain text. */
   function statusMessage(status, body) {
+    if (!status && body === "not-in-export") { return { text: messages.notInExport, detail: "", items: [] }; }
     if (!status) { return { text: messages.transport, detail: "", items: [] }; }
     var b = parseBody(body) || {};
     var detail = typeof b.message === "string" ? b.message : "";
@@ -164,6 +168,18 @@ KW.core = (function () {
     return points.filter(function (p) { return sameQuery(p.query, query); });
   }
 
+  /* The header line of a single-file export: "Positions:" and each repo with its short commit. */
+  function positionsLine(positions) {
+    return "Positions: " + (positions || []).map(positionText).join(", ");
+  }
+
+  /* The note for the symbols an export cut: its `Partial` entries with at "export.symbols". */
+  function exportCutNotes(partial) {
+    return (partial || []).filter(function (p) { return p && p.at === "export.symbols"; }).map(function (p) {
+      return "This export holds the " + p.shown + " most connected of " + p.total + " symbols.";
+    });
+  }
+
   /* The requirements of a symbol: the sorted, de-duplicated union of the tests' requirements,
      the refs-item targets of the rationale and the items of the commits. Each entry is
      {name, label}; the label is the rationale's, or empty. */
@@ -192,6 +208,8 @@ KW.core = (function () {
     cell: cell,
     sameQuery: sameQuery,
     pointsFor: pointsFor,
-    requirementsOf: requirementsOf
+    requirementsOf: requirementsOf,
+    positionsLine: positionsLine,
+    exportCutNotes: exportCutNotes
   };
 })();

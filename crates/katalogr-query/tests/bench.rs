@@ -936,11 +936,12 @@ mod bench {
         );
     }
 
-    use crate::support::{artifact, link, open};
+    use crate::support::{artifact, artifact_with, contract, field, link, open, span, sym};
     use katalogr_query::{
         ChangedFile, DocImpactInput, ImpactOptions, SEED_SYMBOL, Seed, doc_impact, impact,
         seeds_for_changes,
     };
+    use katalogr_query::{LineageOptions, SymbolHit, lineage};
 
     /// FEAT-086 R-9: 100 changed files on a 10,000-symbol graph (100 files of 100 symbols), each
     /// with a 100-line changed range, and 1,000 documents linking to symbols and files: within
@@ -1095,6 +1096,153 @@ mod bench {
         );
         assert!(hits > 0);
         assert!(ms < 100.0, "{ms} ms");
+    }
+
+    /// The hit of the symbol with this id, as `lineage` takes it.
+    fn lineage_hit(tx: &impl Reader, id: Id) -> SymbolHit {
+        let row = tx.symbol(id).unwrap().expect("symbol");
+        SymbolHit {
+            name: row.name.canonical(),
+            kind: row.kind.clone(),
+            path: row.name.artifact.path.as_str().to_string(),
+            span: row.span,
+        }
+    }
+
+    /// FEAT-101 R-15: `lineage` on one type of the 10,000-symbol fixture (the `impact_graph`
+    /// layout) with three fields, reached from one function, at depth 3. Budget: under 100 ms.
+    #[test]
+    #[ignore]
+    fn lineage_symbol_depth_3() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (cache, all) = impact_graph(&tmp);
+        let order = {
+            let mut tx = cache.write().unwrap();
+            let ids = artifact_with(
+                &mut tx,
+                "r",
+                "src/order.tx",
+                vec![
+                    sym(&[("type", "Order")], "type"),
+                    field(&[("type", "Order"), ("field", "id")], "string", true, false),
+                    field(
+                        &[("type", "Order"), ("field", "lines")],
+                        "object",
+                        false,
+                        true,
+                    ),
+                    field(
+                        &[("type", "Order"), ("field", "lines"), ("field", "sku")],
+                        "string",
+                        true,
+                        false,
+                    ),
+                ],
+            );
+            link(&mut tx, "r", "src/order.tx", ids[0], "contains", ids[1]);
+            link(&mut tx, "r", "src/order.tx", ids[0], "contains", ids[2]);
+            link(&mut tx, "r", "src/order.tx", ids[2], "contains", ids[3]);
+            link(&mut tx, "r", "src/f0.tx", all[5050], "uses-x", ids[0]);
+            tx.commit().unwrap();
+            ids[0]
+        };
+        let opts = LineageOptions {
+            depth: 3,
+            limit: 200,
+            per_group: 10,
+            code_kinds: Default::default(),
+            fold_from: Some(50),
+        };
+        let read = cache.read().unwrap();
+        let subject = lineage_hit(&read, order);
+        let (mut hits, mut partial) = (0, 0);
+        let ms = best_ms(|| {
+            let a = lineage(&read, &subject, &opts).unwrap();
+            hits = a
+                .report
+                .bindings
+                .iter()
+                .chain(a.report.code.iter())
+                .map(|g| g.hits.len())
+                .sum::<usize>();
+            partial = a.report.partial.len();
+        });
+        println!(
+            "bench::lineage_symbol_depth_3: {ms} ms, {hits} hits, {partial} partial, load {}",
+            loadavg()
+        );
+        assert!(hits > 0);
+        assert!(ms < 100.0, "{ms} ms");
+    }
+
+    /// FEAT-101 R-15: `lineage` on a contract with 5,000 consumers (functions in 50 files of 100),
+    /// at depth 3, under the default limit of 200. Budget: under 300 ms.
+    #[test]
+    #[ignore]
+    fn lineage_large_contract() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cache = open(&tmp, &["r"]);
+        let key = "orders";
+        let contract_name = katalogr_model::ContractName {
+            kind: "channel".into(),
+            key: key.into(),
+        };
+        {
+            let mut tx = cache.write().unwrap();
+            let id = contract(&mut tx, "channel", key, 1, 5000, 0);
+            let names: Vec<String> = (0..100).map(|i| format!("c{i}")).collect();
+            for f in 0..50 {
+                let syms: Vec<(&str, u32, u32)> = names
+                    .iter()
+                    .enumerate()
+                    .map(|(i, n)| (n.as_str(), (i * 10 + 1) as u32, (i * 10 + 10) as u32))
+                    .collect();
+                let (_, ids) = artifact(&mut tx, "r", &format!("src/consumers{f}.tx"), &syms);
+                for c in ids {
+                    link(
+                        &mut tx,
+                        "r",
+                        &format!("src/consumers{f}.tx"),
+                        c,
+                        "consumes",
+                        id,
+                    );
+                }
+            }
+            tx.commit().unwrap();
+        }
+        let opts = LineageOptions {
+            depth: 3,
+            limit: 200,
+            per_group: 10,
+            code_kinds: Default::default(),
+            fold_from: Some(50),
+        };
+        let subject = SymbolHit {
+            name: contract_name.canonical(),
+            kind: "contract".into(),
+            path: String::new(),
+            span: span(1, 1),
+        };
+        let read = cache.read().unwrap();
+        let (mut hits, mut partial) = (0, 0);
+        let ms = best_ms(|| {
+            let a = lineage(&read, &subject, &opts).unwrap();
+            hits = a
+                .report
+                .bindings
+                .iter()
+                .chain(a.report.code.iter())
+                .map(|g| g.hits.len())
+                .sum::<usize>();
+            partial = a.report.partial.len();
+        });
+        println!(
+            "bench::lineage_large_contract: {ms} ms, {hits} hits, {partial} partial, load {}",
+            loadavg()
+        );
+        assert!(hits > 0);
+        assert!(ms < 300.0, "{ms} ms");
     }
 
     /// FEAT-028 R-12: 100 changed files of the same fixture, each with a 100-line changed range.

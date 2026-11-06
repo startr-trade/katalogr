@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:o="urn:example:orders" targetNamespace="urn:example:orders">
+  <xs:complexType name="Order">
+    <xs:sequence>
+      <xs:element name="id" type="xs:string"/>
+      <xs:element name="total" type="xs:decimal"/>
+      <xs:element name="orderDate" type="xs:string"/>
+    </xs:sequence>
+  </xs:complexType>
+</xs:schema>

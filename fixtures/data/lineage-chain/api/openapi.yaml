@@ -1,0 +1,22 @@
+openapi: 3.0.3
+info:
+  title: Ledger API
+  version: "1.0"
+paths:
+  /orders:
+    post:
+      operationId: placeOrder
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Receipt'
+      responses:
+        "201":
+          description: created
+components:
+  schemas:
+    Receipt:
+      type: object
+      properties:
+        id: {type: string}

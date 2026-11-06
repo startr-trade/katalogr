@@ -41,7 +41,10 @@ pub fn run(
 
 /// The reply of `Katalogr::view` as a reply holding its graph. A cut view is marked partial
 /// whether it was computed or read back.
-fn graph_reply(spec: &ViewSpec, reply: Reply<ViewBytes>) -> Result<Reply<ViewGraph>, DistError> {
+pub(crate) fn graph_reply(
+    spec: &ViewSpec,
+    reply: Reply<ViewBytes>,
+) -> Result<Reply<ViewGraph>, DistError> {
     let Reply {
         outcome,
         report,
@@ -166,7 +169,7 @@ pub fn hoist_globals(args: Vec<std::ffi::OsString>) -> Vec<std::ffi::OsString> {
         } else if a.starts_with('-') {
             i += 1;
         } else {
-            if a == "render" || a == "view" {
+            if a == "render" || a == "view" || a == "export" {
                 at = Some(i);
             }
             break;

@@ -3,6 +3,7 @@
 use crate::deps::DepHit;
 use crate::doc_impact::DocImpact;
 use crate::impact::ImpactReport;
+use crate::lineage::LineageReport;
 use crate::position::PositionAnswer;
 use crate::result::{
     CallerHit, DanglingRef, Envelope, Explain, MapEntry, MirrorDrift, PathStep, RefHit, SearchHit,
@@ -36,6 +37,7 @@ pub fn schemas() -> BTreeMap<&'static str, Value> {
         ("tests", to_value(schema_for!(Envelope<Vec<TestHit>>))),
         ("impact", to_value(schema_for!(Envelope<ImpactReport>))),
         ("timeline", to_value(schema_for!(Envelope<Timeline>))),
+        ("lineage", to_value(schema_for!(Envelope<LineageReport>))),
     ])
 }
 

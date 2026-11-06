@@ -16,6 +16,7 @@ mod claude;
 mod deps;
 mod docs_affected;
 mod impact;
+mod lineage;
 pub use deps::{DEFAULT_DEPS_LIMIT, DEFAULT_USED_BY_LIMIT, DepsOptions};
 pub use docs_affected::{DEFAULT_DOCS_LIMIT, DocsAffectedParams};
 pub use impact::ImpactInput;
@@ -724,6 +725,11 @@ impl Katalogr {
             snapshot_dirs: overrides.snapshot_dirs.clone(),
             answers: answers::AnswerState::default(),
         })
+    }
+
+    /// The machine-local root of each repo, as text. For checks that no export holds one.
+    pub fn root_paths(&self) -> Vec<String> {
+        self.roots.values().map(|r| r.to_string()).collect()
     }
 
     pub fn project(&self) -> &ProjectDir {

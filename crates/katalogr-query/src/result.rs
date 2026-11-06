@@ -378,6 +378,8 @@ pub mod cap {
     pub const BUDGET: &str = "budget";
     /// Members listed per community or cycle.
     pub const MEMBERS: &str = "members";
+    /// `lineage --per-group`.
+    pub const PER_GROUP: &str = "per-group";
     /// Peers of the workspace (FEAT-020): one could not be read in full, or a bounded round
     /// count ended before the walk did.
     pub const PEERS: &str = "peers";

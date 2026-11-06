@@ -6,6 +6,7 @@
 pub mod calls;
 pub mod context;
 pub mod extract;
+mod fields;
 pub mod items;
 pub mod lines;
 pub mod literals;
@@ -92,6 +93,7 @@ impl Extractor for TsExtractor {
             "package-fact",
             "test-marks",
             "string-calls",
+            "type-fields",
         ]
     }
 
@@ -104,9 +106,10 @@ impl Extractor for TsExtractor {
     /// extensions (FEAT-017); `3` adds the `root`, `package` and `rationale`
     /// facts (FEAT-030); `;tests-1` adds the `test` fact, test symbols and the `test-name`
     /// exports (FEAT-063); `;rest-1` adds the `str_calls` fact (FEAT-014); `;rest-2` compacts it (per-file
-    /// candidate table, start-only positions); `;rest-3` packs the position in `pos`.
+    /// candidate table, start-only positions); `;rest-3` packs the position in `pos`; `;fields-1` adds the `field` symbols of
+    /// interfaces, classes and object type aliases (FEAT-101).
     fn revision_salt(&self) -> &'static str {
-        "ts-extract-3;tests-1;rest-1;rest-2;rest-3"
+        "ts-extract-3;tests-1;rest-1;rest-2;rest-3;fields-1"
     }
 
     /// The [`TsContext`] as compact JSON with sorted keys and vectors.

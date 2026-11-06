@@ -494,6 +494,33 @@ fn impact(k: &Katalogr, a: &Args, o: &Options) -> JsonAnswer {
     })
 }
 
+fn lineage(k: &Katalogr, a: &Args, o: &Options) -> JsonAnswer {
+    let text = a.str("text");
+    let (depth, limit, per_group) = (
+        a.int("depth"),
+        a.int("limit") as usize,
+        a.int("per-group") as usize,
+    );
+    let expand = a.flag("expand");
+    let o = Options {
+        expand,
+        ..q(
+            o,
+            a,
+            "lineage",
+            &crate::cmd::lineage::args(text, depth, limit, per_group, expand),
+        )
+    };
+    answer(
+        k.lineage(
+            text,
+            crate::cmd::lineage::options(depth, limit, per_group),
+            &o,
+        ),
+        render_json::lineage,
+    )
+}
+
 fn position(start: &Path, overrides: &Overrides, a: &Args, o: &Options) -> JsonAnswer {
     let repo = a.opt("repo");
     let result = match Katalogr::resolve(start, overrides) {
@@ -878,6 +905,18 @@ pub const OPS: &[Op] = &[
         Call::Project(impact)
     ),
     op!(
+        "lineage",
+        "What a type, schema element, symbol or contract is and where it goes.",
+        &[
+            TEXT,
+            dflt("depth", Ty::Int(1), "3", "contract hops to follow"),
+            dflt("limit", Ty::Int(1), "200", "most hits in all groups"),
+            dflt("per-group", Ty::Int(1), "10", "most hits listed per group"),
+        ],
+        Some("lineage"),
+        Call::Project(lineage)
+    ),
+    op!(
         "status",
         "Index watermark, pending changes and staleness.",
         &[],
@@ -1077,6 +1116,17 @@ pub const OPS: &[Op] = &[
         Call::Project(view_impact)
     ),
     op!(
+        "views/lineage",
+        "A lineage view at a position: Mermaid and the graph.",
+        &[
+            req("symbol", "canonical name or plain name"),
+            dflt("depth", Ty::Int(1), "3", "contract hops to follow"),
+            MAX_NODES,
+        ],
+        Some("view"),
+        Call::Project(view_lineage)
+    ),
+    op!(
         "views/path",
         "A path view at a position: Mermaid and the graph.",
         &[
@@ -1184,6 +1234,7 @@ view_fn!(view_structure, "structure");
 view_fn!(view_contracts, "contracts");
 view_fn!(view_callers, "callers");
 view_fn!(view_impact, "impact");
+view_fn!(view_lineage, "lineage");
 view_fn!(view_path, "path");
 view_fn!(view_cycles, "cycles");
 
@@ -1257,4 +1308,48 @@ pub fn view_id_now(start: &Path, op: &Op, args: &Args, overrides: &Overrides) ->
 /// The route of `name` in `ops`.
 pub fn find_op<'a>(ops: &'a [Op], name: &str) -> Option<&'a Op> {
     ops.iter().find(|o| o.name == name)
+}
+
+/// One facade call for `op`: the project is resolved for it, or the op resolves for itself.
+pub fn call_op(
+    start: &Path,
+    op: &Op,
+    args: &Args,
+    overrides: &Overrides,
+    o: &Options,
+) -> JsonAnswer {
+    match op.call {
+        Call::Project(f) => match Katalogr::resolve(start, overrides) {
+            Ok(k) => f(&k, args, o),
+            Err(e) => render_json::error(&e),
+        },
+        Call::Free(f) => f(start, overrides, args, o),
+    }
+}
+
+/// One row by name, exactly as a request would run it, with no socket and no gate: the same
+/// validation, the same base options and the same renderer. An unknown name or a bad parameter
+/// is `DistError::Usage`.
+pub fn call_by_name(
+    start: &Path,
+    overrides: &Overrides,
+    name: &str,
+    params: &BTreeMap<String, String>,
+) -> Result<JsonAnswer, DistError> {
+    let op = find_op(OPS, name).ok_or_else(|| DistError::Usage(format!("no such op: {name}")))?;
+    let args = Args::parse(op.params, params).map_err(|e| DistError::Usage(e.message))?;
+    let mut overrides = overrides.clone();
+    overrides.context = args.opt("context").map(str::to_string);
+    let base = Options {
+        consistency: Some(args.consistency()),
+        timeout: args.float("timeout"),
+        diagnostic: false,
+        expand: false,
+        at: args.opt("at").map(str::to_string),
+        view: None,
+        ranking: katalogr_dist::Ranking::Neutral,
+        fresh: false,
+        no_peers: false,
+    };
+    Ok(call_op(start, op, &args, &overrides, &base))
 }

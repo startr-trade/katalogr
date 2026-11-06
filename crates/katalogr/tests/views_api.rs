@@ -189,6 +189,24 @@ mod views {
         assert_eq!(r.body, cli_out.trim_end());
     }
 
+    /// R-10. The lineage view's API body is the CLI's `--json`, byte for byte.
+    #[test]
+    fn lineage_view_api_equals_cli() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (_kx, repo) = project(tmp.path());
+        let server = serve(&repo);
+        let r = get(
+            &server,
+            "/api/v1/views/lineage?symbol=target&depth=3&consistency=wait",
+        );
+        assert_eq!(r.status, 200, "{r:?}");
+        let cli_out = ok(
+            &repo,
+            &["--json", "view", "lineage", "target", "--depth", "3"],
+        );
+        assert_eq!(r.body, cli_out.trim_end());
+    }
+
     /// R-6. `meta` lists the capability `views`.
     #[test]
     fn capability_listed() {
@@ -230,6 +248,7 @@ mod views {
                 "contracts",
                 "cycles",
                 "impact",
+                "lineage",
                 "path",
                 "structure"
             ]
@@ -262,7 +281,7 @@ mod views {
         let (_kx, repo) = project(tmp.path());
         let server = serve(&repo);
         let v = get(&server, "/api/v1/meta").json();
-        assert_eq!(v["contract"], 7);
+        assert_eq!(v["contract"], 8);
         assert_eq!(v["view_format"], 1);
     }
 

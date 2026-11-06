@@ -5,6 +5,7 @@ pub mod bindings;
 pub mod calls;
 pub mod context;
 pub mod extract;
+mod fields;
 pub mod impls;
 pub mod items;
 pub mod lines;
@@ -57,6 +58,7 @@ impl Extractor for RustExtractor {
             "package-fact",
             "test-marks",
             "string-calls",
+            "type-fields",
         ]
     }
 
@@ -69,9 +71,10 @@ impl Extractor for RustExtractor {
     /// extensions (FEAT-017); `3` adds the `root`, `package` and `rationale`
     /// facts (FEAT-030); `;tests-1` adds the `test` fact and the `test-name`
     /// exports (FEAT-063); `;rest-1` adds the `str_calls` fact (FEAT-014); `;rest-2` compacts it (per-file
-    /// candidate table, start-only positions); `;rest-3` packs the position in `pos`.
+    /// candidate table, start-only positions); `;rest-3` packs the position in `pos`; `;fields-1` adds the `field` symbols of structs,
+    /// unions and enum variants (FEAT-101).
     fn revision_salt(&self) -> &'static str {
-        "rust-extract-3;tests-1;rest-1;rest-2;rest-3"
+        "rust-extract-3;tests-1;rest-1;rest-2;rest-3;fields-1"
     }
 
     /// The [`WorkspaceContext`] as compact JSON with sorted keys and vectors.

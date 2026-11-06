@@ -184,3 +184,110 @@ pub fn mark_test(tx: &mut WriteTx, id: Id, role: &str) {
     );
     tx.put_symbol(id, &row).unwrap();
 }
+
+/// One symbol for [`artifact_with`]: the path segments as `(kind, name)`, the symbol kind and
+/// its facts.
+pub struct Sym {
+    pub segs: Vec<(&'static str, &'static str)>,
+    pub kind: &'static str,
+    pub facts: Vec<(&'static str, katalogr_model::Fact)>,
+}
+
+/// A symbol with no facts.
+pub fn sym(segs: &[(&'static str, &'static str)], kind: &'static str) -> Sym {
+    Sym {
+        segs: segs.to_vec(),
+        kind,
+        facts: Vec::new(),
+    }
+}
+
+/// A `field` symbol with the neutral structure facts.
+pub fn field(
+    segs: &[(&'static str, &'static str)],
+    ty: &'static str,
+    required: bool,
+    many: bool,
+) -> Sym {
+    use katalogr_model::Fact;
+    Sym {
+        segs: segs.to_vec(),
+        kind: "field",
+        facts: vec![
+            ("field_type", Fact::Str(ty.into())),
+            ("required", Fact::Bool(required)),
+            ("many", Fact::Bool(many)),
+        ],
+    }
+}
+
+/// Add an artifact with symbols that have their own segments, kinds and facts; returns the
+/// symbol ids in order.
+pub fn artifact_with(tx: &mut WriteTx, repo: &str, path: &str, syms: Vec<Sym>) -> Vec<Id> {
+    artifact_ext(tx, repo, path, "tx", syms)
+}
+
+/// [`artifact_with`] for an artifact of the given extension.
+pub fn artifact_ext(
+    tx: &mut WriteTx,
+    repo: &str,
+    path: &str,
+    extension: &str,
+    syms: Vec<Sym>,
+) -> Vec<Id> {
+    let rel = RelPath::new(path).unwrap();
+    let name = ArtifactName {
+        repo: repo.into(),
+        path: rel.clone(),
+    };
+    let aid = name.id();
+    let mut ids = Vec::new();
+    for (i, s) in syms.into_iter().enumerate() {
+        let sn = SymbolName {
+            artifact: name.clone(),
+            segments: s
+                .segs
+                .iter()
+                .map(|(k, n)| Segment {
+                    kind: (*k).into(),
+                    name: (*n).into(),
+                })
+                .collect(),
+            ordinal: 1,
+        };
+        let id = sn.id();
+        let line = i as u32 + 1;
+        tx.put_symbol(
+            id,
+            &SymbolRow {
+                name: sn,
+                artifact: aid,
+                kind: s.kind.into(),
+                span: span(line, line),
+                facts: s
+                    .facts
+                    .into_iter()
+                    .map(|(k, v)| (k.to_string(), v))
+                    .collect(),
+            },
+        )
+        .unwrap();
+        ids.push(id);
+    }
+    let mut sorted = ids.clone();
+    sorted.sort();
+    tx.put_artifact(
+        aid,
+        &ArtifactRow {
+            name,
+            extension: extension.into(),
+            provenance: provenance(repo, &rel),
+            facts: Default::default(),
+            symbols: sorted,
+            exports: Vec::new(),
+            refs: Vec::new(),
+        },
+    )
+    .unwrap();
+    ids
+}

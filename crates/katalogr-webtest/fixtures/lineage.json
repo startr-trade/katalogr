@@ -1,0 +1,256 @@
+{
+ "schema": 1,
+ "watermark": 12,
+ "pending": 0,
+ "stale": false,
+ "truncated": null,
+ "exact": true,
+ "positions": [
+  {
+   "repo": "app",
+   "commit": "0123456789abcdef0123456789abcdef01234567",
+   "dirty": null
+  }
+ ],
+ "result": {
+  "subject": {
+   "name": "repo:app#type:Order",
+   "kind": "type",
+   "path": "schemas/orders.tx",
+   "span": {
+    "start_line": 1,
+    "start_col": 1,
+    "end_line": 1,
+    "end_col": 1
+   }
+  },
+  "subject_contracts": [
+   "contract:shape:Order"
+  ],
+  "declared_in": [
+   {
+    "name": "repo:app#type:Order",
+    "kind": "type",
+    "path": "schemas/orders.tx",
+    "span": {
+     "start_line": 1,
+     "start_col": 1,
+     "end_line": 1,
+     "end_col": 1
+    }
+   },
+   {
+    "name": "repo:app#struct:Order",
+    "kind": "struct",
+    "path": "src/order.rs",
+    "span": {
+     "start_line": 4,
+     "start_col": 1,
+     "end_line": 4,
+     "end_col": 1
+    }
+   }
+  ],
+  "fields": [
+   {
+    "node": {
+     "name": "repo:app#type:Order/field:id",
+     "kind": "field",
+     "path": "schemas/orders.tx",
+     "span": {
+      "start_line": 2,
+      "start_col": 1,
+      "end_line": 2,
+      "end_col": 1
+     }
+    },
+    "depth": 1,
+    "field_type": "string",
+    "required": true,
+    "many": false,
+    "mapped_by": [
+     {
+      "node": {
+       "name": "repo:app#key:wire",
+       "kind": "key",
+       "path": "defs/orders.yaml",
+       "span": {
+        "start_line": 3,
+        "start_col": 1,
+        "end_line": 3,
+        "end_col": 1
+       }
+      },
+      "kind": "maps-x",
+      "confidence": "Declared",
+      "facts": {
+       "wire_format": "wf"
+      }
+     }
+    ],
+    "mapped_total": 1,
+    "copies": [
+     {
+      "node": {
+       "name": "repo:app#struct:Order/field:id",
+       "kind": "field",
+       "path": "src/order.rs",
+       "span": {
+        "start_line": 5,
+        "start_col": 1,
+        "end_line": 5,
+        "end_col": 1
+       }
+      },
+      "by": "name"
+     }
+    ]
+   },
+   {
+    "node": {
+     "name": "repo:app#type:Order/field:lines",
+     "kind": "field",
+     "path": "schemas/orders.tx",
+     "span": {
+      "start_line": 3,
+      "start_col": 1,
+      "end_line": 3,
+      "end_col": 1
+     }
+    },
+    "depth": 1,
+    "field_type": "Line",
+    "required": false,
+    "many": true,
+    "mapped_by": [],
+    "mapped_total": 0,
+    "copies": []
+   }
+  ],
+  "unpaired_fields": [
+   {
+    "name": "repo:app#struct:Order/field:extra",
+    "kind": "field",
+    "path": "src/order.rs",
+    "span": {
+     "start_line": 6,
+     "start_col": 1,
+     "end_line": 6,
+     "end_col": 1
+    }
+   }
+  ],
+  "related": [
+   {
+    "relation": "uses",
+    "node": {
+     "name": "repo:app#type:Line",
+     "kind": "type",
+     "path": "schemas/line.tx",
+     "span": {
+      "start_line": 1,
+      "start_col": 1,
+      "end_line": 1,
+      "end_col": 1
+     }
+    },
+    "through_field": "lines"
+   }
+  ],
+  "bindings": [
+   {
+    "kind": "uses-x",
+    "node_kind": "key",
+    "confidence": "Extracted",
+    "total": 3,
+    "hits": [
+     {
+      "node": {
+       "name": "repo:app#doc:orders/key:type",
+       "kind": "key",
+       "path": "defs/orders.yaml",
+       "span": {
+        "start_line": 3,
+        "start_col": 1,
+        "end_line": 3,
+        "end_col": 1
+       }
+      },
+      "depth": 0,
+      "holder": "repo:app#doc:orders",
+      "via": null,
+      "chain": []
+     },
+     {
+      "node": {
+       "name": "repo:app#doc:more/key:type",
+       "kind": "key",
+       "path": "defs/more.yaml",
+       "span": {
+        "start_line": 3,
+        "start_col": 1,
+        "end_line": 3,
+        "end_col": 1
+       }
+      },
+      "depth": 0,
+      "chain": []
+     }
+    ]
+   }
+  ],
+  "code": [
+   {
+    "kind": "consumes",
+    "node_kind": "fn",
+    "confidence": "Extracted",
+    "total": 1,
+    "hits": [
+     {
+      "node": {
+       "name": "repo:app#fn:handler",
+       "kind": "fn",
+       "path": "src/handler.rs",
+       "span": {
+        "start_line": 9,
+        "start_col": 1,
+        "end_line": 9,
+        "end_col": 1
+       }
+      },
+      "depth": 1,
+      "via": "contract:channel:orders",
+      "chain": [
+       "repo:app#doc:orders"
+      ],
+      "role": "test"
+     }
+    ]
+   }
+  ],
+  "contracts": [
+   {
+    "contract": "contract:channel:orders",
+    "providers": 1,
+    "consumers": 1
+   },
+   {
+    "contract": "contract:shape:Order",
+    "providers": 0,
+    "consumers": 0,
+    "open": "no-consumer"
+   }
+  ],
+  "boundaries": [
+   "open-contract"
+  ],
+  "total": 4,
+  "repos": [
+   "app"
+  ],
+  "projects": [
+   "demo"
+  ],
+  "partial": []
+ }
+}

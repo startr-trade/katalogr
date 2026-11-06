@@ -1,0 +1,200 @@
+mode: exact
+symbols:
+- fx:Cargo.toml#crate:ledger
+- fx:api/openapi.yaml#operation:POST%20%2Forders
+- fx:api/openapi.yaml#type:Receipt
+- fx:api/openapi.yaml#type:Receipt/field:id
+- fx:db/orders.sql#table:public.orders
+- fx:db/orders.sql#table:public.orders/column:amount
+- fx:db/orders.sql#table:public.orders/column:order_id
+- fx:schemas/orders.xsd#schema:orders
+- fx:schemas/orders.xsd#type:Order
+- fx:schemas/orders.xsd#type:Order/field:id
+- fx:schemas/orders.xsd#type:Order/field:orderDate
+- fx:schemas/orders.xsd#type:Order/field:total
+- fx:src/client.rs#fn:send
+- fx:src/lib.rs#mod:client
+- fx:src/lib.rs#mod:model
+- fx:src/lib.rs#mod:repo
+- fx:src/lib.rs#mod:server
+- fx:src/model.rs#struct:Line
+- fx:src/model.rs#struct:Line/field:sku
+- fx:src/model.rs#struct:Order
+- fx:src/model.rs#struct:Order/field:id
+- fx:src/model.rs#struct:Order/field:internal
+- fx:src/model.rs#struct:Order/field:lines
+- fx:src/model.rs#struct:Order/field:order_date
+- fx:src/model.rs#struct:Order/field:total
+- fx:src/repo.rs#fn:load_orders
+- fx:src/server.rs#fn:place
+- fx:src/server.rs#fn:routes
+- fx:stores/orders.yaml#doc:orders
+- fx:stores/orders.yaml#doc:orders/key:columns
+- fx:stores/orders.yaml#doc:orders/key:columns/key:amount
+- fx:stores/orders.yaml#doc:orders/key:columns/key:order_id
+- fx:stores/orders.yaml#doc:orders/key:table
+- fx:stores/orders.yaml#doc:orders/key:type
+contracts:
+- contract:http_route:POST%20%2Forders
+- contract:schema_type:{urn%3Aexample%3Aorders}Order
+- contract:schema_type:{}Receipt
+- contract:sql_column:public.orders.amount
+- contract:sql_column:public.orders.order_id
+- contract:sql_table:public.orders
+links:
+- from: fx:api/openapi.yaml#operation:POST%20%2Forders
+  kind: declares
+  to: contract:http_route:POST%20%2Forders
+  confidence: Extracted
+- from: fx:api/openapi.yaml#operation:POST%20%2Forders
+  kind: uses-type
+  to: fx:api/openapi.yaml#type:Receipt
+  confidence: Extracted
+- from: fx:api/openapi.yaml#type:Receipt
+  kind: contains
+  to: fx:api/openapi.yaml#type:Receipt/field:id
+  confidence: Extracted
+- from: fx:api/openapi.yaml#type:Receipt
+  kind: declares
+  to: contract:schema_type:{}Receipt
+  confidence: Inferred
+- from: fx:db/orders.sql#table:public.orders
+  kind: contains
+  to: fx:db/orders.sql#table:public.orders/column:amount
+  confidence: Extracted
+- from: fx:db/orders.sql#table:public.orders
+  kind: contains
+  to: fx:db/orders.sql#table:public.orders/column:order_id
+  confidence: Extracted
+- from: fx:db/orders.sql#table:public.orders
+  kind: provides
+  to: contract:sql_table:public.orders
+  confidence: Extracted
+- from: fx:db/orders.sql#table:public.orders/column:amount
+  kind: provides
+  to: contract:sql_column:public.orders.amount
+  confidence: Extracted
+- from: fx:db/orders.sql#table:public.orders/column:order_id
+  kind: provides
+  to: contract:sql_column:public.orders.order_id
+  confidence: Extracted
+- from: fx:schemas/orders.xsd#type:Order
+  kind: contains
+  to: fx:schemas/orders.xsd#type:Order/field:id
+  confidence: Extracted
+- from: fx:schemas/orders.xsd#type:Order
+  kind: contains
+  to: fx:schemas/orders.xsd#type:Order/field:orderDate
+  confidence: Extracted
+- from: fx:schemas/orders.xsd#type:Order
+  kind: contains
+  to: fx:schemas/orders.xsd#type:Order/field:total
+  confidence: Extracted
+- from: fx:schemas/orders.xsd#type:Order
+  kind: declares
+  to: contract:schema_type:{urn%3Aexample%3Aorders}Order
+  confidence: Extracted
+- from: fx:src/client.rs#fn:send
+  kind: consumes
+  to: contract:http_route:POST%20%2Forders
+  confidence: Inferred
+  produced_by: profile:example-lineage#client-method
+- from: fx:src/lib.rs#mod:client
+  kind: declares
+  to: fx:src/client.rs
+  confidence: Extracted
+- from: fx:src/lib.rs#mod:model
+  kind: declares
+  to: fx:src/model.rs
+  confidence: Extracted
+- from: fx:src/lib.rs#mod:repo
+  kind: declares
+  to: fx:src/repo.rs
+  confidence: Extracted
+- from: fx:src/lib.rs#mod:server
+  kind: declares
+  to: fx:src/server.rs
+  confidence: Extracted
+- from: fx:src/model.rs#struct:Line
+  kind: contains
+  to: fx:src/model.rs#struct:Line/field:sku
+  confidence: Extracted
+- from: fx:src/model.rs#struct:Order
+  kind: contains
+  to: fx:src/model.rs#struct:Order/field:id
+  confidence: Extracted
+- from: fx:src/model.rs#struct:Order
+  kind: contains
+  to: fx:src/model.rs#struct:Order/field:internal
+  confidence: Extracted
+- from: fx:src/model.rs#struct:Order
+  kind: contains
+  to: fx:src/model.rs#struct:Order/field:lines
+  confidence: Extracted
+- from: fx:src/model.rs#struct:Order
+  kind: contains
+  to: fx:src/model.rs#struct:Order/field:order_date
+  confidence: Extracted
+- from: fx:src/model.rs#struct:Order
+  kind: contains
+  to: fx:src/model.rs#struct:Order/field:total
+  confidence: Extracted
+- from: fx:src/model.rs#struct:Order
+  kind: declares
+  to: contract:schema_type:{urn%3Aexample%3Aorders}Order
+  confidence: Declared
+  produced_by: profile:example-lineage#order-struct-declares
+- from: fx:src/model.rs#struct:Order/field:lines
+  kind: uses-type
+  to: fx:src/model.rs#struct:Line
+  confidence: Extracted
+- from: fx:src/repo.rs#fn:load_orders
+  kind: consumes
+  to: contract:sql_table:public.orders
+  confidence: Inferred
+  produced_by: embedded:sql
+- from: fx:src/server.rs#fn:place
+  kind: provides
+  to: contract:http_route:POST%20%2Forders
+  confidence: Declared
+  produced_by: profile:example-lineage#axum-post
+- from: fx:stores/orders.yaml#doc:orders
+  kind: consumes
+  to: contract:sql_table:public.orders
+  confidence: Declared
+  produced_by: profile:example-lineage#store-uses-table
+- from: fx:stores/orders.yaml#doc:orders
+  kind: contains
+  to: fx:stores/orders.yaml#doc:orders/key:columns
+  confidence: Extracted
+- from: fx:stores/orders.yaml#doc:orders
+  kind: contains
+  to: fx:stores/orders.yaml#doc:orders/key:table
+  confidence: Extracted
+- from: fx:stores/orders.yaml#doc:orders
+  kind: contains
+  to: fx:stores/orders.yaml#doc:orders/key:type
+  confidence: Extracted
+- from: fx:stores/orders.yaml#doc:orders/key:columns
+  kind: contains
+  to: fx:stores/orders.yaml#doc:orders/key:columns/key:amount
+  confidence: Extracted
+- from: fx:stores/orders.yaml#doc:orders/key:columns
+  kind: contains
+  to: fx:stores/orders.yaml#doc:orders/key:columns/key:order_id
+  confidence: Extracted
+- from: fx:stores/orders.yaml#doc:orders/key:columns/key:amount
+  kind: maps-to
+  to: fx:schemas/orders.xsd#type:Order/field:total
+  confidence: Declared
+  produced_by: profile:example-lineage#store-column-mapping
+- from: fx:stores/orders.yaml#doc:orders/key:columns/key:order_id
+  kind: maps-to
+  to: fx:schemas/orders.xsd#type:Order/field:id
+  confidence: Declared
+  produced_by: profile:example-lineage#store-column-mapping
+- from: fx:stores/orders.yaml#doc:orders/key:type
+  kind: uses-type
+  to: fx:schemas/orders.xsd#type:Order
+  confidence: Declared
+  produced_by: profile:example-lineage#store-type
