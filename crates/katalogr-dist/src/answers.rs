@@ -248,6 +248,18 @@ pub(crate) struct AnswerState {
     compute_hook: Option<Arc<dyn Fn() + Send + Sync>>,
 }
 
+impl AnswerState {
+    /// The same build, store and test hook, with counts starting at zero.
+    pub(crate) fn fork(&self) -> AnswerState {
+        AnswerState {
+            build: self.build.clone(),
+            store: self.store.clone(),
+            counters: Mutex::new(AnswerCounters::default()),
+            compute_hook: self.compute_hook.clone(),
+        }
+    }
+}
+
 /// An entry computed by a read, written once the read is known to have held.
 struct PendingWrite {
     entry: StoredAnswer,

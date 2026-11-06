@@ -557,4 +557,37 @@ mod context {
         assert_eq!(code, 4);
         drop(held);
     }
+
+    /// FEAT-095 R-2. `context add --commit` that has not drained is reported, not a quiet success.
+    #[test]
+    fn add_commit_reports_undrained() {
+        let big: Vec<(String, String)> = (0..400)
+            .map(|i| (format!("f{i}.tx"), format!("sym fn Item{i}\n")))
+            .collect();
+        let refs: Vec<(&str, &str)> = big.iter().map(|(n, t)| (n.as_str(), t.as_str())).collect();
+        let p = project(&refs, true);
+        let head = git(&p.repo, &["rev-parse", "HEAD"]);
+        let k = katalogr(&p.repo, ContextChoice::Base);
+        let err = k
+            .context_add_commit(
+                "app",
+                &head,
+                &Options {
+                    timeout: Some(0.001),
+                    ..Options::default()
+                },
+            )
+            .expect_err("a context that cannot drain in time is reported");
+        assert_eq!(err.refused_exit(), Some(5), "{err}");
+        // Given time, the same call succeeds.
+        k.context_add_commit(
+            "app",
+            &head,
+            &Options {
+                timeout: Some(120.0),
+                ..Options::default()
+            },
+        )
+        .expect("drains when given time");
+    }
 }

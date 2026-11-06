@@ -681,6 +681,21 @@ impl Katalogr {
         &self.project
     }
 
+    /// A copy that reads through context `c`, with no notes and no view-ID arguments carried
+    /// over. Stored answers keep the same build and store.
+    pub(crate) fn with_context(&self, c: contexts::ContextChoice) -> Katalogr {
+        Katalogr {
+            project: self.project.clone(),
+            repo: self.repo.clone(),
+            roots: self.roots.clone(),
+            context: c,
+            notes: std::sync::Mutex::new(Vec::new()),
+            view_extra: std::sync::Mutex::new(Vec::new()),
+            snapshot_dirs: self.snapshot_dirs.clone(),
+            answers: self.answers.fork(),
+        }
+    }
+
     /// Record (or replace) the machine-local root of a repo of this project.
     pub fn add_root(&self, name: &str, path: &Path) -> Result<(), DistError> {
         if !self.project.config().repos.iter().any(|r| r.name == name) {
