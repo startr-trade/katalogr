@@ -20,6 +20,7 @@ mod rationale;
 pub mod result;
 mod scc;
 mod schema;
+pub mod semantic_diff;
 pub mod structure;
 #[cfg(test)]
 #[allow(dead_code)]
