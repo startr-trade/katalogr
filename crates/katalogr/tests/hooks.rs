@@ -190,6 +190,73 @@ mod hooks {
         assert!(text.contains("pre-read deny big.tx"), "{text}");
     }
 
+    /// FEAT-096 R-14. The symbols the hook lists, and their order, are those of the full rank.
+    #[test]
+    fn pre_read_matches_full_rank() {
+        let e = env();
+        // Links give the symbols different ranks: three hubs of unlike in-degree.
+        let big = e.repo.join("big.tx");
+        let mut text = std::fs::read_to_string(&big).unwrap();
+        for i in 0..40 {
+            text.push_str(&format!(
+                "link big_function_number_{i:04} calls big_function_number_1700\n"
+            ));
+        }
+        for i in 40..60 {
+            text.push_str(&format!(
+                "link big_function_number_{i:04} calls big_function_number_1600\n"
+            ));
+        }
+        for i in 60..65 {
+            text.push_str(&format!(
+                "link big_function_number_{i:04} calls big_function_number_1500\n"
+            ));
+        }
+        std::fs::write(&big, text).unwrap();
+        ok(&e.repo, &e.home, &["index"]);
+        let out = hook(
+            &e.repo,
+            &e.home,
+            "pre-read",
+            &read_input(&e, "pre_tool_use_read_input.json", big.to_str().unwrap()),
+        );
+        let reason = json(&out)["hookSpecificOutput"]["permissionDecisionReason"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let listed: Vec<&str> = reason.lines().filter(|l| l.starts_with("- ")).collect();
+        assert_eq!(listed.len(), 10, "{reason}");
+        // The order of `map` for this file's symbols is the order of the full rank.
+        let map = json(&ok(&e.repo, &e.home, &["map", "--neutral", "--json"]));
+        let want: Vec<String> = map["result"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|m| m["symbol"]["path"] == "big.tx")
+            .take(10)
+            .map(|m| {
+                m["symbol"]["name"]
+                    .as_str()
+                    .unwrap()
+                    .rsplit(':')
+                    .next()
+                    .unwrap()
+                    .to_string()
+            })
+            .collect();
+        assert_eq!(want.len(), 10);
+        for (line, name) in listed.iter().zip(&want) {
+            assert!(
+                line.contains(name.as_str()),
+                "{line} should name {name}\n{reason}"
+            );
+        }
+        assert!(
+            want[0].ends_with("1700") && want[1].ends_with("1600") && want[2].ends_with("1500"),
+            "{want:?}"
+        );
+    }
+
     #[test]
     fn grep_enriched() {
         let e = env();

@@ -712,6 +712,7 @@ fn scan_in<T: ReadableTable<&'static [u8], &'static [u8]>>(
     t: &T,
     prefix: &[u8],
 ) -> Result<RawRows, StoreError> {
+    SCANS.with(|c| c.set(c.get() + 1));
     let hi = prefix_end(prefix);
     let it = match &hi {
         Some(e) => t.range(prefix..e.as_slice()),
@@ -731,6 +732,7 @@ fn scan_keys_in<T: ReadableTable<&'static [u8], &'static [u8]>>(
     t: &T,
     prefix: &[u8],
 ) -> Result<Vec<Vec<u8>>, StoreError> {
+    SCANS.with(|c| c.set(c.get() + 1));
     let hi = prefix_end(prefix);
     let it = match &hi {
         Some(e) => t.range(prefix..e.as_slice()),
@@ -1950,6 +1952,18 @@ pub trait Reader {
         Ok(Some(out))
     }
 
+    /// The stored rank of one symbol, not checking currency; `None` when absent.
+    fn rank_of(&self, id: Id) -> Result<Option<f64>, StoreError> {
+        let Some(v) = self.raw_get(TableId::Rank, &id.0)? else {
+            return Ok(None);
+        };
+        let bits = u64::from_le_bytes(
+            v.try_into()
+                .map_err(|_| StoreError::Row("bad rank row".into()))?,
+        );
+        Ok(Some(f64::from_bits(bits)))
+    }
+
     /// The extension context of `(repo, extension id)`: its SHA-256 and its bytes.
     fn ext_context(
         &self,
@@ -2937,6 +2951,14 @@ impl WriteTx<'_> {
 
 thread_local! {
     static COMMITS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+    static SCANS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+/// How many table scans (`raw_scan`, `raw_scan_keys`) the calling thread has run. For tests that
+/// check a read path uses point reads only (FEAT-096 R-14).
+#[doc(hidden)]
+pub fn scans_on_this_thread() -> u64 {
+    SCANS.with(std::cell::Cell::get)
 }
 
 /// How many write transactions the calling thread has committed. For tests that check a read

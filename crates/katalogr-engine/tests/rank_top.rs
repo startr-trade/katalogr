@@ -96,4 +96,76 @@ mod rank_top {
         // `map` still answers, from a live rank.
         assert_eq!(katalogr_query::map(&rx).unwrap().len(), 4);
     }
+
+    /// FEAT-096 R-14: the scores of one file's symbols are the full rank's, current or not.
+    #[test]
+    fn file_ranks_match_full_rank() {
+        let f = fixture();
+        f.publish(BASE);
+        let rx = f.engine.cache().read().unwrap();
+        let full = katalogr_query::rank(&rx).unwrap();
+        let ids: Vec<Id> = full.iter().map(|(h, _)| Id::of(&h.name)).collect();
+        let want = |ids: &[Id]| -> Vec<u64> {
+            ids.iter()
+                .map(|id| {
+                    full.iter()
+                        .find(|(h, _)| Id::of(&h.name) == *id)
+                        .map_or(0.0, |(_, r)| *r)
+                        .to_bits()
+                })
+                .collect()
+        };
+        let got = |rx: &katalogr_store::ReadTx, ids: &[Id]| -> Vec<u64> {
+            let m = katalogr_query::file_symbol_ranks(rx, ids).unwrap();
+            ids.iter().map(|id| m[id].to_bits()).collect()
+        };
+        assert!(rx.rank_is_current(RANK_CONTEXT).unwrap());
+        assert_eq!(got(&rx, &ids), want(&ids));
+        // A subset, and a symbol that is not there (0.0).
+        let missing = Id::of("not::a::symbol");
+        let some = [ids[2], missing];
+        let m = katalogr_query::file_symbol_ranks(&rx, &some).unwrap();
+        assert_eq!(m[&ids[2]].to_bits(), want(&[ids[2]])[0]);
+        assert_eq!(m[&missing], 0.0);
+        drop(rx);
+
+        // Not current: the full rank is computed and the same scores come out.
+        let mut tx = f.engine.cache().write().unwrap();
+        tx.set_rank_watermark(1_000_000).unwrap();
+        tx.commit().unwrap();
+        let rx = f.engine.cache().read().unwrap();
+        assert!(!rx.rank_is_current(RANK_CONTEXT).unwrap());
+        assert_eq!(got(&rx, &ids), want(&ids));
+        assert_eq!(
+            katalogr_query::file_symbol_ranks(&rx, &[missing]).unwrap()[&missing],
+            0.0
+        );
+    }
+
+    /// FEAT-096 R-14: with a current rank, only point reads are made, no table scan.
+    #[test]
+    fn file_ranks_scan_no_symbol_table() {
+        let f = fixture();
+        f.publish(BASE);
+        let rx = f.engine.cache().read().unwrap();
+        let ids: Vec<Id> = katalogr_query::rank(&rx)
+            .unwrap()
+            .iter()
+            .map(|(h, _)| Id::of(&h.name))
+            .collect();
+        let before = katalogr_store::cache::scans_on_this_thread();
+        katalogr_query::file_symbol_ranks(&rx, &ids[..2]).unwrap();
+        assert_eq!(katalogr_store::cache::scans_on_this_thread(), before);
+        drop(rx);
+        let mut tx = f.engine.cache().write().unwrap();
+        tx.set_rank_watermark(1_000_000).unwrap();
+        tx.commit().unwrap();
+        let rx = f.engine.cache().read().unwrap();
+        let before = katalogr_store::cache::scans_on_this_thread();
+        katalogr_query::file_symbol_ranks(&rx, &ids[..2]).unwrap();
+        assert!(
+            katalogr_store::cache::scans_on_this_thread() > before,
+            "a rank that is behind is computed from the tables"
+        );
+    }
 }
