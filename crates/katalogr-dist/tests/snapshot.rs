@@ -5,7 +5,7 @@
 mod snapshot {
     use camino::{Utf8Path, Utf8PathBuf};
     use katalogr_dist::{DistError, Katalogr, Options, Overrides, kindex_init, project_init};
-    use katalogr_store::{SnapshotManifest, decode_snapshot, read_manifest};
+    use katalogr_store::{SnapshotManifest, StoreError, decode_snapshot, read_manifest};
     use std::path::{Path, PathBuf};
     use std::process::Command;
 
@@ -99,6 +99,52 @@ mod snapshot {
             .output()
             .unwrap();
         String::from_utf8(o.stdout).unwrap().trim().to_string()
+    }
+
+    /// A second machine: a new kindex and project, with a clone of the repo at the same commit
+    /// and no index yet.
+    pub fn second_machine(s: &Setup) -> Setup {
+        let tmp = tempfile::tempdir().unwrap();
+        let kx = tmp.path().join("kx");
+        let repo = tmp.path().join("app");
+        git(
+            s._tmp.path(),
+            &[
+                "clone",
+                "-q",
+                s.repo.to_str().unwrap(),
+                repo.to_str().unwrap(),
+            ],
+        );
+        git(&repo, &["config", "user.name", "Test"]);
+        git(&repo, &["config", "user.email", "test@example.com"]);
+        git(&repo, &["config", "commit.gpgsign", "false"]);
+        kindex_init(&kx).unwrap();
+        project_init(&kx, "demo", vec![("app".into(), repo.clone())], true).unwrap();
+        Setup {
+            _tmp: tmp,
+            kx,
+            repo,
+        }
+    }
+
+    pub fn graph_digest(s: &Setup) -> String {
+        katalogr(s).audit_record(&opts()).unwrap().graph_digest
+    }
+
+    /// Replaces `from` with `to` in the first (header) lines of a snapshot, at equal or any
+    /// length; the payload is untouched.
+    fn edit_header(file: &Utf8Path, from: &str, to: &str) {
+        let raw = std::fs::read(file).unwrap();
+        let mut at = 0;
+        for _ in 0..2 {
+            at += raw[at..].iter().position(|b| *b == b'\n').unwrap() + 1;
+        }
+        let head = String::from_utf8(raw[..at].to_vec()).unwrap();
+        assert!(head.contains(from), "{head}");
+        let mut out = head.replace(from, to).into_bytes();
+        out.extend_from_slice(&raw[at..]);
+        std::fs::write(file, out).unwrap();
     }
 
     /// The extractor's call counter is process-wide, so the tests of this file run one at a time.
@@ -263,5 +309,345 @@ mod snapshot {
         let header = std::fs::read(&out).unwrap();
         assert!(!header.windows(root.len()).any(|w| w == root));
         let _: &Utf8Path = &out;
+    }
+
+    /// Four more files, committed and indexed, so one changed file is a small part of the repo.
+    fn grow(s: &Setup) {
+        for i in 0..4 {
+            std::fs::write(
+                s.repo.join(format!("g{i}.tx")),
+                format!("sym fn grown{i}\n"),
+            )
+            .unwrap();
+        }
+        commit_all(&s.repo, "grow");
+        katalogr(s).index(None, true, None, &opts()).unwrap();
+    }
+
+    fn exported(s: &Setup) -> Utf8PathBuf {
+        let out = out_of(s, "g.ksnap");
+        katalogr(s).snapshot_export(&out, &opts()).unwrap();
+        out
+    }
+
+    #[test]
+    fn round_trip_graph_identical() {
+        let _g = serial();
+        let s = setup();
+        let want = graph_digest(&s);
+        let out = exported(&s);
+        let t = second_machine(&s);
+        let r = katalogr(&t)
+            .snapshot_import(&out, false, None, &opts())
+            .unwrap();
+        assert!(r.facts_match, "{r:?}");
+        assert!(r.rescans.is_empty() && r.no_root.is_empty());
+        assert_eq!(graph_digest(&t), want);
+    }
+
+    #[test]
+    fn audit_verify_matches_after_import() {
+        let _g = serial();
+        let s = setup();
+        katalogr(&s).audit_record(&opts()).unwrap();
+        let record = std::fs::read_dir(s.kx.join("projects/demo/audit"))
+            .unwrap()
+            .next()
+            .unwrap()
+            .unwrap()
+            .path();
+        let out = exported(&s);
+        let t = second_machine(&s);
+        katalogr(&t)
+            .snapshot_import(&out, false, None, &opts())
+            .unwrap();
+        assert_eq!(
+            katalogr(&t).audit_verify(Some(&record), &opts()).unwrap(),
+            katalogr_dist::AuditOutcome::Match
+        );
+    }
+
+    #[test]
+    fn import_waits_for_processor_lock() {
+        let _g = serial();
+        let s = setup();
+        let out = exported(&s);
+        let t = second_machine(&s);
+        let cache = Utf8PathBuf::from_path_buf(t.kx.join("projects/demo/.cache")).unwrap();
+        std::fs::create_dir_all(&cache).unwrap();
+        let held = katalogr_engine::queue::lock::try_lock(&cache)
+            .unwrap()
+            .expect("lock");
+        // Held for the whole timeout: refused, and nothing installed.
+        let short = Options {
+            timeout: Some(0.3),
+            ..Default::default()
+        };
+        let e = katalogr(&t)
+            .snapshot_import(&out, false, None, &short)
+            .unwrap_err();
+        assert_eq!(e.refused_exit(), Some(5), "{e}");
+        assert!(!cache.join("index.redb").exists());
+        // Released during the wait: the import goes through.
+        let releaser = std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(400));
+            drop(held);
+        });
+        let started = std::time::Instant::now();
+        katalogr(&t)
+            .snapshot_import(&out, false, None, &opts())
+            .unwrap();
+        assert!(started.elapsed() >= std::time::Duration::from_millis(300));
+        releaser.join().unwrap();
+        assert!(cache.join("index.redb").exists());
+    }
+
+    #[test]
+    fn flipped_byte_refused_database_kept() {
+        let _g = serial();
+        let s = setup();
+        let out = exported(&s);
+        let mut raw = std::fs::read(&out).unwrap();
+        let mid = raw.len() / 2;
+        raw[mid] ^= 0xff;
+        std::fs::write(&out, raw).unwrap();
+        let before = std::fs::read(cache_file(&s)).unwrap();
+        let e = katalogr(&s)
+            .snapshot_import(&out, true, None, &opts())
+            .unwrap_err();
+        assert!(
+            matches!(e, DistError::Store(StoreError::BadSnapshot(_))),
+            "{e}"
+        );
+        assert_eq!(std::fs::read(cache_file(&s)).unwrap(), before);
+        assert!(!s.kx.join("projects/demo/.cache/index.redb.import").exists());
+    }
+
+    #[test]
+    fn other_schema_refused() {
+        let _g = serial();
+        let s = setup();
+        let out = exported(&s);
+        let own = format!("\"cache_schema\":{}", katalogr_store::CACHE_SCHEMA);
+        edit_header(&out, &own, "\"cache_schema\":999");
+        let t = second_machine(&s);
+        let e = katalogr(&t)
+            .snapshot_import(&out, false, None, &opts())
+            .unwrap_err();
+        assert_eq!(e.refused_exit(), Some(5), "{e}");
+        assert!(!t.kx.join("projects/demo/.cache/index.redb").exists());
+    }
+
+    #[test]
+    fn existing_database_needs_replace() {
+        let _g = serial();
+        let s = setup();
+        let out = exported(&s);
+        let before = std::fs::read(cache_file(&s)).unwrap();
+        let e = katalogr(&s)
+            .snapshot_import(&out, false, None, &opts())
+            .unwrap_err();
+        assert_eq!(e.refused_exit(), Some(5), "{e}");
+        assert_eq!(std::fs::read(cache_file(&s)).unwrap(), before);
+    }
+
+    #[test]
+    fn replace_installs_over_existing() {
+        let _g = serial();
+        let s = setup();
+        let want = graph_digest(&s);
+        let out = exported(&s);
+        // Another index is there: add a file and index it, so the databases differ.
+        std::fs::write(s.repo.join("u.tx"), "sym fn delta\n").unwrap();
+        commit_all(&s.repo, "c2");
+        katalogr(&s).index(None, true, None, &opts()).unwrap();
+        assert_ne!(graph_digest(&s), want);
+        // The snapshot is at c1; installing it puts the c1 rows back under the c2 checkout,
+        // so the check is on the installed rows, read at the snapshot's own position.
+        let r = katalogr(&s)
+            .snapshot_import(&out, true, None, &opts())
+            .unwrap();
+        assert_eq!(r.manifest.positions[0].repo, "app");
+        let have = katalogr(&s).snapshot_show(&out, true).unwrap();
+        assert_eq!(have, r.manifest);
+        // The base now holds the c1 graph the snapshot was made from.
+        let k = katalogr(&s);
+        let base = katalogr_store::Cache::open_reader(k.project())
+            .unwrap()
+            .unwrap();
+        let text = katalogr_engine::canonical_graph(&base.read().unwrap());
+        use sha2::{Digest, Sha256};
+        let have: String = Sha256::digest(text.as_bytes())
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect();
+        assert_eq!(have, want);
+    }
+
+    #[test]
+    fn unlisted_repo_refused() {
+        let _g = serial();
+        let s = setup();
+        let out = exported(&s);
+        edit_header(&out, "\"repo\":\"app\"", "\"repo\":\"other\"");
+        let t = second_machine(&s);
+        let e = katalogr(&t)
+            .snapshot_import(&out, false, None, &opts())
+            .unwrap_err();
+        assert_eq!(e.refused_exit(), Some(5), "{e}");
+        assert!(e.to_string().contains("other"), "{e}");
+        assert!(!t.kx.join("projects/demo/.cache/index.redb").exists());
+    }
+
+    #[test]
+    fn import_then_index_extracts_only_difference() {
+        let _g = serial();
+        let s = setup();
+        grow(&s);
+        let out = exported(&s);
+        let t = second_machine(&s);
+        // The new machine's clone is one commit ahead, with one file changed.
+        std::fs::write(t.repo.join("t.tx"), "sym fn gamma\nsym fn gamma2\n").unwrap();
+        commit_all(&t.repo, "c2");
+        katalogr(&t)
+            .snapshot_import(&out, false, None, &opts())
+            .unwrap();
+        let before = katalogr_dist::extract_calls();
+        katalogr(&t).index(None, false, None, &opts()).unwrap();
+        let extracted = katalogr_dist::extract_calls() - before;
+        // The changed file, at most once in each of the two contexts; six files exist.
+        assert!((1..=2).contains(&extracted), "extracted {extracted}");
+        let hits = katalogr(&t).find("gamma2", &opts()).unwrap();
+        assert!(matches!(hits.outcome, katalogr_dist::Outcome::Found(_)));
+    }
+
+    #[test]
+    fn import_at_same_commit_extracts_nothing() {
+        let _g = serial();
+        let s = setup();
+        let out = exported(&s);
+        let t = second_machine(&s);
+        katalogr(&t)
+            .snapshot_import(&out, false, None, &opts())
+            .unwrap();
+        let before = katalogr_dist::extract_calls();
+        katalogr(&t).index(None, false, None, &opts()).unwrap();
+        assert_eq!(katalogr_dist::extract_calls() - before, 0);
+    }
+
+    #[test]
+    fn missing_commit_falls_back_to_rescan() {
+        let _g = serial();
+        let s = setup();
+        grow(&s);
+        let out = exported(&s);
+        // A clone that does not hold the snapshot's commit: a fresh history of its own.
+        let t = second_machine(&s);
+        std::fs::remove_dir_all(t.repo.join(".git")).unwrap();
+        git(&t.repo, &["init", "-q"]);
+        git(&t.repo, &["config", "user.name", "Test"]);
+        git(&t.repo, &["config", "user.email", "test@example.com"]);
+        git(&t.repo, &["config", "commit.gpgsign", "false"]);
+        std::fs::write(t.repo.join("t.tx"), "sym fn gamma\nsym fn gamma2\n").unwrap();
+        commit_all(&t.repo, "other history");
+        katalogr(&t)
+            .snapshot_import(&out, false, None, &opts())
+            .unwrap();
+        let before = katalogr_dist::extract_calls();
+        katalogr(&t).index(None, false, None, &opts()).unwrap();
+        // The rescan compares file revisions: only the changed file is extracted.
+        let extracted = katalogr_dist::extract_calls() - before;
+        assert!((1..=2).contains(&extracted), "extracted {extracted}");
+        let hits = katalogr(&t).find("gamma2", &opts()).unwrap();
+        assert!(matches!(hits.outcome, katalogr_dist::Outcome::Found(_)));
+    }
+
+    #[test]
+    fn import_seeds_checkout_context() {
+        let _g = serial();
+        let s = setup();
+        let out = exported(&s);
+        let t = second_machine(&s);
+        katalogr(&t)
+            .snapshot_import(&out, false, None, &opts())
+            .unwrap();
+        // The first read from the checkout creates its layer from the imported base.
+        let r = katalogr(&t).find("alpha", &opts()).unwrap();
+        assert!(matches!(r.outcome, katalogr_dist::Outcome::Found(_)));
+        assert!(r.report.exact, "{:?}", r.report);
+        assert!(t.kx.join("projects/demo/.cache/contexts").is_dir());
+        assert_eq!(
+            r.report.positions[0].commit.as_deref(),
+            Some(head(&t.repo).as_str())
+        );
+    }
+
+    #[test]
+    fn other_facts_queues_rescan() {
+        let _g = serial();
+        let s = setup();
+        let out = exported(&s);
+        let other = "f".repeat(64);
+        let m = read_manifest(&out).unwrap();
+        edit_header(&out, &m.facts_version, &other);
+        let t = second_machine(&s);
+        let r = katalogr(&t)
+            .snapshot_import(&out, false, None, &opts())
+            .unwrap();
+        assert!(!r.facts_match);
+        assert_eq!(r.rescans, ["app"]);
+        let inbox = t.kx.join("projects/demo/.cache/inbox");
+        assert_eq!(std::fs::read_dir(inbox).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn other_facts_warns_for_rootless_repo() {
+        let _g = serial();
+        let s = setup();
+        let out = exported(&s);
+        let m = read_manifest(&out).unwrap();
+        edit_header(&out, &m.facts_version, &"f".repeat(64));
+        let t = second_machine(&s);
+        // The project lists a repo with no root here.
+        let cfg = std::fs::read_to_string(t.kx.join("projects/demo/config.yaml")).unwrap();
+        assert!(cfg.contains("app"));
+        let mut roots = std::fs::read_to_string(t.kx.join("projects/demo/.cache/roots.yaml"))
+            .unwrap_or_default();
+        roots.clear();
+        std::fs::write(t.kx.join("projects/demo/.cache/roots.yaml"), roots).unwrap();
+        let k = Katalogr::resolve(
+            std::path::Path::new("/"),
+            &Overrides {
+                kindex: Some(t.kx.display().to_string()),
+                project: Some("demo".into()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let r = k.snapshot_import(&out, false, None, &opts()).unwrap();
+        assert!(!r.facts_match);
+        assert!(r.rescans.is_empty(), "{r:?}");
+        assert_eq!(r.no_root, ["app"]);
+        assert!(r.warnings.iter().any(|w| w.contains("app")), "{r:?}");
+    }
+
+    #[test]
+    fn pending_and_events_are_empty_after_import() {
+        let _g = serial();
+        let s = setup();
+        // A queued event is in the source index when it is exported: it must not travel.
+        let out = exported(&s);
+        let t = second_machine(&s);
+        katalogr(&t)
+            .snapshot_import(&out, false, None, &opts())
+            .unwrap();
+        use katalogr_store::Reader;
+        let k = katalogr(&t);
+        let cache = katalogr_store::Cache::open_reader(k.project())
+            .unwrap()
+            .unwrap();
+        let tx = cache.read().unwrap();
+        assert!(tx.pending_entries(None).unwrap().is_empty());
+        assert_eq!(tx.event_count("worktree").unwrap(), 0);
     }
 }
