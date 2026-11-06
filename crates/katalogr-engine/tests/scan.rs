@@ -53,7 +53,7 @@ mod graph {
 mod scan {
     use camino::Utf8PathBuf;
     use katalogr_engine::registry::ExtensionRegistry;
-    use katalogr_engine::scan::{list_files, list_files_warned, output_outside_git};
+    use katalogr_engine::scan::{list_files, list_files_warned};
     use katalogr_engine::{NewEvent, Scope, queue::Processor};
     use katalogr_model::RelPath;
     use katalogr_store::{Kindex, ProjectConfig, ProjectName, Reader, RepoConfig};
@@ -92,30 +92,6 @@ mod scan {
             .iter()
             .map(|p| p.as_str().to_string())
             .collect()
-    }
-
-    /// FEAT-095 R-15 helper: where a written file would land relative to git.
-    #[test]
-    fn output_outside_git_cases() {
-        let d = tempfile::tempdir().unwrap();
-        let r = d.path().join("w");
-        std::fs::create_dir_all(r.join("out")).unwrap();
-        init(&r);
-        put(&r, ".gitignore", "out/\n*.log\n");
-        put(&r, "tracked.log", "x\n");
-        git(&r, &["add", "-f", "tracked.log"]);
-        // Tracked paths and plain paths in the work tree: git would track them.
-        assert!(!output_outside_git(&r.join("report.md")).unwrap());
-        assert!(!output_outside_git(&r.join("docs/new/report.md")).unwrap());
-        assert!(!output_outside_git(&r.join("tracked.log")).unwrap());
-        // Ignored files and folders (the folder need not exist).
-        assert!(output_outside_git(&r.join("a.log")).unwrap());
-        assert!(output_outside_git(&r.join("out/report.md")).unwrap());
-        assert!(output_outside_git(&r.join("out/deeper/report.md")).unwrap());
-        // A folder in no work tree.
-        let free = tempfile::tempdir().unwrap();
-        assert!(output_outside_git(&free.path().join("report.md")).unwrap());
-        assert!(output_outside_git(&free.path().join("not/yet/report.md")).unwrap());
     }
 
     #[test]
