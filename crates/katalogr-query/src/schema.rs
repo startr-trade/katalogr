@@ -1,5 +1,6 @@
 //! JSON Schemas of the `--json` output, one per command.
 
+use crate::deps::DepHit;
 use crate::doc_impact::DocImpact;
 use crate::impact::ImpactReport;
 use crate::position::PositionAnswer;
@@ -20,6 +21,7 @@ pub fn schemas() -> BTreeMap<&'static str, Value> {
         ("refs", to_value(schema_for!(Envelope<Vec<RefHit>>))),
         ("callers", to_value(schema_for!(Envelope<Vec<CallerHit>>))),
         ("why", to_value(schema_for!(Envelope<WhyResult>))),
+        ("deps", to_value(schema_for!(Envelope<Vec<DepHit>>))),
         ("map", to_value(schema_for!(Envelope<Vec<MapEntry>>))),
         (
             "dangling",

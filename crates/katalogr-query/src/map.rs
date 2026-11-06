@@ -6,6 +6,7 @@ use crate::refs::weight_trace;
 use crate::result::MapEntry;
 use crate::search::round6;
 use katalogr_model::Id;
+use katalogr_model::insight::is_external_kind;
 use katalogr_store::{PAGERANK_DAMPING, PAGERANK_ITERATIONS, RANK_CONTEXT, Reader, StoreError};
 use std::collections::BTreeMap;
 
@@ -97,8 +98,11 @@ pub fn map_boosted_traced(
         keyed.sort_by(|a, b| b.0.total_cmp(&a.0));
         ranked = keyed.into_iter().map(|(_, e)| e).collect();
     }
+    // Rank is computed over every node; the listing leaves out nodes for code outside the
+    // project (FEAT-007 R-9).
     Ok(ranked
         .into_iter()
+        .filter(|(symbol, _)| !is_external_kind(&symbol.kind))
         .map(|(symbol, score)| MapEntry {
             in_degree: round2(degree.get(&Id::of(&symbol.name)).copied().unwrap_or(0.0)),
             rank: round6(score),
@@ -122,6 +126,9 @@ pub fn map_top(tx: &impl Reader) -> Result<Option<(u64, Vec<MapEntry>)>, StoreEr
     let mut out = Vec::with_capacity(rows.len());
     for (row, (_, score)) in rows.iter().zip(&top.entries) {
         let Some(row) = row else { return Ok(None) };
+        if is_external_kind(&row.kind) {
+            continue;
+        }
         out.push(MapEntry {
             symbol: crate::resolve::hit(row),
             rank: round6(*score),
@@ -143,6 +150,9 @@ pub fn map_top_behind(tx: &impl Reader) -> Result<Option<(u64, Vec<MapEntry>)>, 
     let mut out = Vec::with_capacity(rows.len());
     for (row, (_, score)) in rows.iter().zip(&top.entries) {
         let Some(row) = row else { continue };
+        if is_external_kind(&row.kind) {
+            continue;
+        }
         out.push(MapEntry {
             symbol: crate::resolve::hit(row),
             rank: round6(*score),
