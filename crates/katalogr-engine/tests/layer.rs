@@ -98,15 +98,21 @@ mod context {
         let before = drained_graph(&e);
         assert_eq!(rescan(&e), before);
         assert_eq!(n.load(Ordering::SeqCst), 0);
-        assert!(e.dir().list_shards().unwrap().is_empty());
-        // One edit: one extraction and one delta shard, and a rescan then does nothing more.
+        let p = RelPath::new("b.tx").unwrap();
+        let seeded = e.cache().read().unwrap().file_revision("r", &p).unwrap();
+        assert!(seeded.is_some(), "the seed keeps the file revisions");
+        // One edit: one extraction and a new revision, and a rescan then does nothing more.
         std::fs::write(s.work.join("b.tx"), "sym fn B\nsym fn B2\n").unwrap();
         let g = changed(&e, "b.tx", EventKind::Changed);
         assert!(g.contains("B2"));
         assert_eq!(n.load(Ordering::SeqCst), 1);
         assert_eq!(rescan(&e), g);
         assert_eq!(n.load(Ordering::SeqCst), 1);
-        assert_eq!(e.dir().list_shards().unwrap().len(), 1);
+        let now = e.cache().read().unwrap().file_revision("r", &p).unwrap();
+        assert!(
+            now.is_some() && now != seeded,
+            "the edit changed the revision"
+        );
     }
 
     #[test]
@@ -140,56 +146,31 @@ mod context {
         assert!(g.contains("b.tx"), "{g}");
     }
 
+    /// R-3. The index errors of the base come with the copy, and an unchanged file keeps them
+    /// without being extracted again.
     #[test]
-    fn base_shard_with_errors_not_reused() {
+    fn seeded_errors_kept_for_unchanged_file() {
         // `bad.tx` has a reference to an undeclared symbol, so the base holds index errors for it.
-        let bad = "sym fn A\nlink A calls Nowhere\n";
-        let s = setup(&[("bad.tx", bad), ("ok.tx", "sym fn Ok\n")]);
+        let s = setup(&[
+            ("bad.tx", "sym fn A\nlink A calls Nowhere\n"),
+            ("ok.tx", "sym fn Ok\n"),
+        ]);
+        let p = RelPath::new("bad.tx").unwrap();
         {
             let (b, _) = engine(base_dir(&s.kx), &s.work);
             let r = b.cache().read().unwrap();
-            let p = RelPath::new("bad.tx").unwrap();
             assert!(!r.index_errors("r", &p).unwrap().is_empty());
         }
         let (e, n) = layer(&s);
-        // Edit both away from the committed text and back: the sound file is reused from the
-        // base's shard without extracting, the one with errors is extracted again.
-        for (f, other) in [("bad.tx", "sym fn A\n"), ("ok.tx", "sym fn Ok\nsym fn X\n")] {
-            let committed = std::fs::read_to_string(s.work.join(f)).unwrap();
-            std::fs::write(s.work.join(f), other).unwrap();
-            changed(&e, f, EventKind::Changed);
-            let after_edit = n.load(Ordering::SeqCst);
-            std::fs::write(s.work.join(f), committed).unwrap();
-            changed(&e, f, EventKind::Changed);
-            let revert_cost = n.load(Ordering::SeqCst) - after_edit;
-            if f == "bad.tx" {
-                assert_eq!(revert_cost, 1, "errored base shard must be extracted");
-                let r = e.cache().read().unwrap();
-                let p = RelPath::new(f).unwrap();
-                assert!(!r.index_errors("r", &p).unwrap().is_empty());
-            } else {
-                assert_eq!(revert_cost, 0, "sound base shard is reused");
-            }
-        }
-    }
-
-    #[test]
-    fn branch_switch_reuses_base_shard() {
-        let s = setup(&[("a.tx", "sym fn A\n"), ("b.tx", "sym fn B\n")]);
-        let (e, n) = layer(&s);
-        let clean = drained_graph(&e);
-        // "Switch" to a branch where a.tx differs, then back.
-        std::fs::write(s.work.join("a.tx"), "sym fn A\nsym fn Side\n").unwrap();
-        changed(&e, "a.tx", EventKind::Changed);
-        assert_eq!(n.load(Ordering::SeqCst), 1);
-        std::fs::write(s.work.join("a.tx"), "sym fn A\n").unwrap();
-        let back = changed(&e, "a.tx", EventKind::Changed);
-        assert_eq!(n.load(Ordering::SeqCst), 1, "the base's shard was reused");
-        assert_eq!(back, clean);
-        // The reused shard is the layer's own copy, byte-identical to the base's.
-        let p = RelPath::new("a.tx").unwrap();
-        let mine = std::fs::read(e.dir().shard_path("r", &p)).unwrap();
-        let theirs = std::fs::read(base_dir(&s.kx).shard_path("r", &p)).unwrap();
-        assert_eq!(mine, theirs);
+        let rows = e.cache().read().unwrap().index_errors("r", &p).unwrap();
+        assert!(!rows.is_empty(), "the copy carries the errors");
+        rescan(&e);
+        // Both files are unchanged from the seed, the failed one included: its revision is
+        // stored beside its error rows, so nothing is extracted.
+        assert_eq!(n.load(Ordering::SeqCst), 0, "nothing is extracted");
+        assert_eq!(
+            e.cache().read().unwrap().index_errors("r", &p).unwrap(),
+            rows
+        );
     }
 }

@@ -63,13 +63,10 @@ pub trait Extractor: Send + Sync {
     fn code_kinds(&self) -> &'static [&'static str] {
         &[]
     }
-    /// Bumped by an extension whose output changes for unchanged input (new facts, new symbol
-    /// kinds). It is mixed into the shard revision, so `index --full` re-extracts that
-    /// extension's files once. Default: empty, which leaves every revision unchanged
-    /// (ADR-0018; shared by FEAT-030 and FEAT-016).
-    fn revision_salt(&self) -> &'static str {
-        ""
-    }
+    /// Required: non-empty, and changed whenever this extractor's output for the same input
+    /// changes (new facts, new symbol kinds). It is mixed into the file revision, so the
+    /// extension's files are extracted again once (ADR-0018; shared by FEAT-030 and FEAT-016).
+    fn revision_salt(&self) -> &'static str;
 
     /// The whole extraction, including literals offered to guests. The default wraps
     /// `extract_with_errors` with no literals. The engine calls this method.

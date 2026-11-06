@@ -142,12 +142,14 @@ mod kindex {
         assert!(r.join(".git").exists());
         assert_eq!(
             std::fs::read_to_string(r.join(".gitignore")).unwrap(),
-            "projects/*/.cache/\n"
+            "projects/*/.cache/\nprojects/*/shards/\n"
         );
         let p = k.create_project(&pname("demo"), cfg()).unwrap();
-        for d in ["profiles", "shards", ".cache"] {
+        for d in ["profiles", ".cache"] {
             assert!(p.root().join(d).is_dir(), "{d}");
         }
+        // FEAT-094: a new project has no shards folder.
+        assert!(!p.root().join("shards").exists());
         assert!(p.root().join("format.json").is_file());
         let yaml = std::fs::read_to_string(p.root().join("config.yaml")).unwrap();
         assert!(yaml.find("alpha").unwrap() < yaml.find("zeta").unwrap());
@@ -159,7 +161,7 @@ mod kindex {
         Kindex::init(&r).unwrap();
         assert_eq!(
             std::fs::read_to_string(r.join(".gitignore")).unwrap(),
-            "projects/*/.cache/\n"
+            "projects/*/.cache/\nprojects/*/shards/\n"
         );
         let again = Kindex::open(&r).unwrap();
         assert_eq!(again.projects().unwrap(), vec![pname("demo")]);
@@ -175,18 +177,23 @@ mod kindex {
         let k = Kindex::init(&root(&t)).unwrap();
         let a = k.create_project(&pname("one"), cfg()).unwrap();
         let b = k.create_project(&pname("two"), cfg()).unwrap();
-        let f = fragment();
-        a.write_shard(&f).unwrap();
-        assert_eq!(a.list_shards().unwrap().len(), 1);
-        assert!(b.list_shards().unwrap().is_empty());
-        assert!(b.read_shard("r", &f.provenance.path).unwrap().is_none());
+        // Each project has its own graph database; a write in one is not seen in the other.
+        let dl = || std::time::Instant::now() + std::time::Duration::from_secs(5);
+        {
+            let c = katalogr_store::Cache::open(&a, dl()).unwrap();
+            let mut tx = c.write().unwrap();
+            tx.set_meta("mine", b"one").unwrap();
+            tx.commit().unwrap();
+        }
+        let ca = katalogr_store::Cache::open(&a, dl()).unwrap();
+        let cb = katalogr_store::Cache::open(&b, dl()).unwrap();
+        use katalogr_store::Reader;
         assert_eq!(
-            a.read_shard("r", &f.provenance.path)
-                .unwrap()
-                .unwrap()
-                .extension,
-            "ext"
+            ca.read().unwrap().meta("mine").unwrap().as_deref(),
+            Some(&b"one"[..])
         );
+        assert_eq!(cb.read().unwrap().meta("mine").unwrap(), None);
+        assert_ne!(a.root(), b.root());
         assert_eq!(k.projects().unwrap(), vec![pname("one"), pname("two")]);
     }
 
@@ -272,9 +279,9 @@ mod kindex {
         let s = std::fs::read_to_string(p.root().join("format.json")).unwrap();
         assert_eq!(
             s,
-            "{\n  \"min_katalogr\": \"0.1.0\",\n  \"shard_format\": 1\n}\n"
+            "{\n  \"min_katalogr\": \"0.2.0\",\n  \"shard_format\": 2\n}\n"
         );
-        assert_eq!(SHARD_FORMAT, 1);
+        assert_eq!(SHARD_FORMAT, 2);
     }
 
     #[test]
@@ -284,12 +291,12 @@ mod kindex {
         let p = k.create_project(&pname("demo"), cfg()).unwrap();
         std::fs::write(
             p.root().join("format.json"),
-            "{\"min_katalogr\": \"9.9.0\", \"shard_format\": 2}\n",
+            "{\"min_katalogr\": \"9.9.0\", \"shard_format\": 3}\n",
         )
         .unwrap();
         let e = k.project(&pname("demo")).unwrap_err();
         assert!(
-            matches!(e, StoreError::FormatTooNew { found: 2, .. }),
+            matches!(e, StoreError::FormatTooNew { found: 3, .. }),
             "{e}"
         );
         assert!(e.to_string().contains("9.9.0"));
@@ -367,27 +374,6 @@ mod kindex {
         );
     }
 
-    fn frag(path: &str) -> Fragment {
-        let art = ArtifactName::new("r", path).unwrap();
-        Fragment {
-            provenance: prov(path),
-            extension: "ext".into(),
-            artifact: ArtifactNode {
-                name: art,
-                facts: BTreeMap::new(),
-            },
-            symbols: vec![],
-            links: vec![],
-            refs: vec![],
-            exports: vec![],
-            bindings: vec![],
-        }
-    }
-
-    fn key(path: &str) -> (String, RelPath) {
-        ("r".to_string(), RelPath::new(path).unwrap())
-    }
-
     #[test]
     fn git_state_variants() {
         use katalogr_store::GitState;
@@ -403,15 +389,13 @@ mod kindex {
                 },
             )
             .unwrap();
-        for p in ["a.txt", "b.txt", "c.txt"] {
-            dir.write_shard(&frag(p)).unwrap();
+        for p in ["a.yaml", "b.yaml", "c.yaml"] {
+            std::fs::create_dir_all(dir.root().join("profiles")).unwrap();
+            std::fs::write(dir.root().join("profiles").join(p), p).unwrap();
         }
 
         // A repository with no commit.
-        assert_eq!(
-            dir.git_state().unwrap(),
-            GitState::NoCommits { shard_files: 3 }
-        );
+        assert_eq!(dir.git_state().unwrap(), GitState::NoCommits);
 
         // Clean.
         git(&r, &["add", "-A"]);
@@ -429,12 +413,11 @@ mod kindex {
             other => panic!("{other:?}"),
         }
 
-        // Dirty: one edited, one added, one removed.
-        let mut edited = frag("a.txt");
-        edited.extension = "other".into();
-        dir.write_shard(&edited).unwrap();
-        dir.write_shard(&frag("d.txt")).unwrap();
-        std::fs::remove_file(dir.shard_path("r", &RelPath::new("c.txt").unwrap())).unwrap();
+        // Dirty: one edited, one added, one removed. Cache files are not compared.
+        std::fs::write(dir.root().join("profiles/a.yaml"), "edited").unwrap();
+        std::fs::write(dir.root().join("profiles/d.yaml"), "d").unwrap();
+        std::fs::remove_file(dir.root().join("profiles/c.yaml")).unwrap();
+        std::fs::write(dir.cache_dir().join("note"), "x").unwrap();
         match dir.git_state().unwrap() {
             GitState::Repo {
                 modified,
@@ -442,9 +425,9 @@ mod kindex {
                 deleted,
                 ..
             } => {
-                assert_eq!(modified, vec![key("a.txt")]);
-                assert_eq!(added, vec![key("d.txt")]);
-                assert_eq!(deleted, vec![key("c.txt")]);
+                assert_eq!(modified, vec!["profiles/a.yaml".to_string()]);
+                assert_eq!(added, vec!["profiles/d.yaml".to_string()]);
+                assert_eq!(deleted, vec!["profiles/c.yaml".to_string()]);
             }
             other => panic!("{other:?}"),
         }

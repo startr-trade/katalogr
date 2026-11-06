@@ -423,7 +423,7 @@ impl Katalogr {
     }
 
     /// An existing layer, made usable: one whose cache has another `CACHE_SCHEMA`, or cannot be
-    /// read, is deleted and seeded again. `open_or_rebuild` is never let loose on a layer,
+    /// read, is deleted and seeded again. `Cache::open` is never let loose on a layer,
     /// because rebuilding from delta shards alone would give an empty graph.
     fn current_layer(&self, layer: ProjectDir, deadline: Instant) -> Result<ProjectDir, DistError> {
         let usable = match Cache::inspect(&layer)? {

@@ -267,7 +267,7 @@ fn pre_read(
             scope,
         },
         |tx| -> Result<Option<FileFacts>, StoreError> {
-            if tx.shard_hash(&repo, &rel)?.is_none() {
+            if tx.file_revision(&repo, &rel)?.is_none() {
                 return Ok(None);
             }
             let Some(row) = tx.artifact(artifact.id())? else {

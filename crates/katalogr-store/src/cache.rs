@@ -14,10 +14,10 @@ use crate::error::StoreError;
 use crate::fan;
 use crate::kindex::ProjectDir;
 use crate::postings::{self, PostingBuf};
-use camino::{Utf8Path, Utf8PathBuf};
+use camino::Utf8PathBuf;
 use katalogr_model::{
-    ArtifactName, Confidence, ContractName, ContractRole, Export, ExportKey, Fact, Fragment, Id,
-    LinkKind, Name, OutRef, Provenance, RelPath, Span, SymbolName,
+    ArtifactName, Confidence, ContractName, ContractRole, Export, ExportKey, Fact, Id, LinkKind,
+    Name, OutRef, Provenance, RelPath, Span, SymbolName,
 };
 use redb::{
     ConcurrencyMode, Database, DatabaseError, ReadOnlyDatabase, ReadTransaction, ReadableDatabase,
@@ -31,7 +31,7 @@ use std::sync::{Mutex, PoisonError, RwLock};
 use std::time::{Duration, Instant};
 
 /// Stored in `meta`; a different number rebuilds the cache from the shards.
-pub const CACHE_SCHEMA: u32 = 14;
+pub const CACHE_SCHEMA: u32 = 15;
 
 /// `meta` key: the watermark the stored rank reflects.
 const RANK_WATERMARK_META: &str = "rank_watermark";
@@ -270,10 +270,6 @@ pub struct PendingKey {
     pub path: RelPath,
 }
 
-/// One publish rename: `(temp, final)`, both relative to the project directory. An empty temp
-/// name means "remove the final file".
-pub type JournalEntry = (String, String);
-
 // ---------------------------------------------------------------- keys
 
 pub(crate) fn lp(out: &mut Vec<u8>, s: &str) {
@@ -344,14 +340,6 @@ fn export_key(ns: Vid, key: &str) -> Vec<u8> {
     let mut out = export_prefix(ns);
     out.extend_from_slice(key.as_bytes());
     out
-}
-
-/// The distinct parent directories of the journal's final paths under `root`.
-fn journal_parents(root: &Utf8Path, entries: &[JournalEntry]) -> BTreeSet<Utf8PathBuf> {
-    entries
-        .iter()
-        .filter_map(|(_, fin)| root.join(fin).parent().map(Utf8Path::to_path_buf))
-        .collect()
 }
 
 /// Scan prefix of the `refs_by_key` rows of one export key: `vid(namespace) || lp(key)`. The
@@ -575,17 +563,15 @@ pub(crate) fn db<E: Into<redb::Error>>(e: E) -> StoreError {
 pub type RawRows = Vec<(Vec<u8>, Vec<u8>)>;
 /// The SHA-256 and the bytes of an extension context.
 pub type ExtContextRow = ([u8; 32], Vec<u8>);
-/// `(repo, path)` of a shard.
-pub type ShardKey = (String, RelPath);
-/// A stored shard hash with the `(size, mtime)` recorded beside it.
-pub type ShardHashRow = (ShardKey, [u8; 32], Option<ShardStat>);
+/// `(repo, path)` of a file.
+pub type PathKey = (String, RelPath);
 
 /// The cache tables (FEAT-001 section 5, FEAT-003 section 5).
 #[doc(hidden)]
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum TableId {
     Meta,
-    ShardHashes,
+    FileRevisions,
     Artifacts,
     Symbols,
     LinksOut,
@@ -599,7 +585,6 @@ pub enum TableId {
     Events,
     Pending,
     Watermark,
-    Journal,
     ExtContext,
     Postings,
     DocOrd,
@@ -620,9 +605,9 @@ pub enum TableId {
 }
 
 impl TableId {
-    pub const ALL: [TableId; 33] = [
+    pub const ALL: [TableId; 32] = [
         TableId::Meta,
-        TableId::ShardHashes,
+        TableId::FileRevisions,
         TableId::Artifacts,
         TableId::Symbols,
         TableId::LinksOut,
@@ -636,7 +621,6 @@ impl TableId {
         TableId::Events,
         TableId::Pending,
         TableId::Watermark,
-        TableId::Journal,
         TableId::ExtContext,
         TableId::Postings,
         TableId::DocOrd,
@@ -678,7 +662,7 @@ impl TableId {
     fn name(self) -> &'static str {
         match self {
             TableId::Meta => "meta",
-            TableId::ShardHashes => "shard_hashes",
+            TableId::FileRevisions => "file_revisions",
             TableId::Artifacts => "artifacts",
             TableId::Symbols => "symbols",
             TableId::LinksOut => "links_out",
@@ -692,7 +676,6 @@ impl TableId {
             TableId::Events => "events",
             TableId::Pending => "pending",
             TableId::Watermark => "watermark",
-            TableId::Journal => "journal",
             TableId::ExtContext => "ext_context",
             TableId::Postings => "postings",
             TableId::DocOrd => "doc_ord",
@@ -812,35 +795,16 @@ pub trait Reader {
         self.raw_get(TableId::Meta, name.as_bytes())
     }
 
-    fn shard_hash(&self, repo: &str, path: &RelPath) -> Result<Option<[u8; 32]>, StoreError> {
-        match self.raw_get(TableId::ShardHashes, &path_key(repo, path))? {
-            Some(v) => Ok(Some(split_hash_value(&v)?.0)),
+    /// The stored file revision (the SHA-256 of the revision string) of one file.
+    fn file_revision(&self, repo: &str, path: &RelPath) -> Result<Option<[u8; 32]>, StoreError> {
+        match self.raw_get(TableId::FileRevisions, &path_key(repo, path))? {
+            Some(v) => Ok(Some(revision_value(&v)?)),
             None => Ok(None),
         }
-    }
-
-    /// The `(size, mtime)` of the shard file when its hash was last recorded; `None` when no
-    /// hash is stored or it was stored without them.
-    fn shard_stat(&self, repo: &str, path: &RelPath) -> Result<Option<ShardStat>, StoreError> {
-        match self.raw_get(TableId::ShardHashes, &path_key(repo, path))? {
-            Some(v) => Ok(split_hash_value(&v)?.1),
-            None => Ok(None),
-        }
-    }
-
-    /// Every stored shard hash with the `(size, mtime)` recorded beside it, sorted by
-    /// `(repo, path)` key bytes.
-    fn shard_hash_rows(&self) -> Result<Vec<ShardHashRow>, StoreError> {
-        let mut out = Vec::new();
-        for (k, v) in self.raw_scan(TableId::ShardHashes, &[])? {
-            let (hash, stat) = split_hash_value(&v)?;
-            out.push((decode_path_key(&k)?, hash, stat));
-        }
-        Ok(out)
     }
 
     /// Files with at least one index-error row and the number of rows, sorted by key bytes.
-    fn index_error_files(&self) -> Result<Vec<(ShardKey, usize)>, StoreError> {
+    fn index_error_files(&self) -> Result<Vec<(PathKey, usize)>, StoreError> {
         let mut out = Vec::new();
         for (k, v) in self.raw_scan(TableId::IndexErrors, &[])? {
             let rows: Vec<ErrorRow> = de(&v)?;
@@ -851,11 +815,11 @@ pub trait Reader {
         Ok(out)
     }
 
-    /// Every stored shard hash, sorted by `(repo, path)` key bytes.
-    fn shard_hashes(&self) -> Result<Vec<(ShardKey, [u8; 32])>, StoreError> {
+    /// Every stored file revision, sorted by `(repo, path)` key bytes.
+    fn file_revisions(&self) -> Result<Vec<(PathKey, [u8; 32])>, StoreError> {
         let mut out = Vec::new();
-        for (k, v) in self.raw_scan(TableId::ShardHashes, &[])? {
-            out.push((decode_path_key(&k)?, split_hash_value(&v)?.0));
+        for (k, v) in self.raw_scan(TableId::FileRevisions, &[])? {
+            out.push((decode_path_key(&k)?, revision_value(&v)?));
         }
         Ok(out)
     }
@@ -1883,7 +1847,7 @@ pub trait Reader {
     }
 
     /// Every recorded index error, sorted by `(repo, path)` key bytes.
-    fn index_errors_all(&self) -> Result<Vec<(ShardKey, Vec<ErrorRow>)>, StoreError> {
+    fn index_errors_all(&self) -> Result<Vec<(PathKey, Vec<ErrorRow>)>, StoreError> {
         self.raw_scan(TableId::IndexErrors, &[])?
             .into_iter()
             .map(|(k, v)| {
@@ -1969,15 +1933,6 @@ pub trait Reader {
             out.insert(id, f64::from_bits(bits));
         }
         Ok(Some(out))
-    }
-
-    /// The renames of a publish that has committed but not yet finished.
-    fn publish_journal(&self) -> Result<Vec<JournalEntry>, StoreError> {
-        Ok(self
-            .raw_get(TableId::Journal, &[])?
-            .map(|v| de(&v))
-            .transpose()?
-            .unwrap_or_default())
     }
 
     /// The extension context of `(repo, extension id)`: its SHA-256 and its bytes.
@@ -2487,34 +2442,19 @@ impl WriteTx<'_> {
         self.put(TableId::Meta, name.as_bytes(), value)
     }
 
-    pub fn put_shard_hash(
+    /// Stores the SHA-256 of `revision` as the file's revision.
+    pub fn put_file_revision(
         &mut self,
         repo: &str,
         path: &RelPath,
-        hash: &[u8; 32],
+        revision: &str,
     ) -> Result<(), StoreError> {
-        self.put(TableId::ShardHashes, &path_key(repo, path), hash)
+        let hash: [u8; 32] = Sha256::digest(revision.as_bytes()).into();
+        self.put(TableId::FileRevisions, &path_key(repo, path), &hash)
     }
 
-    /// Like [`WriteTx::put_shard_hash`], also recording the shard file's `(size, mtime)` so a
-    /// later open can skip hashing it while they are unchanged.
-    pub fn put_shard_hash_stat(
-        &mut self,
-        repo: &str,
-        path: &RelPath,
-        hash: &[u8; 32],
-        stat: ShardStat,
-    ) -> Result<(), StoreError> {
-        let mut v = Vec::with_capacity(52);
-        v.extend_from_slice(hash);
-        v.extend_from_slice(&stat.size.to_le_bytes());
-        v.extend_from_slice(&stat.mtime_secs.to_le_bytes());
-        v.extend_from_slice(&stat.mtime_nanos.to_le_bytes());
-        self.put(TableId::ShardHashes, &path_key(repo, path), &v)
-    }
-
-    pub fn remove_shard_hash(&mut self, repo: &str, path: &RelPath) -> Result<(), StoreError> {
-        self.del(TableId::ShardHashes, &path_key(repo, path))
+    pub fn remove_file_revision(&mut self, repo: &str, path: &RelPath) -> Result<(), StoreError> {
+        self.del(TableId::FileRevisions, &path_key(repo, path))
     }
 
     pub fn put_artifact(&mut self, id: Id, row: &ArtifactRow) -> Result<(), StoreError> {
@@ -2770,15 +2710,6 @@ impl WriteTx<'_> {
         self.put(TableId::Watermark, context.as_bytes(), &seq.to_le_bytes())
     }
 
-    /// An empty list clears the journal.
-    pub fn set_publish_journal(&mut self, entries: &[JournalEntry]) -> Result<(), StoreError> {
-        if entries.is_empty() {
-            self.del(TableId::Journal, &[])
-        } else {
-            self.put(TableId::Journal, &[], &ser(&entries)?)
-        }
-    }
-
     /// Stores the context of `(repo, extension id)` with its SHA-256.
     pub fn put_ext_context(
         &mut self,
@@ -3002,69 +2933,21 @@ pub fn commits_on_this_thread() -> u64 {
 
 // ---------------------------------------------------------------- cache
 
-/// What a fragment-level writer must provide so the store can rebuild the graph tables from the
-/// shards without depending on the engine.
-pub trait Restitch {
-    fn replace_fragment(&self, tx: &mut WriteTx, f: Fragment) -> Result<(), StoreError>;
-    fn remove_artifact(&self, tx: &mut WriteTx, a: &ArtifactName) -> Result<(), StoreError>;
+/// A `file_revisions` value: the 32-byte SHA-256 of the revision string.
+fn revision_value(v: &[u8]) -> Result<[u8; 32], StoreError> {
+    v.try_into()
+        .map_err(|_| StoreError::Row("bad file revision".into()))
 }
 
-/// Size and modification time of a shard file, recorded next to its hash.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct ShardStat {
-    pub size: u64,
-    pub mtime_secs: u64,
-    pub mtime_nanos: u32,
-}
-
-impl ShardStat {
-    pub fn of(meta: &std::fs::Metadata) -> Option<ShardStat> {
-        let d = meta
-            .modified()
-            .ok()?
-            .duration_since(std::time::UNIX_EPOCH)
-            .ok()?;
-        Some(ShardStat {
-            size: meta.len(),
-            mtime_secs: d.as_secs(),
-            mtime_nanos: d.subsec_nanos(),
-        })
-    }
-}
-
-/// A `shard_hashes` value: the 32-byte hash, optionally followed by size (u64), mtime seconds
-/// (u64) and mtime nanoseconds (u32), all little-endian.
-fn split_hash_value(v: &[u8]) -> Result<([u8; 32], Option<ShardStat>), StoreError> {
-    let bad = || StoreError::Row("bad shard hash".into());
-    let hash: [u8; 32] = v.get(..32).ok_or_else(bad)?.try_into().map_err(|_| bad())?;
-    match v.len() {
-        32 => Ok((hash, None)),
-        52 => {
-            let u64_at = |i: usize| u64::from_le_bytes(v[i..i + 8].try_into().expect("8 bytes"));
-            Ok((
-                hash,
-                Some(ShardStat {
-                    size: u64_at(32),
-                    mtime_secs: u64_at(40),
-                    mtime_nanos: u32::from_le_bytes(v[48..52].try_into().expect("4 bytes")),
-                }),
-            ))
-        }
-        _ => Err(bad()),
-    }
-}
-
-/// What `open_or_rebuild` did.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct SyncReport {
-    pub replaced: usize,
-    pub removed: usize,
-    /// Shards whose bytes were read and hashed (those with an unchanged size and mtime are not).
-    pub hashed: usize,
-    /// Shards that failed to decode and were moved to `.cache/quarantine/`.
-    pub quarantined: Vec<(String, RelPath)>,
-    /// The deadline passed before every shard was handled; the next open continues.
-    pub deadline_hit: bool,
+/// What opening found. `Replaced` means another schema or a corrupt file was recreated.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum OpenState {
+    /// The file existed with the current schema.
+    Existing,
+    /// The file was missing and has been created.
+    Created,
+    /// The file was of another schema, or corrupt, and has been recreated empty.
+    Replaced,
 }
 
 /// The redb handle behind a [`Cache`]: the single writer, or a read-only handle beside one
@@ -3076,7 +2959,7 @@ enum Handle {
 
 pub struct Cache {
     db: RwLock<Handle>,
-    report: SyncReport,
+    state: OpenState,
     /// `.cache/index.redb`.
     path: Utf8PathBuf,
 }
@@ -3136,10 +3019,17 @@ fn open_db(
                 wait = (wait * 2).min(BACKOFF_MAX);
             }
             Err(DatabaseError::RepairAborted) => return Err(StoreError::Busy),
-            // A corrupt cache is deleted and rebuilt (FEAT-003 section 8).
+            // A corrupt cache is deleted and rebuilt (FEAT-003 section 8). A file that is not a
+            // redb database at all (wrong magic number) reads as invalid data.
             Err(DatabaseError::Storage(StorageError::Corrupted(_)))
             | Err(DatabaseError::UpgradeRequired(_))
                 if !recreated =>
+            {
+                recreated = true;
+                std::fs::remove_file(path).map_err(|e| StoreError::io(path, e))?;
+            }
+            Err(DatabaseError::Storage(StorageError::Io(e)))
+                if !recreated && e.kind() == std::io::ErrorKind::InvalidData =>
             {
                 recreated = true;
                 std::fs::remove_file(path).map_err(|e| StoreError::io(path, e))?;
@@ -3149,70 +3039,65 @@ fn open_db(
     }
 }
 
-/// The writer open: creates the file, and recreates it when its schema differs. The flag is
-/// true when the database is new: the file was missing, corrupt or of another schema.
+/// The writer open: creates the file, and recreates it when it is corrupt or its schema differs.
 fn open_writer(
     path: &Utf8PathBuf,
     busy_until: Instant,
     deadline: Instant,
-) -> Result<(Database, bool), StoreError> {
+) -> Result<(Database, OpenState), StoreError> {
     let existed = path.exists();
-    let (mut database, mut recreated) = open_db(path, busy_until, deadline)?;
+    let (mut database, mut replaced) = open_db(path, busy_until, deadline)?;
     if !schema_current(&database)? {
         drop(database);
         std::fs::remove_file(path).map_err(|e| StoreError::io(path, e))?;
         (database, _) = open_db(path, busy_until, deadline)?;
         schema_current(&database)?;
-        recreated = true;
+        replaced = true;
     }
-    Ok((database, recreated || !existed))
+    let state = if replaced {
+        OpenState::Replaced
+    } else if existed {
+        OpenState::Existing
+    } else {
+        OpenState::Created
+    };
+    Ok((database, state))
 }
 
 impl Cache {
-    /// R-6. Open `.cache/index.redb` (creating it, or recreating it when its schema differs),
-    /// then bring it in line with the shards: every shard is hashed (SHA-256) and compared with
-    /// `shard_hashes`; changed and new shards are decoded and passed to
-    /// [`Restitch::replace_fragment`], deleted ones to [`Restitch::remove_artifact`]; the hashes
-    /// are written and everything commits once. When `deadline` passes mid-way the work done so
-    /// far is committed and the next open continues. A busy database is retried with backoff
+    /// Open or create the graph database, reading no file but the database itself. A file of
+    /// another schema, or a corrupt one, is removed and recreated empty ([`OpenState::Replaced`]);
+    /// a missing one is created ([`OpenState::Created`]). A busy database is retried with backoff
     /// until `deadline`, then [`StoreError::Busy`].
-    pub fn open_or_rebuild(
-        dir: &ProjectDir,
-        stitch: &dyn Restitch,
-        deadline: Instant,
-    ) -> Result<Cache, StoreError> {
-        Cache::open_or_rebuild_busy(dir, stitch, deadline, deadline)
+    pub fn open(dir: &ProjectDir, deadline: Instant) -> Result<Cache, StoreError> {
+        Cache::open_busy(dir, deadline, deadline)
     }
 
-    /// As [`Cache::open_or_rebuild`], but a database held by another writer is retried only until
-    /// `busy_until` (FEAT-080: `busy_until` already passed means one try); the repair bound and
-    /// the sync use `deadline`.
-    pub fn open_or_rebuild_busy(
+    /// As [`Cache::open`], but a database held by another writer is retried only until
+    /// `busy_until` (FEAT-080: `busy_until` already passed means one try); the repair bound uses
+    /// `deadline`.
+    pub fn open_busy(
         dir: &ProjectDir,
-        stitch: &dyn Restitch,
         busy_until: Instant,
         deadline: Instant,
     ) -> Result<Cache, StoreError> {
         let cache_dir = dir.cache_dir();
         std::fs::create_dir_all(&cache_dir).map_err(|e| StoreError::io(&cache_dir, e))?;
         let path = cache_dir.join("index.redb");
-        let (database, created) = open_writer(&path, busy_until, deadline)?;
+        let (database, state) = open_writer(&path, busy_until, deadline)?;
         // This process holds the database now, so no other process is mid-rewrite: a rewrite
         // file that exists is an orphan.
         crate::compact::remove_orphan(&cache_dir);
-        let mut cache = Cache {
+        Ok(Cache {
             db: RwLock::new(Handle::Writer(database)),
-            report: SyncReport::default(),
+            state,
             path,
-        };
-        cache.report = cache.after_open(dir, stitch, deadline)?;
-        // A database built from the shards by this open holds the rows in the order the rounds
-        // wrote them: rewrite it sorted (the "sorted bulk load").
-        if created && cache.report.replaced > 0 && !cache.report.deadline_hit {
-            let (c, _) = cache.compact(dir, CompactMode::preferred(), deadline)?;
-            cache = c;
-        }
-        Ok(cache)
+        })
+    }
+
+    /// What opening found.
+    pub fn state(&self) -> OpenState {
+        self.state
     }
 
     /// Open an existing database file as it is: no schema check, no journal replay and no
@@ -3221,21 +3106,9 @@ impl Cache {
         let (database, _) = open_db(path, deadline, deadline)?;
         Ok(Cache {
             db: RwLock::new(Handle::Writer(database)),
-            report: SyncReport::default(),
+            state: OpenState::Existing,
             path: path.clone(),
         })
-    }
-
-    /// What follows every writer open. An interrupted publish is finished before the shards are
-    /// compared with the hashes.
-    fn after_open(
-        &self,
-        dir: &ProjectDir,
-        stitch: &dyn Restitch,
-        deadline: Instant,
-    ) -> Result<SyncReport, StoreError> {
-        self.replay_journal(dir)?;
-        self.sync(dir, stitch, deadline)
     }
 
     /// FEAT-080 R-1, R-6. A read-only handle beside any writer. Never writes, syncs or replays.
@@ -3279,7 +3152,7 @@ impl Cache {
         drop(rx);
         Ok(Some(Cache {
             db: RwLock::new(Handle::Reader(database)),
-            report: SyncReport::default(),
+            state: OpenState::Existing,
             path,
         }))
     }
@@ -3293,14 +3166,9 @@ impl Cache {
     }
 
     /// FEAT-080 R-4. Replace a read-only handle with the writer, then run what
-    /// `open_or_rebuild` runs after its open. `Ok(false)` when another process holds the writer
+    /// `Cache::open` runs after its open. `Ok(false)` when another process holds the writer
     /// (the reader is kept). No [`ReadTx`] may be alive.
-    pub fn try_upgrade(
-        &self,
-        dir: &ProjectDir,
-        stitch: &dyn Restitch,
-        deadline: Instant,
-    ) -> Result<bool, StoreError> {
+    pub fn try_upgrade(&self, dir: &ProjectDir, deadline: Instant) -> Result<bool, StoreError> {
         if !self.is_reader() {
             return Ok(true);
         }
@@ -3315,7 +3183,6 @@ impl Cache {
             return Err(StoreError::Db("the cache schema changed".into()));
         }
         *self.db.write().unwrap_or_else(PoisonError::into_inner) = Handle::Writer(database);
-        self.after_open(dir, stitch, deadline)?;
         Ok(true)
     }
 
@@ -3334,57 +3201,6 @@ impl Cache {
             Handle::Reader(_) => return Err(StoreError::Busy),
         };
         Ok(WriteTx::new(txn))
-    }
-
-    /// Finish an interrupted publish (FEAT-047, ADR-0014): for each journal entry, rename the
-    /// temp file onto the final name when the temp file still exists (an empty temp name removes
-    /// the final file), fsync, then clear the journal. Idempotent. Returns the entries handled.
-    pub fn replay_journal(&self, dir: &ProjectDir) -> Result<usize, StoreError> {
-        let entries = self.read()?.publish_journal()?;
-        if entries.is_empty() {
-            return Ok(0);
-        }
-        #[cfg_attr(not(feature = "failpoints"), allow(unused_variables))]
-        for (i, (tmp, fin)) in entries.iter().enumerate() {
-            let to = dir.root().join(fin);
-            if tmp.is_empty() {
-                match std::fs::remove_file(&to) {
-                    Ok(()) => {}
-                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-                    Err(e) => return Err(StoreError::io(&to, e)),
-                }
-            } else {
-                let from = dir.root().join(tmp);
-                // The temp file was synced before the publish commit that wrote this entry.
-                if from.exists() {
-                    std::fs::rename(&from, &to).map_err(|e| StoreError::io(&from, e))?;
-                }
-            }
-            #[cfg(feature = "failpoints")]
-            if i == 0 {
-                crate::failpoint::hit("mid_renames");
-            }
-        }
-        // One sync per distinct directory, after the last rename and before the journal is
-        // cleared (ADR-0033). Entries already renamed by an interrupted replay count too.
-        for parent in journal_parents(dir.root(), &entries) {
-            if parent.is_dir() {
-                std::fs::File::open(&parent)
-                    .and_then(|f| f.sync_all())
-                    .map_err(|e| StoreError::io(&parent, e))?;
-            }
-        }
-        #[cfg(feature = "failpoints")]
-        crate::failpoint::hit("before_journal_clear");
-        let mut tx = self.write()?;
-        tx.set_publish_journal(&[])?;
-        tx.commit()?;
-        Ok(entries.len())
-    }
-
-    /// What the last `open_or_rebuild` did.
-    pub fn report(&self) -> &SyncReport {
-        &self.report
     }
 
     /// Bytes of `.cache/index.redb` on disk.
@@ -3420,7 +3236,7 @@ impl Cache {
         deadline: Instant,
     ) -> Result<(Cache, CompactReport), StoreError> {
         let started = Instant::now();
-        let Cache { db, report, path } = self;
+        let Cache { db, state, path } = self;
         let handle = db.into_inner().unwrap_or_else(PoisonError::into_inner);
         let bytes_before = std::fs::metadata(&path).map_or(0, |m| m.len());
         let report_of = |outcome: CompactOutcome, after: u64| CompactReport {
@@ -3435,7 +3251,7 @@ impl Cache {
             reader @ Handle::Reader(_) => {
                 let cache = Cache {
                     db: RwLock::new(reader),
-                    report,
+                    state,
                     path,
                 };
                 let r = report_of(
@@ -3446,11 +3262,11 @@ impl Cache {
             }
         };
         let tmp = dir.cache_dir().join(compact::REWRITE_FILE);
-        let skipped = |database: Database, why: String, report: SyncReport, path: Utf8PathBuf| {
+        let skipped = |database: Database, why: String, state: OpenState, path: Utf8PathBuf| {
             let after = std::fs::metadata(&path).map_or(bytes_before, |m| m.len());
             let cache = Cache {
                 db: RwLock::new(Handle::Writer(database)),
-                report,
+                state,
                 path,
             };
             Ok((cache, report_of(CompactOutcome::Skipped(why), after)))
@@ -3461,7 +3277,7 @@ impl Cache {
                     return skipped(
                         database,
                         format!("in-place compaction failed: {e}"),
-                        report,
+                        state,
                         path,
                     );
                 }
@@ -3483,7 +3299,7 @@ impl Cache {
                     });
                 if let Err(why) = built {
                     let _ = std::fs::remove_file(&tmp);
-                    return skipped(database, why, report, path);
+                    return skipped(database, why, state, path);
                 }
                 #[cfg(feature = "failpoints")]
                 crate::failpoint::hit("before_rewrite_rename");
@@ -3496,7 +3312,7 @@ impl Cache {
                             "the rewritten file cannot replace the cache ({:?})",
                             e.kind()
                         ),
-                        report,
+                        state,
                         path,
                     );
                 }
@@ -3508,7 +3324,7 @@ impl Cache {
         }
         let cache = Cache {
             db: RwLock::new(Handle::Writer(database)),
-            report,
+            state,
             path,
         };
         if mode == CompactMode::InPlace {
@@ -3534,134 +3350,6 @@ impl Cache {
             size = now;
         }
         Ok(())
-    }
-
-    /// Compare the shard files with the stored hashes and stats on a read snapshot: true when
-    /// the sets are equal and every file's `(size, mtime)` equals the stored one, so `sync`
-    /// would change nothing. A shard stored without a stat counts as different.
-    fn shards_unchanged(&self, dir: &ProjectDir, on_disk: &[ShardKey]) -> Result<bool, StoreError> {
-        let rows = self.read()?.shard_hash_rows()?;
-        if rows.len() != on_disk.len() {
-            return Ok(false);
-        }
-        let stored: HashMap<&ShardKey, &Option<ShardStat>> =
-            rows.iter().map(|(k, _, st)| (k, st)).collect();
-        for key in on_disk {
-            let Some(Some(stat)) = stored.get(key).copied() else {
-                return Ok(false);
-            };
-            let file = dir.shard_path(&key.0, &key.1);
-            match std::fs::metadata(&file) {
-                Ok(m) if ShardStat::of(&m) == Some(*stat) => {}
-                _ => return Ok(false),
-            }
-        }
-        Ok(true)
-    }
-
-    fn sync(
-        &self,
-        dir: &ProjectDir,
-        stitch: &dyn Restitch,
-        deadline: Instant,
-    ) -> Result<SyncReport, StoreError> {
-        let mut report = SyncReport::default();
-        let on_disk = dir.list_shards()?;
-        if self.shards_unchanged(dir, &on_disk)? {
-            return Ok(report);
-        }
-        let mut tx = self.write()?;
-        let mut stale: BTreeSet<(String, RelPath)> =
-            tx.shard_hashes()?.into_iter().map(|(k, _)| k).collect();
-
-        for (repo, path) in &on_disk {
-            stale.remove(&(repo.clone(), path.clone()));
-            if Instant::now() >= deadline {
-                report.deadline_hit = true;
-                break;
-            }
-            let file = dir.shard_path(repo, path);
-            // The stat is taken before the read, so a write in between is seen at the next open.
-            let stat = match std::fs::metadata(&file) {
-                Ok(m) => ShardStat::of(&m),
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
-                Err(e) => return Err(StoreError::io(&file, e)),
-            };
-            let stored = tx.shard_hash(repo, path)?;
-            if stored.is_some() && stat.is_some() && tx.shard_stat(repo, path)? == stat {
-                continue;
-            }
-            let bytes = match std::fs::read(&file) {
-                Ok(b) => b,
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
-                Err(e) => return Err(StoreError::io(&file, e)),
-            };
-            report.hashed += 1;
-            let hash: [u8; 32] = Sha256::digest(&bytes).into();
-            let record = |tx: &mut WriteTx| match stat {
-                Some(st) => tx.put_shard_hash_stat(repo, path, &hash, st),
-                None => tx.put_shard_hash(repo, path, &hash),
-            };
-            if stored == Some(hash) {
-                if tx.shard_stat(repo, path)? != stat {
-                    record(&mut tx)?;
-                }
-                continue;
-            }
-            match crate::shard::decode(&bytes) {
-                Ok(fragment) => {
-                    stitch.replace_fragment(&mut tx, fragment)?;
-                    record(&mut tx)?;
-                    tx.put_index_errors(repo, path, &[])?;
-                    report.replaced += 1;
-                }
-                Err(e) => {
-                    quarantine(dir, repo, path)?;
-                    // Whatever this shard contributed before is gone with it.
-                    if tx.shard_hash(repo, path)?.is_some() {
-                        stitch.remove_artifact(
-                            &mut tx,
-                            &ArtifactName {
-                                repo: repo.clone(),
-                                path: path.clone(),
-                            },
-                        )?;
-                        tx.remove_shard_hash(repo, path)?;
-                    }
-                    tx.put_index_errors(
-                        repo,
-                        path,
-                        &[ErrorRow {
-                            span: None,
-                            message: e.to_string(),
-                        }],
-                    )?;
-                    report.quarantined.push((repo.clone(), path.clone()));
-                }
-            }
-        }
-
-        if !report.deadline_hit {
-            // Only meaningful when every on-disk shard was visited.
-            for (repo, path) in stale {
-                if Instant::now() >= deadline {
-                    report.deadline_hit = true;
-                    break;
-                }
-                stitch.remove_artifact(
-                    &mut tx,
-                    &ArtifactName {
-                        repo: repo.clone(),
-                        path: path.clone(),
-                    },
-                )?;
-                tx.remove_shard_hash(&repo, &path)?;
-                tx.put_index_errors(&repo, &path, &[])?;
-                report.removed += 1;
-            }
-        }
-        tx.commit()?;
-        Ok(report)
     }
 }
 
@@ -3698,38 +3386,13 @@ fn schema_current(database: &Database) -> Result<bool, StoreError> {
     Ok(ok)
 }
 
-/// Moves an undecodable shard to `.cache/quarantine/<repo>/<path>`.
-fn quarantine(dir: &ProjectDir, repo: &str, path: &RelPath) -> Result<(), StoreError> {
-    let from = dir.shard_path(repo, path);
-    let to = dir.cache_dir().join("quarantine").join(repo).join(format!(
-        "{}{}",
-        path.as_str(),
-        crate::shard::SUFFIX
-    ));
-    if let Some(parent) = to.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| StoreError::io(parent, e))?;
-    }
-    std::fs::rename(&from, &to).map_err(|e| StoreError::io(&from, e))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Kindex, ProjectConfig, ProjectName, Restitch};
+    use crate::{Kindex, ProjectConfig, ProjectName};
     use camino::Utf8PathBuf;
-    use katalogr_model::{ArtifactName, Fragment};
+
     use std::time::Duration;
-
-    struct Noop;
-
-    impl Restitch for Noop {
-        fn replace_fragment(&self, _: &mut WriteTx, _: Fragment) -> Result<(), StoreError> {
-            Ok(())
-        }
-        fn remove_artifact(&self, _: &mut WriteTx, _: &ArtifactName) -> Result<(), StoreError> {
-            Ok(())
-        }
-    }
 
     fn cache(t: &tempfile::TempDir) -> Cache {
         let root = Utf8PathBuf::from_path_buf(t.path().join("kx")).unwrap();
@@ -3737,7 +3400,7 @@ mod tests {
             .unwrap()
             .create_project(&ProjectName::new("p").unwrap(), ProjectConfig::default())
             .unwrap();
-        Cache::open_or_rebuild(&dir, &Noop, Instant::now() + Duration::from_secs(5)).unwrap()
+        Cache::open(&dir, Instant::now() + Duration::from_secs(5)).unwrap()
     }
 
     fn key(ns: &str, k: &str) -> ExportKey {
@@ -3752,25 +3415,6 @@ mod tests {
             artifact: Id([a; 16]),
             index,
         }
-    }
-
-    #[test]
-    fn journal_parents_distinct() {
-        let root = Utf8Path::new("/kx/projects/p");
-        let entries: Vec<JournalEntry> = vec![
-            ("shards/r/.tmp-1".into(), "shards/r/a.json".into()),
-            ("shards/r/.tmp-2".into(), "shards/r/b.json".into()),
-            ("shards/r/sub/.tmp-3".into(), "shards/r/sub/c.json".into()),
-            (String::new(), "shards/r/sub/gone.json".into()),
-        ];
-        let parents = journal_parents(root, &entries);
-        let want: BTreeSet<Utf8PathBuf> =
-            ["/kx/projects/p/shards/r", "/kx/projects/p/shards/r/sub"]
-                .into_iter()
-                .map(Utf8PathBuf::from)
-                .collect();
-        assert_eq!(parents, want);
-        assert!(journal_parents(root, &[]).is_empty());
     }
 
     #[test]

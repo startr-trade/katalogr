@@ -110,7 +110,7 @@ impl Katalogr {
         Ok(())
     }
 
-    /// A cold start: delete `shards/` and the cache database. The repository roots recorded in
+    /// A cold start: delete the cache database (and a `shards/` folder an earlier release left). The repository roots recorded in
     /// `.cache/roots.yaml` and the lock file stay, because they are machine configuration and
     /// not index data.
     pub fn reset_index(&self, ws: &Workspace) -> Result<()> {

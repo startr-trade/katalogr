@@ -2,7 +2,6 @@
 //! suffixes, and what the text fallback indexed.
 
 use camino::Utf8Path;
-use serde::Deserialize;
 use serde_json::Value;
 use std::collections::BTreeMap;
 
@@ -12,7 +11,7 @@ use crate::error::Result;
 /// Read the `coverage --suffixes N` JSON envelope: `totals`, the `by_extension` row for `text`,
 /// and the unclaimed suffixes summed over repositories (by count, then suffix).
 /// `unclaimed_per_s = files_seen / wall_s` applies only when every claimed file is `text` or
-/// `md`. `text_chunks` is filled in by the caller from the shards.
+/// `md`. `text_chunks` is filled in by the caller from the graph database.
 pub fn from_coverage(cov: &Value, wall_s: Option<f64>) -> DiscoveryResult {
     let u = |p: &str| cov.pointer(p).and_then(Value::as_u64).unwrap_or(0);
     let files_indexed = u("/result/totals/files_indexed");
@@ -73,50 +72,17 @@ pub fn from_coverage(cov: &Value, wall_s: Option<f64>) -> DiscoveryResult {
     }
 }
 
-#[derive(Deserialize)]
-struct ShardLite {
-    #[serde(default)]
-    extension: String,
-    #[serde(default)]
-    symbols: Vec<SymLite>,
-}
-
-#[derive(Deserialize)]
-struct SymLite {
-    #[serde(default)]
-    kind: String,
-}
-
-fn walk_chunks(dir: &Utf8Path, total: &mut u64) {
-    let Ok(rd) = std::fs::read_dir(dir) else {
-        return;
-    };
-    for e in rd.flatten() {
-        let p = e.path();
-        match e.file_type() {
-            Ok(ft) if ft.is_dir() => {
-                if let Some(u) = Utf8Path::from_path(&p) {
-                    walk_chunks(u, total);
-                }
-            }
-            Ok(ft) if ft.is_file() && p.to_string_lossy().ends_with(".kshard.json") => {
-                if let Ok(bytes) = std::fs::read(&p)
-                    && let Ok(s) = serde_json::from_slice::<ShardLite>(&bytes)
-                    && s.extension == "text"
-                {
-                    *total += s.symbols.iter().filter(|x| x.kind == "chunk").count() as u64;
-                }
-            }
-            _ => {}
-        }
-    }
-}
-
-/// Number of `chunk` symbols in the shards of the `text` extension.
+/// Number of `chunk` symbols from artifacts of the `text` extension, read from the graph
+/// database (FEAT-094: there are no shard files to count).
 pub fn text_chunks(project_dir: &Utf8Path) -> u64 {
-    let mut n = 0;
-    walk_chunks(&project_dir.join("shards"), &mut n);
-    n
+    // `<kindex>/projects/<project>`.
+    let (Some(projects), Some(project)) = (project_dir.parent(), project_dir.file_name()) else {
+        return 0;
+    };
+    let Some(kindex) = projects.parent() else {
+        return 0;
+    };
+    katalogr_dist::symbol_count(kindex, project, "text", "chunk").unwrap_or(0)
 }
 
 /// Discovery after the index phase: the coverage report plus the text-fallback chunk count.

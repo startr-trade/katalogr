@@ -53,7 +53,7 @@ mod bench {
     // ------------------------------------------------ cache size and cost (FEAT-075 T9)
 
     use katalogr_dist::{Katalogr, Options, Overrides, kindex_init, project_init};
-    use katalogr_engine::Stitcher;
+
     use katalogr_store::{Cache, CompactMode, Kindex, ProjectDir, ProjectName, Reader};
     use std::path::PathBuf;
 
@@ -625,14 +625,19 @@ mod bench {
         (dir, took)
     }
 
-    /// Bytes of `index.redb` per byte of the sources that have a shard.
+    /// Bytes of `index.redb` per byte of the sources that have a file revision.
     fn bytes_per_source_byte(dir: &ProjectDir, repo: &Path) -> (f64, u64, u64, usize) {
         let cache = std::fs::metadata(dir.cache_dir().join("index.redb"))
             .unwrap()
             .len();
         let mut source = 0u64;
-        let shards = dir.list_shards().unwrap();
-        for (_, path) in &shards {
+        let cache_db = katalogr_store::Cache::open(
+            dir,
+            std::time::Instant::now() + std::time::Duration::from_secs(30),
+        )
+        .unwrap();
+        let shards = katalogr_store::Reader::file_revisions(&cache_db.read().unwrap()).unwrap();
+        for ((_, path), _) in &shards {
             if let Ok(m) = std::fs::metadata(repo.join(path.as_str())) {
                 source += m.len();
             }
@@ -696,12 +701,7 @@ mod bench {
         crate::synth::rust_corpus(&repo, 20, 40, 12);
         let (dir, took) = index_full(tmp.path(), &repo);
         // The compaction alone, on the cache the run just left: a rewrite of the same rows.
-        let cache = Cache::open_or_rebuild(
-            &dir,
-            &Stitcher::new(),
-            Instant::now() + std::time::Duration::from_secs(60),
-        )
-        .unwrap();
+        let cache = Cache::open(&dir, Instant::now() + std::time::Duration::from_secs(60)).unwrap();
         let before = cache.file_bytes().unwrap();
         let (cache, report) = cache
             .compact(
@@ -730,6 +730,188 @@ mod bench {
                 took.as_millis()
             ),
             None => println!("full_index_with_compaction: no schema-9 baseline recorded yet"),
+        }
+    }
+
+    // ---- index data without a fragment store (FEAT-094 T12) ----------------------------
+    //
+    // Corpus: `KATALOGR_BENCH_ROOTS="core=/path/core,site=/path/site"` names read-only repos
+    // (the polyglot corpus is `core` and `site` under `~/.katalogr-loadtest/clones/polyglot-wasm`,
+    // ts-xl is `vscode` under `~/.katalogr-loadtest/clones/ts-xl`). Unset: a generated Rust tree
+    // of 20 crates x 40 modules x 10 functions. Repos are read in place and never written; the
+    // kindex and any generated tree live under `~/.cache/katalogr-scratch/FEAT-094/` (or
+    // `KATALOGR_SCRATCH`) and are removed when the bench ends.
+    // Budgets are set by the user from the recorded numbers: `KATALOGR_BENCH_BUDGET_S` (cold
+    // index, seconds) and `KATALOGR_BENCH_OPEN_BUDGET_MS` (open for a read, milliseconds)
+    // assert a limit when set; without them the benches only print.
+    // Run one at a time, under the heavy-job lock, in release:
+    // `flock ~/.cache/heavy-build.lock cargo test -p katalogr-dist --release --test bench
+    // <name> -- --ignored --nocapture --test-threads=1`.
+
+    /// The FEAT-094 scratch directory, removed when dropped.
+    fn scratch_094() -> tempfile::TempDir {
+        let base = std::env::var("KATALOGR_SCRATCH").map_or_else(
+            |_| {
+                let home = std::env::var("HOME").expect("HOME");
+                PathBuf::from(home).join(".cache/katalogr-scratch/FEAT-094")
+            },
+            PathBuf::from,
+        );
+        std::fs::create_dir_all(&base).unwrap();
+        tempfile::Builder::new()
+            .prefix("bench-")
+            .tempdir_in(base)
+            .unwrap()
+    }
+
+    /// The repos to index, as `(repo name, path)`, and the number of files in them.
+    fn corpus_094(scratch: &Path) -> (Vec<(String, PathBuf)>, usize) {
+        let repos: Vec<(String, PathBuf)> = match std::env::var("KATALOGR_BENCH_ROOTS") {
+            Ok(spec) => spec
+                .split(',')
+                .map(|pair| {
+                    let (name, path) = pair
+                        .split_once('=')
+                        .expect("KATALOGR_BENCH_ROOTS entries are name=path");
+                    (name.to_string(), PathBuf::from(path))
+                })
+                .collect(),
+            Err(_) => {
+                let root = scratch.join("generated");
+                super::synth::rust_corpus(&root, 20, 40, 10);
+                vec![("generated".to_string(), root)]
+            }
+        };
+        let files = repos.iter().map(|(_, p)| count_files(p)).sum();
+        (repos, files)
+    }
+
+    /// Regular files under `dir`, skipping `.git`.
+    fn count_files(dir: &Path) -> usize {
+        let Ok(rd) = std::fs::read_dir(dir) else {
+            return 0;
+        };
+        rd.flatten()
+            .map(|e| {
+                let p = e.path();
+                if p.is_dir() {
+                    if e.file_name() == ".git" {
+                        0
+                    } else {
+                        count_files(&p)
+                    }
+                } else {
+                    1
+                }
+            })
+            .sum()
+    }
+
+    /// Peak resident set of this process so far (`VmHWM`), in MiB.
+    fn peak_rss_mib() -> u64 {
+        std::fs::read_to_string("/proc/self/status")
+            .unwrap_or_default()
+            .lines()
+            .find_map(|l| l.strip_prefix("VmHWM:"))
+            .and_then(|v| v.split_whitespace().next()?.parse::<u64>().ok())
+            .map_or(0, |kib| kib / 1024)
+    }
+
+    /// Resolve the bench project in `kx`. The start directory is the kindex itself, so no
+    /// `.katalogr` marker is found.
+    fn open_094(kx: &Path) -> Katalogr {
+        Katalogr::resolve(
+            kx,
+            &Overrides {
+                kindex: Some(kx.display().to_string()),
+                project: Some("bench".to_string()),
+                ..Default::default()
+            },
+        )
+        .unwrap()
+    }
+
+    /// Kindex with the corpus registered as project `bench`, nothing indexed yet.
+    fn empty_project_094(scratch: &Path) -> (PathBuf, usize) {
+        let kx = scratch.join("kx");
+        kindex_init(&kx).unwrap();
+        let (repos, files) = corpus_094(scratch);
+        // `mark` false: the repos may be read-only clones, so no `.katalogr` marker is written.
+        project_init(&kx, "bench", repos, false).unwrap();
+        (kx, files)
+    }
+
+    /// Cold index (FEAT-094 R-18): wall time of a full rescan of the corpus into an empty
+    /// kindex, waiting for every result. Prints wall time, files, peak RSS and load before and
+    /// after. The budget is set by the user from these numbers.
+    #[test]
+    #[ignore]
+    fn cold_index_budget() {
+        let scratch = scratch_094();
+        let (kx, files) = empty_project_094(scratch.path());
+        let k = open_094(&kx);
+        let opts = Options {
+            timeout: Some(7200.0),
+            ..Options::default()
+        };
+        let load_before = load();
+        let t = Instant::now();
+        let r = k.index(None, true, None, &opts).unwrap();
+        let secs = t.elapsed().as_secs_f64();
+        assert!(!r.stale && !r.timed_out, "cold index did not finish");
+        println!(
+            "cold_index_budget: {secs:.1} s wall for {files} files; peak RSS {} MiB; load {load_before} -> {}",
+            peak_rss_mib(),
+            load()
+        );
+        if let Some(budget) = std::env::var("KATALOGR_BENCH_BUDGET_S")
+            .ok()
+            .and_then(|s| s.parse::<f64>().ok())
+        {
+            assert!(secs <= budget, "{secs:.1} s is over the {budget} s budget");
+        }
+    }
+
+    /// Open for a read (FEAT-094 R-19): after a cold index, the median wall time of 9 fresh
+    /// `resolve` + `status` calls, plus the peak RSS and load. Status is read stale-ok, so it
+    /// measures the open, not a wait.
+    #[test]
+    #[ignore]
+    fn open_has_no_per_file_cost() {
+        let scratch = scratch_094();
+        let (kx, files) = empty_project_094(scratch.path());
+        let index_opts = Options {
+            timeout: Some(7200.0),
+            ..Options::default()
+        };
+        open_094(&kx).index(None, true, None, &index_opts).unwrap();
+        let read_opts = Options {
+            timeout: Some(600.0),
+            ..Options::default()
+        };
+        let load_before = load();
+        let mut ms = Vec::new();
+        for _ in 0..9 {
+            let t = Instant::now();
+            let k = open_094(&kx);
+            k.status(&read_opts).unwrap();
+            ms.push(t.elapsed().as_secs_f64() * 1000.0);
+        }
+        ms.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        let median = ms[4];
+        println!(
+            "open_has_no_per_file_cost: median {median:.1} ms over 9 opens of a {files}-file index; peak RSS {} MiB; load {load_before} -> {}",
+            peak_rss_mib(),
+            load()
+        );
+        if let Some(budget) = std::env::var("KATALOGR_BENCH_OPEN_BUDGET_MS")
+            .ok()
+            .and_then(|s| s.parse::<f64>().ok())
+        {
+            assert!(
+                median <= budget,
+                "{median:.1} ms is over the {budget} ms budget"
+            );
         }
     }
 }

@@ -264,6 +264,8 @@ mod partial {
                     || n == "position.schema.json"
                     || n == "contract.schema.json"
                     || n == "view.schema.json"
+                    // `audit` answers with its own record and outcome types (FEAT-094 R-14).
+                    || n == "audit.schema.json"
             }) {
                 continue;
             }

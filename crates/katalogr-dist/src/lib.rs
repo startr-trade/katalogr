@@ -3,7 +3,9 @@
 //! All behaviour of the command-line wrapper lives here; the wrapper parses, calls and renders.
 
 mod at;
+mod audit;
 pub use at::position_without_board;
+pub use audit::{AuditOutcome, AuditRecord, PositionText};
 mod changes;
 mod claude;
 mod docs_affected;
@@ -21,6 +23,9 @@ pub mod eval;
 pub mod hooks;
 mod roots;
 mod setup;
+mod shard_show;
+mod symbol_count;
+pub use symbol_count::symbol_count;
 mod span;
 #[cfg(feature = "test-extractor")]
 mod test_extractor;
@@ -106,6 +111,10 @@ pub fn schemas() -> BTreeMap<&'static str, serde_json::Value> {
     assert!(
         all.insert("doctor", doctor::schema()).is_none(),
         "schema name doctor is registered twice"
+    );
+    assert!(
+        all.insert("audit", audit::schema()).is_none(),
+        "schema name audit is registered twice"
     );
     assert!(
         all.insert("contract", contract::schema()).is_none(),
@@ -739,7 +748,36 @@ impl Katalogr {
         for repo in &self.project.config().repos {
             engine.set_repo_filters(&repo.name, repo.include.clone(), repo.exclude.clone());
         }
+        self.after_open(&engine)?;
         Ok(engine)
+    }
+
+    /// What follows opening a graph that was lost (FEAT-094 R-8, R-10). A graph of another
+    /// schema, or a corrupt one, was recreated empty: one rescan per repo with a root is queued,
+    /// so reads and `index` rebuild it by extracting. A repo with no root cannot be, and is
+    /// reported. A missing file queues nothing (R-9): see [`Katalogr::note_missing_index`].
+    fn after_open(&self, engine: &Engine) -> Result<(), DistError> {
+        if engine.cache().state() != katalogr_store::OpenState::Replaced {
+            return Ok(());
+        }
+        for repo in &self.project.config().repos {
+            if engine.roots().contains_key(&repo.name) {
+                engine.inbox().append(&NewEvent::rescan(&repo.name))?;
+            } else {
+                self.note(format!(
+                    "repo {} has no root here, so it is absent from this index; add it with katalogr project add-root",
+                    repo.name
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    /// R-9. A graph file that was missing and has been created empty: say so, queue nothing.
+    fn note_missing_index(&self, engine: &Engine) {
+        if engine.cache().state() == katalogr_store::OpenState::Created {
+            self.note("no index yet: run katalogr index --full".to_string());
+        }
     }
 
     /// The read-only engine over `dir`, or `None` when the cache cannot be read that way
@@ -766,6 +804,17 @@ impl Katalogr {
 
     /// [`Katalogr::engine_for`] over the context `choice` names, not this invocation's own.
     fn engine_for_choice(
+        &self,
+        c: impl Into<EngineConsistency>,
+        deadline: Instant,
+        choice: &ContextChoice,
+    ) -> Result<Engine, DistError> {
+        let engine = self.open_for_choice(c, deadline, choice)?;
+        self.note_missing_index(&engine);
+        Ok(engine)
+    }
+
+    fn open_for_choice(
         &self,
         c: impl Into<EngineConsistency>,
         deadline: Instant,

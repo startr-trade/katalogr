@@ -225,9 +225,11 @@ mod cli {
         let tmp = tempfile::tempdir().unwrap();
         let (kx, repo) = setup(tmp.path());
         let project = kx.join("projects/demo");
-        for sub in ["profiles", "shards", ".cache"] {
+        for sub in ["profiles", ".cache"] {
             assert!(project.join(sub).is_dir(), "missing {sub}");
         }
+        // FEAT-094: a new project has no shards folder.
+        assert!(!project.join("shards").exists());
         assert!(kx.join(".git").exists());
         assert!(project.join("format.json").is_file());
         let config = std::fs::read_to_string(project.join("config.yaml")).unwrap();
@@ -295,10 +297,10 @@ mod cli {
     }
 
     /// A project holding a polyglot copy of the fixtures, fully indexed with `threads`
-    /// threads; returns the shard tree.
-    fn shards_at(threads: &str) -> std::collections::BTreeMap<String, Vec<u8>> {
+    /// threads; returns the text of each extracted file (`shard show`).
+    fn texts_at(threads: &str) -> std::collections::BTreeMap<String, Vec<u8>> {
         let tmp = tempfile::tempdir().unwrap();
-        let (kx, repo) = setup(tmp.path());
+        let (_kx, repo) = setup(tmp.path());
         let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures");
         for (i, sub) in ["rust/calls", "rust/items", "ts/calls", "md", "sql"]
             .iter()
@@ -325,15 +327,24 @@ mod cli {
             "index failed: {}",
             String::from_utf8_lossy(&out.stderr)
         );
-        let shards = tree_bytes(&kx.join("projects/demo/shards"));
-        assert!(shards.len() > 24, "shards written: {}", shards.len());
-        shards
+        let mut texts = std::collections::BTreeMap::new();
+        for (rel, _) in tree_bytes(&repo) {
+            if rel.starts_with(".git") {
+                continue;
+            }
+            let (code, out, _) = run_raw(&repo, &["shard", "show", &format!("app:{rel}")]);
+            if code == 0 {
+                texts.insert(rel, out.into_bytes());
+            }
+        }
+        assert!(texts.len() > 24, "files extracted: {}", texts.len());
+        texts
     }
 
-    /// R-2. The shards of a full index are byte-identical at 1 and 8 threads.
+    /// R-2. The extracted text of a full index is byte-identical at 1 and 8 threads.
     #[test]
     fn index_threads_identical() {
-        assert_eq!(shards_at("1"), shards_at("8"));
+        assert_eq!(texts_at("1"), texts_at("8"));
     }
 
     /// FEAT-075 R-6. A full index leaves a compacted cache: `meta.compacted_bytes` is set and
@@ -995,6 +1006,140 @@ mod cli {
         assert_eq!(v["result"]["changed_files"], 1);
         assert!(v["exact"].is_boolean());
     }
+
+    fn git_in(root: &Path, args: &[&str]) {
+        let st = Command::new("git")
+            .current_dir(root)
+            .args(args)
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .status()
+            .expect("run git");
+        assert!(st.success(), "git {args:?} failed");
+    }
+
+    /// Every file below `root` (outside `.git`) with its length and modification time.
+    fn tree_state(root: &Path) -> std::collections::BTreeMap<String, (u64, std::time::SystemTime)> {
+        fn walk(
+            dir: &Path,
+            root: &Path,
+            out: &mut std::collections::BTreeMap<String, (u64, std::time::SystemTime)>,
+        ) {
+            for e in std::fs::read_dir(dir).unwrap() {
+                let e = e.unwrap();
+                let path = e.path();
+                if e.file_name() == ".git" {
+                    continue;
+                }
+                if e.file_type().unwrap().is_dir() {
+                    walk(&path, root, out);
+                } else {
+                    let m = e.metadata().unwrap();
+                    out.insert(
+                        path.strip_prefix(root).unwrap().display().to_string(),
+                        (m.len(), m.modified().unwrap()),
+                    );
+                }
+            }
+        }
+        let mut out = std::collections::BTreeMap::new();
+        walk(root, root, &mut out);
+        out
+    }
+
+    /// R-13. The text form is shard format 1, sorted JSON, for the file as it is on disk.
+    #[test]
+    fn shard_show_prints_format_one() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (_kx, repo) = query_project(tmp.path());
+        let (code, out, err) = run_raw(&repo, &["shard", "show", "app:lib.tx"]);
+        assert_eq!(code, 0, "{err}");
+        let v: serde_json::Value = serde_json::from_str(&out).expect("shard text is JSON");
+        assert_eq!(v["format"], 1);
+        assert!(out.ends_with("}\n") && !out.contains('\r'));
+        assert!(out.contains("\"target\""), "{out}");
+        assert_eq!(v["provenance"]["path"], "lib.tx");
+        // A repo the project does not have is a usage error; a missing file is exit 4.
+        assert_eq!(run_raw(&repo, &["shard", "show", "nope:lib.tx"]).0, 2);
+        assert_eq!(run_raw(&repo, &["shard", "show", "lib.tx"]).0, 2);
+        assert_eq!(run_raw(&repo, &["shard", "show", "app:absent.tx"]).0, 4);
+        // No extractor handles this file.
+        assert_eq!(run_raw(&repo, &["shard", "show", "app:a.zzz"]).0, 4);
+    }
+
+    /// R-13. `--commit` reads the blob at that revision, whatever the working tree holds now.
+    #[test]
+    fn shard_show_at_commit() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (_kx, repo) = query_project(tmp.path());
+        git_in(&repo, &["init", "-q"]);
+        git_in(&repo, &["config", "user.name", "Test"]);
+        git_in(&repo, &["config", "user.email", "test@example.com"]);
+        git_in(&repo, &["config", "commit.gpgsign", "false"]);
+        git_in(&repo, &["add", "lib.tx"]);
+        git_in(&repo, &["commit", "-q", "-m", "c1"]);
+        std::fs::write(repo.join("lib.tx"), "sym fn replaced\n").unwrap();
+        let (code, now, err) = run_raw(&repo, &["shard", "show", "app:lib.tx"]);
+        assert_eq!(code, 0, "{err}");
+        assert!(now.contains("replaced") && !now.contains("\"target\""));
+        let (code, then, err) =
+            run_raw(&repo, &["shard", "show", "app:lib.tx", "--commit", "HEAD"]);
+        assert_eq!(code, 0, "{err}");
+        assert!(
+            then.contains("\"target\"") && !then.contains("replaced"),
+            "{then}"
+        );
+        assert_eq!(
+            run_raw(
+                &repo,
+                &["shard", "show", "app:lib.tx", "--commit", "no-such-rev"]
+            )
+            .0,
+            1,
+            "a bad revision is an error"
+        );
+    }
+
+    /// R-13. Showing a shard changes no file in the kindex, the cache or the repository.
+    #[test]
+    fn shard_show_writes_nothing() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (_kx, repo) = query_project(tmp.path());
+        let before = tree_state(tmp.path());
+        let (code, _, err) = run_raw(&repo, &["shard", "show", "app:user.tx"]);
+        assert_eq!(code, 0, "{err}");
+        assert_eq!(tree_state(tmp.path()), before);
+    }
+
+    /// R-14. `audit verify` exits 0 on a match, 1 on a mismatch, 5 when not comparable and 4
+    /// when there is no record.
+    #[test]
+    fn audit_exit_codes() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (kx, repo) = query_project(tmp.path());
+        assert_eq!(run_raw(&repo, &["audit", "verify"]).0, 4);
+        let (code, out, err) = run_raw(&repo, &["--json", "audit", "record"]);
+        assert_eq!(code, 0, "{err}");
+        let rec: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(run_raw(&repo, &["audit", "verify"]).0, 0);
+        let dir = kx.join("projects/demo/audit");
+        let file = std::fs::read_dir(&dir)
+            .unwrap()
+            .next()
+            .unwrap()
+            .unwrap()
+            .path();
+        let mut wrong = rec.clone();
+        wrong["graph_digest"] = "0".repeat(64).into();
+        std::fs::write(&file, wrong.to_string()).unwrap();
+        let path = file.to_str().unwrap();
+        assert_eq!(run_raw(&repo, &["audit", "verify", path]).0, 1);
+        wrong["facts_version"] = "f".repeat(64).into();
+        std::fs::write(&file, wrong.to_string()).unwrap();
+        let (code, out, _) = run_raw(&repo, &["--json", "audit", "verify", path]);
+        assert_eq!(code, 5);
+        assert!(out.contains("\"outcome\":\"not_comparable\""), "{out}");
+    }
 }
 
 mod query {
@@ -1027,7 +1172,7 @@ mod query {
     fn schemas_current() {
         let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../schema/v1");
         let fresh = katalogr_dist::schemas();
-        assert_eq!(fresh.len(), 30);
+        assert_eq!(fresh.len(), 31);
         for (name, schema) in fresh {
             let mut want = serde_json::to_string_pretty(&schema).unwrap();
             want.push('\n');
@@ -1662,7 +1807,7 @@ mod retrieval {
                 }
             }
         }
-        // A cache rebuilt from the shards answers the same (text carries no watermark).
+        // A cache rebuilt by re-indexing answers the same (text carries no watermark).
         let cache = std::fs::read_dir(repo.parent().unwrap().join("kx/projects/demo/.cache"))
             .unwrap()
             .flatten()
@@ -1670,6 +1815,8 @@ mod retrieval {
             .find(|p| p.file_name().is_some_and(|n| n == "index.redb"))
             .expect("cache file");
         std::fs::remove_file(cache).unwrap();
+        // A lost graph answers empty and queues nothing (FEAT-094 R-9); an index rebuilds it.
+        assert_eq!(run_raw(&repo, &["index", "--full"]).0, 0);
         for (args, want) in first {
             let (code, out, _) = run_raw(&repo, &args);
             assert_eq!(code, 0, "{args:?}");
@@ -1867,7 +2014,7 @@ mod diagnostic {
         let first = traces(&repo);
         assert_eq!(first, traces(&repo), "differs between runs");
         assert!(first.iter().all(|t| !t.is_empty()));
-        // A cache rebuilt from the shards gives byte-identical traces.
+        // A cache rebuilt by re-indexing gives byte-identical traces.
         let cache = std::fs::read_dir(repo.parent().unwrap().join("kx/projects/demo/.cache"))
             .unwrap()
             .flatten()
@@ -1875,6 +2022,7 @@ mod diagnostic {
             .find(|p| p.file_name().is_some_and(|n| n == "index.redb"))
             .expect("cache file");
         std::fs::remove_file(cache).unwrap();
+        assert_eq!(run_raw(&repo, &["index", "--full"]).0, 0);
         assert_eq!(first, traces(&repo), "differs after a cache rebuild");
     }
 }

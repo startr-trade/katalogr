@@ -9,7 +9,7 @@ use katalogr_store::{RANK_CONTEXT, Reader, pagerank};
 use std::time::{Duration, Instant};
 use support::{
     cache_dump, drained_graph, file_event, full_index, init_project, open_engine,
-    open_engine_threads, shard_bytes,
+    open_engine_threads,
 };
 
 struct Fixture {
@@ -213,15 +213,21 @@ mod rank {
         assert_eq!(f.engine.index_stats().rank_refreshes, 1);
     }
 
-    fn snapshot(e: &Engine, kx: &camino::Utf8Path) -> (support::CacheDump, Vec<(String, Vec<u8>)>) {
+    fn snapshot(
+        e: &Engine,
+        work: &camino::Utf8Path,
+    ) -> (support::CacheDump, Vec<(String, Vec<u8>)>) {
         let dump = cache_dump(e)
             .into_iter()
-            .filter(|(n, _)| n != "shard_hashes")
+            .filter(|(n, _)| n != "file_revisions")
             .collect();
-        (dump, shard_bytes(kx).into_iter().collect())
+        (
+            dump,
+            support::extracted_texts(e, work).into_iter().collect(),
+        )
     }
 
-    /// FEAT-093 R-16. The round size and the thread count change neither the shards nor any
+    /// FEAT-093 R-16. The round size and the thread count change neither the extracted texts nor any
     /// cache table, the rank included; a publish that changes no rank input keeps a rank equal
     /// to a fresh index's.
     #[test]
@@ -238,7 +244,7 @@ mod rank {
                 let e = open_engine_threads(&kx, &work, threads);
                 drain_with_budget(&e, budget);
                 assert!(current(&e));
-                let snap = snapshot(&e, &kx);
+                let snap = snapshot(&e, &work);
                 assert!(
                     snap.0
                         .iter()

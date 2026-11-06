@@ -3,26 +3,15 @@
 mod support;
 
 use camino::Utf8PathBuf;
-use katalogr_model::RelPath;
-use katalogr_store::{Kindex, ProjectName};
 use support::{fresh_index, open_engine};
 
 mod graph {
     use super::*;
 
-    fn shard_bytes(kx: &Utf8PathBuf) -> Vec<(String, Vec<u8>)> {
-        let dir = Kindex::open(kx)
-            .unwrap()
-            .project(&ProjectName::new("p").unwrap())
-            .unwrap();
-        dir.list_shards()
-            .unwrap()
-            .into_iter()
-            .map(|(repo, path): (String, RelPath)| {
-                let bytes = std::fs::read(dir.shard_path(&repo, &path)).unwrap();
-                (format!("{repo}:{path}"), bytes)
-            })
-            .collect()
+    /// The text of every file's fragment, extracted as the planner would.
+    fn texts(kx: &Utf8PathBuf, work: &Utf8PathBuf) -> Vec<(String, Vec<u8>)> {
+        let e = open_engine(kx, work);
+        support::extracted_texts(&e, work).into_iter().collect()
     }
 
     #[test]
@@ -50,9 +39,9 @@ mod graph {
         assert!(g1.contains(r#""node":"artifact""#));
         assert!(g1.contains(r#""link":true"#));
         assert!(g1.contains("r:a.tx#fn:A"), "canonical names, not ids");
-        let s1 = shard_bytes(&kx1);
+        let s1 = texts(&kx1, &work);
         assert_eq!(s1.len(), 3);
-        assert_eq!(s1, shard_bytes(&kx2), "shard files are byte-identical");
+        assert_eq!(s1, texts(&kx2, &work), "extracted texts are byte-identical");
 
         // Re-opening and re-reading gives the same text.
         let e = open_engine(&kx1, &work);

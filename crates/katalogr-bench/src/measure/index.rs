@@ -7,7 +7,7 @@ use crate::sizes;
 use crate::stats::{self, summary};
 
 /// N cold `index --full` runs: reset, check out the base commits, index, then record wall time,
-/// peak RSS, shard and cache sizes and the shard digest. A non-zero exit is an error.
+/// peak RSS, the cache size and the graph digest. A non-zero exit is an error.
 pub fn run(cx: &mut Ctx) -> Result<IndexResult> {
     let runs = cx.s.runs.max(1);
     let mut wall = Vec::new();
@@ -36,10 +36,10 @@ pub fn run(cx: &mut Ctx) -> Result<IndexResult> {
         wall.push(r.wall.as_secs_f64());
         rss.push(mib(r.peak_rss_kib));
         let dir = cx.project_dir();
-        digests.push(sizes::shard_digest(&dir)?);
-        last = Some((sizes::shard_stats(&dir)?, sizes::cache_bytes(&dir)?));
+        digests.push(sizes::graph_digest(&cx.k)?);
+        last = Some(sizes::cache_bytes(&dir)?);
     }
-    let (shards, cache) = last.expect("at least one run");
+    let cache = last.expect("at least one run");
     // Files indexed come from the coverage report after the last run.
     let cov = cx.run_json(&["coverage", "--suffixes", "50"])?;
     let files_indexed = cov
@@ -58,8 +58,6 @@ pub fn run(cx: &mut Ctx) -> Result<IndexResult> {
         },
         wall_s,
         peak_rss_mib: summary(&rss),
-        shard_files: shards.files,
-        shard_bytes: shards.bytes,
         cache_bytes: cache,
         digests_equal: digests.windows(2).all(|w| w[0] == w[1]),
         digest: digests.last().cloned().unwrap_or_default(),

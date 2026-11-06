@@ -641,27 +641,19 @@ mod rest {
         assert!(route(&repo, "GET /users").is_empty());
     }
 
-    /// Every shard of the project's kindex, by path.
-    fn shards(repo: &Path) -> std::collections::BTreeMap<String, Vec<u8>> {
-        fn walk(dir: &Path, base: &Path, out: &mut std::collections::BTreeMap<String, Vec<u8>>) {
-            for e in std::fs::read_dir(dir).unwrap().flatten() {
-                let p = e.path();
-                if p.is_dir() {
-                    walk(&p, base, out);
-                } else {
-                    let rel = p.strip_prefix(base).unwrap().to_str().unwrap().to_string();
-                    out.insert(rel, std::fs::read(&p).unwrap());
-                }
-            }
-        }
-        let base = kindex_of(repo).join("projects/demo/shards");
-        let mut out = std::collections::BTreeMap::new();
-        walk(&base, &base, &mut out);
-        out
+    /// The extracted text of each of `files` (`shard show`), by path.
+    fn texts(repo: &Path, files: &[(&str, &str)]) -> std::collections::BTreeMap<String, Vec<u8>> {
+        files
+            .iter()
+            .filter_map(|(f, _)| {
+                let (code, out, _) = katalogr(repo, &["shard", "show", &format!("app:{f}")]);
+                (code == 0).then(|| (f.to_string(), out.into_bytes()))
+            })
+            .collect()
     }
 
     #[test]
-    fn shards_deterministic() {
+    fn extracted_text_deterministic() {
         let files: Vec<(&str, &str)> = vec![
             CARGO,
             LIB,
@@ -694,11 +686,11 @@ mod rest {
             ok(&b, &["notify", f]);
         }
         ok(&b, &["index"]);
-        let (sa, sb) = (shards(&a), shards(&b));
+        let (sa, sb) = (texts(&a, &files), texts(&b, &files));
         assert!(sa.len() >= files.len(), "{:?}", sa.keys());
         assert_eq!(sa.keys().collect::<Vec<_>>(), sb.keys().collect::<Vec<_>>());
         for (k, v) in &sa {
-            assert_eq!(v, &sb[k], "shard {k} differs");
+            assert_eq!(v, &sb[k], "text of {k} differs");
         }
         // The same links after stitching.
         let key = "GET /v1/users/{}";

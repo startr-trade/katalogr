@@ -86,6 +86,8 @@ fn run(cli: &Cli) -> Result<ExitCode, DistError> {
         Some(Command::Eval { action }) => cmd::eval::run(cli, action),
         Some(Command::Context { action }) => cmd::context::run(cli, action),
         Some(Command::Profiles { action }) => cmd::profiles::run(cli, action),
+        Some(Command::Shard { action }) => cmd::shard::run(cli, action),
+        Some(Command::Audit { action }) => cmd::audit::run(cli, action),
         Some(Command::Dangling { kind }) => cmd::dangling::run(cli, kind),
         Some(Command::DocsAffected { since, kind, limit }) => {
             cmd::docs_affected::run(cli, since.as_deref(), kind, *limit)

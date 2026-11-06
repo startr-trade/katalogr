@@ -20,6 +20,10 @@ impl Extractor for CtxExtractor {
         "ctx-test"
     }
 
+    fn revision_salt(&self) -> &'static str {
+        "test-1"
+    }
+
     fn handles(&self, path: &RelPath) -> bool {
         TestExtractor.handles(path)
     }
@@ -175,12 +179,13 @@ mod context {
         let roots = BTreeMap::from([("r".to_string(), work.clone())]);
         let e = Engine::open(dir, reg, roots, Instant::now() + Duration::from_secs(10)).unwrap();
         let revision = |e: &Engine| {
-            let shard = e
-                .dir()
-                .read_shard("r", &RelPath::new("a.salt").unwrap())
+            use katalogr_store::Reader;
+            e.cache()
+                .read()
                 .unwrap()
-                .expect("shard");
-            shard.provenance.revision
+                .file_revision("r", &RelPath::new("a.salt").unwrap())
+                .unwrap()
+                .expect("file revision")
         };
 
         SALT.store(0, Ordering::SeqCst);
@@ -189,22 +194,16 @@ mod context {
             .unwrap();
         drained_graph(&e);
         let r0 = revision(&e);
-        let shard_file = e.dir().shard_path("r", &RelPath::new("a.salt").unwrap());
-        let m0 = std::fs::metadata(&shard_file).unwrap().modified().unwrap();
 
-        // Nothing changed: the rescan skips the shard.
+        // Nothing changed: the rescan keeps the revision.
         std::thread::sleep(Duration::from_millis(20));
         e.inbox()
             .append(&katalogr_engine::NewEvent::rescan("r"))
             .unwrap();
         drained_graph(&e);
         assert_eq!(revision(&e), r0);
-        assert_eq!(
-            std::fs::metadata(&shard_file).unwrap().modified().unwrap(),
-            m0
-        );
 
-        // The extractor bumps its salt: a full rescan rewrites the shard under a new revision.
+        // The extractor bumps its salt: a full rescan extracts again under a new revision.
         SALT.store(1, Ordering::SeqCst);
         std::thread::sleep(Duration::from_millis(20));
         e.inbox()
@@ -214,6 +213,5 @@ mod context {
         let r1 = revision(&e);
         SALT.store(0, Ordering::SeqCst);
         assert_ne!(r1, r0, "the salt is part of the revision");
-        assert!(std::fs::metadata(&shard_file).unwrap().modified().unwrap() > m0);
     }
 }

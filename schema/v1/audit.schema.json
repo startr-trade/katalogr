@@ -1,0 +1,56 @@
+{
+  "$defs": {
+    "PositionText": {
+      "description": "One repo's position in a record.",
+      "properties": {
+        "commit": {
+          "description": "40 lower-case hex, or `null` for a directory with no commit.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "repo": {
+          "type": "string"
+        },
+        "tree": {
+          "description": "The hash of uncommitted changes (64 lower-case hex), or `null` when the checkout is clean.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "repo"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "What `audit record` writes.",
+  "properties": {
+    "facts_version": {
+      "description": "The facts version the graph was built under (extractor ids, salts and profile hashes).",
+      "type": "string"
+    },
+    "graph_digest": {
+      "description": "SHA-256 of the canonical graph export, lower-case hex.",
+      "type": "string"
+    },
+    "positions": {
+      "description": "One entry per repo with a root here, sorted by repo.",
+      "items": {
+        "$ref": "#/$defs/PositionText"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "facts_version",
+    "graph_digest",
+    "positions"
+  ],
+  "title": "AuditRecord",
+  "type": "object"
+}

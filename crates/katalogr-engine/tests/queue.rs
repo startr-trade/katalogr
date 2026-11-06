@@ -21,6 +21,10 @@ impl Extractor for Counting {
     fn id(&self) -> &'static str {
         "test"
     }
+
+    fn revision_salt(&self) -> &'static str {
+        "test-1"
+    }
     fn handles(&self, path: &RelPath) -> bool {
         TestExtractor.handles(path)
     }
@@ -231,22 +235,35 @@ mod queue {
         p.process(&Scope::Project, 256, soon()).unwrap();
         let r = e.cache().read().unwrap();
         assert_eq!(artifact_count(&r), 1);
-        assert!(!e.dir().shard_path("r", &rel("target/b.tx")).exists());
+        assert!(
+            !r.file_revisions()
+                .unwrap()
+                .iter()
+                .any(|((_, p), _)| p.as_str() == "target/b.tx")
+        );
     }
 
+    /// R-2: a publish writes nothing but the graph database: the project folder outside `.cache`
+    /// is the same before and after, and holds no shard files or temp files.
     #[test]
-    fn recover_removes_orphan_temp_files() {
+    fn publish_writes_no_files_outside_cache() {
         let f = fixture();
         let e = f.engine();
-        let shards = e.dir().root().join("shards/r");
-        std::fs::create_dir_all(&shards).unwrap();
-        let orphan = shards.join(".tmp-7-a.tx.kshard.json");
-        std::fs::write(&orphan, b"junk").unwrap();
+        let before = tree_outside_cache(e.dir().root());
+        f.write("a.tx", "sym fn A\n");
+        f.write("b.tx", "sym fn B\n");
+        f.notify(&e, "a.tx");
+        f.notify(&e, "b.tx");
         let mut p = Processor::try_acquire(&e).unwrap().unwrap();
-        p.recover().unwrap();
-        assert!(!orphan.exists());
+        p.ingest().unwrap();
+        p.process(&Scope::Project, 256, soon()).unwrap();
+        drop(p);
+        assert_eq!(artifact_count(&e.cache().read().unwrap()), 2);
+        assert_eq!(tree_outside_cache(e.dir().root()), before);
     }
 
+    /// R-2: one transaction holds the rows, file revision and watermark. Stopping right after the
+    /// commit, with the engine reopened, leaves nothing to finish.
     #[test]
     fn results_and_watermark_atomic() {
         let f = fixture();
@@ -256,23 +273,12 @@ mod queue {
         f.notify(&e, "a.tx");
         f.notify(&e, "b.tx");
 
-        // Crash after the publish commit: no renames, journal left behind.
         let mut p = Processor::try_acquire(&e).unwrap().unwrap();
         p.ingest().unwrap();
         let wm = p.process_to_commit(&Scope::Project, 256, soon()).unwrap();
         assert_eq!(wm.0, 2);
         drop(p);
-        assert_eq!(
-            e.cache().read().unwrap().publish_journal().unwrap().len(),
-            2
-        );
-        let dir = e.dir().clone();
-        assert!(!dir.shard_path("r", &rel("a.tx")).exists());
-
-        let mut p = Processor::try_acquire(&e).unwrap().unwrap();
-        p.recover().unwrap();
-        drop(p);
-        check_consistent(&e);
+        check_consistent(&e, 2);
 
         // Same again, with a reopen of the whole engine in between.
         f.write("a.tx", "sym fn A\nsym fn A2\n");
@@ -283,44 +289,59 @@ mod queue {
         drop(p);
         drop(e);
         let e = f.engine();
-        let mut p = Processor::try_acquire(&e).unwrap().unwrap();
-        p.recover().unwrap();
-        drop(p);
-        check_consistent(&e);
+        check_consistent(&e, 2);
         assert_eq!(e.cache().read().unwrap().symbols().unwrap().len(), 3);
         assert_eq!(e.cache().read().unwrap().watermark("worktree").unwrap(), 3);
 
-        // A deletion removes the shard file through the journal.
+        // A deletion removes the rows and the file revision in the same commit.
         std::fs::remove_file(f.work.join("b.tx")).unwrap();
         f.notify(&e, "b.tx");
         let mut p = Processor::try_acquire(&e).unwrap().unwrap();
         p.ingest().unwrap();
         p.process_to_commit(&Scope::Project, 256, soon()).unwrap();
         drop(p);
-        let mut p = Processor::try_acquire(&e).unwrap().unwrap();
-        p.recover().unwrap();
-        drop(p);
-        check_consistent(&e);
+        check_consistent(&e, 1);
         assert_eq!(artifact_count(&e.cache().read().unwrap()), 1);
     }
 
-    /// Every shard file's hash equals `shard_hashes`; nothing is pending or journaled.
-    fn check_consistent(e: &Engine) {
+    /// Every artifact has exactly one file revision; nothing is pending; events are pruned.
+    fn check_consistent(e: &Engine, files: usize) {
         let r = e.cache().read().unwrap();
-        assert!(r.publish_journal().unwrap().is_empty());
         assert!(r.pending_entries(None).unwrap().is_empty());
-        let on_disk = e.dir().list_shards().unwrap();
-        let hashes = r.shard_hashes().unwrap();
-        assert_eq!(on_disk.len(), hashes.len());
-        for ((repo, path), hash) in hashes {
-            let bytes = std::fs::read(e.dir().shard_path(&repo, &path)).unwrap();
-            assert_eq!(<[u8; 32]>::from(Sha256::digest(&bytes)), hash);
-        }
+        let revisions = r.file_revisions().unwrap();
+        assert_eq!(revisions.len(), files);
+        assert_eq!(r.artifacts().unwrap().len(), files);
         assert_eq!(
             r.watermark("worktree").unwrap(),
             r.last_seq("worktree").unwrap()
         );
         assert_eq!(r.event_count("worktree").unwrap(), 0, "events are pruned");
+    }
+
+    /// Every file under `root` except `.cache`, with its size and content hash.
+    fn tree_outside_cache(root: &camino::Utf8Path) -> BTreeMap<String, (u64, [u8; 32])> {
+        fn walk(
+            base: &camino::Utf8Path,
+            dir: &camino::Utf8Path,
+            out: &mut BTreeMap<String, (u64, [u8; 32])>,
+        ) {
+            for e in std::fs::read_dir(dir).unwrap().flatten() {
+                let p = Utf8PathBuf::from_path_buf(e.path()).unwrap();
+                let rel = p.strip_prefix(base).unwrap().to_string();
+                if rel == ".cache" {
+                    continue;
+                }
+                if p.is_dir() {
+                    walk(base, &p, out);
+                } else {
+                    let bytes = std::fs::read(&p).unwrap();
+                    out.insert(rel, (bytes.len() as u64, Sha256::digest(&bytes).into()));
+                }
+            }
+        }
+        let mut out = BTreeMap::new();
+        walk(root, root, &mut out);
+        out
     }
 
     #[test]

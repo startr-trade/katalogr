@@ -2,6 +2,7 @@
 
 #[cfg(feature = "api")]
 pub mod api;
+pub mod audit;
 pub mod callers;
 pub mod claude;
 pub mod communities;
@@ -40,6 +41,7 @@ pub mod search;
 #[cfg(feature = "web")]
 pub mod serve;
 pub mod session;
+pub mod shard;
 pub mod show;
 pub mod skill;
 pub mod status;

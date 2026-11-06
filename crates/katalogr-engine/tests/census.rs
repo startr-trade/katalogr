@@ -76,14 +76,15 @@ mod census {
         let engine = routed_engine(&tmp);
         let c = census(&engine, "r").unwrap().unwrap();
         support::full_index(&engine);
+        let published = support::published(&engine);
         let has_shard =
-            |p: &katalogr_model::RelPath| engine.dir().shard_path("r", p).as_std_path().exists();
+            |p: &katalogr_model::RelPath| published.contains(&("r".to_string(), p.clone()));
         assert!(!c.claimed.is_empty());
         for (p, _) in &c.claimed {
-            assert!(has_shard(p), "claimed {p} has no shard");
+            assert!(has_shard(p), "claimed {p} has no file revision");
         }
         for p in &c.unclaimed {
-            assert!(!has_shard(p), "unclaimed {p} has a shard");
+            assert!(!has_shard(p), "unclaimed {p} has a file revision");
         }
     }
 }

@@ -11,9 +11,7 @@ use katalogr_model::RelPath;
 use katalogr_store::{Kindex, PendingKey, ProjectDir, ProjectName, Reader, StoreError};
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::{Duration, Instant};
-use support::{
-    TestExtractor, drained_graph, file_event, fresh_index, init_project, open_engine, shard_bytes,
-};
+use support::{TestExtractor, drained_graph, file_event, fresh_index, init_project, open_engine};
 
 struct Fixture {
     _tmp: tempfile::TempDir,
@@ -129,7 +127,7 @@ mod readers {
         drop(in_flight);
     }
 
-    /// R-1: nothing is written: not the cache file, not a lock file, not a shard.
+    /// R-1: nothing is written: not the cache file, not a lock file, no file.
     #[test]
     fn stale_ok_writes_nothing() {
         let f = fixture();
@@ -138,7 +136,7 @@ mod readers {
         let file = dir.cache_dir().join("index.redb");
         let before = std::fs::read(&file).unwrap();
         let cache_files = ls(&dir.cache_dir());
-        let shards = shard_bytes(&f.kx);
+        let texts = support::extracted_texts(&w, &f.work);
         let commits = katalogr_store::cache::commits_on_this_thread();
         let r = f.reader().unwrap();
         for _ in 0..3 {
@@ -147,7 +145,7 @@ mod readers {
         assert!(matches!(r.cache().write(), Err(StoreError::Busy)));
         assert_eq!(std::fs::read(&file).unwrap(), before);
         assert_eq!(ls(&dir.cache_dir()), cache_files);
-        assert_eq!(shard_bytes(&f.kx), shards);
+        assert_eq!(support::extracted_texts(&w, &f.work), texts);
         assert_eq!(katalogr_store::cache::commits_on_this_thread(), commits);
         drop(w);
     }
@@ -347,7 +345,7 @@ mod readers {
         drop(w);
     }
 
-    /// R-11: an index beside readers publishes the same shards and graph as one without.
+    /// R-11: an index beside readers publishes the same graph and extracted texts as one without.
     #[test]
     fn index_beside_readers_identical() {
         let f = fixture();
@@ -379,7 +377,11 @@ mod readers {
         let root = Utf8PathBuf::from_path_buf(f._tmp.path().to_path_buf()).unwrap();
         let (fresh_kx, fresh) = fresh_index(&root, "fresh", &f.work);
         assert_eq!(graph, fresh);
-        assert_eq!(shard_bytes(&f.kx), shard_bytes(&fresh_kx));
+        let (a, b) = (open_engine(&f.kx, &f.work), open_engine(&fresh_kx, &f.work));
+        assert_eq!(
+            support::extracted_texts(&a, &f.work),
+            support::extracted_texts(&b, &f.work)
+        );
     }
 
     #[cfg(feature = "failpoints")]
@@ -450,15 +452,11 @@ mod readers {
         let f = crashed();
         let dir = f.dir();
         let past = Instant::now();
-        let err = Cache::open_or_rebuild(&dir, &katalogr_engine::Stitcher::new(), past)
+        let err = Cache::open(&dir, past)
             .err()
             .expect("the repair is aborted");
         assert!(matches!(err, StoreError::Busy), "{err:?}");
-        let ok = Cache::open_or_rebuild(
-            &dir,
-            &katalogr_engine::Stitcher::new(),
-            Instant::now() + Duration::from_secs(30),
-        );
+        let ok = Cache::open(&dir, Instant::now() + Duration::from_secs(30));
         assert!(ok.is_ok());
     }
 }

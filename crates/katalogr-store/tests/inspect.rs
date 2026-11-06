@@ -2,27 +2,11 @@
 
 mod inspect {
     use camino::Utf8PathBuf;
-    use katalogr_model::ArtifactName;
+    use katalogr_model::RelPath;
     use katalogr_store::{
         CACHE_SCHEMA, Cache, CacheInspection, Kindex, ProjectConfig, ProjectDir, ProjectName,
-        Restitch, StoreError, WriteTx,
     };
     use std::time::{Duration, Instant};
-
-    struct Noop;
-
-    impl Restitch for Noop {
-        fn replace_fragment(
-            &self,
-            _: &mut WriteTx,
-            _: katalogr_model::Fragment,
-        ) -> Result<(), StoreError> {
-            Ok(())
-        }
-        fn remove_artifact(&self, _: &mut WriteTx, _: &ArtifactName) -> Result<(), StoreError> {
-            Ok(())
-        }
-    }
 
     fn project(t: &tempfile::TempDir) -> ProjectDir {
         let root = Utf8PathBuf::from_path_buf(t.path().join("kx")).unwrap();
@@ -33,7 +17,7 @@ mod inspect {
     }
 
     fn open(dir: &ProjectDir) -> Cache {
-        Cache::open_or_rebuild(dir, &Noop, Instant::now() + Duration::from_secs(5)).unwrap()
+        Cache::open(dir, Instant::now() + Duration::from_secs(5)).unwrap()
     }
 
     #[test]
@@ -74,7 +58,7 @@ mod inspect {
         std::fs::remove_file(&file).unwrap();
         let cache = open(&dir);
         let mut tx = cache.write().unwrap();
-        tx.set_publish_journal(&[("a".to_string(), "b".to_string())])
+        tx.put_file_revision("a", &RelPath::new("b.tx").unwrap(), "rev")
             .unwrap();
         tx.commit().unwrap();
         drop(cache);
@@ -82,9 +66,8 @@ mod inspect {
             CacheInspection::Open(o) => {
                 assert_eq!(o.stored_schema, Some(CACHE_SCHEMA));
                 let tables = o.tables.unwrap();
-                assert_eq!(tables.journal, vec![("a".to_string(), "b".to_string())]);
+                assert_eq!(tables.file_revisions.len(), 1);
                 assert!(tables.pending.is_empty());
-                assert!(tables.shard_hashes.is_empty());
             }
             other => panic!("{other:?}"),
         }
@@ -108,22 +91,24 @@ mod inspect {
         let dir = project(&t);
         let cache = open(&dir);
         let mut tx = cache.write().unwrap();
-        tx.set_publish_journal(&[("a".to_string(), "b".to_string())])
+        tx.put_file_revision("a", &RelPath::new("b.tx").unwrap(), "rev")
             .unwrap();
         tx.commit().unwrap();
         // An uncommitted write is not seen.
         let mut open_tx = cache.write().unwrap();
-        open_tx.set_publish_journal(&[]).unwrap();
+        open_tx
+            .remove_file_revision("a", &RelPath::new("b.tx").unwrap())
+            .unwrap();
         match Cache::inspect(&dir).unwrap() {
             CacheInspection::Open(o) => {
                 let tables = o.tables.unwrap();
-                assert_eq!(tables.journal, vec![("a".to_string(), "b".to_string())]);
+                assert_eq!(tables.file_revisions.len(), 1);
             }
             other => panic!("{other:?}"),
         }
         open_tx.commit().unwrap();
         match Cache::inspect(&dir).unwrap() {
-            CacheInspection::Open(o) => assert!(o.tables.unwrap().journal.is_empty()),
+            CacheInspection::Open(o) => assert!(o.tables.unwrap().file_revisions.is_empty()),
             other => panic!("{other:?}"),
         }
     }

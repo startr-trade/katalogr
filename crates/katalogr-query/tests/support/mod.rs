@@ -3,25 +3,13 @@
 
 use camino::Utf8PathBuf;
 use katalogr_model::{
-    ArtifactName, Confidence, Fragment, Id, LinkKind, Name, Provenance, RelPath, Segment, Span,
-    SymbolName,
+    ArtifactName, Confidence, Id, LinkKind, Name, Provenance, RelPath, Segment, Span, SymbolName,
 };
 use katalogr_store::{
     ArtifactRow, Cache, Kindex, LinkEntry, LinkKey, LinkOrigin, LinkRow, ProjectConfig,
-    ProjectName, RepoConfig, Restitch, StoreError, SymbolRow, WriteTx,
+    ProjectName, RepoConfig, SymbolRow, WriteTx,
 };
 use std::time::{Duration, Instant};
-
-struct NoShards;
-
-impl Restitch for NoShards {
-    fn replace_fragment(&self, _: &mut WriteTx, _: Fragment) -> Result<(), StoreError> {
-        Ok(())
-    }
-    fn remove_artifact(&self, _: &mut WriteTx, _: &ArtifactName) -> Result<(), StoreError> {
-        Ok(())
-    }
-}
 
 pub fn open(tmp: &tempfile::TempDir, repos: &[&str]) -> Cache {
     let root = Utf8PathBuf::from_path_buf(tmp.path().join("kx")).unwrap();
@@ -35,7 +23,7 @@ pub fn open(tmp: &tempfile::TempDir, repos: &[&str]) -> Cache {
             },
         )
         .unwrap();
-    Cache::open_or_rebuild(&dir, &NoShards, Instant::now() + Duration::from_secs(60)).unwrap()
+    Cache::open(&dir, Instant::now() + Duration::from_secs(60)).unwrap()
 }
 
 pub fn provenance(repo: &str, path: &RelPath) -> Provenance {

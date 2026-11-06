@@ -33,6 +33,10 @@ impl Extractor for TextExtractor {
         "text"
     }
 
+    fn revision_salt(&self) -> &'static str {
+        "text-extract-1"
+    }
+
     /// Always false: files are routed here only by a profile `select`.
     fn handles(&self, _: &RelPath) -> bool {
         false

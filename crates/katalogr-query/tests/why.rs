@@ -3,27 +3,16 @@
 use camino::Utf8PathBuf;
 use katalogr_model::insight::{FACT_RATIONALE, FACT_TEST, TEST_CASE};
 use katalogr_model::{
-    ArtifactName, Confidence, ContractName, ContractRole, Fact, Fragment, Id, LinkKind, Name,
-    Provenance, RelPath, Segment, Span, SymbolName,
+    ArtifactName, Confidence, ContractName, ContractRole, Fact, Id, LinkKind, Name, Provenance,
+    RelPath, Segment, Span, SymbolName,
 };
 use katalogr_query::{Blame, Resolution, SymbolHit, attach_use, why, why_sources, why_use};
 use katalogr_store::{
     ArtifactRow, BindingRow, Cache, ContractRow, Kindex, LinkEntry, LinkKey, LinkOrigin, LinkRow,
-    ProjectConfig, ProjectName, Reader, RepoConfig, Restitch, StoreError, SymbolRow, WriteTx,
+    ProjectConfig, ProjectName, Reader, RepoConfig, SymbolRow, WriteTx,
 };
 use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
-
-struct NoShards;
-
-impl Restitch for NoShards {
-    fn replace_fragment(&self, _: &mut WriteTx, _: Fragment) -> Result<(), StoreError> {
-        Ok(())
-    }
-    fn remove_artifact(&self, _: &mut WriteTx, _: &ArtifactName) -> Result<(), StoreError> {
-        Ok(())
-    }
-}
 
 fn span(line: u32) -> Span {
     Span {
@@ -64,7 +53,7 @@ fn open(tmp: &tempfile::TempDir) -> Cache {
             },
         )
         .unwrap();
-    Cache::open_or_rebuild(&dir, &NoShards, Instant::now() + Duration::from_secs(60)).unwrap()
+    Cache::open(&dir, Instant::now() + Duration::from_secs(60)).unwrap()
 }
 
 fn put_sym(

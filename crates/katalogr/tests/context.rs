@@ -119,22 +119,30 @@ mod context {
         v
     }
 
-    fn shard_count(dir: &Path) -> usize {
-        fn walk(d: &Path, n: &mut usize) {
-            if let Ok(rd) = std::fs::read_dir(d) {
-                for e in rd.flatten() {
-                    let p = e.path();
-                    if p.is_dir() {
-                        walk(&p, n);
-                    } else if p.to_string_lossy().ends_with(".kshard.json") {
-                        *n += 1;
-                    }
-                }
-            }
-        }
-        let mut n = 0;
-        walk(&dir.join("shards"), &mut n);
-        n
+    /// How many files the layer holds a different revision for than the base: the files the
+    /// layer extracted itself (FEAT-043 R-3; the seed carries the base's revisions).
+    fn delta_count(p: &P, layer: &Path) -> usize {
+        use katalogr_store::{Cache, ContextId, Reader};
+        let dl = || std::time::Instant::now() + std::time::Duration::from_secs(5);
+        let base = Katalogr::resolve(&p.repo, &Overrides::default())
+            .unwrap()
+            .project()
+            .clone();
+        let id = ContextId::new(layer.file_name().unwrap().to_str().unwrap()).unwrap();
+        let revisions = |c: Cache| -> std::collections::BTreeMap<_, _> {
+            c.read()
+                .unwrap()
+                .file_revisions()
+                .unwrap()
+                .into_iter()
+                .collect()
+        };
+        let mine = revisions(Cache::open(&base.layer(&id), dl()).unwrap());
+        let theirs = revisions(Cache::open(&base, dl()).unwrap());
+        mine.iter()
+            .filter(|(k, v)| theirs.get(*k) != Some(*v))
+            .count()
+            + theirs.keys().filter(|k| !mine.contains_key(*k)).count()
     }
 
     const FILES: [(&str, &str); 3] = [
@@ -194,11 +202,11 @@ mod context {
         find(&p.repo, ContextChoice::Current, "Alpha");
         let layer = layers(&p).remove(0);
         // Nothing differs from the base yet.
-        assert_eq!(shard_count(&layer), 0);
+        assert_eq!(delta_count(&p, &layer), 0);
         std::fs::write(p.repo.join("c.tx"), "sym fn Gamma\nsym fn Delta\n").unwrap();
         ok(&p.repo, &["notify", "c.tx"]);
         assert!(has(&p.repo, ContextChoice::Current, "Delta"));
-        assert_eq!(shard_count(&layer), 1);
+        assert_eq!(delta_count(&p, &layer), 1);
         // The base is untouched by the edit.
         assert!(!has(&p.repo, ContextChoice::Base, "Delta"));
     }
@@ -327,28 +335,11 @@ mod context {
 
     #[test]
     fn schema_mismatch_reseeds() {
-        use katalogr_store::{CACHE_SCHEMA, Cache, Restitch, WriteTx};
-        struct Noop;
-        impl Restitch for Noop {
-            fn replace_fragment(
-                &self,
-                _: &mut WriteTx,
-                _: katalogr_model::Fragment,
-            ) -> Result<(), katalogr_store::StoreError> {
-                Ok(())
-            }
-            fn remove_artifact(
-                &self,
-                _: &mut WriteTx,
-                _: &katalogr_model::ArtifactName,
-            ) -> Result<(), katalogr_store::StoreError> {
-                Ok(())
-            }
-        }
+        use katalogr_store::{CACHE_SCHEMA, Cache};
         let p = based();
         assert!(has(&p.repo, ContextChoice::Current, "Alpha"));
         let layer = layers(&p).remove(0);
-        // A cache of another schema and a leftover delta shard: the layer is rebuilt from the
+        // A cache of another schema and a leftover file: the layer is rebuilt from the
         // base, so the leftover is gone and the answer is the base's.
         {
             let dir = Katalogr::resolve(&p.repo, &Overrides::default())
@@ -357,9 +348,8 @@ mod context {
                 .clone();
             let id = katalogr_store::ContextId::new(layer.file_name().unwrap().to_str().unwrap())
                 .unwrap();
-            let c = Cache::open_or_rebuild(
+            let c = Cache::open(
                 &dir.layer(&id),
-                &Noop,
                 std::time::Instant::now() + std::time::Duration::from_secs(5),
             )
             .unwrap();
@@ -368,10 +358,9 @@ mod context {
                 .unwrap();
             tx.commit().unwrap();
         }
-        std::fs::create_dir_all(layer.join("shards/app")).unwrap();
-        std::fs::write(layer.join("shards/app/junk.kshard.json"), "x").unwrap();
+        std::fs::write(layer.join("junk"), "x").unwrap();
         assert!(has(&p.repo, ContextChoice::Current, "Alpha"));
-        assert!(!layer.join("shards/app/junk.kshard.json").exists());
+        assert!(!layer.join("junk").exists());
         assert_eq!(layers(&p).len(), 1);
     }
 
@@ -531,24 +520,7 @@ mod context {
     /// context's own cache, not the base's.
     #[test]
     fn reader_opens_the_layer() {
-        use katalogr_store::{Cache, Restitch, WriteTx};
-        struct Noop;
-        impl Restitch for Noop {
-            fn replace_fragment(
-                &self,
-                _: &mut WriteTx,
-                _: katalogr_model::Fragment,
-            ) -> Result<(), katalogr_store::StoreError> {
-                Ok(())
-            }
-            fn remove_artifact(
-                &self,
-                _: &mut WriteTx,
-                _: &katalogr_model::ArtifactName,
-            ) -> Result<(), katalogr_store::StoreError> {
-                Ok(())
-            }
-        }
+        use katalogr_store::Cache;
         let p = based();
         std::fs::write(p.repo.join("c.tx"), "sym fn GammaLayer\n").unwrap();
         ok(&p.repo, &["notify", "c.tx"]);
@@ -561,9 +533,8 @@ mod context {
         let id =
             katalogr_store::ContextId::new(layer.file_name().unwrap().to_str().unwrap()).unwrap();
         // A writer holds the layer's cache, so the read has to take a read-only handle.
-        let held = Cache::open_or_rebuild(
+        let held = Cache::open(
             &dir.layer(&id),
-            &Noop,
             std::time::Instant::now() + std::time::Duration::from_secs(5),
         )
         .unwrap();

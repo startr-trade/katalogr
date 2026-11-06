@@ -11,15 +11,15 @@ use crate::embed::{self, GuestContexts};
 use crate::error::EngineError;
 use crate::parallel::{Parallelism, wave_size};
 use crate::profiles::ProfileSet;
+use crate::scan::glob_set;
 use crate::stitch::{PreparedFragment, Stitcher};
 use camino::Utf8Path;
-use katalogr_model::{ArtifactName, ExtractError, ExtractInput, Fragment, Name, RelPath};
+use katalogr_model::{ExtractError, ExtractInput, Fragment, RelPath};
 use katalogr_store::blob::git_blob_id;
-use katalogr_store::{ErrorRow, PendingKey, ReadTx, Reader, StoreError};
+use katalogr_store::{ErrorRow, PendingKey, ReadTx, Reader, scan_for_absolute};
 use rayon::prelude::*;
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
-use std::fs::File;
 use std::time::Instant;
 
 /// What one pending path needs.
@@ -29,13 +29,12 @@ pub(super) enum Action {
     Replace {
         fragment: Box<Fragment>,
         errors: Vec<ErrorRow>,
-        tmp: String,
-        fin: String,
+        /// Bytes of the source file, for the round's byte cap.
+        source_len: u64,
     },
-    Delete {
-        fin: Option<String>,
-    },
-    Failed(String),
+    Delete,
+    /// The message, and the file revision to store with it (`None` for a history path).
+    Failed(String, Option<String>),
 }
 
 pub(super) struct Planned {
@@ -54,10 +53,11 @@ pub(super) struct PlanEnv<'e> {
     /// For each `(repo, host id)` whose routed extractor `embeds()`: its guests' contexts.
     guests: BTreeMap<(String, &'static str), GuestContexts>,
     embed_sig: Option<[u8; 32]>,
-    /// In a layer: the stored revision of each path of the round that has an artifact row.
-    row_revisions: BTreeMap<(String, RelPath), String>,
-    /// In a layer: paths the base held index errors for at seed time (never reused).
-    base_errors: BTreeSet<(String, String)>,
+    /// The stored file revision (SHA-256 of the revision string) of each path of the round.
+    revisions: BTreeMap<(String, RelPath), [u8; 32]>,
+    /// Paths of the round with an index-error row: a file whose extraction failed has no
+    /// revision, but its row must go when the file does.
+    errored: BTreeSet<(String, RelPath)>,
     /// Paths of the round that git ignores and does not track: treated as gone (FEAT-099).
     not_admitted: BTreeSet<(String, RelPath)>,
 }
@@ -91,26 +91,14 @@ impl<'e> PlanEnv<'e> {
                 guests.insert(pair, g);
             }
         }
-        let mut row_revisions = BTreeMap::new();
-        let mut base_errors = BTreeSet::new();
-        if engine.dir().is_layer() {
-            for (key, _) in items {
-                let id = ArtifactName {
-                    repo: key.repo.clone(),
-                    path: key.path.clone(),
-                }
-                .id();
-                if let Some(row) = snap.artifact(id)? {
-                    row_revisions.insert(
-                        (key.repo.clone(), key.path.clone()),
-                        row.provenance.revision,
-                    );
-                }
+        let mut revisions = BTreeMap::new();
+        let mut errored = BTreeSet::new();
+        for (key, _) in items {
+            if let Some(h) = snap.file_revision(&key.repo, &key.path)? {
+                revisions.insert((key.repo.clone(), key.path.clone()), h);
             }
-            if let Some(bytes) = snap.meta(katalogr_store::META_BASE_ERRORS)? {
-                let pairs: Vec<(String, String)> =
-                    serde_json::from_slice(&bytes).unwrap_or_default();
-                base_errors.extend(pairs);
+            if !snap.index_errors(&key.repo, &key.path)?.is_empty() {
+                errored.insert((key.repo.clone(), key.path.clone()));
             }
         }
         let mut not_admitted = BTreeSet::new();
@@ -134,6 +122,30 @@ impl<'e> PlanEnv<'e> {
             }
             not_admitted.extend(gone.into_iter().map(|p| (repo.to_string(), p)));
         }
+        // R-12: a path that has a file revision but that the repo's globs no longer admit is
+        // treated as gone, so a rescan removes it.
+        let mut globs: BTreeMap<&str, Option<(globset::GlobSet, globset::GlobSet)>> =
+            BTreeMap::new();
+        for (key, _) in items {
+            let k = (key.repo.clone(), key.path.clone());
+            if !(revisions.contains_key(&k) || errored.contains(&k))
+                || key
+                    .path
+                    .as_str()
+                    .starts_with(crate::history::HISTORY_PREFIX)
+            {
+                continue;
+            }
+            let set = globs.entry(&key.repo).or_insert_with(|| {
+                let (include, exclude) = engine.repo_filters(&key.repo);
+                Some((glob_set(&include).ok()?, glob_set(&exclude).ok()?))
+            });
+            if let Some((include, exclude)) = set
+                && !(include.is_match(key.path.as_str()) && !exclude.is_match(key.path.as_str()))
+            {
+                not_admitted.insert((key.repo.clone(), key.path.clone()));
+            }
+        }
         Ok(PlanEnv {
             engine,
             not_admitted,
@@ -141,27 +153,26 @@ impl<'e> PlanEnv<'e> {
             contexts,
             guests,
             embed_sig: embed::signature(engine.registry()),
-            row_revisions,
-            base_errors,
+            revisions,
+            errored,
         })
     }
 }
 
 /// Decide what one queued path needs, from the file's current content.
-pub(super) fn plan_one(env: &PlanEnv, key: &PendingKey, seq: u64) -> Result<Action, EngineError> {
+pub(super) fn plan_one(env: &PlanEnv, key: &PendingKey) -> Result<Action, EngineError> {
     let engine = env.engine;
     let profiles = env.profiles;
-    let dir = engine.dir();
     let Some(root) = engine.roots().get(&key.repo) else {
         return Ok(Action::Skip);
     };
-    let fin = relative_shard(dir.root(), &dir.shard_path(&key.repo, &key.path));
+    let held = env.revisions.get(&(key.repo.clone(), key.path.clone()));
     if let Some(sha) = key
         .path
         .as_str()
         .strip_prefix(crate::history::HISTORY_PREFIX)
     {
-        return plan_history(engine, key, seq, root, sha, fin);
+        return plan_history(key, root, sha, held);
     }
     let Some(source) = engine.source(&key.repo) else {
         return Ok(Action::Skip);
@@ -174,71 +185,46 @@ pub(super) fn plan_one(env: &PlanEnv, key: &PendingKey, seq: u64) -> Result<Acti
     } else {
         source.read(&key.path)?
     };
-    let layer = dir.is_layer();
-    let existing = if layer {
-        None
-    } else {
-        dir.read_shard(&key.repo, &key.path).unwrap_or_default()
-    };
-    let stored_revision = if layer {
-        env.row_revisions
-            .get(&(key.repo.clone(), key.path.clone()))
-            .cloned()
-    } else {
-        existing.as_ref().map(|f| f.provenance.revision.clone())
-    };
-    let Some(content) = content else {
-        let has_shard = dir.shard_path(&key.repo, &key.path).exists();
-        return Ok(Action::Delete {
-            fin: has_shard.then_some(fin),
-        });
-    };
-    let Some(extractor) = extractor_for(engine.registry(), profiles, &key.path) else {
-        // No extractor applies any more (a `select` was removed, or the extension is gone):
-        // a shard left from before is stale.
-        let has_shard = dir.shard_path(&key.repo, &key.path).exists();
-        let has_row = stored_revision.is_some();
-        return Ok(if has_shard {
-            Action::Delete { fin: Some(fin) }
-        } else if has_row {
-            Action::Delete { fin: None }
+    let delete_or_skip = || {
+        if held.is_some() || env.errored.contains(&(key.repo.clone(), key.path.clone())) {
+            Action::Delete
         } else {
             Action::Skip
-        });
+        }
+    };
+    let Some(content) = content else {
+        return Ok(delete_or_skip());
+    };
+    let Some(extractor) = extractor_for(engine.registry(), profiles, &key.path) else {
+        // No extractor applies any more (a `select` was removed, or the extension is gone).
+        return Ok(delete_or_skip());
     };
     let pair = (key.repo.clone(), extractor.id());
     let ctx: Vec<u8> = env.contexts.get(&pair).cloned().unwrap_or_default();
-    // The profiles that can apply to this extension are part of what the shard depends on.
-    let mut keyed = ctx.clone();
-    if let Some(h) = profiles.hash_for(extractor.id()) {
-        keyed.extend_from_slice(&h);
-    }
-    // Revision key, in a fixed order: blob id, context, profile hash, revision salt, embed
-    // signature, guest key bytes. Every input takes part.
-    // An extension that changes what it extracts from unchanged input bumps its salt.
-    let salt = extractor.revision_salt();
-    if !salt.is_empty() {
-        keyed.extend_from_slice(b"salt:");
-        keyed.extend_from_slice(salt.as_bytes());
-    }
-    // A host's output also depends on the guest set and on each guest's projected context.
+    // The revision depends on, in a fixed order: blob id, extension id, context, profile hash,
+    // engine revision, revision salt, embed signature and guest key bytes. A host's output also
+    // depends on the guest set and on each guest's projected context.
     let no_guests = GuestContexts::default();
-    let guests = if extractor.embeds() {
+    let (guests, embed_sig, guest_bytes) = if extractor.embeds() {
         let g = env.guests.get(&pair).unwrap_or(&no_guests);
-        if let Some(sig) = env.embed_sig {
-            keyed.extend_from_slice(&sig);
-        }
-        keyed.extend_from_slice(&g.key_bytes());
-        g
+        (g, env.embed_sig, g.key_bytes())
     } else {
-        &no_guests
+        (&no_guests, None, Vec::new())
     };
-    let revision = context::revision(&git_blob_id(&content), &keyed);
-    if stored_revision.as_deref() == Some(revision.as_str()) {
+    let revision = context::revision_of(
+        &git_blob_id(&content),
+        &context::RevisionFields {
+            extension: extractor.id(),
+            context: &ctx,
+            profile: profiles.hash_for(extractor.id()),
+            salt: extractor.revision_salt(),
+            embed: embed_sig,
+            guests: &guest_bytes,
+        },
+    );
+    let digest: [u8; 32] = Sha256::digest(revision.as_bytes()).into();
+    if held == Some(&digest) {
         return Ok(Action::Skip);
-    }
-    if layer && let Some(action) = reuse_shard(env, key, seq, &revision, &fin) {
-        return Ok(action);
     }
     match extractor.extract_full(&ExtractInput {
         repo: &key.repo,
@@ -272,102 +258,104 @@ pub(super) fn plan_one(env: &PlanEnv, key: &PendingKey, seq: u64) -> Result<Acti
                     message: e.to_string(),
                 })
                 .collect();
-            let leaf = Utf8Path::new(&fin).file_name().unwrap_or("shard");
-            let parent = Utf8Path::new(&fin).parent().unwrap_or(Utf8Path::new(""));
             Ok(Action::Replace {
                 fragment: Box::new(fragment),
                 errors,
-                tmp: parent.join(format!(".tmp-{seq}-{leaf}")).to_string(),
-                fin,
+                source_len: content.len() as u64,
             })
         }
-        Err(e) => Ok(Action::Failed(e.to_string())),
+        Err(e) => Ok(Action::Failed(e.to_string(), Some(revision))),
     }
 }
 
-/// In a layer: when the base's shard for this path has exactly the revision computed here, use
-/// it without extracting. Not when the base held index errors for the path, because shards do
-/// not carry error rows and the context's errors must equal a clean index's.
-fn reuse_shard(
-    env: &PlanEnv,
-    key: &PendingKey,
-    seq: u64,
-    revision: &str,
-    fin: &str,
-) -> Option<Action> {
-    if env
-        .base_errors
-        .contains(&(key.repo.clone(), key.path.as_str().to_string()))
-    {
-        return None;
-    }
-    let base = env.engine.dir().base();
-    let fragment = base.read_shard(&key.repo, &key.path).ok().flatten()?;
-    if fragment.provenance.revision != revision {
-        return None;
-    }
-    let leaf = Utf8Path::new(fin).file_name().unwrap_or("shard");
-    let parent = Utf8Path::new(fin).parent().unwrap_or(Utf8Path::new(""));
-    Some(Action::Replace {
-        fragment: Box::new(fragment),
-        errors: Vec::new(),
-        tmp: parent.join(format!(".tmp-{seq}-{leaf}")).to_string(),
-        fin: fin.to_string(),
-    })
+/// Extract one file as the planner would, for a read that writes nothing. `Ok(None)` when no
+/// extractor handles `path`. The context is built from the engine's source of `repo`, the
+/// guests' contexts are read from a snapshot, and embeds and profiles are applied.
+pub fn extract_for_show(
+    engine: &Engine,
+    repo: &str,
+    path: &RelPath,
+    content: &[u8],
+    profiles: &ProfileSet,
+) -> Result<Option<katalogr_model::Extraction>, EngineError> {
+    let Some(extractor) = extractor_for(engine.registry(), profiles, path) else {
+        return Ok(None);
+    };
+    let ctx = context::build(engine, repo, extractor)?.unwrap_or_default();
+    let no_guests = GuestContexts::default();
+    let loaded;
+    let (guests, embed_sig) = if extractor.embeds() {
+        let snap = engine.cache().read()?;
+        loaded = GuestContexts::load(engine.registry(), &snap, repo, extractor.id())?;
+        (&loaded, embed::signature(engine.registry()))
+    } else {
+        (&no_guests, None)
+    };
+    let revision = context::revision_of(
+        &git_blob_id(content),
+        &context::RevisionFields {
+            extension: extractor.id(),
+            context: &ctx,
+            profile: profiles.hash_for(extractor.id()),
+            salt: extractor.revision_salt(),
+            embed: embed_sig,
+            guests: &guests.key_bytes(),
+        },
+    );
+    let mut out = extractor
+        .extract_full(&ExtractInput {
+            repo,
+            path,
+            revision: &revision,
+            content,
+            context: &ctx,
+        })
+        .map_err(|e| EngineError::Queue(format!("{path}: {e}")))?;
+    let more = embed::apply(
+        engine.registry(),
+        repo,
+        path,
+        extractor.id(),
+        &out.embedded,
+        guests,
+        &mut out.fragment,
+    );
+    out.errors.extend(more);
+    profiles.apply(&mut out.fragment);
+    Ok(Some(out))
 }
 
 /// A history path (`@history/<sha>`) names a commit, not a file: its fragment comes from the
-/// repository's history. A commit's fragment never changes, so an existing shard is current.
+/// repository's history. A commit's fragment never changes, so a stored revision for `sha` is
+/// current.
 fn plan_history(
-    engine: &Engine,
     key: &PendingKey,
-    seq: u64,
     root: &Utf8Path,
     sha: &str,
-    fin: String,
+    held: Option<&[u8; 32]>,
 ) -> Result<Action, EngineError> {
-    let dir = engine.dir();
-    let has_shard = dir.shard_path(&key.repo, &key.path).exists();
-    let existing = dir.read_shard(&key.repo, &key.path).unwrap_or_default();
-    if existing.is_some_and(|f| f.provenance.revision == sha) {
+    let digest: [u8; 32] = Sha256::digest(sha.as_bytes()).into();
+    if held == Some(&digest) {
         return Ok(Action::Skip);
     }
     let opts = crate::history::HistoryOptions::default();
     match crate::history::history_fragment(&key.repo, root.as_std_path(), sha, &opts) {
-        Ok(Some(fragment)) => {
-            let leaf = Utf8Path::new(&fin).file_name().unwrap_or("shard");
-            let parent = Utf8Path::new(&fin).parent().unwrap_or(Utf8Path::new(""));
-            Ok(Action::Replace {
-                fragment: Box::new(fragment),
-                errors: Vec::new(),
-                tmp: parent.join(format!(".tmp-{seq}-{leaf}")).to_string(),
-                fin,
-            })
-        }
-        Ok(None) => Ok(Action::Delete {
-            fin: has_shard.then_some(fin),
+        Ok(Some(fragment)) => Ok(Action::Replace {
+            fragment: Box::new(fragment),
+            errors: Vec::new(),
+            source_len: 0,
         }),
-        Err(e) => Ok(Action::Failed(e.to_string())),
+        Ok(None) => Ok(if held.is_some() {
+            Action::Delete
+        } else {
+            Action::Skip
+        }),
+        Err(e) => Ok(Action::Failed(e.to_string(), None)),
     }
 }
 
-pub(super) fn relative_shard(root: &Utf8Path, full: &Utf8Path) -> String {
-    full.strip_prefix(root).unwrap_or(full).to_string()
-}
-
-pub(super) fn write_synced(path: &Utf8Path, bytes: &[u8]) -> Result<(), EngineError> {
-    use std::io::Write;
-    let io = |e| EngineError::io(path, e);
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| EngineError::io(parent, e))?;
-    }
-    let mut f = File::create(path).map_err(io)?;
-    f.write_all(bytes).map_err(io)?;
-    f.sync_all().map_err(io)
-}
-
-/// A planned path with everything computed off the writer: the shard is encoded, hashed and
-/// written to its temp file, and the stitch inputs are prepared.
+/// A planned path with everything computed off the writer: the guard has run and the stitch
+/// inputs are prepared.
 pub(super) struct Prepared {
     pub(super) key: PendingKey,
     pub(super) seq: u64,
@@ -379,55 +367,43 @@ pub(super) enum Ready {
     Replace {
         prepared: Box<PreparedFragment>,
         errors: Vec<ErrorRow>,
-        hash: [u8; 32],
-        encoded_len: u64,
-        tmp: String,
-        fin: String,
+        revision: String,
+        source_len: u64,
     },
-    Delete {
-        fin: Option<String>,
-    },
-    Failed(String),
+    Delete,
+    /// The message, and the file revision to store with it (`None` for a history path).
+    Failed(String, Option<String>),
 }
 
-/// Encode, hash and write the temp shard of a `Replace`, then prepare its stitch inputs. Other
-/// actions pass through.
+/// Run the absolute-path guard on a `Replace` and prepare its stitch inputs. Other actions pass
+/// through. No encoding happens.
 pub(super) fn prepare_one(engine: &Engine, p: Planned) -> Result<Prepared, EngineError> {
     let Planned { key, seq, action } = p;
     let ready = match action {
         Action::Skip => Ready::Skip,
-        Action::Delete { fin } => Ready::Delete { fin },
-        Action::Failed(m) => Ready::Failed(m),
+        Action::Delete => Ready::Delete,
+        Action::Failed(m, r) => Ready::Failed(m, r),
         Action::Replace {
             fragment,
             errors,
-            tmp,
-            fin,
+            source_len,
         } => {
-            let dir = engine.dir();
-            // A guard refusal fails only this path (an index error row, no shard, the earlier
+            // A guard refusal fails only this path (an index error row, no rows, the earlier
             // artifact kept); any other error aborts the batch (FEAT-073).
-            let bytes = match dir.encode_shard(&fragment) {
-                Ok(bytes) => bytes,
-                Err(StoreError::Guard(g)) => {
-                    return Ok(Prepared {
-                        key,
-                        seq,
-                        ready: Ready::Failed(format!("shard refused: {g}")),
-                    });
-                }
-                Err(other) => return Err(other.into()),
-            };
-            let hash = <[u8; 32]>::from(Sha256::digest(&bytes));
-            write_synced(&dir.root().join(&tmp), &bytes)?;
+            if let Err(g) = scan_for_absolute(&fragment, Some(engine.dir().kindex_root())) {
+                return Ok(Prepared {
+                    key,
+                    seq,
+                    ready: Ready::Failed(format!("shard refused: {g}"), None),
+                });
+            }
+            let revision = fragment.provenance.revision.clone();
             let prepared = Box::new(Stitcher::prepare(*fragment)?);
             Ready::Replace {
                 prepared,
                 errors,
-                hash,
-                encoded_len: bytes.len() as u64,
-                tmp,
-                fin,
+                revision,
+                source_len,
             }
         }
     };
@@ -435,7 +411,7 @@ pub(super) fn prepare_one(engine: &Engine, p: Planned) -> Result<Prepared, Engin
 }
 
 /// Whether to start another wave: always for the first, then only while the deadline has not
-/// passed and the encoded bytes held are below the cap (R-4, R-5).
+/// passed and the source bytes held are below the cap (R-4, R-5).
 pub(super) fn next_wave(
     done: usize,
     bytes: u64,
@@ -458,7 +434,7 @@ pub(super) fn run_batch(
 ) -> Result<Vec<Prepared>, EngineError> {
     let engine = env.engine;
     let one = |(key, seq): &(PendingKey, u64)| -> Result<Prepared, EngineError> {
-        let action = plan_one(env, key, *seq)?;
+        let action = plan_one(env, key)?;
         prepare_one(
             engine,
             Planned {
@@ -492,8 +468,8 @@ pub(super) fn run_batch(
         };
         for r in results {
             let p = r?;
-            if let Ready::Replace { encoded_len, .. } = &p.ready {
-                bytes += encoded_len;
+            if let Ready::Replace { source_len, .. } = &p.ready {
+                bytes += source_len;
             }
             out.push(p);
         }

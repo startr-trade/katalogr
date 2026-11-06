@@ -13,12 +13,12 @@ mod bench {
         cycles, dead_code, hubs, rationale,
     };
     use katalogr_model::{
-        ArtifactName, Confidence, Fact, Fragment, Id, LinkKind, Name, Provenance, RelPath, Segment,
-        Span, SymbolName,
+        ArtifactName, Confidence, Fact, Id, LinkKind, Name, Provenance, RelPath, Segment, Span,
+        SymbolName,
     };
     use katalogr_store::{
         ArtifactRow, Cache, Kindex, LinkEntry, LinkKey, LinkOrigin, LinkRow, ProjectConfig,
-        ProjectName, Reader, RepoConfig, Restitch, StoreError, SymbolRow, WriteTx,
+        ProjectName, Reader, RepoConfig, SymbolRow,
     };
     use std::collections::{BTreeMap, BTreeSet};
     use std::sync::OnceLock;
@@ -29,18 +29,6 @@ mod bench {
     const PER_FILE: usize = SYMBOLS / FILES;
     const PACKAGES: usize = 20;
     const SEED: u64 = 0x9E37_79B9_7F4A_7C15;
-
-    /// The bench graph has no shards, so restitching never runs.
-    struct NoShards;
-
-    impl Restitch for NoShards {
-        fn replace_fragment(&self, _: &mut WriteTx, _: Fragment) -> Result<(), StoreError> {
-            Ok(())
-        }
-        fn remove_artifact(&self, _: &mut WriteTx, _: &ArtifactName) -> Result<(), StoreError> {
-            Ok(())
-        }
-    }
 
     /// xorshift64: a small deterministic generator; `state` must start non-zero.
     fn next_rand(state: &mut u64) -> u64 {
@@ -74,9 +62,7 @@ mod bench {
                 },
             )
             .unwrap();
-        let cache =
-            Cache::open_or_rebuild(&dir, &NoShards, Instant::now() + Duration::from_secs(60))
-                .unwrap();
+        let cache = Cache::open(&dir, Instant::now() + Duration::from_secs(60)).unwrap();
         let span = Span {
             start_line: 1,
             start_col: 1,
@@ -356,9 +342,7 @@ mod bench {
                 },
             )
             .unwrap();
-        let cache =
-            Cache::open_or_rebuild(&dir, &NoShards, Instant::now() + Duration::from_secs(60))
-                .unwrap();
+        let cache = Cache::open(&dir, Instant::now() + Duration::from_secs(60)).unwrap();
         let span = Span {
             start_line: 1,
             start_col: 1,
@@ -588,9 +572,7 @@ mod bench {
                 },
             )
             .unwrap();
-        let cache =
-            Cache::open_or_rebuild(&dir, &NoShards, Instant::now() + Duration::from_secs(60))
-                .unwrap();
+        let cache = Cache::open(&dir, Instant::now() + Duration::from_secs(60)).unwrap();
         let span = Span {
             start_line: 1,
             start_col: 1,
@@ -844,9 +826,7 @@ mod bench {
                 },
             )
             .unwrap();
-        let cache =
-            Cache::open_or_rebuild(&dir, &NoShards, Instant::now() + Duration::from_secs(60))
-                .unwrap();
+        let cache = Cache::open(&dir, Instant::now() + Duration::from_secs(60)).unwrap();
         let span = Span {
             start_line: 1,
             start_col: 1,

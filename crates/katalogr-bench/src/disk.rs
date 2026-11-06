@@ -157,8 +157,8 @@ fn evict_keeps_clones() {
     let tmp = tempfile::tempdir().unwrap();
     let ws = Workspace::open(Some(Utf8Path::from_path(tmp.path()).unwrap())).unwrap();
     let mk = || {
-        std::fs::create_dir_all(ws.project_dir("c1").join("shards")).unwrap();
-        std::fs::write(ws.project_dir("c1").join("shards/a"), b"12345").unwrap();
+        std::fs::create_dir_all(ws.project_dir("c1").join("audit")).unwrap();
+        std::fs::write(ws.project_dir("c1").join("audit/a"), b"12345").unwrap();
         std::fs::create_dir_all(ws.clone_dir("c1", "r")).unwrap();
         std::fs::write(ws.clone_dir("c1", "r").join("f"), b"123").unwrap();
     };

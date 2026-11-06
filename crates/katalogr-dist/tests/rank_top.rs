@@ -4,7 +4,7 @@
 
 mod rank_top {
     use katalogr_dist::{Overrides, kindex_init, project_init, session_start};
-    use katalogr_engine::Stitcher;
+
     use katalogr_store::{Cache, Kindex, ProjectName};
     use std::path::{Path, PathBuf};
     use std::time::{Duration, Instant};
@@ -50,12 +50,7 @@ mod rank_top {
     fn stale_rank(s: &Setup) {
         let kindex = Kindex::open(camino::Utf8Path::from_path(&s.kx).unwrap()).unwrap();
         let dir = kindex.project(&ProjectName::new("demo").unwrap()).unwrap();
-        let cache = Cache::open_or_rebuild(
-            &dir,
-            &Stitcher::new(),
-            Instant::now() + Duration::from_secs(5),
-        )
-        .unwrap();
+        let cache = Cache::open(&dir, Instant::now() + Duration::from_secs(5)).unwrap();
         let mut tx = cache.write().unwrap();
         tx.set_rank_watermark(1_000_000).unwrap();
         tx.commit().unwrap();

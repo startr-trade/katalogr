@@ -32,7 +32,7 @@ pub struct Finding {
     /// `KD-<AREA>-<NNN>`: stable, never reused.
     pub code: String,
     pub severity: Severity,
-    /// `marker`, `format`, `cache`, `journal`, `shards`, `queue`, `lock`, `parse`, `profile`,
+    /// `marker`, `format`, `cache`, `lock`, `revisions`, `queue`, `parse`, `profile`,
     /// `git` or `roots`.
     pub area: String,
     /// One line, no paths, no source text.
@@ -149,8 +149,16 @@ pub struct Report {
 }
 
 /// The checks, in the order they run and are reported.
-pub const AREAS: [&str; 11] = [
-    "marker", "format", "cache", "lock", "journal", "shards", "queue", "parse", "profile", "git",
+pub const AREAS: [&str; 10] = [
+    "marker",
+    "format",
+    "cache",
+    "lock",
+    "revisions",
+    "queue",
+    "parse",
+    "profile",
+    "git",
     "roots",
 ];
 
