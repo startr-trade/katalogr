@@ -49,7 +49,15 @@ fn run(cli: &Cli) -> Result<ExitCode, DistError> {
             range,
             full,
             history,
-        }) => cmd::index::run(cli, since.as_ref(), range.as_ref(), *full, *history),
+            no_reports,
+        }) => cmd::index::run(
+            cli,
+            since.as_ref(),
+            range.as_ref(),
+            *full,
+            *history,
+            *no_reports,
+        ),
         Some(Command::Status) => cmd::status::run(cli),
         Some(Command::Contract) => cmd::contract::run(cli),
         Some(Command::Watch { interval }) => cmd::watch::run(cli, *interval),
@@ -119,6 +127,7 @@ fn run(cli: &Cli) -> Result<ExitCode, DistError> {
         Some(Command::Diff {
             a,
             b,
+            requested,
             repo,
             format,
             limit,
@@ -127,8 +136,9 @@ fn run(cli: &Cli) -> Result<ExitCode, DistError> {
         }) => cmd::diff::run(
             cli,
             &cmd::diff::Args {
-                a,
-                b,
+                a: a.as_deref(),
+                b: b.as_deref(),
+                requested: *requested,
                 repo: repo.as_deref(),
                 format: *format,
                 limit: *limit,

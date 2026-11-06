@@ -12,8 +12,9 @@ use crate::exit::ExitCode;
 use crate::render;
 
 pub struct Args<'a> {
-    pub a: &'a str,
-    pub b: &'a str,
+    pub a: Option<&'a str>,
+    pub b: Option<&'a str>,
+    pub requested: bool,
     pub repo: Option<&'a str>,
     pub format: Option<DiffFormat>,
     pub limit: usize,
@@ -83,9 +84,33 @@ pub fn run(cli: &Cli, args: &Args) -> Result<ExitCode, DistError> {
     let k = crate::cmd::resolve(cli)?;
     let mut o = options(cli);
     o.timeout = Some(cli.timeout.unwrap_or(DIFF_TIMEOUT_DEFAULT as f64));
+    if args.requested {
+        let o = k.diff_requested(&o)?;
+        for w in &o.warnings {
+            eprintln!("katalogr: warning: {w}");
+        }
+        if cli.json {
+            println!(
+                "{}",
+                serde_json::json!({ "built": o.built, "failed": o.failed })
+            );
+        } else {
+            println!("built {} report(s), {} failed", o.built, o.failed);
+        }
+        return Ok(if o.failed > 0 {
+            ExitCode::Error
+        } else {
+            ExitCode::Ok
+        });
+    }
+    let (Some(a), Some(b)) = (args.a, args.b) else {
+        return Err(DistError::Usage(
+            "name two revisions, or use --requested".into(),
+        ));
+    };
     let req = DiffRequest {
-        a: args.a.to_string(),
-        b: args.b.to_string(),
+        a: a.to_string(),
+        b: b.to_string(),
         repo: args.repo.map(str::to_string),
         limit: args.limit,
     };

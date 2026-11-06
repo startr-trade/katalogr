@@ -418,6 +418,9 @@ pub enum Command {
         /// Index the commits that carry item trailers (`Refs:`).
         #[arg(long)]
         history: bool,
+        /// Do not build the diff reports that merges asked for.
+        #[arg(long)]
+        no_reports: bool,
     },
     /// Show the index watermark, pending changes and staleness.
     Status,
@@ -661,9 +664,14 @@ pub enum Command {
     /// communities and coverage. The report is stored and read back; `--json` gives the data.
     Diff {
         /// The earlier revision (a commit, branch or tag).
-        a: String,
+        #[arg(required_unless_present = "requested", conflicts_with = "requested")]
+        a: Option<String>,
         /// The later revision.
-        b: String,
+        #[arg(required_unless_present = "requested", conflicts_with = "requested")]
+        b: Option<String>,
+        /// Build the reports that merges asked for, then stop.
+        #[arg(long)]
+        requested: bool,
         /// The repo; default: the current one.
         #[arg(long, value_name = "NAME")]
         repo: Option<String>,

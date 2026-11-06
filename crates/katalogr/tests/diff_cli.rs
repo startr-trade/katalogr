@@ -10,6 +10,7 @@ mod diff_cli {
             .env_remove("KATALOGR_KINDEX")
             .env_remove("KATALOGR_PROJECT")
             .env_remove("KATALOGR_CONTEXT")
+            .env("KATALOGR_ANSWER_BUILD", "test")
             .args(args)
             .output()
             .expect("run katalogr");
@@ -20,7 +21,7 @@ mod diff_cli {
         )
     }
 
-    fn ok(dir: &Path, args: &[&str]) -> String {
+    pub fn ok(dir: &Path, args: &[&str]) -> String {
         let (code, out, err) = run(dir, args);
         assert_eq!(code, 0, "{args:?}: {out}{err}");
         out
@@ -39,9 +40,9 @@ mod diff_cli {
         );
     }
 
-    struct P {
-        tmp: tempfile::TempDir,
-        repo: PathBuf,
+    pub struct P {
+        pub tmp: tempfile::TempDir,
+        pub repo: PathBuf,
     }
 
     /// A project over a git repo with tags `v1` and `v2`, the base indexed at `v2`.
@@ -242,6 +243,53 @@ mod diff_cli {
         assert_eq!(code, 2);
     }
 
+    // ---------------------------------------------------------------- R-16
+
+    /// A side branch merged into main, then the post-merge hook's event.
+    fn merge_and_hook(p: &P) {
+        git(&p.repo, &["checkout", "-q", "-b", "feat"]);
+        std::fs::write(
+            p.repo.join("g.tx"),
+            "sym fn a\nsym fn b\nsym fn c\nsym fn d\nsym fn e\nlink b calls a\nlink c calls a\nlink d calls c\nlink e calls d\n",
+        )
+        .unwrap();
+        git(&p.repo, &["add", "-A"]);
+        git(&p.repo, &["commit", "-q", "-m", "feature"]);
+        git(&p.repo, &["checkout", "-q", "main"]);
+        git(&p.repo, &["merge", "-q", "--no-ff", "feat", "-m", "merge"]);
+        ok(&p.repo, &["notify", "--from-git", "post-merge"]);
+    }
+
+    fn queued(p: &P) -> usize {
+        let dir = p.tmp.path().join("kx/projects/demo/.cache/diff-requests");
+        std::fs::read_dir(dir).map(|d| d.count()).unwrap_or(0)
+    }
+
+    pub fn project_for_tests() -> P {
+        project()
+    }
+
+    pub fn merge_and_hook_for_tests(p: &P) {
+        merge_and_hook(p)
+    }
+
+    pub fn queued_for_tests(p: &P) -> usize {
+        queued(p)
+    }
+
+    #[test]
+    fn requested_command_builds_reports() {
+        let p = project();
+        merge_and_hook(&p);
+        assert_eq!(queued(&p), 1);
+        let out = ok(&p.repo, &["diff", "--requested"]);
+        assert!(out.contains("built 1 report(s), 0 failed"), "{out}");
+        assert_eq!(queued(&p), 0);
+        // The report is stored, so asking for it is a read.
+        let merged = ok(&p.repo, &["--json", "diff", "HEAD^1", "HEAD"]);
+        assert!(merged.contains("\"report_format\":1"), "{merged}");
+    }
+
     // ---------------------------------------------------------------- R-19
 
     #[test]
@@ -251,5 +299,22 @@ mod diff_cli {
         let out = ok(&p.repo, &["diff", "v1", "v2"]);
         assert!(out.starts_with("# Changes in app"), "{out}");
         assert!(out.contains("app:g.tx#fn:d"), "{out}");
+    }
+}
+
+mod diff_requests {
+    use super::diff_cli::{merge_and_hook_for_tests, ok, project_for_tests, queued_for_tests};
+
+    #[test]
+    fn no_reports_flag_skips() {
+        let p = project_for_tests();
+        merge_and_hook_for_tests(&p);
+        ok(
+            &p.repo,
+            &["--consistency", "wait-all", "index", "--no-reports"],
+        );
+        assert_eq!(queued_for_tests(&p), 1, "--no-reports leaves the request");
+        ok(&p.repo, &["--consistency", "wait-all", "index"]);
+        assert_eq!(queued_for_tests(&p), 0, "a plain index builds it");
     }
 }
