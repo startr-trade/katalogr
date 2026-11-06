@@ -1311,6 +1311,69 @@ pub fn plain<R: Serialize>(
     code
 }
 
+/// `workspace map`: the projects, then one line per edge.
+pub fn workspace_map(cli: &Cli, reply: Reply<katalogr_dist::analytics::WorkspaceMap>) -> ExitCode {
+    if cli.json {
+        return emit(&json::workspace_map(reply));
+    }
+    plain(cli, reply, "workspace", workspace_map_lines, |_| false)
+}
+
+fn workspace_map_lines(m: &katalogr_dist::analytics::WorkspaceMap) -> Vec<String> {
+    let mut out = vec![format!("projects: {}", m.projects.join(", "))];
+    for e in &m.edges {
+        out.push(format!(
+            "{} consumes from {}  {}  {} contract(s)",
+            e.consumer, e.provider, e.kind, e.contracts
+        ));
+    }
+    out
+}
+
+/// `workspace status`: one line per peer.
+pub fn workspace_status(cli: &Cli, peers: Vec<katalogr_dist::query::PeerState>) -> ExitCode {
+    if cli.json {
+        return emit(&json::workspace_status(peers));
+    }
+    if peers.is_empty() {
+        println!("no peers named");
+    }
+    for p in &peers {
+        let who = match &p.kindex {
+            Some(a) => format!("{a}/{}", p.project),
+            None => p.project.clone(),
+        };
+        let mut line = format!("{who}  {}", p.state);
+        if p.stale {
+            line.push_str("  stale");
+        }
+        if !p.positions.is_empty() {
+            let at: Vec<String> = p
+                .positions
+                .iter()
+                .map(|x| {
+                    format!(
+                        "{}@{}",
+                        x.repo,
+                        x.commit
+                            .as_deref()
+                            .map_or("none", |c| &c[..c.len().min(12)])
+                    )
+                })
+                .collect();
+            line.push_str(&format!("  {}", at.join(", ")));
+        }
+        if !p.repos_absent.is_empty() {
+            line.push_str(&format!("  absent: {}", p.repos_absent.join(", ")));
+        }
+        if let Some(f) = &p.fix {
+            line.push_str(&format!("  fix: {f}"));
+        }
+        println!("{line}");
+    }
+    ExitCode::Ok
+}
+
 /// `docs-affected`: one block per document, its links indented below it.
 pub fn docs_affected(cli: &Cli, reply: Reply<katalogr_dist::query::DocImpact>) -> ExitCode {
     plain(cli, reply, "docs-affected", docs_affected_lines, |_| false)

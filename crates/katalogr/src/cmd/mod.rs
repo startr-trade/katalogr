@@ -55,6 +55,7 @@ pub mod view;
 pub mod view_doc;
 pub mod watch;
 pub mod why;
+pub mod workspace;
 
 use std::path::Path;
 

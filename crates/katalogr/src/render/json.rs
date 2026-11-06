@@ -555,6 +555,20 @@ pub fn view_answer(reply: Reply<katalogr_dist::ViewBytes>) -> JsonAnswer {
     }
 }
 
+/// `workspace status`: the state of each peer, one shape for the CLI and the API.
+pub fn workspace_status(peers: Vec<katalogr_dist::query::PeerState>) -> JsonAnswer {
+    let body = katalogr_dist::WorkspaceStatus::new(peers);
+    JsonAnswer {
+        stdout: Some(serde_json::to_string(&body).expect("serialise workspace status")),
+        ..JsonAnswer::new(ExitCode::Ok)
+    }
+}
+
+/// `workspace map`: the envelope of the project-level map.
+pub fn workspace_map(reply: Reply<katalogr_dist::analytics::WorkspaceMap>) -> JsonAnswer {
+    plain(reply, |_| false)
+}
+
 /// `index` and `status`: stdout is `Report::to_json()`; exit Stale when the wait timed out.
 pub fn report(r: &Report) -> JsonAnswer {
     JsonAnswer {

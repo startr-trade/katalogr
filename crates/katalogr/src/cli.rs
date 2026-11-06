@@ -650,6 +650,12 @@ pub enum Command {
         #[arg(long, default_value_t = crate::cmd::impact::DEFAULT_TEST, value_name = "N")]
         test_depth: u32,
     },
+    /// Peers of this project: the other projects whose contracts it joins. Add and locate peers,
+    /// report each one's state, and map which project consumes what another provides.
+    Workspace {
+        #[command(subcommand)]
+        action: WorkspaceAction,
+    },
     /// List, add and remove contexts: the base, each checkout's own, and pinned commits.
     Context {
         #[command(subcommand)]
@@ -764,6 +770,30 @@ pub enum EvalAction {
         /// The metric to order combinations by.
         #[arg(long, default_value = "retrieval.ndcg@10", value_name = "METRIC")]
         objective: String,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum WorkspaceAction {
+    /// The state of each peer, with the command that fixes any that cannot be read in full.
+    Status,
+    /// Which project consumes what another provides, over the ends you can read.
+    Map,
+    /// Name a peer in this project's settings (committed to the kindex; no path is written).
+    Add {
+        /// The peer project. (Named `peer` inside, since `project` is a global flag.)
+        #[arg(value_name = "PROJECT")]
+        peer: String,
+        /// The alias of the kindex it lives in; default: this kindex. (Not `--kindex`: that flag
+        /// already names the kindex folder of the whole command.)
+        #[arg(long, value_name = "ALIAS")]
+        alias: Option<String>,
+    },
+    /// Record on this machine where the kindex `alias` is (never committed).
+    Locate {
+        alias: String,
+        /// The kindex folder.
+        dir: String,
     },
 }
 
