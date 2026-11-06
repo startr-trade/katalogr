@@ -693,6 +693,9 @@ mod api {
             // Exports a snapshot of the index to a file, or imports one (FEAT-097): it writes, and its
             // answers are its own types, not envelopes.
             "snapshot",
+            // Builds, stores and prints a diff report between two positions (FEAT-095); it has no
+            // route, and its report is its own type, not an envelope.
+            "diff",
             // Draws a view for a person; the generated views are `view`, served under
             // `/api/v1/views/`.
             "render",
