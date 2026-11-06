@@ -100,10 +100,16 @@ mod web_assets {
             let bg = &vars["--bg"];
             for fg in ["--fg", "--links"] {
                 let ratio = contrast(&vars[fg], bg);
-                assert!(ratio >= 4.5, "{class} {fg} on --bg is {ratio:.2}, needs 4.5");
+                assert!(
+                    ratio >= 4.5,
+                    "{class} {fg} on --bg is {ratio:.2}, needs 4.5"
+                );
             }
             let icons = contrast(&vars["--icons"], bg);
-            assert!(icons >= 3.0, "{class} --icons on --bg is {icons:.2}, needs 3");
+            assert!(
+                icons >= 3.0,
+                "{class} --icons on --bg is {icons:.2}, needs 3"
+            );
         }
     }
 }
