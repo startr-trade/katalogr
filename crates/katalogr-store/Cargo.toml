@@ -21,6 +21,7 @@ serde_yaml_ng.workspace = true
 sha1.workspace = true
 sha2.workspace = true
 redb.workspace = true
+lz4_flex.workspace = true
 postcard.workspace = true
 thiserror.workspace = true
 tempfile.workspace = true
