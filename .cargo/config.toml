@@ -2,3 +2,9 @@
 linker = "rust-lld"
 [target.aarch64-unknown-linux-musl]
 linker = "rust-lld"
+
+# The web view's test harness runs its pages in a script engine that recurses
+# past the default 2 MiB test-thread stack in debug builds (FEAT-034). Shipped
+# binaries never run that engine, so this only affects threads in test runs.
+[env]
+RUST_MIN_STACK = "67108864"
