@@ -168,14 +168,11 @@ mod web {
         let (_kx, repo) = project(tmp.path());
         let s = start(&repo);
         let backend = HttpBackend { addr: s.addr };
-        for (hash, sentence) in [(
-            "#/dependencies",
-            "Dependency and vulnerability data isn't in this version of katalogr.",
-        )] {
-            let mut page = Page::open(hash, &backend);
-            assert!(page.text().contains(sentence), "{hash}: {}", page.text());
-            assert_eq!(page.requests(), ["/api/v1/meta"], "{hash}");
-        }
+        let hash = "#/dependencies";
+        let sentence = "Dependency and vulnerability data isn't in this version of katalogr.";
+        let mut page = Page::open(hash, &backend);
+        assert!(page.text().contains(sentence), "{hash}: {}", page.text());
+        assert_eq!(page.requests(), ["/api/v1/meta"], "{hash}");
     }
 
     /// R-12. The health panels find their rows in the real answers.
