@@ -9,8 +9,8 @@ use katalogr_dist::analytics::Itemized;
 use katalogr_dist::eval::{EvalReport, SweepReport};
 use katalogr_dist::query::{
     DanglingRef, Envelope, Explain, Fold, HintSource, MirrorDrift, Partial, RESULT_SCHEMA_VERSION,
-    ReplaceResult, Serialize, ShowResult, SymbolHit, Trace, Truncation, WhyResult, budget, cap,
-    hints,
+    ReplaceResult, Serialize, ShowResult, SymbolHit, Trace, Truncation, WhyResult, WorkspaceBlock,
+    budget, cap, hints,
 };
 use katalogr_dist::{DistError, Outcome, PositionRef, Reply, Report};
 
@@ -75,6 +75,7 @@ pub(super) fn envelope<T>(
         view_id: report.view_id.clone(),
         context: report.context.clone(),
         working_set: report.working_set.clone(),
+        workspace: None,
     }
 }
 
@@ -143,6 +144,7 @@ fn found(exit: ExitCode, report: &Report, stdout: String) -> JsonAnswer {
 }
 
 /// The envelope of a list within the budget, with the hints for `command` (none when empty).
+#[allow(clippy::too_many_arguments)]
 fn list_envelope<T: Serialize>(
     report: &Report,
     items: Vec<T>,
@@ -151,6 +153,7 @@ fn list_envelope<T: Serialize>(
     command: &str,
     mut trace: Option<Trace>,
     folded: Vec<Fold>,
+    workspace: Option<WorkspaceBlock>,
 ) -> String
 where
     Vec<T>: HintSource,
@@ -178,6 +181,7 @@ where
     };
     let mut e = envelope(report, truncated, partial, items, next, trace);
     e.folded = folded;
+    e.workspace = workspace;
     line(&e)
 }
 
@@ -201,6 +205,7 @@ fn other_outcome<T>(
                 "",
                 trace,
                 Vec::new(),
+                None,
             );
             JsonAnswer {
                 message: Some(message),
@@ -261,6 +266,7 @@ where
                 command,
                 reply.diagnostic,
                 Vec::new(),
+                reply.workspace,
             );
             found(exit, &reply.report, stdout)
         }
@@ -289,6 +295,7 @@ where
                 command,
                 reply.diagnostic,
                 reply.folded,
+                reply.workspace,
             );
             found(exit, &reply.report, stdout)
         }
@@ -488,7 +495,8 @@ pub fn plain<R: Serialize>(reply: Reply<R>, fails: fn(&R) -> bool) -> JsonAnswer
     match reply.outcome {
         Outcome::Found(r) => {
             let failing = fails(&r);
-            let e = envelope(&reply.report, None, reply.partial, r, Vec::new(), None);
+            let mut e = envelope(&reply.report, None, reply.partial, r, Vec::new(), None);
+            e.workspace = reply.workspace;
             let exit = if exit == ExitCode::Ok && failing {
                 ExitCode::Error
             } else {
@@ -536,7 +544,8 @@ pub fn view(
     let exit = exit_for(&reply);
     match reply.outcome {
         Outcome::Found(g) => {
-            let e = envelope(&reply.report, None, reply.partial, g, Vec::new(), None);
+            let mut e = envelope(&reply.report, None, reply.partial, g, Vec::new(), None);
+            e.workspace = reply.workspace;
             found(exit, &reply.report, line(&e))
         }
         other => other_outcome(exit, &reply.report, other, budget_tokens, None),
@@ -558,6 +567,20 @@ pub fn view_answer(reply: Reply<katalogr_dist::ViewBytes>) -> JsonAnswer {
         }
         other => other_outcome(exit, &reply.report, other, None, None),
     }
+}
+
+/// `workspace status`: the state of each peer, one shape for the CLI and the API.
+pub fn workspace_status(peers: Vec<katalogr_dist::query::PeerState>) -> JsonAnswer {
+    let body = katalogr_dist::WorkspaceStatus::new(peers);
+    JsonAnswer {
+        stdout: Some(serde_json::to_string(&body).expect("serialise workspace status")),
+        ..JsonAnswer::new(ExitCode::Ok)
+    }
+}
+
+/// `workspace map`: the envelope of the project-level map.
+pub fn workspace_map(reply: Reply<katalogr_dist::analytics::WorkspaceMap>) -> JsonAnswer {
+    plain(reply, |_| false)
 }
 
 /// `index` and `status`: stdout is `Report::to_json()`; exit Stale when the wait timed out.
@@ -684,6 +707,7 @@ mod tests {
             diagnostic: None,
             partial: Vec::new(),
             folded: Vec::new(),
+            workspace: None,
         }
     }
 

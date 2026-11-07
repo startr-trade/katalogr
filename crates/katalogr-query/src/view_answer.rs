@@ -4,6 +4,7 @@
 //! The graph is a `serde_json::Value`, so this crate does not depend on the renderers.
 
 use crate::position::PositionRef;
+use crate::result::PeerState;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -46,6 +47,10 @@ pub struct ViewAnswer {
     /// Only when not exact.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub stale: Option<bool>,
+    /// The peers the view read and the positions it reflects of each (FEAT-020). Left out when the
+    /// view read none, so a view of a project with no peers keeps its exact bytes.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub peers: Vec<PeerState>,
 }
 
 /// The JSON Schema of [`ViewAnswer`] (`schema/v1/view.schema.json`). It is not an envelope, so

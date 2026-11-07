@@ -105,6 +105,32 @@
       ],
       "type": "object"
     },
+    "DanglingRef": {
+      "description": "A reference that names something no artifact exports.",
+      "properties": {
+        "from": {
+          "$ref": "#/$defs/SymbolHit",
+          "description": "The symbol (or artifact) the reference starts at."
+        },
+        "kind": {
+          "description": "Link kind.",
+          "type": "string"
+        },
+        "wanted": {
+          "description": "The export keys that were looked for, `namespace:key`, most specific first.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "from",
+        "kind",
+        "wanted"
+      ],
+      "type": "object"
+    },
     "ExpandedTerm": {
       "properties": {
         "postings": {
@@ -491,6 +517,91 @@
       ],
       "type": "object"
     },
+    "PeerEnd": {
+      "description": "One far end of a link. `hit` absent means opaque: only project, link and role are known.",
+      "properties": {
+        "hit": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SymbolHit"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "link": {
+          "description": "`contract:<kind>:<key>`, or `namespace:key` for a match by export key.",
+          "type": "string"
+        },
+        "opaque": {
+          "default": false,
+          "type": "boolean"
+        },
+        "project": {
+          "type": "string"
+        },
+        "role": {
+          "description": "`provides`, `consumes`, `declares` or `exports`.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "project",
+        "link",
+        "role"
+      ],
+      "type": "object"
+    },
+    "PeerState": {
+      "description": "One named peer: whether it could be read, and the positions its answers reflect.",
+      "properties": {
+        "fix": {
+          "description": "The command that fixes it; never a path.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "kindex": {
+          "description": "The kindex alias, when the peer lives in another kindex.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "positions": {
+          "items": {
+            "$ref": "#/$defs/PositionRef"
+          },
+          "type": "array"
+        },
+        "project": {
+          "type": "string"
+        },
+        "repos_absent": {
+          "description": "Repos in the peer's config with no recorded position here.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "stale": {
+          "type": "boolean"
+        },
+        "state": {
+          "description": "`ok`, `no-location`, `not-found`, `newer-format`, `no-index`, `unavailable` or `timeout`.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "project",
+        "state",
+        "positions",
+        "stale"
+      ],
+      "type": "object"
+    },
     "PositionRef": {
       "description": "One repo's position. Serialises as `{\"repo\",\"commit\",\"dirty\"}`, absent parts as `null`.",
       "properties": {
@@ -626,6 +737,25 @@
         "score",
         "parts",
         "tied_with_next"
+      ],
+      "type": "object"
+    },
+    "ResolvedRef": {
+      "description": "A dangling entry that a peer resolved, and the ends that resolve it.",
+      "properties": {
+        "ends": {
+          "items": {
+            "$ref": "#/$defs/PeerEnd"
+          },
+          "type": "array"
+        },
+        "reference": {
+          "$ref": "#/$defs/DanglingRef"
+        }
+      },
+      "required": [
+        "reference",
+        "ends"
       ],
       "type": "object"
     },
@@ -956,6 +1086,36 @@
         "item_paths"
       ],
       "type": "object"
+    },
+    "WorkspaceBlock": {
+      "description": "What a read of a project that names peers learned about them (FEAT-020). Present only when\nthe reading project names peers and they were read.",
+      "properties": {
+        "ends": {
+          "description": "Far ends of this answer, sorted by link, project, role, name.",
+          "items": {
+            "$ref": "#/$defs/PeerEnd"
+          },
+          "type": "array"
+        },
+        "peers": {
+          "description": "One per named peer, sorted by kindex alias then project.",
+          "items": {
+            "$ref": "#/$defs/PeerState"
+          },
+          "type": "array"
+        },
+        "resolved": {
+          "description": "`dangling` only: entries a peer resolved, moved out of the result.",
+          "items": {
+            "$ref": "#/$defs/ResolvedRef"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "peers"
+      ],
+      "type": "object"
     }
   },
   "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -1060,6 +1220,17 @@
         }
       ],
       "description": "`search` and `map` only (FEAT-039): the working set that reordered this answer. Absent\nwhen ranking was neutral or the set was empty."
+    },
+    "workspace": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/WorkspaceBlock"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "`refs`, `callers`, `dangling`, `impact` and the workspace map, for a project that names\npeers (FEAT-020): each peer's state and the far ends of the answer. Absent otherwise."
     }
   },
   "required": [

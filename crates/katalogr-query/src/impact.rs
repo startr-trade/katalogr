@@ -11,6 +11,7 @@ use crate::result::{ConfidenceSchema, Partial, SymbolHit, TestHit, cap};
 use crate::tests::{
     DEFAULT_TEST_DEPTH, TestsOptions, canon, from_strength, role_of, strength, tests_for,
 };
+use crate::workspace::PeerEnd;
 use katalogr_model::insight::FACT_TEST;
 use katalogr_model::{AnyName, Confidence, Fact, Id, LinkKind, Name, parse_name};
 use katalogr_store::{LinkKey, Reader, StoreError};
@@ -87,6 +88,25 @@ pub struct ImpactReport {
     pub projects: Vec<String>,
     /// Caps that cut this answer; the facade copies it to `Reply::partial`.
     pub partial: Vec<Partial>,
+    /// What the peers of the reading project add (FEAT-020), one entry per peer that answered,
+    /// sorted by project. Set by the facade: `impact` leaves it empty.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub peers: Vec<PeerImpact>,
+}
+
+/// What one peer's walk added, from the contracts the local walk reached (FEAT-020). Depth counts
+/// hops inside that peer.
+#[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]
+pub struct PeerImpact {
+    pub project: String,
+    pub groups: Vec<ImpactGroup>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub total: Option<u64>,
+    pub tests: Vec<TestHit>,
+    pub contracts: Vec<ImpactContract>,
+    /// One end per contract reached there through a repo the user cannot read.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub opaque: Vec<PeerEnd>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]
@@ -569,5 +589,6 @@ pub fn impact(
         repos: repos.into_iter().collect(),
         projects: Vec::new(),
         partial,
+        peers: Vec::new(),
     })
 }

@@ -272,6 +272,8 @@ mod partial {
                     // `snapshot` answers with its own manifest and import report (FEAT-097).
                     || n == "snapshot-manifest.schema.json"
                     || n == "snapshot-import.schema.json"
+                    // `workspace status` answers with the state of each peer (FEAT-020).
+                    || n == "workspace-status.schema.json"
             }) {
                 continue;
             }

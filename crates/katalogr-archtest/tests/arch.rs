@@ -747,7 +747,7 @@ mod archtest {
     ];
 
     /// Facade or function names that edit source files, settings, hooks, the index or the project.
-    const API_DENIED_NAMES: [&str; 11] = [
+    const API_DENIED_NAMES: [&str; 13] = [
         "replace",
         "notify",
         "add_root",
@@ -759,10 +759,12 @@ mod archtest {
         "context_prune",
         "project_init",
         "kindex_init",
+        "workspace_add",
+        "workspace_locate",
     ];
 
     /// The read calls an op row makes on the facade; each row makes exactly one.
-    const API_READ_CALLS: [&str; 31] = [
+    const API_READ_CALLS: [&str; 33] = [
         "find",
         "view",
         "refs",
@@ -794,6 +796,8 @@ mod archtest {
         "doctor",
         "timeline",
         "stored_view",
+        "workspace_status",
+        "workspace_map",
     ];
 
     #[derive(Default)]
@@ -1457,6 +1461,42 @@ mod archtest {
         assert!(
             failures.is_empty(),
             "the web test harness would be shipped:\n{}",
+            failures.join("\n")
+        );
+    }
+
+    /// FEAT-020 R-7. A peer is read through a read-only handle and nothing else: the workspace
+    /// sources of `katalogr-dist` open no writer, queue nothing and touch no shard, and the
+    /// peer's graph is opened with `Engine::open_reader`.
+    #[test]
+    fn workspace_opens_read_only() {
+        const BANNED: [&str; 8] = [
+            "Engine::open(",
+            "open_try",
+            "engine_on",
+            "Inbox",
+            ".write()",
+            "read_shard",
+            "shard_path",
+            "shard::",
+        ];
+        let dir = workspace_root().join("crates/katalogr-dist/src");
+        let mut failures = Vec::new();
+        for name in ["workspace.rs", "workspace_join.rs"] {
+            let src = std::fs::read_to_string(dir.join(name)).expect("read workspace source");
+            for b in BANNED {
+                if src.contains(b) {
+                    failures.push(format!("{name} holds `{b}`"));
+                }
+            }
+        }
+        let ws = std::fs::read_to_string(dir.join("workspace.rs")).expect("read workspace.rs");
+        if !ws.contains("Engine::open_reader") {
+            failures.push("workspace.rs does not call `Engine::open_reader`".to_string());
+        }
+        assert!(
+            failures.is_empty(),
+            "a peer would not be read through a read-only handle:\n{}",
             failures.join("\n")
         );
     }

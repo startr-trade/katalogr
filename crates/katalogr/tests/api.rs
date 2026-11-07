@@ -370,6 +370,97 @@ mod api {
         }
     }
 
+    /// FEAT-020 R-14. The project demo consumes `endpoint:orders`; the project `other`, in the
+    /// same kindex, provides it, and demo names it as a peer.
+    fn with_peer(tmp: &Path, kx: &Path, repo: &Path) {
+        let other = tmp.join("other");
+        std::fs::create_dir_all(&other).unwrap();
+        std::fs::write(
+            other.join("api.tx"),
+            "sym fn serve\nbind serve provides endpoint:orders\n",
+        )
+        .unwrap();
+        git(&other, &["init", "-q", "-b", "main"]);
+        git(&other, &["config", "user.name", "Test"]);
+        git(&other, &["config", "user.email", "test@example.com"]);
+        git(&other, &["config", "commit.gpgsign", "false"]);
+        git(&other, &["add", "-A"]);
+        git(&other, &["commit", "-q", "-m", "c1"]);
+        ok(
+            tmp,
+            &[
+                "--kindex",
+                kx.to_str().unwrap(),
+                "project",
+                "init",
+                "other",
+                "--repo",
+                &format!("r={}", other.display()),
+                "--mark",
+            ],
+        );
+        ok(&other, &["index"]);
+        std::fs::write(
+            repo.join("client.tx"),
+            "sym fn fetch\nbind fetch consumes endpoint:orders\n",
+        )
+        .unwrap();
+        git(repo, &["add", "-A"]);
+        git(repo, &["commit", "-q", "-m", "c2"]);
+        ok(repo, &["workspace", "add", "other"]);
+        ok(repo, &["index"]);
+    }
+
+    /// FEAT-020 R-14. `GET /api/v1/workspace-status` is byte for byte `workspace status --json`.
+    #[test]
+    fn workspace_status_equals_cli_json() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (kx, repo) = project(tmp.path());
+        with_peer(tmp.path(), &kx, &repo);
+        let server = serve(&repo, &[]);
+        let r = get(&server, "/api/v1/workspace-status?consistency=wait");
+        assert_eq!(r.status, 200, "{r:?}");
+        let out = cli(&repo, &["--json", "workspace", "status"]);
+        let want = String::from_utf8(out.stdout).unwrap();
+        assert!(want.contains("\"project\":\"other\""), "{want}");
+        assert_eq!(r.body, want.trim_end(), "{r:?}");
+    }
+
+    /// FEAT-020 R-14. `GET /api/v1/workspace-map` is byte for byte `workspace map --json`, and
+    /// `no-peers` is the same flag as `--no-peers`.
+    #[test]
+    fn workspace_map_equals_cli_json() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (kx, repo) = project(tmp.path());
+        with_peer(tmp.path(), &kx, &repo);
+        let server = serve(&repo, &[]);
+        let cases: &[(&str, &[&str])] = &[
+            ("workspace-map", &["workspace", "map"]),
+            (
+                "workspace-map?no-peers=true",
+                &["--no-peers", "workspace", "map"],
+            ),
+        ];
+        for (route, args) in cases {
+            let sep = if route.contains('?') { '&' } else { '?' };
+            let r = get(&server, &format!("/api/v1/{route}{sep}consistency=wait"));
+            assert_eq!(r.status, 200, "{route}: {r:?}");
+            let mut full = vec!["--json", "--consistency", "wait"];
+            full.extend_from_slice(args);
+            let out = cli(&repo, &full);
+            let want = String::from_utf8(out.stdout).unwrap();
+            assert_eq!(r.body, want.trim_end(), "{route}: {r:?}");
+        }
+        let with = get(&server, "/api/v1/workspace-map?consistency=wait").json();
+        assert_eq!(with["result"]["edges"][0]["provider"], "other");
+        let without = get(
+            &server,
+            "/api/v1/workspace-map?no-peers=true&consistency=wait",
+        )
+        .json();
+        assert!(without["result"]["edges"].as_array().unwrap().is_empty());
+    }
+
     /// R-10. The `impact` body is byte for byte what `impact --json` prints, for each way of
     /// giving the seeds and for the depth, limit and test-depth arguments.
     #[test]
@@ -619,6 +710,8 @@ mod api {
         ("search", "terms=caller"),
         ("dangling", ""),
         ("deps", ""),
+        ("workspace-status", ""),
+        ("workspace-map", ""),
         ("mirrors", ""),
         ("status", ""),
         ("docs-affected", ""),
@@ -744,7 +837,12 @@ mod api {
             "render",
         ];
         // Served at another path.
-        let elsewhere = [("contract", "meta"), ("view", "views/")];
+        let elsewhere = [
+            ("contract", "meta"),
+            ("view", "views/"),
+            // `workspace add` and `workspace locate` write; `status` and `map` have routes.
+            ("workspace", "workspace-status"),
+        ];
         let doc = {
             let server = serve(&repo, &[]);
             get(&server, "/api/v1/openapi.json").json()

@@ -57,6 +57,7 @@ pub mod view;
 pub mod view_doc;
 pub mod watch;
 pub mod why;
+pub mod workspace;
 
 use std::path::Path;
 
@@ -162,6 +163,7 @@ pub fn options_with(cli: &Cli, diagnostic: bool) -> Options {
         view: None,
         ranking: katalogr_dist::Ranking::Neutral,
         fresh: cli.fresh,
+        no_peers: cli.no_peers,
     }
 }
 

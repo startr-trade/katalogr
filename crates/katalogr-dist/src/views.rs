@@ -2,13 +2,15 @@
 //! back as a [`ViewGraph`] for the renderers.
 
 use crate::view_store::ViewStore;
+use crate::workspace::fingerprint;
+use crate::workspace_join::{attach, peer_ends};
 use crate::{
     Consistency, DistError, Katalogr, Options, Outcome, Reply, Report, on_target, unresolved,
 };
 use katalogr_analytics::{CycleOptions, GraphOptions, Level, structure};
 use katalogr_query::{
-    Direction, Partial, PathStep, PositionRef, Resolution, SymbolHit, ViewAnswer, ViewQuery,
-    ViewQueryJson, cap,
+    Direction, LinkKeys, Partial, PathStep, PeerEnd, PositionRef, Resolution, SymbolHit,
+    ViewAnswer, ViewQuery, ViewQueryJson, cap,
 };
 use katalogr_render::{PELE_VERSION, ViewEdge, ViewGraph, ViewNode, ViewSpec, node_id, to_mermaid};
 use katalogr_store::StoreError;
@@ -55,6 +57,39 @@ pub fn answer_bytes(answer: &ViewAnswer) -> Vec<u8> {
     serde_json::to_vec(answer).expect("serialise view answer")
 }
 
+/// The views that read peers (FEAT-020). The others stay answers about this project alone.
+pub(crate) const PEER_VIEW_OPS: &[&str] = &["contracts", "impact"];
+
+/// The name of a peer's node in a view: `<project>//<canonical>`, so `group_of` gives
+/// `<project>//<repo>` and two projects sharing a repo name cannot collide.
+fn peer_name(project: &str, name: &str) -> String {
+    format!("{project}//{name}")
+}
+
+/// A peer's ends as nodes, each joined to its contract. An opaque end is one node per project,
+/// named `<project>//hidden`, labelled `hidden` and of kind `opaque`.
+fn peer_nodes(b: &mut Builder, ends: &[PeerEnd]) {
+    for e in ends {
+        let contract = e.link.as_str();
+        if !contract.starts_with("contract:") {
+            continue;
+        }
+        b.node(contract, "contract", None);
+        match &e.hit {
+            Some(h) => {
+                let name = peer_name(&e.project, &h.name);
+                b.node(&name, &h.kind, Some(&h.path));
+                b.edge(&name, contract, &e.role, false);
+            }
+            None => {
+                let name = peer_name(&e.project, "hidden");
+                b.node(&name, "opaque", None);
+                b.edge(&name, contract, &e.role, false);
+            }
+        }
+    }
+}
+
 /// Most members listed per cycle in a cycles view.
 const CYCLE_MEMBERS: usize = 60;
 
@@ -71,7 +106,11 @@ impl Builder {
         self.nodes.entry(id.clone()).or_insert_with(|| ViewNode {
             id,
             name: name.to_string(),
-            label: String::new(),
+            label: if kind == "opaque" {
+                "hidden".to_string()
+            } else {
+                String::new()
+            },
             kind: kind.to_string(),
             path: path.map(str::to_string),
             group: group_of(name, kind),
@@ -263,8 +302,18 @@ impl Katalogr {
         let kind = Some(arg(spec, "kind")?).filter(|k| !k.is_empty());
         let max = number(spec, "max-nodes")?;
         let mut partial = Vec::new();
+        let _extra = self.extra_scope();
+        let mut peers = self.peers_for_read(opts)?;
+        let mut keys = LinkKeys::default();
         let reply = self.query(opts, |tx| {
             let map = katalogr_query::contract_map(tx, kind, max)?;
+            if !peers.is_empty() {
+                keys.contracts = map
+                    .items
+                    .iter()
+                    .map(|i| katalogr_model::Id::of(&i.contract))
+                    .collect();
+            }
             let mut b = Builder::default();
             for item in &map.items {
                 b.node(&item.contract, "contract", None);
@@ -280,6 +329,10 @@ impl Katalogr {
                     }
                 }
             }
+            // The peers' ends of the same contracts, drawn beside the local ones.
+            if !peers.is_empty() {
+                peer_nodes(&mut b, &peer_ends(&mut peers, &keys));
+            }
             // The cap counts contracts; the ends come with them.
             let mut g = b.finish(title, 0);
             g.shown = map.items.len() as u64;
@@ -287,7 +340,9 @@ impl Katalogr {
             partial = limit_partial(max, g.shown, g.total);
             Ok(Outcome::Found(g))
         })?;
-        Ok(with_partial(reply, partial))
+        let mut reply = with_partial(reply, partial);
+        attach(&mut reply, &peers, Vec::new(), Vec::new());
+        Ok(reply)
     }
 
     fn view_callers(
@@ -365,10 +420,16 @@ impl Katalogr {
             ..Default::default()
         };
         let mut partial = Vec::new();
+        let _extra = self.extra_scope();
+        let mut peers = self.peers_for_read(opts)?;
+        let mut rounds = None;
         let reply = self.query(opts, |tx| {
             on_target(tx, text, |root| {
                 let seeds = katalogr_query::seeds_for_symbol(root);
-                let report = katalogr_query::impact(tx, &seeds, &iopts)?;
+                let mut report = katalogr_query::impact(tx, &seeds, &iopts)?;
+                if !peers.is_empty() {
+                    rounds = crate::impact::across_peers(&mut report, &mut peers, &iopts);
+                }
                 let mut b = Builder::default();
                 for s in &report.seeds {
                     b.node(&s.node.name, &s.node.kind, Some(&s.node.path));
@@ -386,6 +447,28 @@ impl Katalogr {
                     let to = t.chain.first().unwrap_or(&t.seed);
                     b.edge(&t.test.name, to, "tests", false);
                 }
+                // What each peer adds: its hits, joined to the contract they came through (or to
+                // the node they were reached from inside the peer), and one hidden node when
+                // something there is out of the user's reach.
+                for p in &report.peers {
+                    for g in &p.groups {
+                        let inferred = g.confidence == katalogr_model::Confidence::Inferred;
+                        for h in &g.hits {
+                            let name = peer_name(&p.project, &h.node.name);
+                            b.node(&name, &h.node.kind, Some(&h.node.path));
+                            let to = match (&h.via, h.chain.first()) {
+                                (_, Some(c)) => peer_name(&p.project, c),
+                                (Some(v), None) => v.clone(),
+                                (None, None) => h.seed.clone(),
+                            };
+                            if to.starts_with("contract:") {
+                                b.node(&to, "contract", None);
+                            }
+                            b.edge(&name, &to, &g.kind, inferred);
+                        }
+                    }
+                    peer_nodes(&mut b, &p.opaque);
+                }
                 let hits: u64 = report.groups.iter().map(|g| g.hits.len() as u64).sum();
                 let others = (report.seeds.len() + report.tests.len()) as u64;
                 let total = report.total.unwrap_or(hits) + others;
@@ -394,7 +477,10 @@ impl Katalogr {
                 Ok::<_, StoreError>(g)
             })
         })?;
-        Ok(with_partial(reply, partial))
+        let mut reply = with_partial(reply, partial);
+        reply.partial.extend(rounds);
+        attach(&mut reply, &peers, Vec::new(), Vec::new());
+        Ok(reply)
     }
 
     /// The symbol's lineage: the subject, the contracts its hits pass through, the hits and their
@@ -608,7 +694,26 @@ impl Katalogr {
         let Ok(facts) = engine.facts_version(&snap) else {
             return Ok(None);
         };
-        let id = katalogr_query::view_id(&positions, &facts, &to_view_query(spec));
+        let mut query = to_view_query(spec);
+        // A view that reads peers is a question about their positions too; one of them not
+        // exact has no ID to know in advance.
+        if PEER_VIEW_OPS.contains(&spec.op.as_str()) && !opts.no_peers {
+            let Ok(peers) = self.open_peers(deadline) else {
+                return Ok(None);
+            };
+            if peers
+                .iter()
+                .any(|p| p.state.state != "ok" || p.state.stale || !p.state.repos_absent.is_empty())
+            {
+                return Ok(None);
+            }
+            if !peers.is_empty() {
+                query
+                    .args
+                    .insert("workspace".to_string(), fingerprint(&peers));
+            }
+        }
+        let id = katalogr_query::view_id(&positions, &facts, &query);
         Ok(Some((id, positions)))
     }
 
@@ -621,6 +726,7 @@ impl Katalogr {
             && let Some(body) = store.get(id)
         {
             return Ok(Reply {
+                workspace: None,
                 outcome: Outcome::Found(ViewBytes {
                     body,
                     from_store: true,
@@ -697,6 +803,7 @@ impl Katalogr {
             diagnostic,
             partial,
             folded,
+            workspace,
         } = reply;
         let outcome = match outcome {
             Outcome::Found(graph) => {
@@ -718,6 +825,10 @@ impl Katalogr {
                     watermark: (!exact).then_some(report.watermark),
                     pending: (!exact).then_some(report.pending),
                     stale: (!exact).then_some(report.stale),
+                    peers: workspace
+                        .as_ref()
+                        .map(|w| w.peers.clone())
+                        .unwrap_or_default(),
                 };
                 let body = answer_bytes(&answer);
                 if let Some(id) = &view_id {
@@ -746,6 +857,7 @@ impl Katalogr {
             }
         };
         Ok(Reply {
+            workspace,
             outcome,
             report,
             diagnostic,

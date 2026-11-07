@@ -519,6 +519,7 @@ impl Katalogr {
             _ => Vec::new(),
         };
         Ok(Reply {
+            workspace: None,
             outcome: out,
             partial,
             folded: Vec::new(),
@@ -629,6 +630,7 @@ impl Katalogr {
         report.warnings.extend(warnings);
         report.view_id = Some(req.view_id.clone());
         Ok(Reply {
+            workspace: None,
             outcome: out,
             partial: Vec::new(),
             folded: Vec::new(),

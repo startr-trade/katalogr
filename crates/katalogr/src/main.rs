@@ -94,6 +94,7 @@ fn run(cli: &Cli) -> Result<ExitCode, DistError> {
         }) => cmd::doctor::run(cli, *fail_on, *skip_git, *verbose),
         Some(Command::Eval { action }) => cmd::eval::run(cli, action),
         Some(Command::Context { action }) => cmd::context::run(cli, action),
+        Some(Command::Workspace { action }) => cmd::workspace::run(cli, action),
         Some(Command::Profiles { action }) => cmd::profiles::run(cli, action),
         Some(Command::Shard { action }) => cmd::shard::run(cli, action),
         Some(Command::Answers { action }) => cmd::answers::run(cli, action),

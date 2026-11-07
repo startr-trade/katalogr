@@ -51,6 +51,7 @@ pub(crate) fn graph_reply(
         diagnostic,
         mut partial,
         folded,
+        workspace,
     } = reply;
     let outcome = match outcome {
         Outcome::Found(vb) => {
@@ -81,6 +82,7 @@ pub(crate) fn graph_reply(
         diagnostic,
         partial,
         folded,
+        workspace,
     })
 }
 

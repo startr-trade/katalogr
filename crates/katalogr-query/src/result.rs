@@ -2,6 +2,7 @@
 
 use crate::diagnostic::Trace;
 use crate::position::PositionRef;
+use crate::workspace::PeerEnd;
 use katalogr_model::{Confidence, Span};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -35,7 +36,7 @@ pub(crate) enum ConfidenceSchema {
     Declared,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, JsonSchema)]
 pub struct SymbolHit {
     /// Canonical name.
     pub name: String,
@@ -379,6 +380,9 @@ pub mod cap {
     pub const MEMBERS: &str = "members";
     /// `lineage --per-group`.
     pub const PER_GROUP: &str = "per-group";
+    /// Peers of the workspace (FEAT-020): one could not be read in full, or a bounded round
+    /// count ended before the walk did.
+    pub const PEERS: &str = "peers";
 }
 
 /// Said with every partial answer.
@@ -454,6 +458,46 @@ pub struct Fold {
     pub depth: Option<u32>,
 }
 
+/// What a read of a project that names peers learned about them (FEAT-020). Present only when
+/// the reading project names peers and they were read.
+#[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]
+pub struct WorkspaceBlock {
+    /// One per named peer, sorted by kindex alias then project.
+    pub peers: Vec<PeerState>,
+    /// Far ends of this answer, sorted by link, project, role, name.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub ends: Vec<PeerEnd>,
+    /// `dangling` only: entries a peer resolved, moved out of the result.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub resolved: Vec<ResolvedRef>,
+}
+
+/// One named peer: whether it could be read, and the positions its answers reflect.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
+pub struct PeerState {
+    pub project: String,
+    /// The kindex alias, when the peer lives in another kindex.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kindex: Option<String>,
+    /// `ok`, `no-location`, `not-found`, `newer-format`, `no-index`, `unavailable` or `timeout`.
+    pub state: String,
+    pub positions: Vec<PositionRef>,
+    /// Repos in the peer's config with no recorded position here.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub repos_absent: Vec<String>,
+    pub stale: bool,
+    /// The command that fixes it; never a path.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fix: Option<String>,
+}
+
+/// A dangling entry that a peer resolved, and the ends that resolve it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
+pub struct ResolvedRef {
+    pub reference: DanglingRef,
+    pub ends: Vec<PeerEnd>,
+}
+
 /// What `--json` prints.
 #[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]
 pub struct Envelope<T> {
@@ -492,6 +536,10 @@ pub struct Envelope<T> {
     /// when ranking was neutral or the set was empty.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub working_set: Option<crate::working_set::WorkingSetSummary>,
+    /// `refs`, `callers`, `dangling`, `impact` and the workspace map, for a project that names
+    /// peers (FEAT-020): each peer's state and the far ends of the answer. Absent otherwise.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace: Option<WorkspaceBlock>,
 }
 
 #[cfg(test)]

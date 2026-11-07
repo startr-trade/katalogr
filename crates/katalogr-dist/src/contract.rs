@@ -8,7 +8,7 @@ use serde::Serialize;
 /// The path major: `/api/v1`.
 pub const API_VERSION: u32 = 1;
 /// Raised by every additive change to the contract.
-pub const CONTRACT_VERSION: u32 = 7;
+pub const CONTRACT_VERSION: u32 = 8;
 /// The position format (FEAT-043 CD-2).
 pub const POSITION_FORMAT: u32 = 1;
 /// The view-id format (FEAT-043 CD-3).
@@ -24,6 +24,7 @@ pub const CAPABILITIES: &[&str] = &[
     "type-lineage",
     "view-id",
     "views",
+    "workspace",
 ];
 
 /// Reported by a process that serves pages. Never in [`CAPABILITIES`].
@@ -82,7 +83,8 @@ fn info_lists_capabilities_sorted() {
     assert!(i.capabilities.iter().any(|c| c == "view-id"));
     assert_eq!(i.api, 1);
     assert!(i.capabilities.iter().any(|c| c == "views"));
-    assert_eq!(i.contract, 7);
+    assert_eq!(i.contract, 8);
+    assert!(i.capabilities.iter().any(|c| c == "workspace"));
     assert!(i.capabilities.iter().any(|c| c == "deps"));
     assert!(i.capabilities.iter().any(|c| c == "impact"));
     assert!(i.capabilities.iter().any(|c| c == "type-lineage"));

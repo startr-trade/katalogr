@@ -157,6 +157,7 @@ impl Katalogr {
             ));
         }
         Ok(Reply {
+            workspace: None,
             outcome: Outcome::Found(Timeline { points: all }),
             report: self.stored_report(Vec::new()),
             diagnostic: None,
@@ -195,6 +196,7 @@ impl Katalogr {
             None => (Outcome::NoMatch(format!("no stored view {id}")), Vec::new()),
         };
         Ok(Reply {
+            workspace: None,
             outcome,
             report: self.stored_report(positions),
             diagnostic: None,

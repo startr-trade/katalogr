@@ -97,6 +97,11 @@ pub const COMMON: &[Param] = &[
     ),
     opt("diagnostic", Ty::Bool, "include a diagnostic trace"),
     opt("expand", Ty::Bool, "list every hit instead of folding"),
+    opt(
+        "no-peers",
+        Ty::Bool,
+        "read this project alone, even when it names peers",
+    ),
 ];
 
 /// A request's parameters, validated, with defaults applied.
@@ -433,6 +438,15 @@ fn mirrors(k: &Katalogr, a: &Args, o: &Options) -> JsonAnswer {
 
 fn status(k: &Katalogr, _a: &Args, o: &Options) -> JsonAnswer {
     answer(k.status(o), |r| render_json::status(&r, k.context_name()))
+}
+
+fn workspace_status(k: &Katalogr, _a: &Args, o: &Options) -> JsonAnswer {
+    answer(k.workspace_status(o), render_json::workspace_status)
+}
+
+fn workspace_map(k: &Katalogr, a: &Args, o: &Options) -> JsonAnswer {
+    let o = q(o, a, "workspace-map", &[]);
+    answer(k.workspace_map(&o), render_json::workspace_map)
 }
 
 fn docs_affected(k: &Katalogr, a: &Args, o: &Options) -> JsonAnswer {
@@ -837,6 +851,20 @@ pub const OPS: &[Op] = &[
         ],
         Some("docs-affected"),
         Call::Project(docs_affected)
+    ),
+    op!(
+        "workspace-status",
+        "The state of each peer of this project, and the command that fixes any not read in full.",
+        &[],
+        Some("workspace-status"),
+        Call::Project(workspace_status)
+    ),
+    op!(
+        "workspace-map",
+        "Which project consumes what another provides, over the ends the user can read.",
+        &[],
+        Some("workspace-map"),
+        Call::Project(workspace_map)
     ),
     op!(
         "impact",
@@ -1321,6 +1349,7 @@ pub fn call_by_name(
         view: None,
         ranking: katalogr_dist::Ranking::Neutral,
         fresh: false,
+        no_peers: false,
     };
     Ok(call_op(start, op, &args, &overrides, &base))
 }
