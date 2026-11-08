@@ -67,8 +67,12 @@ else
 	$(HEAVY) cargo test --workspace --locked -j$(CARGO_JOBS) --no-fail-fast -- --test-threads=4
 endif
 
-failpoints: ## The engine crash suite.
-	$(HEAVY) cargo test -p katalogr-engine --features failpoints --locked -j$(CARGO_JOBS) -- --test-threads=4
+failpoints: ## The engine crash suite (cargo-nextest when installed).
+ifeq ($(NEXTEST),yes)
+	$(HEAVY) cargo nextest run -p katalogr-engine --features failpoints --locked --build-jobs $(CARGO_JOBS) --test-threads $(TEST_THREADS) --no-fail-fast
+else
+	$(HEAVY) cargo test -p katalogr-engine --features failpoints --locked -j$(CARGO_JOBS) --no-fail-fast -- --test-threads=4
+endif
 
 eval: ## The retrieval gate.
 	$(HEAVY) cargo run --locked -j$(CARGO_JOBS) -p katalogr -- eval run --sets fixtures/eval --baseline fixtures/eval/baseline.json --gate
