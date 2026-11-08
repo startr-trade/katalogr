@@ -16,6 +16,14 @@ concurrency:
 permissions:
   contents: read
 
+# As sutra's CI: builds here are one-shot, so incremental artifacts only bloat the cache, and debug
+# info is the bulk of a debug build (and of Windows link time) while nothing here needs a debugger.
+# Panics still name the failing test. Local builds are unaffected.
+env:
+  CARGO_INCREMENTAL: "0"
+  CARGO_PROFILE_DEV_DEBUG: "0"
+  CARGO_PROFILE_TEST_DEBUG: "0"
+
 jobs:
   fmt:
     runs-on: ubuntu-24.04
@@ -38,6 +46,9 @@ jobs:
           components: rustfmt, clippy
       # Compiled dependencies are kept between runs, keyed on Cargo.lock and the toolchain.
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          # Saved from main only; pull requests restore main's cache instead of adding their own.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: cargo clippy
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
       # Test ci::builds_without_mcp_feature (FEAT-067 R-14)
@@ -60,6 +71,9 @@ jobs:
           toolchain: 1.99.0
       # Compiled dependencies are kept between runs, keyed on Cargo.lock and the toolchain.
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          # Saved from main only; pull requests restore main's cache instead of adding their own.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       # cargo-nextest runs the test binaries side by side, as `make test` does (same tests).
       - uses: taiki-e/install-action@1e29709c0ec63babbe8f266397a465f29a825f91 # v2.87.31
         with:
