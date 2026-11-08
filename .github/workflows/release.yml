@@ -11,10 +11,20 @@ permissions:
 jobs:
   verify-tag:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
+      # FEAT-109: nothing is built or published from a commit whose `ci` run has not succeeded.
+      - name: CI passed on the tagged commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_SHA: ${{ github.sha }}
+        run: sh scripts/release-ci-gate.sh
       - name: tag commit is on main
         run: |
           if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
