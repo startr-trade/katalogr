@@ -178,6 +178,8 @@ pub(crate) fn record_size(path: &Utf8Path, deadline: Instant) -> Result<(), Stor
 /// Renames the rewritten file over the cache and makes the rename durable.
 pub(crate) fn swap(tmp: &Utf8Path, path: &Utf8Path) -> std::io::Result<()> {
     std::fs::rename(tmp, path)?;
+    // Windows cannot open a directory with `File::open`; NTFS journals the rename itself.
+    #[cfg(unix)]
     if let Some(parent) = path.parent() {
         std::fs::File::open(parent)?.sync_all()?;
     }

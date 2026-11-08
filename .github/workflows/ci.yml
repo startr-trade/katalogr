@@ -45,7 +45,7 @@ jobs:
         with:
           toolchain: 1.99.0
       - name: cargo test
-        run: cargo test --workspace --locked
+        run: cargo test --workspace --locked --no-fail-fast
       - name: cargo test (failpoints, crash suite)
         if: matrix.os == 'ubuntu-latest'
         run: cargo test -p katalogr-engine --features failpoints --locked
@@ -68,4 +68,4 @@ jobs:
       - name: cargo build (no C compiler)
         run: cargo build --workspace --locked
       - name: cargo test (no C compiler)
-        run: cargo test --workspace --locked
+        run: cargo test --workspace --locked --no-fail-fast

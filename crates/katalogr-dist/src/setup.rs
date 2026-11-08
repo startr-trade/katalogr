@@ -31,19 +31,20 @@ fn canonical(p: &Utf8Path) -> Result<Utf8PathBuf, DistError> {
     utf8(&c)
 }
 
-/// `target` expressed relative to `base`; both absolute and canonical.
+/// `target` expressed relative to `base`; both absolute and canonical. Joined with `/` on every
+/// system, because the marker is committed and read on other machines; Windows accepts `/`.
 fn relative_to(base: &Utf8Path, target: &Utf8Path) -> Utf8PathBuf {
     let b: Vec<_> = base.components().collect();
     let t: Vec<_> = target.components().collect();
     let common = b.iter().zip(&t).take_while(|(x, y)| x == y).count();
-    let mut out = Utf8PathBuf::new();
-    for _ in common..b.len() {
-        out.push("..");
+    if common == 0 {
+        // Nothing shared, such as another drive on Windows: only the absolute path works.
+        return target.to_path_buf();
     }
-    for c in &t[common..] {
-        out.push(c.as_str());
-    }
-    out
+    let parts: Vec<&str> = std::iter::repeat_n("..", b.len() - common)
+        .chain(t[common..].iter().map(|c| c.as_str()))
+        .collect();
+    Utf8PathBuf::from(parts.join("/"))
 }
 
 /// Create (or confirm) a kindex repository at `dir`. Idempotent.
