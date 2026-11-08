@@ -27,6 +27,8 @@ jobs:
         with:
           toolchain: 1.99.0
           components: rustfmt, clippy
+      # Compiled dependencies are kept between runs, keyed on Cargo.lock and the toolchain.
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - name: cargo clippy
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
       # Test ci::builds_without_mcp_feature (FEAT-067 R-14)
@@ -46,8 +48,18 @@ jobs:
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
           toolchain: 1.99.0
+      # Compiled dependencies are kept between runs, keyed on Cargo.lock and the toolchain.
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      # cargo-nextest runs the test binaries side by side, as `make test` does (same tests).
+      - uses: taiki-e/install-action@1e29709c0ec63babbe8f266397a465f29a825f91 # v2.87.31
+        with:
+          tool: cargo-nextest
       - name: cargo test
-        run: cargo test --workspace --locked --no-fail-fast
+        run: cargo nextest run --workspace --locked --no-fail-fast
+      # nextest does not run doctests.
+      - name: cargo test (doctests)
+        if: ${{ !cancelled() }}
+        run: cargo test --workspace --doc --locked
       - name: cargo test (failpoints, crash suite)
         if: matrix.os == 'ubuntu-latest'
         run: cargo test -p katalogr-engine --features failpoints --locked
