@@ -2,12 +2,18 @@
 //! honours the byte cap and the deadline; failures leave no visible state.
 mod support;
 
-use camino::{Utf8Path, Utf8PathBuf};
+#[cfg(unix)]
+use camino::Utf8Path;
+use camino::Utf8PathBuf;
+use katalogr_engine::Scope;
 use katalogr_engine::consistency::DEFAULT_BUDGET;
 use katalogr_engine::parallel::Parallelism;
-use katalogr_engine::queue::{Processor, find_orphan_temps};
+use katalogr_engine::queue::Processor;
+#[cfg(unix)]
+use katalogr_engine::queue::find_orphan_temps;
 use katalogr_engine::registry::ExtensionRegistry;
-use katalogr_engine::{Engine, Scope, canonical_graph};
+#[cfg(unix)]
+use katalogr_engine::{Engine, canonical_graph};
 use katalogr_store::Reader;
 use proptest::prelude::*;
 use std::collections::BTreeMap;
@@ -320,12 +326,14 @@ mod parallel {
     }
 
     /// Make `path` unreadable; false when the process can still read it (running as root).
+    #[cfg(unix)]
     fn unreadable(path: &Utf8Path) -> bool {
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o000)).unwrap();
         std::fs::read(path).is_err()
     }
 
+    #[cfg(unix)]
     fn index_error(threads: usize, bad: &[&str]) -> (Engine, Project, String) {
         let p = project();
         for i in 0..24 {
@@ -354,6 +362,7 @@ mod parallel {
 
     /// R-6. A planning error mid-round leaves the graph and watermark unchanged and no temp
     /// files after recovery.
+    #[cfg(unix)]
     #[test]
     fn plan_error_leaves_no_visible_state() {
         for threads in [1, 4] {
@@ -380,6 +389,7 @@ mod parallel {
         }
     }
 
+    #[cfg(unix)]
     fn canonical_empty() -> String {
         let p = project();
         let e = open_engine_threads(&p.kx, &p.work, 1);
@@ -387,6 +397,7 @@ mod parallel {
     }
 
     /// R-7. The error reported is the first in batch order, at any thread count.
+    #[cfg(unix)]
     #[test]
     fn first_error_in_batch_order() {
         for threads in [1, 8] {
