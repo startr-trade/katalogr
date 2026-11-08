@@ -54,20 +54,3 @@ jobs:
       - name: retrieval gate
         if: matrix.os == 'ubuntu-latest'
         run: cargo run --locked -p katalogr -- eval run --sets fixtures/eval --baseline fixtures/eval/baseline.json --gate
-
-  no-c:
-    # Requirement R-6. Test: ci::builds_without_c_compiler
-    runs-on: ubuntu-latest
-    env:
-      CC: "false"
-      CXX: "false"
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
-        with:
-          toolchain: 1.99.0
-      # Test ci::builds_without_c_compiler: build and test with no C compiler available.
-      - name: cargo build (no C compiler)
-        run: cargo build --workspace --locked
-      - name: cargo test (no C compiler)
-        run: cargo test --workspace --locked --no-fail-fast

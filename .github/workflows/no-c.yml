@@ -1,0 +1,36 @@
+name: no-c
+
+# Requirement R-6 (one binary, no toolchain beyond cargo). Test: ci::builds_without_c_compiler.
+# Whether katalogr builds without a C compiler changes only with its dependencies or toolchain,
+# so this runs when those change, nightly, on demand, and before every release (release.yml has
+# the same job), not on every push.
+on:
+  push:
+    paths:
+      - Cargo.lock
+      - "**/Cargo.toml"
+      - rust-toolchain.toml
+      - ".cargo/**"
+      - .github/workflows/no-c.yml
+  schedule:
+    - cron: "17 2 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  no-c:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      CC: "false"
+      CXX: "false"
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: 1.99.0
+      # Build everything, tests included, with no C compiler available. The build is the proof.
+      - name: cargo build (no C compiler)
+        run: cargo build --workspace --all-targets --locked

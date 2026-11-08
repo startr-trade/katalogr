@@ -32,6 +32,22 @@ jobs:
             exit 1
           fi
 
+  # R-6: every release is proven to build with no C compiler (no-c.yml runs the same check when
+  # dependencies change and nightly).
+  no-c:
+    needs: verify-tag
+    runs-on: ubuntu-latest
+    env:
+      CC: "false"
+      CXX: "false"
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: 1.99.0
+      - name: cargo build (no C compiler)
+        run: cargo build --workspace --all-targets --locked
+
   build:
     needs: verify-tag
     strategy:
@@ -102,7 +118,7 @@ jobs:
           if-no-files-found: error
 
   publish:
-    needs: build
+    needs: [build, no-c]
     runs-on: ubuntu-latest
     permissions:
       contents: write

@@ -29,14 +29,15 @@ HEAVY ?= $(strip \
 help: ## List the targets.
 	@grep -hE '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  make %-10s %s\n", $$1, $$2}'
 
-ci: ## Everything CI runs on Linux plus the cross-target checks, cheapest first.
+ci: ## Everything CI runs on Linux plus the cross-target checks, cheapest first (no-c only on a dependency change).
 	@$(MAKE) --no-print-directory fmt
 	@$(MAKE) --no-print-directory lint
 	@$(MAKE) --no-print-directory cross
 	@$(MAKE) --no-print-directory test
 	@$(MAKE) --no-print-directory failpoints
 	@$(MAKE) --no-print-directory eval
-	@$(MAKE) --no-print-directory no-c
+	@if [ -n "$(NO_C_CHANGED)" ]; then $(MAKE) --no-print-directory no-c; \
+	 else echo "no-c: skipped (no dependency or toolchain change since $(BASE); run make no-c to force)"; fi
 	@echo "make ci: all steps passed"
 
 fmt: ## cargo fmt --check.
@@ -53,8 +54,18 @@ cross: ## Clippy over every test for Windows and macOS (compiles, does not link 
 		$(HEAVY) cargo clippy -p katalogr --no-default-features --all-targets --locked -j$(CARGO_JOBS) --target $$t -- -D warnings || exit 1; \
 	done
 
-test: ## Workspace tests.
-	$(HEAVY) cargo test --workspace --locked -j$(CARGO_JOBS) -- --test-threads=4
+# cargo-nextest, when installed, runs the test binaries side by side instead of one after another
+# (same tests; doctests still run through cargo test). Without it, plain cargo test.
+NEXTEST := $(shell cargo nextest --version >/dev/null 2>&1 && echo yes)
+TEST_THREADS ?= 6
+
+test: ## Workspace tests (in parallel with cargo-nextest when installed).
+ifeq ($(NEXTEST),yes)
+	$(HEAVY) cargo nextest run --workspace --locked --build-jobs $(CARGO_JOBS) --test-threads $(TEST_THREADS) --no-fail-fast
+	$(HEAVY) cargo test --workspace --doc --locked -j$(CARGO_JOBS)
+else
+	$(HEAVY) cargo test --workspace --locked -j$(CARGO_JOBS) --no-fail-fast -- --test-threads=4
+endif
 
 failpoints: ## The engine crash suite.
 	$(HEAVY) cargo test -p katalogr-engine --features failpoints --locked -j$(CARGO_JOBS) -- --test-threads=4
@@ -62,6 +73,13 @@ failpoints: ## The engine crash suite.
 eval: ## The retrieval gate.
 	$(HEAVY) cargo run --locked -j$(CARGO_JOBS) -p katalogr -- eval run --sets fixtures/eval --baseline fixtures/eval/baseline.json --gate
 
-no-c: ## Build and test with no C compiler available.
-	$(HEAVY) env CC=false CXX=false cargo build --workspace --locked -j$(CARGO_JOBS)
-	$(HEAVY) env CC=false CXX=false cargo test --workspace --locked -j$(CARGO_JOBS) -- --test-threads=4
+# The no-C proof only changes when dependencies or the toolchain do, so `make ci` runs it only
+# when this branch changes those files against BASE (CI does the same, plus nightly and on tags).
+BASE ?= origin/main
+NO_C_PATHS := Cargo.lock ':(glob)**/Cargo.toml' rust-toolchain.toml .cargo
+NO_C_CHANGED = $(shell { git diff --name-only $(BASE)...HEAD -- $(NO_C_PATHS); git diff --name-only HEAD -- $(NO_C_PATHS); } 2>/dev/null | head -1)
+
+# Its own target directory: cargo does not rebuild for a changed CC, so reusing target/ would
+# pass on artifacts a C compiler built. Everything in target/no-c was built without one.
+no-c: ## Build everything, tests included, with no C compiler available (the build is the proof).
+	$(HEAVY) env CC=false CXX=false CARGO_TARGET_DIR=target/no-c cargo build --workspace --all-targets --locked -j$(CARGO_JOBS)
