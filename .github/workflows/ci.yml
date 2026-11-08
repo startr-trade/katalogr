@@ -1,15 +1,24 @@
 name: ci
 
+# One run per change (as kanbanr's CI): a push to main, a pull request, or on demand. Other branch
+# pushes do not run CI; local `make ci` covers them.
 on:
   push:
+    branches: [main]
   pull_request:
+  workflow_dispatch:
+
+# A newer run for the same branch or pull request makes the older one pointless.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
 
 jobs:
   fmt:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
@@ -20,7 +29,7 @@ jobs:
         run: cargo fmt --all -- --check
 
   clippy:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
@@ -39,7 +48,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        # Pinned images (as kanbanr): a runner image update does not change results unannounced.
+        os: [ubuntu-24.04, macos-15, windows-2025]
     runs-on: ${{ matrix.os }}
     # A hung test fails the job in an hour instead of holding a runner for six.
     timeout-minutes: 60
@@ -61,8 +71,8 @@ jobs:
         if: ${{ !cancelled() }}
         run: cargo test --workspace --doc --locked
       - name: cargo test (failpoints, crash suite)
-        if: matrix.os == 'ubuntu-latest'
+        if: matrix.os == 'ubuntu-24.04'
         run: cargo test -p katalogr-engine --features failpoints --locked
       - name: retrieval gate
-        if: matrix.os == 'ubuntu-latest'
+        if: matrix.os == 'ubuntu-24.04'
         run: cargo run --locked -p katalogr -- eval run --sets fixtures/eval --baseline fixtures/eval/baseline.json --gate
