@@ -3,7 +3,7 @@ resolver = "3"
 members = ["crates/*"]
 
 [workspace.package]
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 license = "Apache-2.0 OR MIT"
 repository = "https://github.com/startr-trade/katalogr"
@@ -13,23 +13,23 @@ homepage = "https://github.com/startr-trade/katalogr"
 rust-version = "1.98"
 
 [workspace.dependencies]
-katalogr-model = { path = "crates/katalogr-model", version = "0.1.0" }
-katalogr-store = { path = "crates/katalogr-store", version = "0.1.0" }
-katalogr-engine = { path = "crates/katalogr-engine", version = "0.1.0" }
-katalogr-ext-rust = { path = "crates/katalogr-ext-rust", version = "0.1.0" }
-katalogr-ext-wasm = { path = "crates/katalogr-ext-wasm", version = "0.1.0" }
-katalogr-query = { path = "crates/katalogr-query", version = "0.1.0" }
-katalogr-analytics = { path = "crates/katalogr-analytics", version = "0.1.0" }
-katalogr-dist = { path = "crates/katalogr-dist", version = "0.1.0" }
-katalogr-ext-ts = { path = "crates/katalogr-ext-ts", version = "0.1.0" }
-katalogr-ext-sql = { path = "crates/katalogr-ext-sql", version = "0.1.0" }
-katalogr-ext-md = { path = "crates/katalogr-ext-md", version = "0.1.0" }
-katalogr-ext-kanbanr = { path = "crates/katalogr-ext-kanbanr", version = "0.1.0" }
-katalogr-ext-data = { path = "crates/katalogr-ext-data", version = "0.1.0" }
-katalogr-ext-text = { path = "crates/katalogr-ext-text", version = "0.1.0" }
-katalogr-ext-schema = { path = "crates/katalogr-ext-schema", version = "0.1.0" }
-katalogr-ext-openapi = { path = "crates/katalogr-ext-openapi", version = "0.1.0" }
-katalogr-bench = { path = "crates/katalogr-bench", version = "0.1.0" }
+katalogr-model = { path = "crates/katalogr-model", version = "0.1.1" }
+katalogr-store = { path = "crates/katalogr-store", version = "0.1.1" }
+katalogr-engine = { path = "crates/katalogr-engine", version = "0.1.1" }
+katalogr-ext-rust = { path = "crates/katalogr-ext-rust", version = "0.1.1" }
+katalogr-ext-wasm = { path = "crates/katalogr-ext-wasm", version = "0.1.1" }
+katalogr-query = { path = "crates/katalogr-query", version = "0.1.1" }
+katalogr-analytics = { path = "crates/katalogr-analytics", version = "0.1.1" }
+katalogr-dist = { path = "crates/katalogr-dist", version = "0.1.1" }
+katalogr-ext-ts = { path = "crates/katalogr-ext-ts", version = "0.1.1" }
+katalogr-ext-sql = { path = "crates/katalogr-ext-sql", version = "0.1.1" }
+katalogr-ext-md = { path = "crates/katalogr-ext-md", version = "0.1.1" }
+katalogr-ext-kanbanr = { path = "crates/katalogr-ext-kanbanr", version = "0.1.1" }
+katalogr-ext-data = { path = "crates/katalogr-ext-data", version = "0.1.1" }
+katalogr-ext-text = { path = "crates/katalogr-ext-text", version = "0.1.1" }
+katalogr-ext-schema = { path = "crates/katalogr-ext-schema", version = "0.1.1" }
+katalogr-ext-openapi = { path = "crates/katalogr-ext-openapi", version = "0.1.1" }
+katalogr-bench = { path = "crates/katalogr-bench", version = "0.1.1" }
 quick-xml = "=0.41.0"
 saphyr-parser = "=0.1.0"
 oxc_parser = "=0.154.0"
