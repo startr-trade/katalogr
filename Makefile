@@ -18,7 +18,7 @@ SHELL := /bin/bash
 CARGO_JOBS ?= 4
 LOCK ?= $(HOME)/.cache/heavy-build.lock
 MEM ?= 14G
-TARGETS := x86_64-pc-windows-msvc aarch64-apple-darwin
+TARGETS := x86_64-pc-windows-msvc aarch64-apple-darwin x86_64-apple-darwin
 
 HEAVY ?= $(strip \
 	$(if $(shell command -v flock 2>/dev/null),flock $(LOCK)) \
