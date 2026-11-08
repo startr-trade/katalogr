@@ -130,8 +130,13 @@ fn orphan_temps(dir: &ProjectDir) -> Result<Vec<Utf8PathBuf>, String> {
     find_orphan_temps(&dir.root().join("shards")).map_err(|e| engine_kind(&e))
 }
 
+/// `p` relative to `base`, always `/`-separated (reports read the same on every system).
 fn rel_to(base: &Utf8Path, p: &Utf8Path) -> String {
-    p.strip_prefix(base).unwrap_or(p).to_string()
+    let rel = p.strip_prefix(base).unwrap_or(p);
+    rel.components()
+        .map(|c| c.as_str())
+        .collect::<Vec<_>>()
+        .join("/")
 }
 
 /// KD-JNL-001 to 003. `tables` is None when the cache could not be read: only the orphan-temp

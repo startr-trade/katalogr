@@ -168,6 +168,9 @@ mod loadtest {
         ws: Workspace,
         corpus: Corpus,
         commits: Vec<String>,
+        /// The synthetic remote's folder, kept as a path: turning the `file://` URL back into one
+        /// is system-specific (`file:///C:/...` on Windows).
+        remote: Utf8PathBuf,
     }
 
     fn fixture(replay: u32) -> Fixture {
@@ -187,6 +190,7 @@ mod loadtest {
             ws,
             corpus,
             commits,
+            remote: base.join("remote"),
         }
     }
 
@@ -250,11 +254,7 @@ mod loadtest {
         let f = fixture(2);
         let first = fetch::fetch(&f.ws, &f.corpus, &Git::default()).unwrap();
         // Delete the remote: a second fetch must not touch the network (the file system).
-        let remote = f.corpus.repos[0]
-            .url
-            .trim_start_matches("file://")
-            .to_string();
-        std::fs::remove_dir_all(&remote).unwrap();
+        std::fs::remove_dir_all(&f.remote).unwrap();
         let second = fetch::fetch(&f.ws, &f.corpus, &Git::default()).unwrap();
         assert_eq!(first, second);
         // A clone left on another commit is re-checked out without a fetch.
