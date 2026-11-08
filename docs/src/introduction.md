@@ -1,5 +1,10 @@
 # katalogr
 
+<div class="brand-lockup">
+  <img class="on-light" src="images/brand/katalogr-lockup-light.svg" alt="katalogr — κατάλογος, a register of links">
+  <img class="on-dark" src="images/brand/katalogr-lockup-dark.svg" alt="katalogr — κατάλογος, a register of links">
+</div>
+
 katalogr is an indexing and cross-referencing tool for code and documents. It builds a
 deterministic graph that traces every file, function and method, in any technology and across the
 connections between them, so that people and AI coding agents can ask where something is defined,

@@ -1,6 +1,14 @@
-# katalogr
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/brand/katalogr-lockup-dark.svg">
+    <img src="assets/brand/katalogr-lockup-light.svg" alt="katalogr — κατάλογος, a register of links" width="540">
+  </picture>
+</p>
 
-Deterministic, technology- and protocol-neutral traceability graph for polyglot systems, built for humans and AI coding agents.
+<p align="center">
+  <b>Deterministic, technology- and protocol-neutral traceability graph for polyglot systems,
+  built for humans and AI coding agents.</b>
+</p>
 
 Documentation: <https://katalogr.startr.trade>. To contribute, see [CONTRIBUTING](CONTRIBUTING.md); to report a vulnerability, see [SECURITY](SECURITY.md).
 
