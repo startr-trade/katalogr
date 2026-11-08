@@ -143,12 +143,22 @@ mod loadtest {
         git(&repo, &["add", "-A"]);
         git(&repo, &["commit", "-q", "-m", "third"]);
         let c3 = git(&repo, &["rev-parse", "HEAD"]);
-        (format!("file://{repo}"), vec![c1, c2, c3])
+        (file_url(repo.as_str()), vec![c1, c2, c3])
+    }
+
+    /// A `file://` URL git accepts on every system: `file:///C:/a/b` on Windows.
+    fn file_url(path: &str) -> String {
+        let p = path.replace('\\', "/");
+        if p.starts_with('/') {
+            format!("file://{p}")
+        } else {
+            format!("file:///{p}")
+        }
     }
 
     fn manifest(url: &str, head: &str, replay: u32) -> Corpus {
         let yaml = format!(
-            "version: 1\ncorpora:\n  - name: synth\n    tier: S\n    category: synthetic\n    languages: [rust, ts, md, sql, go]\n    primary: main\n    replay: {replay}\n    profile: synth.yaml\n    repos:\n      - {{ name: main, url: \"{url}\", commit: {head}, depth: 3 }}\n    approx: {{ files: 50, tree_mib: 1, disk_gib: 0.01 }}\n"
+            "version: 1\ncorpora:\n  - name: synth\n    tier: S\n    category: synthetic\n    languages: [rust, ts, md, sql, go]\n    primary: main\n    replay: {replay}\n    profile: synth.yaml\n    repos:\n      - {{ name: main, url: '{url}', commit: {head}, depth: 3 }}\n    approx: {{ files: 50, tree_mib: 1, disk_gib: 0.01 }}\n"
         );
         Manifest::parse(&yaml).unwrap().corpora.remove(0)
     }

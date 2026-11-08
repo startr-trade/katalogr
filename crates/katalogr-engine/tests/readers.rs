@@ -371,10 +371,16 @@ mod readers {
                     }
                 });
             }
+            // Stop the readers even when indexing panics; otherwise the scope waits forever.
+            struct StopOnDrop<'a>(&'a std::sync::atomic::AtomicBool);
+            impl Drop for StopOnDrop<'_> {
+                fn drop(&mut self) {
+                    self.0.store(true, std::sync::atomic::Ordering::SeqCst);
+                }
+            }
+            let _stop = StopOnDrop(&stop);
             let w = open_engine(&f.kx, &f.work);
-            let g = support::full_index(&w);
-            stop.store(true, std::sync::atomic::Ordering::SeqCst);
-            g
+            support::full_index(&w)
         });
         let root = Utf8PathBuf::from_path_buf(f._tmp.path().to_path_buf()).unwrap();
         let (fresh_kx, fresh) = fresh_index(&root, "fresh", &f.work);

@@ -347,6 +347,7 @@ fn export_key(ns: Vid, key: &str) -> Vec<u8> {
 }
 
 /// The distinct parent directories of the journal's final paths under `root`.
+#[cfg_attr(not(unix), allow(dead_code))]
 fn journal_parents(root: &Utf8Path, entries: &[JournalEntry]) -> BTreeSet<Utf8PathBuf> {
     entries
         .iter()
@@ -3349,6 +3350,9 @@ impl Cache {
         }
         // One sync per distinct directory, after the last rename and before the journal is
         // cleared (ADR-0033). Entries already renamed by an interrupted replay count too.
+        // Unix only: Windows cannot open a directory with `File::open` ("Access is denied"),
+        // and NTFS journals the rename itself.
+        #[cfg(unix)]
         for parent in journal_parents(dir.root(), &entries) {
             if parent.is_dir() {
                 std::fs::File::open(&parent)

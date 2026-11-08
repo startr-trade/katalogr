@@ -2,6 +2,7 @@
 
 pub mod blob;
 pub mod cache;
+pub mod canon;
 mod codec;
 pub mod compact;
 mod dict;

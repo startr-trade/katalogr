@@ -226,7 +226,7 @@ mod cli {
         );
 
         let roots = std::fs::read_to_string(project.join(".cache/roots.yaml")).unwrap();
-        let canon = std::fs::canonicalize(&repo).unwrap();
+        let canon = katalogr_dist::canonicalize(&repo).unwrap();
         assert_eq!(roots, format!("app: {}\n", canon.display()));
 
         let marker = std::fs::read_to_string(repo.join(".katalogr")).unwrap();

@@ -9,6 +9,7 @@ pub mod eval;
 pub mod hooks;
 mod roots;
 mod setup;
+pub use katalogr_store::canon::canonicalize;
 mod span;
 #[cfg(feature = "test-extractor")]
 mod test_extractor;
@@ -470,7 +471,7 @@ impl Katalogr {
             return Err(DistError::usage(format!("{root} is not a directory")));
         }
         let root = Utf8PathBuf::from_path_buf(
-            std::fs::canonicalize(&root).map_err(|e| DistError::io(&root, e))?,
+            setup::canonicalize(root.as_std_path()).map_err(|e| DistError::io(&root, e))?,
         )
         .map_err(|p| DistError::usage(format!("{}: path is not UTF-8", p.display())))?;
         let cache = self.project.cache_dir();

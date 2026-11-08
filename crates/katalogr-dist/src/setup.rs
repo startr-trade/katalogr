@@ -27,9 +27,11 @@ pub(crate) fn absolute(p: &Path) -> Result<Utf8PathBuf, DistError> {
 }
 
 fn canonical(p: &Utf8Path) -> Result<Utf8PathBuf, DistError> {
-    let c = std::fs::canonicalize(p).map_err(|e| DistError::io(p, e))?;
+    let c = canonicalize(p.as_std_path()).map_err(|e| DistError::io(p, e))?;
     utf8(&c)
 }
+
+pub use katalogr_store::canon::canonicalize;
 
 /// `target` expressed relative to `base`; both absolute and canonical. Joined with `/` on every
 /// system, because the marker is committed and read on other machines; Windows accepts `/`.

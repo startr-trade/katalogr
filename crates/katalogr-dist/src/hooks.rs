@@ -183,16 +183,19 @@ fn allow(note: impl Into<String>) -> Result<Decision, DistError> {
 impl Katalogr {
     /// The repo whose root contains `file`, with the root-relative path.
     fn locate(&self, file: &Path) -> Option<(String, RelPath, PathBuf)> {
-        let canon = std::fs::canonicalize(file).ok()?;
+        let canon = crate::setup::canonicalize(file).ok()?;
         let mut best: Option<(String, RelPath, PathBuf, usize)> = None;
         for (name, root) in &self.roots {
-            let Ok(root) = std::fs::canonicalize(root) else {
+            let Ok(root) = crate::setup::canonicalize(root.as_std_path()) else {
                 continue;
             };
             let Ok(rel) = canon.strip_prefix(&root) else {
                 continue;
             };
-            let Some(rel) = rel.to_str().and_then(|s| RelPath::new(s).ok()) else {
+            // Repo-relative paths are always `/`-separated, whatever the system's separator.
+            let parts: Option<Vec<&str>> =
+                rel.components().map(|c| c.as_os_str().to_str()).collect();
+            let Some(rel) = parts.and_then(|p| RelPath::new(&p.join("/")).ok()) else {
                 continue;
             };
             let depth = root.components().count();

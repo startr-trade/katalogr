@@ -359,7 +359,8 @@ impl Case {
         let mut roots = BTreeMap::new();
         for (repo, case_dir) in repos {
             let case_dir = Utf8PathBuf::from_path_buf(
-                std::fs::canonicalize(case_dir).map_err(|e| AccError::io(case_dir, e))?,
+                katalogr_store::canon::canonicalize(case_dir.as_ref())
+                    .map_err(|e| AccError::io(case_dir, e))?,
             )
             .map_err(|p| AccError::Run(format!("{}: not UTF-8", p.display())))?;
             install_profiles(&case_dir, dir.root(), repo, repos.len() > 1)?;
@@ -514,7 +515,7 @@ pub fn run_case(
 }
 
 fn label_of(case_dir: &Utf8Path) -> String {
-    std::fs::canonicalize(case_dir)
+    katalogr_store::canon::canonicalize(case_dir.as_std_path())
         .ok()
         .and_then(|p| Utf8PathBuf::from_path_buf(p).ok())
         .and_then(|p| {
