@@ -25,6 +25,9 @@ jobs:
           GITHUB_REPOSITORY: ${{ github.repository }}
           GITHUB_SHA: ${{ github.sha }}
         run: sh scripts/release-ci-gate.sh
+      # FEAT-114: every release opens with its notes, refused here before anything is built.
+      - name: The tag has release notes
+        run: sh scripts/release-notes-check.sh "$GITHUB_REF_NAME"
       - name: tag commit is on main
         run: |
           if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
@@ -147,9 +150,17 @@ jobs:
           done
           test -f "katalogr-${GITHUB_REF_NAME}-x86_64-pc-windows-msvc.zip" || { echo "missing archive for windows"; exit 1; }
           test "$(ls katalogr-* | wc -l)" -eq 5 || { echo "unexpected extra archives"; exit 1; }
-      - name: create draft release
+      # FEAT-114: the release page opens with the notes written for it, links made absolute.
+      - name: The release notes, for the release page
         shell: bash
         run: |
-          gh release create "$GITHUB_REF_NAME" --draft --verify-tag \
+          python3 scripts/release-notes-body.py "docs/src/releases/${GITHUB_REF_NAME}.md" "$RUNNER_TEMP/notes.md"
+          cat "$RUNNER_TEMP/notes.md"
+      # Published at once (as kanbanr and sutra): every gate above has passed by the time this runs.
+      - name: publish the release
+        shell: bash
+        run: |
+          gh release create "$GITHUB_REF_NAME" --verify-tag --latest \
+            --notes-file "$RUNNER_TEMP/notes.md" \
             artifacts/* \
             scripts/install.sh scripts/install.ps1

@@ -35,6 +35,11 @@ jobs:
           components: rustfmt, clippy
       - name: cargo fmt
         run: cargo fmt --all -- --check
+      # FEAT-114: the version being built has its release notes, so its tag is not refused later.
+      - name: The workspace version has release notes
+        run: |
+          v="$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -n1)"
+          sh scripts/release-notes-check.sh "v$v"
 
   clippy:
     runs-on: ubuntu-24.04
