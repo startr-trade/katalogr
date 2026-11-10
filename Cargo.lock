@@ -2434,7 +2434,7 @@ dependencies = [
 
 [[package]]
 name = "katalogr-ext-deps"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "katalogr-model",
  "katalogr-store",
@@ -2590,7 +2590,7 @@ dependencies = [
 
 [[package]]
 name = "katalogr-render"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "layout-rs",
  "schemars",
@@ -2622,7 +2622,7 @@ dependencies = [
 
 [[package]]
 name = "katalogr-web"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "katalogr-query",
  "katalogr-render",
@@ -2633,7 +2633,7 @@ dependencies = [
 
 [[package]]
 name = "katalogr-webtest"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "boa_engine",
  "katalogr-render",
