@@ -30,10 +30,10 @@ mod ci {
                 name = None;
             } else if let Some(n) = line.strip_prefix("name = ") {
                 name = Some(n.trim_matches('"').to_string());
-            } else if let Some(v) = line.strip_prefix("version = ") {
-                if let Some(n) = name.take() {
-                    out.push((n, v.trim_matches('"').to_string()));
-                }
+            } else if let Some(v) = line.strip_prefix("version = ")
+                && let Some(n) = name.take()
+            {
+                out.push((n, v.trim_matches('"').to_string()));
             }
         }
         out
