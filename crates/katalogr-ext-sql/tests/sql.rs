@@ -23,7 +23,13 @@ fn walk(dir: &Utf8Path, base: &Utf8Path, out: &mut Vec<(String, Vec<u8>)>) {
             walk(&p, base, out);
         } else if p.file_name() != Some("expected.yaml") {
             out.push((
-                p.strip_prefix(base).unwrap().to_string(),
+                // Repo-relative paths are `/`-separated on every system.
+                p.strip_prefix(base)
+                    .unwrap()
+                    .components()
+                    .map(|c| c.as_str())
+                    .collect::<Vec<_>>()
+                    .join("/"),
                 std::fs::read(&p).unwrap(),
             ));
         }

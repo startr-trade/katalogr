@@ -96,7 +96,17 @@ fn kill(pid: u32) {
     }
 }
 
-#[cfg(not(unix))]
+/// Windows has no signals: `taskkill /F /T` ends the child and everything it started.
+#[cfg(windows)]
+fn kill(pid: u32) {
+    let _ = Command::new("taskkill")
+        .args(["/F", "/T", "/PID", &pid.to_string()])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status();
+}
+
+#[cfg(not(any(unix, windows)))]
 fn kill(_pid: u32) {}
 
 impl Running {
@@ -122,7 +132,8 @@ impl Running {
             .unwrap_or_default();
         Ok(RunStats {
             wall,
-            status,
+            // A killed child has no exit status of its own; Windows reports taskkill's code.
+            status: if timed_out { None } else { status },
             peak_rss_kib: rss,
             stdout,
             stderr,

@@ -374,7 +374,7 @@ impl Katalogr {
         }
         let abs = crate::setup::absolute(dir)?;
         let abs = Utf8PathBuf::from_path_buf(
-            std::fs::canonicalize(&abs).map_err(|e| DistError::io(&abs, e))?,
+            crate::setup::canonicalize(abs.as_std_path()).map_err(|e| DistError::io(&abs, e))?,
         )
         .map_err(|p| DistError::usage(format!("{}: path is not UTF-8", p.display())))?;
         Kindex::open(&abs).map_err(|_| DistError::usage(format!("{abs} is not a kindex")))?;

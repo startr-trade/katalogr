@@ -115,12 +115,11 @@ impl Katalogr {
     /// not index data.
     pub fn reset_index(&self, ws: &Workspace) -> Result<()> {
         let dir = ws.project_dir(&self.project);
-        for p in [dir.join("shards")] {
-            match std::fs::remove_dir_all(&p) {
-                Ok(()) => {}
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-                Err(e) => return Err(e.into()),
-            }
+        let shards = dir.join("shards");
+        match std::fs::remove_dir_all(&shards) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(e.into()),
         }
         let cache = dir.join(".cache");
         if let Ok(rd) = std::fs::read_dir(&cache) {

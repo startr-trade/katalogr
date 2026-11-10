@@ -8,6 +8,7 @@ src = "src"
 [output.html]
 default-theme = "rust"
 preferred-dark-theme = "ayu"
+additional-css = ["brand.css"]
 git-repository-url = "https://github.com/startr-trade/katalogr"
 edit-url-template = "https://github.com/startr-trade/katalogr/edit/main/docs/{path}"
 

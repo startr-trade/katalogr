@@ -10,17 +10,46 @@ permissions:
 
 jobs:
   verify-tag:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      actions: read
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
+      # FEAT-109: nothing is built or published from a commit whose `ci` run has not succeeded.
+      - name: CI passed on the tagged commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_SHA: ${{ github.sha }}
+        run: sh scripts/release-ci-gate.sh
+      # FEAT-114: every release opens with its notes, refused here before anything is built.
+      - name: The tag has release notes
+        run: sh scripts/release-notes-check.sh "$GITHUB_REF_NAME"
       - name: tag commit is on main
         run: |
           if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
             echo "Tag $GITHUB_REF_NAME ($GITHUB_SHA) is not an ancestor of origin/main; refusing to release."
             exit 1
           fi
+
+  # R-6: every release is proven to build with no C compiler (no-c.yml runs the same check when
+  # dependencies change and nightly).
+  no-c:
+    needs: verify-tag
+    runs-on: ubuntu-24.04
+    env:
+      CC: "false"
+      CXX: "false"
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: 1.99.0
+      - name: cargo build (no C compiler)
+        run: cargo build --workspace --all-targets --locked
 
   build:
     needs: verify-tag
@@ -29,19 +58,19 @@ jobs:
       matrix:
         include:
           - target: x86_64-unknown-linux-musl
-            os: ubuntu-latest
+            os: ubuntu-24.04
             runnable: true
           - target: aarch64-unknown-linux-musl
-            os: ubuntu-latest
+            os: ubuntu-24.04
             runnable: false
           - target: x86_64-apple-darwin
-            os: macos-13
+            os: macos-15-intel
             runnable: true
           - target: aarch64-apple-darwin
-            os: macos-14
+            os: macos-15
             runnable: true
           - target: x86_64-pc-windows-msvc
-            os: windows-latest
+            os: windows-2025
             runnable: true
     runs-on: ${{ matrix.os }}
     env:
@@ -51,7 +80,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
-          toolchain: stable
+          toolchain: 1.99.0
       - name: add target
         shell: bash
         run: rustup target add "$TARGET"
@@ -99,8 +128,8 @@ jobs:
           if-no-files-found: error
 
   publish:
-    needs: build
-    runs-on: ubuntu-latest
+    needs: [build, no-c]
+    runs-on: ubuntu-24.04
     permissions:
       contents: write
     env:
@@ -129,9 +158,17 @@ jobs:
           test -f "katalogr-${GITHUB_REF_NAME}-x86_64-pc-windows-msvc.zip" || { echo "missing archive for windows"; exit 1; }
           test -f "web-bundle-${GITHUB_REF_NAME}.tar.gz" || { echo "missing web bundle"; exit 1; }
           test "$(ls katalogr-* | wc -l)" -eq 5 || { echo "unexpected extra archives"; exit 1; }
-      - name: create draft release
+      # FEAT-114: the release page opens with the notes written for it, links made absolute.
+      - name: The release notes, for the release page
         shell: bash
         run: |
-          gh release create "$GITHUB_REF_NAME" --draft --verify-tag \
+          python3 scripts/release-notes-body.py "docs/src/releases/${GITHUB_REF_NAME}.md" "$RUNNER_TEMP/notes.md"
+          cat "$RUNNER_TEMP/notes.md"
+      # Published at once (as kanbanr and sutra): every gate above has passed by the time this runs.
+      - name: publish the release
+        shell: bash
+        run: |
+          gh release create "$GITHUB_REF_NAME" --verify-tag --latest \
+            --notes-file "$RUNNER_TEMP/notes.md" \
             artifacts/* \
             scripts/install.sh scripts/install.ps1

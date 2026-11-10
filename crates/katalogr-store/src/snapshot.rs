@@ -159,6 +159,7 @@ pub fn read_manifest(path: &Utf8Path) -> Result<SnapshotManifest, StoreError> {
     parse_header(&mut BufReader::new(f))
 }
 
+#[cfg(unix)]
 fn sync_dir(dir: &Utf8Path) -> Result<(), StoreError> {
     let d = if dir.as_str().is_empty() {
         Utf8Path::new(".")
@@ -168,6 +169,13 @@ fn sync_dir(dir: &Utf8Path) -> Result<(), StoreError> {
     File::open(d)
         .and_then(|f| f.sync_all())
         .map_err(|e| StoreError::io(d, e))
+}
+
+/// Windows cannot open a directory with `File::open` ("Access is denied"); NTFS journals the
+/// rename itself.
+#[cfg(not(unix))]
+fn sync_dir(_dir: &Utf8Path) -> Result<(), StoreError> {
+    Ok(())
 }
 
 /// Hashes `database` to fill `digest` and `bytes`, then writes header and payload to a temp file

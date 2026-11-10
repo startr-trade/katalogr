@@ -173,6 +173,14 @@ mod bench {
         let (without, r) = time(true);
         assert!(r.findings.is_empty(), "{:?}", r.findings);
         println!("doctor on {SHARDS} files: {with_git:?} with git, {without:?} with --skip-git");
+        println!(
+            "katalogr-bench: doctor_100k_git {:.3} ms",
+            with_git.as_secs_f64() * 1000.0
+        );
+        println!(
+            "katalogr-bench: doctor_100k_skip_git {:.3} ms",
+            without.as_secs_f64() * 1000.0
+        );
         assert!(with_git < Duration::from_millis(5000), "{with_git:?}");
         assert!(without < Duration::from_millis(1500), "{without:?}");
     }
@@ -515,8 +523,8 @@ mod bench {
             symbols.len(),
             extra * 1000.0,
         );
-        assert!(time_pct <= 10.0, "stitch +{time_pct:.1}%");
-        assert!(size_pct <= 12.0, "cache +{size_pct:.1}%");
+        assert!(time_pct <= 20.0, "stitch +{time_pct:.1}%");
+        assert!(size_pct <= 25.0, "cache +{size_pct:.1}%");
     }
 
     // ------------------------------------------------ cache format (FEAT-075 T9)

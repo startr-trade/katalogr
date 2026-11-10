@@ -335,20 +335,24 @@ mod timeline {
             ],
         );
         assert_eq!(r.status.code(), Some(2), "{r:?}");
-        // A symlinked child folder is not followed.
-        let real = snapshot_of(&repo, tmp.path(), "real");
-        let links = tmp.path().join("links");
-        std::fs::create_dir_all(&links).unwrap();
-        std::os::unix::fs::symlink(&real, links.join("alias")).unwrap();
-        let t = points(&repo, &["--snapshots", links.to_str().unwrap()]);
-        assert!(
-            t["result"]["points"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .all(|p| p["source"] != "snapshot"),
-            "{t}"
-        );
+        // A symlinked child folder is not followed. Unix only: creating a symlink on Windows
+        // needs Developer Mode or an elevated shell, which CI runners do not grant.
+        #[cfg(unix)]
+        {
+            let real = snapshot_of(&repo, tmp.path(), "real");
+            let links = tmp.path().join("links");
+            std::fs::create_dir_all(&links).unwrap();
+            std::os::unix::fs::symlink(&real, links.join("alias")).unwrap();
+            let t = points(&repo, &["--snapshots", links.to_str().unwrap()]);
+            assert!(
+                t["result"]["points"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .all(|p| p["source"] != "snapshot"),
+                "{t}"
+            );
+        }
     }
 
     // ---- R-14 ----

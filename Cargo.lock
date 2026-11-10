@@ -2263,7 +2263,7 @@ dependencies = [
 
 [[package]]
 name = "katalogr"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "camino",
@@ -2287,7 +2287,7 @@ dependencies = [
 
 [[package]]
 name = "katalogr-acceptance"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "camino",
  "katalogr-engine",
@@ -2314,7 +2314,7 @@ dependencies = [
 
 [[package]]
 name = "katalogr-analytics"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "camino",
  "globset",
@@ -2332,17 +2332,18 @@ dependencies = [
 
 [[package]]
 name = "katalogr-archtest"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "cargo_metadata",
  "proc-macro2",
  "syn 2.0.119",
+ "tempfile",
  "toml",
 ]
 
 [[package]]
 name = "katalogr-bench"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "camino",
@@ -2360,7 +2361,7 @@ dependencies = [
 
 [[package]]
 name = "katalogr-dist"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "camino",
  "fs4",
@@ -2393,7 +2394,7 @@ dependencies = [
 
 [[package]]
 name = "katalogr-engine"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "camino",
  "fs4",
@@ -2417,7 +2418,7 @@ dependencies = [
 
 [[package]]
 name = "katalogr-ext-data"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "camino",
  "katalogr-acceptance",
@@ -2444,7 +2445,7 @@ dependencies = [
 
 [[package]]
 name = "katalogr-ext-kanbanr"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "katalogr-model",
  "pulldown-cmark",
@@ -2454,7 +2455,7 @@ dependencies = [
 
 [[package]]
 name = "katalogr-ext-md"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "katalogr-model",
  "pulldown-cmark",
@@ -2462,7 +2463,7 @@ dependencies = [
 
 [[package]]
 name = "katalogr-ext-openapi"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "camino",
  "katalogr-acceptance",
@@ -2475,7 +2476,7 @@ dependencies = [
 
 [[package]]
 name = "katalogr-ext-rust"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "camino",
  "katalogr-engine",
@@ -2493,7 +2494,7 @@ dependencies = [
 
 [[package]]
 name = "katalogr-ext-schema"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "camino",
  "katalogr-acceptance",
@@ -2507,7 +2508,7 @@ dependencies = [
 
 [[package]]
 name = "katalogr-ext-sql"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "camino",
  "katalogr-engine",
@@ -2523,7 +2524,7 @@ dependencies = [
 
 [[package]]
 name = "katalogr-ext-text"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "katalogr-model",
  "katalogr-store",
@@ -2532,7 +2533,7 @@ dependencies = [
 
 [[package]]
 name = "katalogr-ext-ts"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "camino",
  "katalogr-engine",
@@ -2552,7 +2553,7 @@ dependencies = [
 
 [[package]]
 name = "katalogr-ext-wasm"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "katalogr-model",
  "serde",
@@ -2562,7 +2563,7 @@ dependencies = [
 
 [[package]]
 name = "katalogr-model"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "proptest",
  "regex",
@@ -2574,7 +2575,7 @@ dependencies = [
 
 [[package]]
 name = "katalogr-query"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "camino",
  "katalogr-model",
@@ -2600,7 +2601,7 @@ dependencies = [
 
 [[package]]
 name = "katalogr-store"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "camino",
  "gix",

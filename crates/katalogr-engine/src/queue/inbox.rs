@@ -148,8 +148,16 @@ fn new_id() -> String {
     )
 }
 
+#[cfg(unix)]
 fn sync_dir(dir: &Utf8Path) -> Result<(), EngineError> {
     std::fs::File::open(dir)
         .and_then(|f| f.sync_all())
         .map_err(|e| EngineError::io(dir, e))
+}
+
+/// Windows cannot open a directory with `File::open` (it answers "Access is denied"), and NTFS
+/// journals the rename itself, so there is nothing further to make durable.
+#[cfg(not(unix))]
+fn sync_dir(_dir: &Utf8Path) -> Result<(), EngineError> {
+    Ok(())
 }

@@ -1,0 +1,3 @@
+# Check out text files with LF on every system: tests compare files byte for byte, and
+# include_str! must embed the same bytes in a Windows build as in a Unix one.
+* text=auto eol=lf
