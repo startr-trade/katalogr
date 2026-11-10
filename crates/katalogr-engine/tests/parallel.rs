@@ -5,11 +5,11 @@ mod support;
 #[cfg(unix)]
 use camino::Utf8Path;
 use camino::Utf8PathBuf;
+use katalogr_engine::Scope;
 use katalogr_engine::consistency::DEFAULT_BUDGET;
 use katalogr_engine::parallel::Parallelism;
 use katalogr_engine::queue::Processor;
 use katalogr_engine::registry::ExtensionRegistry;
-use katalogr_engine::Scope;
 #[cfg(unix)]
 use katalogr_engine::{Engine, canonical_graph};
 use katalogr_store::Reader;
