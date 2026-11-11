@@ -380,4 +380,37 @@ mod web {
         assert_eq!(out.status.code(), Some(2), "{out:?}");
         assert!(String::from_utf8_lossy(&out.stderr).contains("--write-assets"));
     }
+
+    /// Capabilities a view may name before the item that serves them is built: their pages read
+    /// as absent on purpose. Every other `needs` must be a capability this binary reports.
+    /// `dependencies` is the Dependencies page as a whole: the `deps` inventory is served, but the
+    /// page has no panels yet and its vulnerability half waits for FEAT-029, so it stays absent.
+    const PLANNED: &[&str] = &["dependencies", "drift", "git-history", "metrics", "rules"];
+
+    // Test web::view_needs_are_capabilities (FEAT-115 R-1)
+    #[test]
+    fn view_needs_are_capabilities() {
+        let caps = katalogr_dist::contract::CAPABILITIES;
+        let m = katalogr_web::manifest::manifest();
+        let mut bad = Vec::new();
+        for v in &m.views {
+            let mut needs: Vec<(String, &str)> = Vec::new();
+            if let Some(n) = &v.needs {
+                needs.push((v.id.clone(), n));
+            }
+            for p in &v.panels {
+                if let Some(n) = &p.needs {
+                    needs.push((format!("{}/{}", v.id, p.id), n));
+                }
+            }
+            for (at, n) in needs {
+                if !caps.contains(&n) && !PLANNED.contains(&n) {
+                    bad.push(format!(
+                        "{at} needs {n:?}, which is neither a capability nor planned"
+                    ));
+                }
+            }
+        }
+        assert!(bad.is_empty(), "{}", bad.join("\n"));
+    }
 }
