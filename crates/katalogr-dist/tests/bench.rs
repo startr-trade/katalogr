@@ -1452,6 +1452,113 @@ mod bench {
         );
     }
 
+    // ------------------------------------------------ working set (FEAT-039 R-10)
+
+    /// FEAT-039 R-10: gathering the working set adds at most 20 ms to a `search` on a 10k-symbol
+    /// project. Ten files of 1,000 symbols are committed, three are then edited (the dirty
+    /// tier), and the same search is timed with the default ranking and with the neutral one;
+    /// the difference of the medians is the cost. Needs the test extractor. Run in release,
+    /// alone, under the heavy-job lock:
+    /// `flock ~/.cache/heavy-build.lock cargo test -p katalogr-dist --release --features
+    /// test-extractor --test bench working_set_cost -- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    #[cfg(feature = "test-extractor")]
+    fn working_set_cost() {
+        use katalogr_dist::Ranking;
+        use std::fmt::Write as _;
+        let base = std::env::var_os("KATALOGR_SCRATCH")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| {
+                PathBuf::from(std::env::var_os("HOME").unwrap()).join(".cache/katalogr-scratch")
+            })
+            .join("FEAT-039-ws");
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(&base).unwrap();
+        let kx = base.join("kx");
+        kindex_init(&kx).unwrap();
+        let repo = base.join("app");
+        std::fs::create_dir_all(&repo).unwrap();
+        for file in 0..10 {
+            let mut text = String::new();
+            for i in 0..1000 {
+                let _ = writeln!(text, "sym fn handler{file}x{i}");
+            }
+            std::fs::write(repo.join(format!("m{file}.tx")), text).unwrap();
+        }
+        let git = |args: &[&str]| {
+            let st = std::process::Command::new("git")
+                .current_dir(&repo)
+                .args(args)
+                .env("GIT_CONFIG_GLOBAL", "/dev/null")
+                .env("GIT_CONFIG_SYSTEM", "/dev/null")
+                .status()
+                .unwrap();
+            assert!(st.success());
+        };
+        git(&["init", "-q"]);
+        git(&["add", "."]);
+        git(&[
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@example.invalid",
+            "commit",
+            "-q",
+            "-m",
+            "x",
+        ]);
+        project_init(&kx, "demo", vec![("app".to_string(), repo.clone())], true).unwrap();
+        let open = || {
+            Katalogr::resolve(
+                &repo,
+                &Overrides {
+                    kindex: Some(kx.display().to_string()),
+                    ..Overrides::default()
+                },
+            )
+            .unwrap()
+        };
+        open().index(None, true, None, &Options::default()).unwrap();
+        // Three files are being edited: the dirty tier holds them.
+        for file in 0..3 {
+            let p = repo.join(format!("m{file}.tx"));
+            let mut t = std::fs::read_to_string(&p).unwrap();
+            t.push_str(&format!("sym fn edited{file}\n"));
+            std::fs::write(&p, t).unwrap();
+        }
+        // The edits are read once, so both timings below see the same indexed state.
+        open().search("handler", 20, &Options::default()).unwrap();
+        let median = |ranking: Ranking| {
+            let opts = Options {
+                ranking,
+                ..Options::default()
+            };
+            let run = || {
+                open().search("handler", 20, &opts).unwrap();
+            };
+            run();
+            let mut ms: Vec<f64> = (0..15)
+                .map(|_| {
+                    let t = Instant::now();
+                    run();
+                    t.elapsed().as_secs_f64() * 1000.0
+                })
+                .collect();
+            ms.sort_by(f64::total_cmp);
+            ms[7]
+        };
+        let neutral = median(Ranking::Neutral);
+        let boosted = median(Ranking::Default);
+        let added = boosted - neutral;
+        println!(
+            "working_set_cost: neutral {neutral:.1} ms, working-set {boosted:.1} ms, added {added:.1} ms; load {}",
+            load()
+        );
+        let _ = std::fs::remove_dir_all(&base);
+        assert!(added <= 20.0, "{added:.1} ms is over the 20 ms budget");
+    }
+
     // ------------------------------------------------ peers (FEAT-020 R-16)
 
     /// A project `name` of `symbols` functions in one repo, in the kindex `kx`: every tenth
