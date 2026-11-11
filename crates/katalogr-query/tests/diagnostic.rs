@@ -418,6 +418,42 @@ mod diagnostic {
         };
     }
 
+    /// FEAT-065 R-7 (5.6): a context pack fills each entry's tier and reason, and the trace
+    /// carries them; entries a plain pack leaves unset serialise without the fields.
+    #[test]
+    fn pack_entries_carry_tier_and_reason() {
+        use katalogr_query::budget::pack_trace;
+        let lines = ["aaaa", "bbbb", "cccc", "dddddddddddddddd"];
+        let mut p = pack_trace(&lines, 3);
+        // A synthetic tiered pack: the builder names the tier and the link path that
+        // included each entry.
+        let tiers = [
+            ("seed", "named in the query"),
+            ("neighbour", "calls seed"),
+            ("neighbour", "called by seed"),
+            ("outer", "two hops"),
+        ];
+        for (e, (tier, reason)) in p.entries.iter_mut().zip(tiers) {
+            e.tier = Some(tier.to_string());
+            e.reason = Some(reason.to_string());
+        }
+        assert_eq!((p.kept, p.omitted), (2, 2));
+        assert_eq!(p.entries.len(), 3);
+        let v = serde_json::to_value(&p).unwrap();
+        let es = v["entries"].as_array().unwrap();
+        assert_eq!(es[0]["tier"], "seed");
+        assert_eq!(es[0]["reason"], "named in the query");
+        // The omitted entry carries its tier and reason too.
+        assert_eq!(es[2]["kept"], false);
+        assert_eq!(es[2]["tier"], "neighbour");
+        assert_eq!(es[2]["reason"], "called by seed");
+        // Unset by a plain pack: the fields are absent, not null.
+        let plain = serde_json::to_value(pack_trace(&lines, 3)).unwrap();
+        for e in plain["entries"].as_array().unwrap() {
+            assert!(e.get("tier").is_none() && e.get("reason").is_none(), "{e}");
+        }
+    }
+
     #[test]
     fn link_weights_traced() {
         let (fx, _) = graph_fx();
