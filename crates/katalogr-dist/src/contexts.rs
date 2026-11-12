@@ -9,7 +9,9 @@ use katalogr_engine::queue::Inbox;
 use katalogr_engine::queue::lock::lock_until;
 use katalogr_engine::{EventKind, FileSource, NewEvent, scan::ScanError};
 use katalogr_store::{CACHE_SCHEMA, Cache, CacheInspection};
-use katalogr_store::{ContextId, ContextKind, ContextManifest, ProjectDir, Reader, seed_layer};
+use katalogr_store::{
+    ContextId, ContextKind, ContextManifest, ProjectDir, Reader, seed_layer_with_repos,
+};
 use std::time::Instant;
 
 /// What `context list` shows about one context. No absolute path is ever part of it.
@@ -510,7 +512,14 @@ impl Katalogr {
         if !layer.root().join(ContextManifest::FILE).is_file() {
             let mut m = m.clone();
             m.seed_commit = None;
-            seed_layer(&self.project, layer, &m, deadline)?;
+            let repos: Vec<String> = self
+                .project
+                .config()
+                .repos
+                .iter()
+                .map(|r| r.name.clone())
+                .collect();
+            seed_layer_with_repos(&self.project, layer, &m, &repos, deadline)?;
             drop(lock);
             self.queue_seed_delta(layer, repo)?;
         }

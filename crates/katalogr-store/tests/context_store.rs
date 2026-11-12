@@ -3,7 +3,7 @@ mod context_store {
     use katalogr_model::RelPath;
     use katalogr_store::{
         Cache, ContextId, ContextKind, ContextManifest, Kindex, PendingKey, ProjectConfig,
-        ProjectName, Reader, RepoConfig, StoreError, seed_layer,
+        ProjectName, Reader, RepoConfig, StoreError, seed_layer, seed_layer_with_repos,
     };
 
     fn project(t: &tempfile::TempDir) -> katalogr_store::ProjectDir {
@@ -165,5 +165,39 @@ mod context_store {
         seed_layer(&p, &layer, &m, dl()).unwrap();
         assert!(!layer.root().join("junk").exists());
         assert!(layer.root().join("context.json").is_file());
+    }
+
+    /// FEAT-118 R-3.
+    #[test]
+    fn records_all_repo_positions() {
+        use std::time::{Duration, Instant};
+        let dl = || Instant::now() + Duration::from_secs(5);
+        let t = tempfile::tempdir().unwrap();
+        let p = project(&t);
+        let known = "cd".repeat(20);
+        {
+            let c = Cache::open(&p, dl()).unwrap();
+            let mut tx = c.write().unwrap();
+            tx.set_meta("base_commit.other", known.as_bytes()).unwrap();
+            tx.commit().unwrap();
+        }
+        let id = ContextId::new("w-bbbb").unwrap();
+        let layer = p.layer(&id);
+        let repos = ["r".to_string(), "other".to_string(), "unknown".to_string()];
+        seed_layer_with_repos(&p, &layer, &manifest(id), &repos, dl()).unwrap();
+        let c = Cache::open(&layer, dl()).unwrap();
+        let r = c.read().unwrap();
+        let pos = |name: &str| r.meta(&format!("position.{name}")).unwrap().unwrap();
+        let own: serde_json::Value = serde_json::from_slice(&pos("r")).unwrap();
+        assert_eq!(own["commit"], "ab".repeat(20));
+        let other: serde_json::Value = serde_json::from_slice(&pos("other")).unwrap();
+        assert_eq!(other["commit"], known.as_str());
+        assert!(other["dirty"].is_null());
+        assert_eq!(
+            r.meta("position_changed.other").unwrap().as_deref(),
+            Some(&br#"{"over":false,"paths":[]}"#[..])
+        );
+        // No commit known: no usable record, so the first read rescans.
+        assert!(pos("unknown").is_empty());
     }
 }
