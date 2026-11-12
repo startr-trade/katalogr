@@ -70,6 +70,21 @@ jobs:
     # A hung test fails the job in an hour instead of holding a runner for six.
     timeout-minutes: 60
     steps:
+      # FEAT-113: build and temp files on a Dev Drive (ReFS, trusted: no Defender filter).
+      - uses: samypr100/setup-dev-drive@562171fe8df7401fdf582d766cd3b6ab80d5b1a0 # v4.1.0
+        if: runner.os == 'Windows'
+        with:
+          drive-size: 16GB
+          drive-format: ReFS
+          trusted-dev-drive: true
+          env-mapping: |
+            CARGO_TARGET_DIR,{{ DEV_DRIVE }}/target
+            TMP,{{ DEV_DRIVE }}/tmp
+            TEMP,{{ DEV_DRIVE }}/tmp
+      - name: temp folder on the Dev Drive
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: New-Item -ItemType Directory -Force -Path $env:TMP | Out-Null
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
@@ -77,6 +92,8 @@ jobs:
       # Compiled dependencies are kept between runs, keyed on Cargo.lock and the toolchain.
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
+          # On Windows the target dir is on the Dev Drive; the cache follows it.
+          workspaces: ${{ runner.os == 'Windows' && format('. -> {0}', env.CARGO_TARGET_DIR) || '. -> target' }}
           # Saved from main only; pull requests restore main's cache instead of adding their own.
           save-if: ${{ github.ref == 'refs/heads/main' }}
       # cargo-nextest runs the test binaries side by side, as `make test` does (same tests).
