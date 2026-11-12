@@ -120,9 +120,10 @@ fn  ledger:src/totals.rs#fn:report  src/totals.rs:6  [Extracted]  depth 1
 fn  ledger:src/lib.rs#mod:tests/fn:records_a_payment  src/lib.rs:28  [Extracted]  depth 2
 ```
 
-A call written inside a macro's arguments, such as `assert_eq!(record(&p), 1)`, was not linked in
-our test project. Call the function on its own line (`let id = record(&p);`) when you want the call
-to show up.
+Calls inside the arguments of the standard macros (`assert!`, `assert_eq!`, `vec!`, `format!`,
+`println!`, `write!`, `matches!`, `dbg!` and their relatives) are linked like any other call, so
+`assert_eq!(record(&p), 1)` makes the test a caller of `record`. Calls inside your own
+`macro_rules!` macros are not followed.
 
 ## tests
 
