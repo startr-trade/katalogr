@@ -1,6 +1,6 @@
 ---
 name: katalogr
-description: Deterministic code and artifact graph for the current project. Use it before reading or grepping whenever the question is where something is, who uses it, why it exists, how two things connect, or what a change would touch, in any indexed project (a `.katalogr` marker exists, or `katalogr` answers). It replaces whole-file reads with exact spans and ranked, budgeted answers. Covers search, show, explain, refs, callers, path, why, map, dangling, docs-affected, view, render, index and notify, with playbooks for scoping work, finding where to implement, assessing a change, tracing a flow, reviewing a change, and keeping docs and schemas in sync.
+description: Deterministic code and artifact graph for the current project. Use it before reading or grepping whenever the question is where something is, who uses it, why it exists, how two things connect, or what a change would touch, in any indexed project (a `.katalogr` marker exists, or `katalogr` answers). It replaces whole-file reads with exact spans and ranked, budgeted answers. Covers search, show, explain, refs, callers, path, why, map, impact, lineage, deps, diff, workspace, dangling, docs-affected, view, render, serve, export, snapshot, index and notify, with playbooks for scoping work, finding where to implement, assessing a change, tracing a flow, reviewing a change, and keeping docs and schemas in sync.
 ---
 
 # katalogr: ask the graph before you read
@@ -37,6 +37,12 @@ katalogr has already parsed this project into a graph of artifacts, symbols, con
    - `path <a> <b>`: the shortest chain between two things, with each link's kind and confidence.
    - `why <file>:<line>`: the symbol at that line, the board items and goals it serves, the commit that last changed it, and who uses it (callers, tests, contracts). `--no-use` leaves the users out (faster, for hooks).
    - `docs-affected [--since <rev>]`: documents linked to code that changed since the merge-base, or `--since`.
+   - `impact [<symbol>|--file P|--range A..B|--since REV|--item CODE] [--depth N] [--limit N]`: what depends on this, grouped by link kind and confidence, with the tests that cover it. `--range` answers at the range's head (exit 6 if no context holds it).
+   - `lineage <type|element|contract> [--depth N] [--per-group N] [--expand]`: where it is declared, its fields, related types, what binds to it, code, and where the answer stops.
+   - `deps [--package NAME] [--limit N]`: the lockfile inventory; each version shows who pins it and the code that uses the package.
+   - `diff <A> <B> [--repo NAME] [--format markdown|html] [--out FILE|--out-dir DIR]`: the stored structural diff between two commits, branches or releases. `diff --requested` builds what the `post-merge` hook queued.
+   - `workspace status|map|add <project>|locate <alias> <dir>`: peer projects whose contracts this one joins. Cross-project ends can be `opaque`.
+   - `shard show <repo>:<path> [--commit REV]`: what the index holds about one file, as text.
 6. **Orient in an unfamiliar project.** `katalogr map --budget 1500` gives the most central symbols first (PageRank). `map` and `search` favour the files you are working on; `--neutral` ranks by relevance alone.
 7. **Follow the `next:` line.** Every answer ends with the most useful follow-up commands.
 8. **Respect confidence.**
@@ -48,6 +54,7 @@ katalogr has already parsed this project into a graph of artifacts, symbols, con
 - `--json` gives a versioned envelope with `watermark`, `pending`, `stale` and `next`.
 - `--consistency wait|wait-all|stale-ok` and `--timeout <s>` choose how fresh the answer must be. The CLI default is `wait`.
 - `--at <position>` answers for an exact position (a commit, or `commit+hash` of uncommitted changes); `katalogr position` prints the checkout's. An exact answer carries `positions` and a `view_id` that repeats.
+- `--no-peers` reads this project alone, without its workspace peers.
 - `katalogr watch` polls the checkout and reindexes edits made outside Claude. `katalogr context list|show|add|diff` manages contexts.
 
 ## 3. Playbooks
@@ -68,7 +75,7 @@ katalogr has already parsed this project into a graph of artifacts, symbols, con
 1. `katalogr refs <symbol>` and `katalogr callers <symbol> --depth 3`
 2. `katalogr path <symbol> <entry point>` for the flows it sits on
 3. Note every `[Inferred]` hit and confirm it with `show`.
-4. Report the blast radius **before** editing. `katalogr impact` will do this in one step once available.
+4. Report the blast radius **before** editing: `katalogr impact <symbol> | --file <path> | --range <base>..<head> | --since <rev> | --item <CODE>` groups hits by link kind and confidence and lists tests and boundary contracts. Read its `[Inferred]` hits with `show`.
 
 ### 3.4 Trace a flow or a bug across files
 1. `katalogr why <file>:<line>` where the symptom shows
@@ -90,6 +97,9 @@ katalogr has already parsed this project into a graph of artifacts, symbols, con
 - `katalogr render <op> --format mermaid|dot|graphml|structurizr|svg` draws `structure`, `contracts`, `callers <symbol>`, `path <a> <b>` or `cycles`. `render mdbook` and `render filter` fill `katalogr-query` blocks in docs.
 - `katalogr view <op> [--fresh]` answers from the view store by view ID; with `--json` it is what the API returns. `--fresh` recomputes and compares.
 - `katalogr view check <path>` lists bad query blocks (no index needed). `katalogr view snapshot --docs <dir> --out <dir> [--at <position>]` writes every block's view for one position, or nothing.
+- `katalogr serve [--listen 127.0.0.1:7878] [--snapshots DIR]...` serves the web view and the API on loopback. `katalogr view timeline` and `katalogr view stored <ID>` read stored views and snapshots without the index.
+- `katalogr export html --out F [--max-symbols N] [--with-source]` writes one offline file for reviewers; `katalogr export graph <op> --format dot|graphml|json --out F` writes one view for Gephi, yEd or Cytoscape. Both write nothing and exit 5 or 6 when an answer is stale or not exact.
+- `katalogr snapshot export --out F.ksnap | import F [--replace] | show F [--verify]` moves the index outside git; the file holds names, paths and signatures, so keep it as private as the code. `katalogr audit record` and `audit verify` record and check the index digest at a release.
 - `katalogr api [--listen 127.0.0.1:7878]` serves the read queries as HTTP/JSON on loopback; the default is `stale-ok`, and an `ETag` needs `consistency=wait`.
 
 ## 4. Cost routing
