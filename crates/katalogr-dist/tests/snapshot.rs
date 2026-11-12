@@ -132,17 +132,25 @@ mod snapshot {
         katalogr(s).audit_record(&opts()).unwrap().graph_digest
     }
 
-    /// Replaces `from` with `to` in the first (header) lines of a snapshot, at equal or any
-    /// length; the payload is untouched.
+    /// Replaces `from` with `to` in the first two header lines of a snapshot, at equal or any
+    /// length, and rewrites `file_sha256` so only the checks under test can refuse the file.
     fn edit_header(file: &Utf8Path, from: &str, to: &str) {
+        use sha2::{Digest, Sha256};
         let raw = std::fs::read(file).unwrap();
         let mut at = 0;
-        for _ in 0..2 {
+        for _ in 0..3 {
             at += raw[at..].iter().position(|b| *b == b'\n').unwrap() + 1;
         }
         let head = String::from_utf8(raw[..at].to_vec()).unwrap();
-        assert!(head.contains(from), "{head}");
-        let mut out = head.replace(from, to).into_bytes();
+        let (first, rest) = head.split_once('\n').unwrap();
+        let (manifest, _) = rest.split_once('\n').unwrap();
+        assert!(manifest.contains(from), "{head}");
+        let manifest = format!("{}\n", manifest.replace(from, to));
+        let mut h = Sha256::new();
+        h.update(manifest.as_bytes());
+        h.update(&raw[at..]);
+        let sum: String = h.finalize().iter().map(|b| format!("{b:02x}")).collect();
+        let mut out = format!("{first}\n{manifest}file_sha256 {sum}\n").into_bytes();
         out.extend_from_slice(&raw[at..]);
         std::fs::write(file, out).unwrap();
     }
@@ -421,6 +429,39 @@ mod snapshot {
         );
         assert_eq!(std::fs::read(cache_file(&s)).unwrap(), before);
         assert!(!s.kx.join("projects/demo/.cache/index.redb.import").exists());
+    }
+
+    #[test]
+    fn manifest_flip_refused_by_show_verify() {
+        let _g = serial();
+        let s = setup();
+        let out = exported(&s);
+        let m = read_manifest(&out).unwrap();
+        let raw = std::fs::read(&out).unwrap();
+        let text = String::from_utf8_lossy(&raw[..400]).to_string();
+        let commit = m.positions[0].commit.clone();
+        let targets = [
+            text.find(&m.facts_version).unwrap(),
+            text.find(&commit).unwrap(),
+            text.find("\"cache_schema\":").unwrap() + "\"cache_schema\":".len() + 1,
+            text.find("\"repo\":\"").unwrap() + "\"repo\":\"".len(),
+        ];
+        for at in targets {
+            let mut bad = raw.clone();
+            bad[at] ^= 0x01;
+            let f = out_of(&s, "flipped.ksnap");
+            std::fs::write(&f, bad).unwrap();
+            let e = katalogr(&s).snapshot_show(&f, true).unwrap_err();
+            assert!(
+                matches!(e, DistError::Store(StoreError::BadSnapshot(_))),
+                "offset {at}: {e}"
+            );
+            let e = katalogr(&s).snapshot_show(&f, false).unwrap_err();
+            assert!(
+                matches!(e, DistError::Store(StoreError::BadSnapshot(_))),
+                "offset {at}: {e}"
+            );
+        }
     }
 
     #[test]
