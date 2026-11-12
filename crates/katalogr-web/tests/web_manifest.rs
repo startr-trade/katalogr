@@ -5,7 +5,7 @@ mod web_manifest {
 
     const KNOWN: [&str; 8] = [
         "impact",
-        "dependencies",
+        "deps",
         "vulnerabilities",
         "type-lineage",
         "git-history",

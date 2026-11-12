@@ -381,11 +381,16 @@ mod web {
         assert!(String::from_utf8_lossy(&out.stderr).contains("--write-assets"));
     }
 
-    /// Capabilities a view may name before the item that serves them is built: their pages read
-    /// as absent on purpose. Every other `needs` must be a capability this binary reports.
-    /// `dependencies` is the Dependencies page as a whole: the `deps` inventory is served, but the
-    /// page has no panels yet and its vulnerability half waits for FEAT-029, so it stays absent.
-    const PLANNED: &[&str] = &["dependencies", "drift", "git-history", "metrics", "rules"];
+    /// Capabilities a view may name before the item that serves them is built: their pages or
+    /// panels read as absent on purpose. Every other `needs` must be a capability this binary
+    /// reports, so a renamed capability cannot silently hide a page (FEAT-115).
+    const PLANNED: &[&str] = &[
+        "drift",
+        "git-history",
+        "metrics",
+        "rules",
+        "vulnerabilities",
+    ];
 
     // Test web::view_needs_are_capabilities (FEAT-115 R-1)
     #[test]

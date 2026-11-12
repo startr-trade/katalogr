@@ -194,7 +194,7 @@ mod web_app {
         let mut p = open("#/dependencies", &b);
         assert!(
             p.text()
-                .contains("Dependency and vulnerability data isn't in this version of katalogr.")
+                .contains("Dependency data isn't in this version of katalogr.")
         );
         let mut p = open("#/type-lineage", &b);
         assert!(
