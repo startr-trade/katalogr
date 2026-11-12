@@ -387,9 +387,9 @@ pub enum Command {
         max_len: u32,
     },
     /// Draw a view of the index as Mermaid, DOT, GraphML, Structurizr or SVG. The view is an op
-    /// (`structure`, `contracts`, `callers <symbol>`, `path <from> <to>`, `cycles`) with its
-    /// flags, as in a `katalogr-query` block. `render mdbook` and `render filter` embed views
-    /// in docs.
+    /// (`structure`, `contracts`, `callers <symbol>`, `impact <symbol>`, `lineage <symbol>`,
+    /// `path <from> <to>`, `cycles`) with its flags, as in a `katalogr-query` block.
+    /// `render mdbook` and `render filter` embed views in docs.
     #[command(args_conflicts_with_subcommands = true)]
     Render {
         #[command(subcommand)]
@@ -403,7 +403,8 @@ pub enum Command {
     },
     /// A generated view as Mermaid and data, stored by its view ID and answered from the store
     /// when it is there. The view is an op (`structure`, `contracts`, `callers <symbol>`,
-    /// `path <from> <to>`, `cycles`) with its flags, as in a `katalogr-query` block. With
+    /// `impact <symbol>`, `lineage <symbol>`, `path <from> <to>`, `cycles`) with its flags, as
+    /// in a `katalogr-query` block. With
     /// `--json` the answer is what `GET /api/v1/views/<op>` returns.
     #[command(args_conflicts_with_subcommands = true)]
     View {

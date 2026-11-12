@@ -1168,6 +1168,37 @@ mod cli {
         assert_eq!(code, 5);
         assert!(out.contains("\"outcome\":\"not_comparable\""), "{out}");
     }
+
+    /// FEAT-119: `render --help` and `view --help` name every op that `view check` accepts
+    /// (the ops of the `katalogr-query` block grammar, `OPS` in `katalogr-render`).
+    #[test]
+    fn render_view_help_names_every_op() {
+        const OPS: &[&str] = &[
+            "structure",
+            "contracts",
+            "callers",
+            "impact",
+            "lineage",
+            "path",
+            "cycles",
+        ];
+        let dir = std::env::temp_dir();
+        for cmd in ["render", "view"] {
+            let out = Command::new(env!("CARGO_BIN_EXE_katalogr"))
+                .current_dir(&dir)
+                .args([cmd, "--help"])
+                .output()
+                .expect("run katalogr --help");
+            assert!(out.status.success(), "{cmd} --help exited {:?}", out.status);
+            let help = String::from_utf8(out.stdout).expect("utf8 help");
+            for op in OPS {
+                assert!(
+                    help.contains(&format!("`{op}")),
+                    "{cmd} --help does not name op `{op}`:\n{help}"
+                );
+            }
+        }
+    }
 }
 
 mod query {
