@@ -71,6 +71,8 @@ name = "bench_web"
 required-features = ["web"]
 
 [dev-dependencies]
+# The view op catalogue, so the help test follows the one op table (FEAT-119).
+katalogr-render.workspace = true
 # The `.tx` test extractor gives integration tests symbols to query.
 katalogr-dist = { workspace = true, features = ["test-extractor"] }
 tempfile.workspace = true

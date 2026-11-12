@@ -2273,6 +2273,7 @@ dependencies = [
  "katalogr-dist",
  "katalogr-engine",
  "katalogr-model",
+ "katalogr-render",
  "katalogr-store",
  "katalogr-web",
  "katalogr-webtest",
