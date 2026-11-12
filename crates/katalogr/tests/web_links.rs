@@ -167,12 +167,57 @@ mod web {
         let tmp = tempfile::tempdir().unwrap();
         let (_kx, repo) = project(tmp.path());
         let s = start(&repo);
-        let backend = HttpBackend { addr: s.addr };
+        // Every page this binary draws has its capability now, so the server's own meta answer
+        // is replayed with `deps` taken out: a binary built without it (FEAT-115).
+        let (status, body) =
+            katalogr_webtest::Backend::get(&HttpBackend { addr: s.addr }, "/api/v1/meta");
+        assert_eq!(status, 200, "{body}");
+        let mut meta: Value = serde_json::from_str(&body).unwrap();
+        let caps = meta["capabilities"]
+            .as_array_mut()
+            .expect("meta lists capabilities");
+        caps.retain(|c| c != "deps");
+        let backend =
+            katalogr_webtest::MapBackend::new().with("/api/v1/meta", 200, &meta.to_string());
         let hash = "#/dependencies";
-        let sentence = "Dependency and vulnerability data isn't in this version of katalogr.";
+        let sentence = "Dependency data isn't in this version of katalogr.";
         let mut page = Page::open(hash, &backend);
         assert!(page.text().contains(sentence), "{hash}: {}", page.text());
         assert_eq!(page.requests(), ["/api/v1/meta"], "{hash}");
+    }
+
+    // Test web::deps_panel_lists_packages (FEAT-115 R-2)
+    /// The Dependencies page lists the lockfile inventory from `deps`, and its vulnerability
+    /// panel says it is not in this version.
+    #[test]
+    fn deps_panel_lists_packages() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (_kx, repo) = project(tmp.path());
+        std::fs::write(
+            repo.join("Cargo.lock"),
+            "version = 3\n\n[[package]]\nname = \"alpha-lib\"\nversion = \"1.2.3\"\nsource = \"registry+https://registry.example/index\"\n",
+        )
+        .unwrap();
+        ok(&repo, &["index"]);
+        let s = start(&repo);
+        let mut page = Page::open("#/dependencies", &HttpBackend { addr: s.addr });
+        assert!(page.has("panel-packages"), "{}", page.text());
+        assert!(page.has("panel-vulnerabilities"), "{}", page.text());
+        let text = page.text();
+        for want in [
+            "alpha-lib",
+            "1.2.3",
+            "Vulnerability matching isn't in this version of katalogr.",
+        ] {
+            assert!(text.contains(want), "{want}: {text}");
+        }
+        assert!(
+            page.requests()
+                .iter()
+                .any(|r| r.starts_with("/api/v1/deps")),
+            "{:?}",
+            page.requests()
+        );
     }
 
     /// R-12. The health panels find their rows in the real answers.
