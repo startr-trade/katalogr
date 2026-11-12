@@ -1,14 +1,17 @@
-//! Graph snapshot file (FEAT-097): a two-line text header and one LZ4 frame holding the
-//! compacted database file.
+//! Graph snapshot file (FEAT-097, FEAT-121): a three-line text header and one LZ4 frame holding
+//! the compacted database file.
 //!
 //! ```text
 //! katalogr-snapshot 1\n
 //! {"bytes":..,"cache_schema":..,"digest":"..","facts_version":"..","format":1,"positions":[..]}\n
+//! file_sha256 <64 lower-case hex>\n
 //! <one LZ4 frame>
 //! ```
 //!
-//! The digest is the SHA-256 of the decoded database. It finds damage, not tampering: it sits in
-//! the same file. Nothing here names a language, format or protocol.
+//! `digest` is the SHA-256 of the decoded database. `file_sha256` is the SHA-256 of the manifest
+//! line (with its `\n`) followed by every byte after the third line, so any changed byte of the
+//! file is refused by `read_manifest`, before a byte is decoded. Bytes after the frame are
+//! refused too. Both find damage, not tampering: they sit in the same file. Nothing here names a language, format or protocol.
 
 use crate::error::StoreError;
 use camino::{Utf8Path, Utf8PathBuf};
@@ -23,6 +26,7 @@ pub const SNAPSHOT_MAGIC: &str = "katalogr-snapshot";
 pub const SNAPSHOT_FORMAT: u32 = 1;
 pub const SNAPSHOT_SUFFIX: &str = ".ksnap";
 pub const MAX_MANIFEST_BYTES: usize = 1024 * 1024;
+const FILE_SUM_PREFIX: &str = "file_sha256 ";
 
 /// File name of the decode target beside `index.redb`.
 pub const IMPORT_FILE: &str = "index.redb.import";
@@ -99,15 +103,35 @@ fn write_compact_sorted(v: &serde_json::Value, out: &mut String) {
     }
 }
 
-/// The two header lines, each ending in `\n`.
-fn header_bytes(m: &SnapshotManifest) -> Result<Vec<u8>, StoreError> {
+/// The manifest line and the checksum line of the header, each ending in `\n`. The checksum is
+/// a zero placeholder of the final width, filled in once the frame is written.
+fn header_bytes(m: &SnapshotManifest) -> Result<(Vec<u8>, Vec<u8>), StoreError> {
     let v = serde_json::to_value(m).map_err(|e| bad(e.to_string()))?;
     let mut line = String::new();
     write_compact_sorted(&v, &mut line);
     if line.len() > MAX_MANIFEST_BYTES {
         return Err(bad("the manifest is too large"));
     }
-    Ok(format!("{SNAPSHOT_MAGIC} {SNAPSHOT_FORMAT}\n{line}\n").into_bytes())
+    let first = format!("{SNAPSHOT_MAGIC} {SNAPSHOT_FORMAT}\n").into_bytes();
+    let manifest_line = format!("{line}\n").into_bytes();
+    Ok((first, manifest_line))
+}
+
+/// Passes writes through and hashes them.
+struct HashWriter<W> {
+    inner: W,
+    hash: Sha256,
+}
+
+impl<W: Write> Write for HashWriter<W> {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        let n = self.inner.write(buf)?;
+        self.hash.update(&buf[..n]);
+        Ok(n)
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.inner.flush()
+    }
 }
 
 /// Reads one `\n`-terminated line of at most `limit` bytes (the terminator excluded).
@@ -128,8 +152,16 @@ fn read_line_limited(r: &mut impl BufRead, limit: usize) -> Result<String, Store
     String::from_utf8(buf).map_err(|_| bad("the header is not text"))
 }
 
-/// Parses both header lines from `r`, leaving it at the first payload byte.
-fn parse_header(r: &mut impl BufRead) -> Result<SnapshotManifest, StoreError> {
+/// What the header says: the manifest, its line as stored (with `\n`) and the claimed
+/// `file_sha256`.
+struct Header {
+    manifest: SnapshotManifest,
+    line: Vec<u8>,
+    file_sha256: String,
+}
+
+/// Parses the three header lines from `r`, leaving it at the first payload byte.
+fn parse_header(r: &mut impl BufRead) -> Result<Header, StoreError> {
     let first = read_line_limited(r, 64)?;
     let number = first
         .strip_prefix(SNAPSHOT_MAGIC)
@@ -148,15 +180,46 @@ fn parse_header(r: &mut impl BufRead) -> Result<SnapshotManifest, StoreError> {
     if !is_digest(&m.digest) {
         return Err(bad("the digest is not 64 lower-case hex digits"));
     }
-    Ok(m)
+    let sum = read_line_limited(r, FILE_SUM_PREFIX.len() + 64)?;
+    let file_sha256 = sum
+        .strip_prefix(FILE_SUM_PREFIX)
+        .filter(|h| is_digest(h))
+        .ok_or_else(|| bad("the file checksum line is missing or malformed"))?
+        .to_string();
+    let mut line = line.into_bytes();
+    line.push(b'\n');
+    Ok(Header {
+        manifest: m,
+        line,
+        file_sha256,
+    })
 }
 
-/// Reads and checks the two header lines. Never reads the payload. Errors: `BadSnapshot` for a
-/// wrong magic, a manifest line over the limit, unparsable JSON or a bad digest shape;
-/// `SnapshotFormat` for a format above `SNAPSHOT_FORMAT`.
+/// Reads and checks the three header lines, then hashes the manifest line and the rest of the
+/// file against `file_sha256`. Decodes nothing. Errors: `BadSnapshot` for a wrong magic, a
+/// manifest line over the limit, unparsable JSON, a bad digest shape, a missing or malformed
+/// checksum line, or a checksum that does not match; `SnapshotFormat` for a format above
+/// `SNAPSHOT_FORMAT`.
 pub fn read_manifest(path: &Utf8Path) -> Result<SnapshotManifest, StoreError> {
     let f = File::open(path).map_err(|e| StoreError::io(path, e))?;
-    parse_header(&mut BufReader::new(f))
+    let mut r = BufReader::with_capacity(CHUNK, f);
+    let h = parse_header(&mut r)?;
+    let mut hash = Sha256::new();
+    hash.update(&h.line);
+    let mut buf = vec![0u8; CHUNK];
+    loop {
+        let n = r.read(&mut buf).map_err(|e| StoreError::io(path, e))?;
+        if n == 0 {
+            break;
+        }
+        hash.update(&buf[..n]);
+    }
+    if hex(&hash.finalize()) != h.file_sha256 {
+        return Err(bad(
+            "snapshot file is damaged: its checksum does not match (it was changed after export)",
+        ));
+    }
+    Ok(h.manifest)
 }
 
 #[cfg(unix)]
@@ -191,7 +254,7 @@ pub fn write_snapshot(
     let (digest, bytes) = hash_file(database)?;
     manifest.digest = digest;
     manifest.bytes = bytes;
-    let header = header_bytes(&manifest)?;
+    let (first, manifest_line) = header_bytes(&manifest)?;
     let tmp = Utf8PathBuf::from(format!("{out}.part"));
     let result = (|| -> Result<(), StoreError> {
         let mut src = BufReader::with_capacity(
@@ -200,15 +263,37 @@ pub fn write_snapshot(
         );
         let file = File::create(&tmp).map_err(|e| StoreError::io(&tmp, e))?;
         let mut w = BufWriter::with_capacity(CHUNK, file);
-        w.write_all(&header).map_err(|e| StoreError::io(&tmp, e))?;
-        let mut enc = FrameEncoder::new(w);
+        w.write_all(&first).map_err(|e| StoreError::io(&tmp, e))?;
+        w.write_all(&manifest_line)
+            .map_err(|e| StoreError::io(&tmp, e))?;
+        // The checksum line has its final width; its digits are written after the frame.
+        w.write_all(FILE_SUM_PREFIX.as_bytes())
+            .map_err(|e| StoreError::io(&tmp, e))?;
+        let sum_at = (first.len() + manifest_line.len() + FILE_SUM_PREFIX.len()) as u64;
+        w.write_all(&[b'0'; 64])
+            .and_then(|()| w.write_all(b"\n"))
+            .map_err(|e| StoreError::io(&tmp, e))?;
+        let mut hw = HashWriter {
+            inner: w,
+            hash: Sha256::new(),
+        };
+        hw.hash.update(&manifest_line);
+        let mut enc = FrameEncoder::new(hw);
         std::io::copy(&mut src, &mut enc).map_err(|e| StoreError::io(&tmp, e))?;
-        let w = enc
+        let hw = enc
             .finish()
             .map_err(|e| bad(format!("compression failed: {e}")))?;
-        let file = w
+        let sum = hex(&hw.hash.finalize());
+        let mut file = hw
+            .inner
             .into_inner()
             .map_err(|e| StoreError::io(&tmp, e.into_error()))?;
+        {
+            use std::io::{Seek, SeekFrom};
+            file.seek(SeekFrom::Start(sum_at))
+                .and_then(|_| file.write_all(sum.as_bytes()))
+                .map_err(|e| StoreError::io(&tmp, e))?;
+        }
         file.sync_all().map_err(|e| StoreError::io(&tmp, e))?;
         std::fs::rename(&tmp, out).map_err(|e| StoreError::io(out, e))?;
         if let Some(dir) = out.parent() {
@@ -262,7 +347,8 @@ fn decode_inner(
     let f = File::open(path).map_err(|e| StoreError::io(path, e))?;
     let mut reader = BufReader::with_capacity(CHUNK, f);
     // The payload follows the header this manifest came from; the header is read again so a
-    // manifest handed in by a caller cannot move the start.
+    // manifest handed in by a caller cannot move the start. The file checksum is
+    // `read_manifest`'s to check, which every caller has run.
     parse_header(&mut reader)?;
     let mut dec = FrameDecoder::new(reader);
     let out = File::create(target).map_err(|e| StoreError::io(target, e))?;
@@ -287,6 +373,22 @@ fn decode_inner(
     }
     if total != manifest.bytes {
         return Err(bad("the payload is shorter than the manifest says"));
+    }
+    let mut rest = dec.into_inner();
+    let mut extra = 0u64;
+    loop {
+        let n = rest
+            .read(&mut buf)
+            .map_err(|e| bad(format!("damaged payload: {e}")))?;
+        if n == 0 {
+            break;
+        }
+        extra += n as u64;
+    }
+    if extra > 0 {
+        return Err(bad(format!(
+            "snapshot file has {extra} bytes after its data"
+        )));
     }
     if hex(&h.finalize()) != manifest.digest {
         return Err(bad("the digest does not match the payload"));
