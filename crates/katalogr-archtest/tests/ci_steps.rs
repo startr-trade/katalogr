@@ -135,4 +135,74 @@ mod ci {
             }
         }
     }
+
+    /// FEAT-112 R-1. CI installs and runs actionlint, and `make lint` runs it when present.
+    #[test]
+    fn actionlint_runs() {
+        let text = workflow("ci.yml");
+        assert!(
+            text.lines().any(|l| l.trim() == "run: actionlint -color"),
+            "ci.yml has no `run: actionlint -color`"
+        );
+        assert!(
+            text.lines().any(|l| l.contains("actionlint@")),
+            "ci.yml has no install step naming `actionlint@`"
+        );
+        let make =
+            std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../Makefile"))
+                .expect("Makefile");
+        let mut lint = make.lines().skip_while(|l| !l.starts_with("lint:"));
+        lint.next();
+        let recipe: Vec<&str> = lint.take_while(|l| l.starts_with('\t')).collect();
+        assert!(
+            recipe.iter().any(|l| l.contains("actionlint")),
+            "the Makefile `lint` recipe does not mention actionlint"
+        );
+    }
+
+    /// FEAT-112 R-2. release.yml's build job caches compiled dependencies per target.
+    #[test]
+    fn release_build_cached() {
+        let text = workflow("release.yml");
+        let lines = job_lines(&text, "build");
+        let cached = steps(&lines).into_iter().any(|s| {
+            let sha = s.iter().any(|l| {
+                l.split_once("Swatinem/rust-cache@").is_some_and(|(_, r)| {
+                    r.len() >= 40 && r[..40].chars().all(|c| c.is_ascii_hexdigit())
+                })
+            });
+            sha && s
+                .iter()
+                .any(|l| l.trim().starts_with("key:") && l.contains("matrix.target"))
+        });
+        assert!(
+            cached,
+            "release.yml build job has no per-target rust-cache step"
+        );
+    }
+
+    /// FEAT-112 R-3. No compiler wrapper is committed: builds need only a stock toolchain.
+    #[test]
+    fn no_wrapper_in_repo() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let mut files = vec![root.join(".cargo/config.toml"), root.join("Makefile")];
+        for e in std::fs::read_dir(root.join("crates")).expect("crates") {
+            files.push(e.expect("entry").path().join("Cargo.toml"));
+        }
+        files.push(root.join("Cargo.toml"));
+        for f in files.iter().filter(|f| f.exists()) {
+            let text = std::fs::read_to_string(f).expect("file");
+            assert!(
+                !text.contains("rustc-wrapper") && !text.contains("RUSTC_WRAPPER"),
+                "{} sets a compiler wrapper",
+                f.display()
+            );
+        }
+        for (name, text) in workflows() {
+            assert!(
+                !text.contains("rustc-wrapper") && !text.contains("RUSTC_WRAPPER"),
+                "{name} sets a compiler wrapper"
+            );
+        }
+    }
 }

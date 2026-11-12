@@ -40,6 +40,12 @@ jobs:
         run: |
           v="$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -n1)"
           sh scripts/release-notes-check.sh "v$v"
+      # FEAT-112: the workflow files themselves are linted.
+      - uses: taiki-e/install-action@1e29709c0ec63babbe8f266397a465f29a825f91 # v2.87.31
+        with:
+          tool: actionlint@1.7.12
+      - name: actionlint
+        run: actionlint -color
 
   clippy:
     runs-on: ubuntu-24.04

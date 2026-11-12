@@ -46,6 +46,7 @@ fmt: ## cargo fmt --check.
 lint: ## Both clippy runs from ci.yml (workspace; katalogr without default features).
 	$(HEAVY) cargo clippy --workspace --all-targets --locked -j$(CARGO_JOBS) -- -D warnings
 	$(HEAVY) cargo clippy -p katalogr --no-default-features --all-targets --locked -j$(CARGO_JOBS) -- -D warnings
+	@if command -v actionlint >/dev/null 2>&1; then actionlint; else echo "actionlint: not installed, skipped (CI runs it)"; fi
 
 cross: ## Clippy over every test for Windows and macOS (compiles, does not link or run).
 	@for t in $(TARGETS); do \
