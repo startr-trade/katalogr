@@ -80,9 +80,9 @@ payload verified
 
 - **export** writes a text header (the positions, the facts version, the cache schema, the digest)
   then the compressed database. It refuses (exit 5) when the index is not current, when a repository
-  is not at a clean commit, or when the file would be tracked by git. In our test, a project with a
-  second repository (the board) that was not the marked one was refused with
-  `repo board has no recorded position`; a project with one repository exported.
+  is not at a clean commit, or when the file would be tracked by git. Every repository of the
+  project is recorded at the commit the index holds it at, so a project with several repositories
+  exports from any checkout.
 - **show** prints the manifest and needs no project, except with `--verify`, which also checks the
   payload against the digest.
 - **import** installs the file as the project's base index, atomically, after checking the schema,

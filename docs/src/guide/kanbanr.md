@@ -202,8 +202,9 @@ $ katalogr dangling --kind verified-by
 verified-by  board:projects/ledger/…#item:FEAT-7/req:R-1  projects/ledger/…/FEAT-7.yaml:11  wants test-name:ledger::tests::records_a_payment
 ```
 
-When the board changes, run `katalogr index --full` to read it again. In our test, a plain
-`katalogr index` did not pick up an edit made in the board repository.
+When the board changes, commit it and run `katalogr index`: a checkout reads the board at its
+committed state, so a plain `index` picks up the new commit. Uncommitted edits in the board
+repository are not read from another repository's checkout, not even with `--full`.
 
 ## 5. The contract
 
