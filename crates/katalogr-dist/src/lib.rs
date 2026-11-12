@@ -828,8 +828,35 @@ impl Katalogr {
             );
         }
         self.pin_positions(&mut engine, manifest_kind.as_ref())?;
+        self.follow_pins(&mut engine, manifest_kind.as_ref());
         self.recorded_only(&mut engine)?;
         self.configure(engine)
+    }
+
+    /// FEAT-118. In a checkout layer the rows of every pinned repo follow its pin: the files are
+    /// read from git at the pin, never from the disk (not even for `index --full`), and reconcile
+    /// catches the rows up when the base moves. The base and commit contexts are left alone.
+    fn follow_pins(&self, engine: &mut Engine, manifest: Option<&katalogr_store::ContextManifest>) {
+        if !manifest.is_some_and(|m| m.kind == katalogr_store::ContextKind::Checkout) {
+            return;
+        }
+        let pinned: Vec<(String, String)> = engine
+            .roots()
+            .keys()
+            .filter_map(|r| engine.pinned_commit(r).map(|c| (r.clone(), c.to_string())))
+            .collect();
+        for (repo, commit) in pinned {
+            if let Some(root) = engine.roots().get(&repo).cloned() {
+                engine.set_source(
+                    &repo,
+                    katalogr_engine::FileSource::Commit {
+                        repo_root: root,
+                        commit,
+                    },
+                );
+            }
+        }
+        engine.set_pin_rows_follow(true);
     }
 
     /// FEAT-097 R-13. A repo the project lists, with no root here and a recorded position (an

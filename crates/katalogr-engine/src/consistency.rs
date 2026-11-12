@@ -130,6 +130,10 @@ pub struct Engine {
     /// Repos whose position is fixed by the context, not read from a checkout: the commit the
     /// context reflects (`None`: no commit known). Such a repo is never reconciled.
     pins: BTreeMap<String, Option<String>>,
+    /// FEAT-118. Set for a checkout layer: the rows of a pinned repo follow its pin, so reconcile
+    /// queues what differs between the recorded position and the pin, and settle records the pin.
+    /// Off for the base (its rows follow `advance_base`) and for commit contexts.
+    pin_rows_follow: bool,
     /// Repos with no root here that hold a recorded position (an imported snapshot, FEAT-097):
     /// they answer from their rows, are never reconciled, and count as exact at that position.
     recorded_only: BTreeSet<String>,
@@ -211,6 +215,7 @@ impl Engine {
             roots,
             sources,
             pins: BTreeMap::new(),
+            pin_rows_follow: false,
             recorded_only: BTreeSet::new(),
             filters: BTreeMap::new(),
             builtin_profiles: Vec::new(),
@@ -235,6 +240,7 @@ impl Engine {
             registry,
             sources,
             pins,
+            pin_rows_follow,
             recorded_only,
             stitcher,
             roots,
@@ -252,6 +258,7 @@ impl Engine {
                 registry,
                 sources,
                 pins,
+                pin_rows_follow,
                 recorded_only,
                 stitcher,
                 roots,
@@ -324,6 +331,16 @@ impl Engine {
     /// pinned repo is not read from disk and nothing is queued for it.
     pub fn set_pinned_position(&mut self, repo: &str, commit: Option<String>) {
         self.pins.insert(repo.to_string(), commit);
+    }
+
+    /// The commit `repo` is pinned to, if it is pinned with one.
+    pub fn pinned_commit(&self, repo: &str) -> Option<&str> {
+        self.pins.get(repo).and_then(|c| c.as_deref())
+    }
+
+    /// FEAT-118. Make the rows of the pinned repos follow their pins (a checkout layer).
+    pub fn set_pin_rows_follow(&mut self, on: bool) {
+        self.pin_rows_follow = on;
     }
 
     /// FEAT-097. Repos with no root here that hold a recorded position, and so answer from
@@ -667,8 +684,21 @@ impl Engine {
         let snap = self.cache.read()?;
         let mut before = BTreeMap::new();
         for repo in self.roots.keys() {
-            if self.pins.contains_key(repo) {
+            if let Some(pin) = self.pins.get(repo) {
                 if let Ok(s) = self.state_of(repo) {
+                    if self.pin_rows_follow
+                        && let Some(pin) = pin
+                    {
+                        let recorded = recorded_position(&snap, repo)?;
+                        if recorded.as_ref().and_then(|p| p.commit.as_deref()) != Some(pin) {
+                            for ev in self.events_for_pin(repo, recorded.as_ref(), pin) {
+                                if ev.kind == EventKind::Rescan && self.rescan_waiting(repo)? {
+                                    continue;
+                                }
+                                self.inbox().append(&ev)?;
+                            }
+                        }
+                    }
                     before.insert(repo.clone(), s);
                 }
                 continue;
@@ -718,6 +748,43 @@ impl Engine {
             }
         }
         Ok(false)
+    }
+
+    /// FEAT-118. The events that bring a pinned repo's rows from the `recorded` position to its
+    /// `pin`, from the two commits alone (the disk is never consulted). A rescan when there is no
+    /// record or the commits cannot be compared.
+    fn events_for_pin(
+        &self,
+        repo: &str,
+        recorded: Option<&PositionRef>,
+        pin: &str,
+    ) -> Vec<NewEvent> {
+        let rescan = || vec![NewEvent::rescan(repo)];
+        let Some(from) = recorded.and_then(|p| p.commit.as_deref()) else {
+            return rescan();
+        };
+        let root = self.roots[repo].as_std_path();
+        let Ok(changes) = crate::scan::changed_paths(root, &format!("{from}..{pin}")) else {
+            return rescan();
+        };
+        if changes.len() > CHANGED_CAP {
+            return rescan();
+        }
+        use crate::scan::PathChange as C;
+        let mut out = Vec::new();
+        for c in changes {
+            match c {
+                C::Added(p) | C::Modified(p) => {
+                    out.push(NewEvent::file(repo, &p, EventKind::Changed));
+                }
+                C::Deleted(p) => out.push(NewEvent::file(repo, &p, EventKind::Deleted)),
+                C::Renamed { from, to } => {
+                    out.push(NewEvent::file(repo, &from, EventKind::Deleted));
+                    out.push(NewEvent::file(repo, &to, EventKind::Changed));
+                }
+            }
+        }
+        out
     }
 
     /// The events that bring the index from the `recorded` position to `now`: the paths that
@@ -829,11 +896,30 @@ impl Engine {
         if after.len() != self.roots.len() {
             return Ok(not_exact(recorded));
         }
-        let changed: Vec<&WorkingState> = after
-            .values()
-            .filter(|s| !self.pins.contains_key(&s.position.repo))
-            .filter(|s| recorded.get(&s.position.repo) != Some(&s.position))
-            .collect();
+        // A pinned repo's `recorded` entry is its pin, so the stored record is read to tell
+        // whether the pin was already written (FEAT-118 R-3).
+        let raw = if self.pin_rows_follow {
+            Some(self.cache.read()?)
+        } else {
+            None
+        };
+        let mut changed: Vec<&WorkingState> = Vec::new();
+        for s in after.values() {
+            let repo = &s.position.repo;
+            let differs = if !self.pins.contains_key(repo) {
+                recorded.get(repo) != Some(&s.position)
+            } else if let Some(raw) = &raw
+                && s.position.commit.is_some()
+            {
+                recorded_position(raw, repo)?.as_ref() != Some(&s.position)
+            } else {
+                false
+            };
+            if differs {
+                changed.push(s);
+            }
+        }
+        drop(raw);
         // A read-only handle cannot record; a later read through a writer does.
         if !changed.is_empty()
             && !self.cache.is_reader()
