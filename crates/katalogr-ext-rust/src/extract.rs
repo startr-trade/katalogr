@@ -14,7 +14,7 @@ use katalogr_model::{
 };
 use ra_ap_syntax::{
     AstNode, Edition, SourceFile, SyntaxElement, SyntaxKind, SyntaxNode, TextRange,
-    ast::{self, HasAttrs, HasModuleItem},
+    ast::{self, HasAttrs, HasModuleItem, HasName},
 };
 use std::collections::{BTreeMap, HashMap};
 
@@ -106,6 +106,13 @@ pub(crate) struct Builder<'a> {
     pub ranges: HashMap<TextRange, Id>,
     /// Calls that pass a token-like string, by the symbol whose body holds them (FEAT-014).
     pub str_calls: BTreeMap<Id, Vec<StrCall>>,
+    /// Byte offset added to every span while calls inside macro arguments are collected from a
+    /// re-parsed segment (FEAT-120); 0 otherwise.
+    pub span_base: usize,
+    /// Nesting depth of macro arguments being re-parsed (FEAT-120).
+    pub macro_depth: u32,
+    /// Names of the `macro_rules!` defined in this file, collected from the whole file (FEAT-120).
+    pub local_macros: std::collections::BTreeSet<String>,
     /// Names of the types (structs, enums, unions, traits, aliases) declared anywhere in the
     /// file: the unqualified names a field may refer to in its own project (FEAT-101).
     pub type_names: std::collections::BTreeSet<String>,
@@ -190,6 +197,9 @@ pub fn extract_full(input: &ExtractInput) -> Result<Extraction, ExtractError> {
         trait_impl: false,
         ranges: HashMap::new(),
         str_calls: BTreeMap::new(),
+        span_base: 0,
+        macro_depth: 0,
+        local_macros: std::collections::BTreeSet::new(),
         type_names: std::collections::BTreeSet::new(),
     };
 
@@ -210,6 +220,12 @@ pub fn extract_full(input: &ExtractInput) -> Result<Extraction, ExtractError> {
     // Syntax errors do not stop the walk; `ra_ap_syntax` keeps the tree it could build.
     let parse = SourceFile::parse(text, Edition::Edition2021);
     let tree = parse.tree();
+    b.local_macros = tree
+        .syntax()
+        .descendants()
+        .filter_map(ast::MacroRules::cast)
+        .filter_map(|m| m.name().map(|n| n.text().to_string()))
+        .collect();
     let inner = attr_texts(tree.attrs());
     if inner
         .iter()
@@ -369,12 +385,13 @@ impl Builder<'_> {
 
     pub(crate) fn span_of(&self, node: &SyntaxNode) -> Span {
         let (s, e) = trimmed(node);
-        self.lines.span(s, e)
+        self.lines.span(s + self.span_base, e + self.span_base)
     }
 
     /// The span of a byte range of the source.
     pub(crate) fn span_of_range(&self, start: usize, end: usize) -> Span {
-        self.lines.span(start, end)
+        self.lines
+            .span(start + self.span_base, end + self.span_base)
     }
 
     pub(crate) fn add_ref(
