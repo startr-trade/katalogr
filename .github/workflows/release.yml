@@ -81,6 +81,11 @@ jobs:
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
           toolchain: 1.99.0
+      # FEAT-112: compiled dependencies are kept per target; only tag runs execute this workflow.
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          key: release-${{ matrix.target }}
+          save-if: true
       - name: add target
         shell: bash
         run: rustup target add "$TARGET"
@@ -157,7 +162,7 @@ jobs:
           done
           test -f "katalogr-${GITHUB_REF_NAME}-x86_64-pc-windows-msvc.zip" || { echo "missing archive for windows"; exit 1; }
           test -f "web-bundle-${GITHUB_REF_NAME}.tar.gz" || { echo "missing web bundle"; exit 1; }
-          test "$(ls katalogr-* | wc -l)" -eq 5 || { echo "unexpected extra archives"; exit 1; }
+          test "$(printf '%s\n' katalogr-* | wc -l)" -eq 5 || { echo "unexpected extra archives"; exit 1; }
       # FEAT-114: the release page opens with the notes written for it, links made absolute.
       - name: The release notes, for the release page
         shell: bash
