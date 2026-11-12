@@ -15,6 +15,9 @@ use std::time::{Duration, Instant};
 /// The repository name every fixture is indexed under.
 const REPO: &str = "fx";
 
+/// `(from, kind, to)` of a link.
+type LinkKey = (String, String, String);
+
 /// The canonical graph of one indexed fixture, parsed.
 struct Graph {
     symbols: BTreeMap<String, Value>,
@@ -26,6 +29,8 @@ struct Graph {
     errors: BTreeMap<String, Vec<ErrorRow>>,
     /// Symbol names in `map` order (rank descending).
     map: Vec<(String, f64)>,
+    /// `(from, kind, to)` with the spans of every such link, as `(line, col, end line, end col)`.
+    link_spans: BTreeMap<LinkKey, Vec<(u64, u64, u64, u64)>>,
 }
 
 impl Graph {
@@ -149,6 +154,7 @@ fn parse_graph(text: String) -> Graph {
         map: Vec::new(),
         symbols: BTreeMap::new(),
         links: BTreeSet::new(),
+        link_spans: BTreeMap::new(),
         artifacts: BTreeMap::new(),
         text: text.clone(),
     };
@@ -160,6 +166,12 @@ fn parse_graph(text: String) -> Graph {
         } else if v["node"] == "artifact" {
             g.artifacts.insert(s("name"), v);
         } else if v["link"] == true {
+            if v["span"].is_object() {
+                g.link_spans
+                    .entry((s("from"), s("kind"), s("to")))
+                    .or_default()
+                    .push(span(&v));
+            }
             g.links.insert((
                 s("from"),
                 s("kind"),
@@ -614,7 +626,8 @@ mod rust {
 
     #[test]
     fn fields_revision_salt() {
-        assert!(RustExtractor.revision_salt().ends_with(";fields-1"));
+        assert!(RustExtractor.revision_salt().contains(";fields-1"));
+        assert!(RustExtractor.revision_salt().ends_with(";macros-1"));
         assert!(RustExtractor.patterns().contains(&"type-fields"));
     }
 
@@ -769,6 +782,134 @@ mod rust {
         assert!(g.has_link(run, "calls", "src/lib.rs#impl:Counter/fn:bump", "inferred"));
         assert!(g.has_link(run, "calls", "src/lib.rs#macro:trace", "inferred"));
         assert!(!g.has_link(run, "calls", "src/lib.rs#impl:Counter/fn:bump", "extracted"));
+    }
+
+    const MC: &str = "src/lib.rs#";
+
+    fn mc_test(n: &str) -> String {
+        format!("{MC}mod:tests/fn:{n}")
+    }
+
+    #[test]
+    fn calls_in_assert_macros_linked() {
+        let g = index_case("macro-calls");
+        assert_expected("macro-calls", &g);
+        assert!(g.has_link(
+            &mc_test("t_assert_eq"),
+            "calls",
+            "src/lib.rs#fn:record",
+            "extracted"
+        ));
+        assert!(g.has_link(
+            &mc_test("t_assert"),
+            "calls",
+            "src/lib.rs#fn:second",
+            "extracted"
+        ));
+        // A method call inside an assertion is matched by name.
+        assert!(g.has_link(
+            &mc_test("t_method"),
+            "calls",
+            "src/lib.rs#impl:Ledger/fn:settle",
+            "inferred"
+        ));
+    }
+
+    #[test]
+    fn calls_in_std_macros_linked() {
+        let g = index_case("macro-calls");
+        for (t, f) in [
+            ("t_vec", "third"),
+            ("t_format", "fourth"),
+            ("t_println", "fifth"),
+            ("t_matches", "sixth"),
+            ("t_dbg", "seventh"),
+        ] {
+            assert!(
+                g.has_link(
+                    &mc_test(t),
+                    "calls",
+                    &format!("src/lib.rs#fn:{f}"),
+                    "extracted"
+                ),
+                "{t} -> {f}"
+            );
+        }
+    }
+
+    #[test]
+    fn calls_in_nested_macros_linked() {
+        let g = index_case("macro-calls");
+        assert!(g.has_link(
+            &mc_test("t_nested"),
+            "calls",
+            "src/lib.rs#fn:eighth",
+            "extracted"
+        ));
+    }
+
+    #[test]
+    fn macro_call_span_offset_correct() {
+        let g = index_case("macro-calls");
+        let key =
+            |t: &str, f: &str| { (mc_test(t), "calls".to_string(), format!("{MC}fn:{f}")) }.clone();
+        let at = |t: &str, f: &str| {
+            let k = key(t, f);
+            let full = |n: &str| format!("{REPO}:{n}");
+            g.link_spans[&(full(&k.0), k.1, full(&k.2))].clone()
+        };
+        let text = std::fs::read_to_string(fixtures_dir().join("macro-calls/src/lib.rs")).unwrap();
+        // Each reported span starts at the callee's name in the file.
+        for (t, f) in [
+            ("t_assert_eq", "record"),
+            ("t_vec", "third"),
+            ("t_nested", "eighth"),
+            ("t_multiline", "spread"),
+        ] {
+            let spans = at(t, f);
+            assert_eq!(spans.len(), 1, "{t}");
+            let (line, col, _, _) = spans[0];
+            let l = text.lines().nth(line as usize - 1).unwrap();
+            let rest: String = l.chars().skip(col as usize - 1).collect();
+            assert!(rest.starts_with(f), "{t}: line {line} col {col}: {l:?}");
+        }
+    }
+
+    #[test]
+    fn calls_in_user_macro_policy() {
+        let g = index_case("macro-calls");
+        let no_call_to = |from: &str, to: &str| {
+            assert!(
+                !g.links
+                    .iter()
+                    .any(|l| l.1 == "calls" && l.0.ends_with(from) && l.2.ends_with(to)),
+                "{from} -> {to}"
+            );
+        };
+        // A user macro's arguments are not read, but the macro itself is linked.
+        no_call_to("fn:t_user_macro", "fn:wrapped");
+        assert!(g.has_link(
+            &mc_test("t_user_macro"),
+            "calls",
+            "src/lib.rs#macro:wrap",
+            "inferred"
+        ));
+        // A local `assert_eq` shadows the standard one.
+        no_call_to("fn:uses_shadow", "fn:hidden");
+    }
+
+    #[test]
+    fn unparsable_macro_args_skipped() {
+        let g = index_case("macro-calls");
+        assert!(g.errors.is_empty(), "{:?}", g.errors);
+        for f in ["second", "json_arg", "arrow_arg"] {
+            assert!(
+                !g.links.iter().any(|l| l.0.ends_with("fn:t_unparsable")
+                    && l.1 == "calls"
+                    && l.2.ends_with(&format!("fn:{f}"))),
+                "{f}"
+            );
+        }
     }
 
     #[test]

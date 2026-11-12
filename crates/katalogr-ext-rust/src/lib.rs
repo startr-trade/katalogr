@@ -72,9 +72,10 @@ impl Extractor for RustExtractor {
     /// facts (FEAT-030); `;tests-1` adds the `test` fact and the `test-name`
     /// exports (FEAT-063); `;rest-1` adds the `str_calls` fact (FEAT-014); `;rest-2` compacts it (per-file
     /// candidate table, start-only positions); `;rest-3` packs the position in `pos`; `;fields-1` adds the `field` symbols of structs,
-    /// unions and enum variants (FEAT-101).
+    /// unions and enum variants (FEAT-101); `;macros-1` links the calls in the arguments of std macros
+    /// (FEAT-120).
     fn revision_salt(&self) -> &'static str {
-        "rust-extract-3;tests-1;rest-1;rest-2;rest-3;fields-1"
+        "rust-extract-3;tests-1;rest-1;rest-2;rest-3;fields-1;macros-1"
     }
 
     /// The [`WorkspaceContext`] as compact JSON with sorted keys and vectors.

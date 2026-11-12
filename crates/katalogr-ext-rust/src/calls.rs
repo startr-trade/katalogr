@@ -4,7 +4,36 @@
 use crate::bindings::segments_of;
 use crate::extract::{Builder, NS_MACRO, NS_METHOD};
 use katalogr_model::{Confidence, ExportKey, Id};
-use ra_ap_syntax::{AstNode, SyntaxNode, WalkEvent, ast};
+use ra_ap_syntax::{AstNode, Edition, NodeOrToken, SyntaxKind, SyntaxNode, WalkEvent, ast};
+
+/// Standard-library macros whose arguments are comma- or semicolon-separated expressions
+/// (FEAT-120). Calls in their arguments are linked like calls outside a macro.
+const STD_ARG_MACROS: &[&str] = &[
+    "assert",
+    "assert_eq",
+    "assert_ne",
+    "debug_assert",
+    "debug_assert_eq",
+    "debug_assert_ne",
+    "dbg",
+    "eprint",
+    "eprintln",
+    "format",
+    "format_args",
+    "matches",
+    "panic",
+    "print",
+    "println",
+    "todo",
+    "unimplemented",
+    "unreachable",
+    "vec",
+    "write",
+    "writeln",
+];
+
+/// How many macros may nest before their arguments are no longer read.
+const MACRO_ARG_DEPTH: u32 = 4;
 
 /// Common standard-library method names. A method call with one of these names yields no
 /// candidate: it would link to any workspace method of the same name (FEAT-053, FEAT-058).
@@ -79,8 +108,10 @@ const STD_METHODS: &[&str] = &[
 ];
 
 impl Builder<'_> {
-    /// Every call below `node` becomes a reference from the symbol `from`. Calls inside macro
-    /// arguments are token trees, not expressions, and are not seen.
+    /// Every call below `node` becomes a reference from the symbol `from`. The arguments of
+    /// the macros in [`STD_ARG_MACROS`] are token trees: each comma- or semicolon-separated
+    /// segment is re-parsed as an expression and walked too (FEAT-120). Other macros'
+    /// arguments are not seen.
     pub(crate) fn collect_calls(&mut self, node: &SyntaxNode, from: Id) {
         for ev in node.preorder() {
             let WalkEvent::Enter(n) = ev else { continue };
@@ -126,8 +157,66 @@ impl Builder<'_> {
                 }];
                 let span = self.span_of(path.syntax());
                 self.add_ref(from, "calls", span, cands, Confidence::Inferred);
+                if let Some(name) = segments_of(&path).and_then(|s| s.last().cloned()) {
+                    self.macro_args(&mac, &name, from);
+                }
             }
         }
+    }
+
+    /// Calls in the arguments of `mac` when it is an unshadowed standard macro (FEAT-120).
+    fn macro_args(&mut self, mac: &ast::MacroCall, name: &str, from: Id) {
+        if self.macro_depth >= MACRO_ARG_DEPTH || !STD_ARG_MACROS.contains(&name) {
+            return;
+        }
+        let Some(tt) = mac.token_tree() else { return };
+        if self.defines_macro(name) {
+            return;
+        }
+        let mut elems: Vec<_> = tt.syntax().children_with_tokens().collect();
+        if elems.len() < 2 {
+            return;
+        }
+        elems.pop();
+        elems.remove(0);
+        let mut segments: Vec<Vec<_>> = vec![Vec::new()];
+        for e in elems {
+            let sep = matches!(&e, NodeOrToken::Token(t)
+                if matches!(t.kind(), SyntaxKind::COMMA | SyntaxKind::SEMICOLON));
+            if sep {
+                segments.push(Vec::new());
+            } else if let Some(last) = segments.last_mut() {
+                last.push(e);
+            }
+        }
+        for seg in segments {
+            let is_trivia = |e: &ra_ap_syntax::SyntaxElement| {
+                matches!(e.kind(), SyntaxKind::WHITESPACE | SyntaxKind::COMMENT)
+            };
+            let Some(first) = seg.iter().position(|e| !is_trivia(e)) else {
+                continue;
+            };
+            let last = seg.iter().rposition(|e| !is_trivia(e)).unwrap_or(first);
+            let text: String = seg[first..=last].iter().map(|e| e.to_string()).collect();
+            let local: usize = seg[first].text_range().start().into();
+            let parse = ast::Expr::parse(&text, Edition::Edition2021);
+            let root = parse.syntax_node();
+            if !parse.errors().is_empty() || ast::Expr::cast(root.clone()).is_none() {
+                continue;
+            }
+            let saved = self.span_base;
+            self.span_base = saved + local;
+            self.macro_depth += 1;
+            self.collect_calls(&root, from);
+            self.macro_depth -= 1;
+            self.span_base = saved;
+        }
+    }
+
+    /// The file defines a `macro_rules!` called `name`, so a call of `name!` is not the
+    /// standard macro. The names are collected once from the whole file in `extract`.
+    fn defines_macro(&self, name: &str) -> bool {
+        self.local_macros.contains(name)
     }
 }
 

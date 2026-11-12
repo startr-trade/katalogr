@@ -24,8 +24,8 @@
     "salt": "openapi-extract-2"
   },
   "rust": {
-    "digest": "00bc9fe5dcf92f02e9ba370c1c2339c18d8d7155637402072bfe420bf90917e9",
-    "salt": "rust-extract-3;tests-1;rest-1;rest-2;rest-3;fields-1"
+    "digest": "33472e9412fa0431a44570fbf559fa41036f67d1b3f94ce1d19d0716a14cef06",
+    "salt": "rust-extract-3;tests-1;rest-1;rest-2;rest-3;fields-1;macros-1"
   },
   "sql": {
     "digest": "0b2ae8635c26c86e60cba2a6a5ade2e1bbeb67fd6a8813d0101ea104f4cd6005",

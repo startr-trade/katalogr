@@ -1,0 +1,11 @@
+mode: subset
+symbols:
+  - "fx:src/lib.rs#fn:record"
+  - "fx:src/lib.rs#impl:Ledger/fn:settle"
+  - "fx:src/lib.rs#macro:wrap"
+  - "fx:src/shadow.rs#fn:hidden"
+links:
+  - from: fx:src/lib.rs#mod:tests/fn:t_assert_eq
+    kind: calls
+    to: fx:src/lib.rs#fn:record
+    confidence: extracted
