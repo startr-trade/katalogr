@@ -2641,6 +2641,66 @@ mod position {
             .collect();
         assert_eq!(repos, ["app", "other", "plain"], "sorted by repo");
     }
+
+    /// FEAT-117, FEAT-118. An edit committed in the second repo is seen by a plain `index` run
+    /// from the first, the position stays exact, and `snapshot export` records both repos.
+    #[test]
+    fn two_repo_snapshot_export_and_index() {
+        let tmp = tempfile::tempdir().unwrap();
+        let t = tmp.path();
+        let kx = t.join("kx");
+        let (app, other) = (t.join("app"), t.join("other"));
+        for (d, f, text) in [
+            (&app, "a.tx", "sym fn Alpha\n"),
+            (&other, "b.tx", "sym fn Beta\n"),
+        ] {
+            std::fs::create_dir_all(d).unwrap();
+            std::fs::write(d.join(f), text).unwrap();
+            git(d, &["init", "-q", "-b", "main"]);
+            git(d, &["config", "user.name", "Test"]);
+            git(d, &["config", "user.email", "test@example.com"]);
+            git(d, &["config", "commit.gpgsign", "false"]);
+            git(d, &["add", "-A"]);
+            git(d, &["commit", "-q", "-m", "c1"]);
+        }
+        ok(&app, &["kindex", "init", kx.to_str().unwrap()]);
+        let specs: Vec<String> = [("app", &app), ("other", &other)]
+            .iter()
+            .map(|(n, p)| format!("{n}={}", p.display()))
+            .collect();
+        let mut args = vec!["--kindex", kx.to_str().unwrap(), "project", "init", "demo"];
+        for s in &specs {
+            args.extend(["--repo", s]);
+        }
+        args.push("--mark");
+        ok(&app, &args);
+        ok(&app, &["index"]);
+
+        // Commit an edit in the second repo, then index from the first.
+        std::fs::write(other.join("c.tx"), "sym fn Gamma\n").unwrap();
+        git(&other, &["add", "-A"]);
+        git(&other, &["commit", "-q", "-m", "c2"]);
+        ok(&app, &["index"]);
+
+        let v = json(&app, &["--json", "find", "Gamma"]);
+        assert_eq!(v["exact"], true, "{v}");
+        let other_pos = v["positions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|p| p["repo"] == "other")
+            .unwrap_or_else(|| panic!("no position for other: {v}"));
+        assert_eq!(other_pos["commit"], head(&other).as_str());
+        let (code, _, _) = run_raw(&app, &["--json", "find", "Gamma"]);
+        assert_eq!(code, 0, "the committed edit is found");
+
+        let out = t.join("g.ksnap");
+        let msg = ok(
+            &app,
+            &["snapshot", "export", "--out", out.to_str().unwrap()],
+        );
+        assert!(msg.contains("2 repos"), "{msg}");
+    }
 }
 
 mod view {

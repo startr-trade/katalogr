@@ -333,6 +333,11 @@ impl Engine {
         self.pins.insert(repo.to_string(), commit);
     }
 
+    /// True when the context fixes `repo`'s position (a pin), whether or not it names a commit.
+    pub fn is_pinned(&self, repo: &str) -> bool {
+        self.pins.contains_key(repo)
+    }
+
     /// The commit `repo` is pinned to, if it is pinned with one.
     pub fn pinned_commit(&self, repo: &str) -> Option<&str> {
         self.pins.get(repo).and_then(|c| c.as_deref())
@@ -643,6 +648,23 @@ impl Engine {
             }
         }
         Ok(out)
+    }
+
+    /// FEAT-117. The position `repo` holds in this context: its pin when it is pinned to a
+    /// commit, otherwise the position last recorded for it.
+    pub fn effective_position(
+        &self,
+        snap: &impl Reader,
+        repo: &str,
+    ) -> Result<Option<PositionRef>, EngineError> {
+        if let Some(Some(commit)) = self.pins.get(repo) {
+            return Ok(Some(PositionRef {
+                repo: repo.to_string(),
+                commit: Some(commit.clone()),
+                dirty: None,
+            }));
+        }
+        recorded_position(snap, repo)
     }
 
     /// The recorded positions of the repos with no root here.

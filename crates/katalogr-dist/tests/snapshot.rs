@@ -744,4 +744,128 @@ mod snapshot {
             other => panic!("expected NoMatch, got {other:?}"),
         }
     }
+
+    struct Two {
+        _tmp: tempfile::TempDir,
+        kx: PathBuf,
+        app: PathBuf,
+        other: PathBuf,
+    }
+
+    /// Two repos in one project, `app` and `other`, each with a `.tx` file. `other_commits`:
+    /// whether `other` has a commit (else it is a git repo with none).
+    fn two(other_commits: bool) -> Two {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = std::fs::canonicalize(tmp.path()).unwrap();
+        let (kx, app, other) = (root.join("kx"), root.join("app"), root.join("other"));
+        for (dir, text, commits) in [
+            (&app, "sym fn appfn\n", true),
+            (&other, "sym fn otherfn\n", other_commits),
+        ] {
+            std::fs::create_dir_all(dir).unwrap();
+            git(dir, &["init", "-q", "-b", "main"]);
+            git(dir, &["config", "user.name", "Test"]);
+            git(dir, &["config", "user.email", "test@example.com"]);
+            git(dir, &["config", "commit.gpgsign", "false"]);
+            std::fs::write(dir.join("a.tx"), text).unwrap();
+            std::fs::write(dir.join(".gitignore"), ".katalogr\n").unwrap();
+            if commits {
+                commit_all(dir, "c1");
+            }
+        }
+        kindex_init(&kx).unwrap();
+        project_init(
+            &kx,
+            "demo",
+            vec![("app".into(), app.clone()), ("other".into(), other.clone())],
+            true,
+        )
+        .unwrap();
+        Two {
+            _tmp: tmp,
+            kx,
+            app,
+            other,
+        }
+    }
+
+    fn two_k(t: &Two, context: Option<&str>) -> Katalogr {
+        Katalogr::resolve(
+            &t.app,
+            &Overrides {
+                kindex: Some(t.kx.display().to_string()),
+                context: context.map(str::to_string),
+                ..Default::default()
+            },
+        )
+        .unwrap()
+    }
+
+    fn two_out(t: &Two, name: &str) -> Utf8PathBuf {
+        Utf8PathBuf::from_path_buf(t._tmp.path().join(name)).unwrap()
+    }
+
+    /// FEAT-117 R-1: a checkout context records the other repo at its pin.
+    #[test]
+    fn two_repo_export_in_checkout_context() {
+        let _g = serial();
+        let t = two(true);
+        two_k(&t, None).index(None, false, None, &opts()).unwrap();
+        let r = two_k(&t, None)
+            .snapshot_export(&two_out(&t, "g.ksnap"), &opts())
+            .unwrap();
+        let got: Vec<(String, String)> = r
+            .manifest
+            .positions
+            .iter()
+            .map(|p| (p.repo.clone(), p.commit.clone()))
+            .collect();
+        assert_eq!(
+            got,
+            vec![
+                ("app".to_string(), head(&t.app)),
+                ("other".to_string(), head(&t.other))
+            ]
+        );
+    }
+
+    /// FEAT-117 R-1: the base pins every git repo, and exports them all.
+    #[test]
+    fn export_in_base_context_pinned_repos() {
+        let _g = serial();
+        let t = two(true);
+        two_k(&t, None).index(None, false, None, &opts()).unwrap();
+        let r = two_k(&t, Some("base"))
+            .snapshot_export(&two_out(&t, "b.ksnap"), &opts())
+            .unwrap();
+        assert_eq!(r.manifest.positions.len(), 2);
+        assert!(r.manifest.positions.iter().all(|p| !p.commit.is_empty()));
+    }
+
+    /// FEAT-117 R-2: a pinned repo with no commit is refused by name, with the command.
+    #[test]
+    fn export_pin_without_commit_refused() {
+        let _g = serial();
+        let t = two(false);
+        two_k(&t, None).index(None, false, None, &opts()).unwrap();
+        let out = two_out(&t, "n.ksnap");
+        let e = two_k(&t, None).snapshot_export(&out, &opts()).unwrap_err();
+        assert_eq!(refused_exit(&e), Some(5), "{e}");
+        assert!(e.to_string().contains("other"), "{e}");
+        assert!(e.to_string().contains("pinned with no commit"), "{e}");
+        assert!(e.to_string().contains("katalogr index"), "{e}");
+        assert!(!out.exists());
+    }
+
+    /// FEAT-117 R-3: a single-repo project exports as before.
+    #[test]
+    fn single_repo_export_unchanged() {
+        let _g = serial();
+        let s = setup();
+        let r = katalogr(&s)
+            .snapshot_export(&out_of(&s, "one.ksnap"), &opts())
+            .unwrap();
+        assert_eq!(r.manifest.positions.len(), 1);
+        assert_eq!(r.manifest.positions[0].commit, head(&s.repo));
+    }
 }
