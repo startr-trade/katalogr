@@ -54,7 +54,8 @@ mod web_export {
         assert!(!markup.contains("src="), "a src attribute");
         for (i, _) in markup.match_indices("href=") {
             assert!(
-                markup[i..].starts_with("href=\"data:,\""),
+                markup[i..].starts_with("href=\"data:,\"")
+                    || markup[i..].starts_with("href=\"data:image/svg+xml,"),
                 "a link: {}",
                 &markup[i..i + 40]
             );
@@ -92,6 +93,28 @@ mod web_export {
         // The licences travel with the inlined libraries.
         assert!(file.contains("Copyright (c) 2016-2026, The Cytoscape Consortium."));
         assert!(file.contains("Permission is hereby granted"));
+    }
+
+    #[test]
+    fn export_has_brand_favicon() {
+        let file = single_file(&canned(false));
+        // The head carries the brand SVG as an icon, and nothing else is linked as an icon.
+        assert_eq!(
+            katalogr_webtest::favicon_svg(&file),
+            include_str!("../../../assets/brand/katalogr-favicon.svg")
+        );
+        assert_eq!(file.matches("rel=\"icon\"").count(), 1);
+        assert!(!file.contains("data:,"));
+        // The icon is a data URI, so the policy's `img-src data:` lets it load with no request,
+        // and the head holds no other URL.
+        assert!(CSP.contains("img-src data:"));
+        let markup = markup_only(&file);
+        let icon = &markup[markup.find("rel=\"icon\"").unwrap()..];
+        let link = &icon[..icon.find('>').unwrap()];
+        assert!(
+            !link.contains("http:") && !link.contains("https:"),
+            "{link}"
+        );
     }
 
     #[test]

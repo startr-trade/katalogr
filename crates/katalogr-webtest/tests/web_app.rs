@@ -583,4 +583,15 @@ mod web_app {
             r#""page""#
         );
     }
+
+    #[test]
+    fn page_has_brand_favicon() {
+        let page = katalogr_web::page_linked("");
+        assert_eq!(
+            katalogr_webtest::favicon_svg(&page),
+            include_str!("../../../assets/brand/katalogr-favicon.svg")
+        );
+        assert_eq!(page.matches("rel=\"icon\"").count(), 1);
+        assert!(!page.contains("data:,"));
+    }
 }

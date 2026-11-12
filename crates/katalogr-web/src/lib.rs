@@ -2,6 +2,7 @@
 //! library, all text embedded in the binary. Nothing is fetched at build or run time.
 
 pub mod export;
+mod favicon;
 pub mod manifest;
 
 use sha2::{Digest, Sha256};
@@ -174,7 +175,8 @@ pub fn page_linked(api_base: &str) -> String {
         escape_attr(api_base)
     );
     let head = format!(
-        "<link rel=\"icon\" href=\"data:,\">\n{}\n<link rel=\"stylesheet\" href=\"assets/app.css\">",
+        "<link rel=\"icon\" href=\"{}\">\n{}\n<link rel=\"stylesheet\" href=\"assets/app.css\">",
+        favicon::FAVICON_HREF,
         katalogr_render::assets::head_tags(Some("assets/"))
     );
     let manifest = format!(

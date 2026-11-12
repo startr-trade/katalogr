@@ -105,6 +105,31 @@ fn file_blocks(text: &str) -> FileBlocks {
     out
 }
 
+/// The percent-decoded body of the first `rel="icon"` link's `data:image/svg+xml,` URI in a
+/// page or export head. Panics if there is no such link.
+pub fn favicon_svg(head: &str) -> String {
+    const PREFIX: &str = "rel=\"icon\" href=\"data:image/svg+xml,";
+    let at = head
+        .find(PREFIX)
+        .expect("an icon link with an svg data URI");
+    let start = at + PREFIX.len();
+    let body = &head[start..start + head[start..].find('"').expect("the link closes")];
+    let raw = body.as_bytes();
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < raw.len() {
+        if raw[i] == b'%' {
+            let hex = std::str::from_utf8(&raw[i + 1..i + 3]).expect("two hex digits");
+            out.push(u8::from_str_radix(hex, 16).expect("two hex digits"));
+            i += 3;
+        } else {
+            out.push(raw[i]);
+            i += 1;
+        }
+    }
+    String::from_utf8(out).expect("UTF-8 SVG")
+}
+
 /// A plain HTTP/1.1 GET over `std::net` to a running server.
 pub struct HttpBackend {
     pub addr: SocketAddr,

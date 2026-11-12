@@ -249,7 +249,8 @@ pub fn single_file(data: &ExportData) -> String {
     );
     let head = format!(
         "<meta http-equiv=\"Content-Security-Policy\" content=\"{CSP}\">\n\
-         <link rel=\"icon\" href=\"data:,\">\n{}<style>\n{css}</style>",
+         <link rel=\"icon\" href=\"{}\">\n{}<style>\n{css}</style>",
+        crate::favicon::FAVICON_HREF,
         katalogr_render::assets::head_tags(None),
     );
     let json = serde_json::to_string(data).expect("export data serialises");
