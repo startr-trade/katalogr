@@ -119,6 +119,86 @@ mod snapshot_format {
         assert!(!dir(&t).join("x.ksnap.part").exists());
     }
 
+    /// A small fixed file: a short pseudo-random database and the fixed manifest.
+    fn small_file(t: &tempfile::TempDir) -> (Utf8PathBuf, Vec<u8>) {
+        let d = dir(t);
+        let db = d.join("small-db");
+        let mut x = 0x2545_f491_4f6c_dd1du64;
+        let mut v = Vec::new();
+        while v.len() < 6000 {
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            v.extend(std::iter::repeat_n(
+                (x >> 24) as u8 & 0x03,
+                1 + (x as usize & 31),
+            ));
+        }
+        std::fs::write(&db, &v).unwrap();
+        let out = d.join("small.ksnap");
+        write_snapshot(&db, input(), &out).unwrap();
+        let raw = std::fs::read(&out).unwrap();
+        (out, raw)
+    }
+
+    #[test]
+    fn every_single_byte_flip_refused() {
+        let t = tempfile::tempdir().unwrap();
+        let (out, raw) = small_file(&t);
+        let m = read_manifest(&out).unwrap();
+        let target = dir(&t).join("flip-target");
+        let flipped = dir(&t).join("flipped.ksnap");
+        for off in 0..raw.len() {
+            for mask in [0xffu8, 0x01] {
+                let mut bad = raw.clone();
+                bad[off] ^= mask;
+                std::fs::write(&flipped, &bad).unwrap();
+                let refused = match read_manifest(&flipped) {
+                    Err(_) => true,
+                    Ok(mm) => decode_snapshot(&flipped, &mm, &target).is_err(),
+                };
+                assert!(refused, "offset {off} mask {mask:#x} was accepted");
+            }
+        }
+        // The unchanged file still decodes.
+        decode_snapshot(&out, &m, &target).unwrap();
+    }
+
+    #[test]
+    fn appended_byte_refused() {
+        let t = tempfile::tempdir().unwrap();
+        let (out, mut raw) = small_file(&t);
+        let m = read_manifest(&out).unwrap();
+        raw.push(0);
+        let f = dir(&t).join("appended.ksnap");
+        std::fs::write(&f, &raw).unwrap();
+        // The checksum already refuses it; a file whose checksum covers the extra byte is
+        // refused by the decoder.
+        assert!(matches!(read_manifest(&f), Err(StoreError::BadSnapshot(_))));
+        let at = raw
+            .iter()
+            .enumerate()
+            .filter(|(_, b)| **b == b'\n')
+            .nth(1)
+            .unwrap()
+            .0
+            + 1;
+        let mut h = Sha256::new();
+        let line_start = raw.iter().position(|b| *b == b'\n').unwrap() + 1;
+        let body_start = at + 1 + raw[at + 1..].iter().position(|b| *b == b'\n').unwrap();
+        h.update(&raw[line_start..at]);
+        h.update(&raw[body_start + 1..]);
+        let sum: String = h.finalize().iter().map(|b| format!("{b:02x}")).collect();
+        raw[at + 12..at + 12 + 64].copy_from_slice(sum.as_bytes());
+        std::fs::write(&f, &raw).unwrap();
+        let mm = read_manifest(&f).unwrap();
+        assert_eq!(mm, m);
+        let target = dir(&t).join("appended-target");
+        let e = decode_snapshot(&f, &mm, &target).unwrap_err();
+        assert!(e.to_string().contains("1 bytes after its data"), "{e}");
+        assert!(!target.exists());
+    }
+
     #[test]
     fn truncated_file_refused() {
         let t = tempfile::tempdir().unwrap();

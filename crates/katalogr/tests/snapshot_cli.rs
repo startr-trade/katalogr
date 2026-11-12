@@ -111,8 +111,10 @@ mod snapshot_cli {
         let mid = raw.len() / 2;
         raw[mid] ^= 0xff;
         std::fs::write(&snap, raw).unwrap();
-        // The header alone still reads; the payload does not verify.
-        ok(&repo, &["snapshot", "show", snap.to_str().unwrap()]);
+        // FEAT-121: the whole-file checksum is checked before anything else, so plain show
+        // refuses a damaged file too.
+        let (code, _, err) = run(&repo, &["snapshot", "show", snap.to_str().unwrap()]);
+        assert_eq!(code, 1, "{err}");
         let (code, _, err) = run(
             &repo,
             &["snapshot", "show", snap.to_str().unwrap(), "--verify"],
