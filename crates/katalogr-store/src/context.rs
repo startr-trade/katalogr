@@ -120,6 +120,20 @@ pub fn seed_layer(
     m: &ContextManifest,
     deadline: Instant,
 ) -> Result<(), StoreError> {
+    seed_layer_with_repos(base, layer, m, &[], deadline)
+}
+
+/// [`seed_layer`], also recording the position of every repo in `repos` other than the layer's
+/// own (FEAT-118 R-3): `position.<repo>` is set to the base's `base_commit.<repo>`, clean, and
+/// `position_changed.<repo>` to the empty set. A repo the base holds no commit for gets no
+/// record, so the layer's first read rescans it.
+pub fn seed_layer_with_repos(
+    base: &ProjectDir,
+    layer: &ProjectDir,
+    m: &ContextManifest,
+    repos: &[String],
+    deadline: Instant,
+) -> Result<(), StoreError> {
     let mut m = m.clone();
     let root = layer.root();
     if root.join(ContextManifest::FILE).is_file() {
@@ -168,6 +182,24 @@ pub fn seed_layer(
                 tx.set_meta(&changed_key, br#"{"over":false,"paths":[]}"#)?;
             }
             _ => {
+                tx.set_meta(&pos_key, b"")?;
+                tx.set_meta(&changed_key, b"")?;
+            }
+        }
+        for repo in repos.iter().filter(|r| **r != m.repo) {
+            let commit = tx
+                .meta(&format!("base_commit.{repo}"))?
+                .and_then(|b| String::from_utf8(b).ok())
+                .filter(|c| !c.is_empty());
+            let (pos_key, changed_key) = (
+                format!("position.{repo}"),
+                format!("position_changed.{repo}"),
+            );
+            if let Some(c) = commit {
+                let pos = serde_json::json!({"repo": repo, "commit": c, "dirty": null});
+                tx.set_meta(&pos_key, pos.to_string().as_bytes())?;
+                tx.set_meta(&changed_key, br#"{"over":false,"paths":[]}"#)?;
+            } else {
                 tx.set_meta(&pos_key, b"")?;
                 tx.set_meta(&changed_key, b"")?;
             }

@@ -241,4 +241,62 @@ mod position {
         assert!(second.exact);
         assert_eq!(second.positions.len(), 1);
     }
+
+    fn head(root: &Utf8Path) -> String {
+        let out = Command::new("git")
+            .current_dir(root)
+            .args(["rev-parse", "HEAD"])
+            .output()
+            .unwrap();
+        String::from_utf8(out.stdout).unwrap().trim().to_string()
+    }
+
+    /// The repo is pinned (FEAT-118) to a second commit, with an uncommitted file beside it.
+    fn pinned_setup() -> (Setup, String) {
+        let mut s = setup();
+        let w = s.work.clone();
+        write(&w, "c.tx", "sym fn Committed\n");
+        git(w.as_std_path(), &["add", "."]);
+        git(w.as_std_path(), &["commit", "-q", "-m", "c2"]);
+        write(&w, "d.tx", "sym fn Uncommitted\n");
+        let pin = head(&w);
+        s.engine.set_source(
+            "r",
+            katalogr_engine::FileSource::Commit {
+                repo_root: w.clone(),
+                commit: pin.clone(),
+            },
+        );
+        s.engine.set_pinned_position("r", Some(pin.clone()));
+        s.engine.set_pin_rows_follow(true);
+        (s, pin)
+    }
+
+    fn stored_commit(e: &Engine) -> Option<String> {
+        let snap = e.cache().read().unwrap();
+        katalogr_engine::consistency::recorded_position(&snap, "r")
+            .unwrap()
+            .and_then(|p| p.commit)
+    }
+
+    /// FEAT-118 R-1: the rows follow the pin, read from git and not from the disk.
+    #[test]
+    fn pinned_repo_catches_up_to_pin() {
+        let (s, pin) = pinned_setup();
+        let a = read(&s.engine);
+        assert!(a.value.contains("Committed"), "{}", a.value);
+        assert!(!a.value.contains("Uncommitted"));
+        assert!(a.exact);
+        assert_eq!(a.positions.len(), 1);
+        assert_eq!(a.positions[0].commit.as_deref(), Some(pin.as_str()));
+    }
+
+    /// FEAT-118 R-3: the pin is recorded once its events are applied, and not before.
+    #[test]
+    fn records_pinned_position() {
+        let (s, pin) = pinned_setup();
+        assert_ne!(stored_commit(&s.engine).as_deref(), Some(pin.as_str()));
+        read(&s.engine);
+        assert_eq!(stored_commit(&s.engine).as_deref(), Some(pin.as_str()));
+    }
 }

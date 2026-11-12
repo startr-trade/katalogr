@@ -35,7 +35,7 @@ pub use cache::{
 pub use compact::{
     CompactMode, CompactOutcome, CompactPolicy, CompactReport, ExportPlan, REWRITE_FILE,
 };
-pub use context::{ContextId, ContextKind, ContextManifest, seed_layer};
+pub use context::{ContextId, ContextKind, ContextManifest, seed_layer, seed_layer_with_repos};
 #[doc(hidden)]
 pub use dict::Memo;
 pub use error::StoreError;

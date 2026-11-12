@@ -4,7 +4,6 @@
 use crate::error::DistError;
 use crate::{Consistency, Katalogr, Options};
 use camino::{Utf8Path, Utf8PathBuf};
-use katalogr_engine::consistency::recorded_position;
 use katalogr_engine::queue::lock::lock_until;
 use katalogr_engine::scan::output_outside_git;
 use katalogr_engine::{Engine, QueryOptions, Scope};
@@ -55,7 +54,12 @@ fn snapshot_plan(
     plan.meta.insert("layer_base_errors".into(), None);
     let mut positions = Vec::new();
     for repo in repos {
-        let Some(p) = recorded_position(snap, repo)? else {
+        let Some(p) = engine.effective_position(snap, repo)? else {
+            if engine.is_pinned(repo) {
+                return Err(refused(format!(
+                    "repo {repo} is pinned with no commit: run `katalogr index`, which advances the base to the default branch of the repo"
+                )));
+            }
             if engine.roots().contains_key(repo) {
                 return Err(refused(format!(
                     "repo {repo} has no recorded position: read it first, with `katalogr index`"
