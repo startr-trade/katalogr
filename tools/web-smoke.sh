@@ -95,7 +95,9 @@ kindex="$work/kindex"
 
 # Serve on port 0 and read the address the server announces.
 log="$work/serve.log"
-(cd "$repo" && "$bin" serve --listen 127.0.0.1:0 2>"$log" >/dev/null) &
+# exec, so $! is the server itself and the EXIT trap stops it (a plain subshell left it
+# running, holding any lock fd the caller passed in).
+(cd "$repo" && exec "$bin" serve --listen 127.0.0.1:0 2>"$log" >/dev/null) &
 server_pid=$!
 addr=""
 for _ in $(seq 1 100); do
