@@ -47,6 +47,38 @@ mod graph {
         let e = open_engine(&kx1, &work);
         assert_eq!(support::drained_graph(&e), g1);
     }
+
+    /// FEAT-016 R-8: the canonical graph names each contract node `contract:<kind>:<key>`,
+    /// and every binding link points at that name, never at an internal id.
+    #[test]
+    fn contract_targets_named() {
+        let g = indexed(&[
+            (
+                "lib.tx",
+                "sym fn say_hi\nbind say_hi provides wasm_export:pkg/say_hi\n",
+            ),
+            (
+                "app.tx",
+                "sym fn main\nbind main consumes wasm_export:pkg/say_hi\n",
+            ),
+        ]);
+        let all = lines(&g);
+        let names: Vec<&str> = all
+            .iter()
+            .filter(|v| v["node"] == "contract")
+            .map(|v| v["name"].as_str().unwrap())
+            .collect();
+        assert_eq!(names, ["contract:wasm_export:pkg%2Fsay_hi"], "{g}");
+        let targets: Vec<&str> = all
+            .iter()
+            .filter(|v| {
+                v["link"] == true && matches!(v["kind"].as_str(), Some("provides" | "consumes"))
+            })
+            .map(|v| v["to"].as_str().unwrap())
+            .collect();
+        assert_eq!(targets.len(), 2, "{g}");
+        assert!(targets.iter().all(|t| *t == names[0]), "{targets:?}");
+    }
 }
 
 const PROFILE: &str = "\
