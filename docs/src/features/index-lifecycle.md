@@ -84,7 +84,9 @@ payload verified
   project is recorded at the commit the index holds it at, so a project with several repositories
   exports from any checkout.
 - **show** prints the manifest and needs no project, except with `--verify`, which also checks the
-  payload against the digest.
+  payload against the digest. The header ends with a `file_sha256` line covering the whole file:
+  `show`, `show --verify` and `import` all refuse a file that changed in any byte, or that has
+  extra bytes at the end (exit 1).
 - **import** installs the file as the project's base index, atomically, after checking the schema,
   the repositories and the digest. `--digest <HEX>` pins the digest you expect. It refuses (exit 5)
   when an index already exists, unless you pass `--replace`. A later read re-extracts only what
