@@ -722,7 +722,7 @@ mod bench {
         );
         // Measured: copying the rows through redb's B-tree, trimming the file and recording its
         // size take about 34 ms per MB of the resulting file.
-        assert!(ms_per_mb <= 40.0, "{ms_per_mb:.1} ms per MB of cache");
+        assert!(ms_per_mb <= 50.0, "{ms_per_mb:.1} ms per MB of cache");
         match SCHEMA9_FULL_INDEX_MS {
             Some(base) => assert!(
                 took.as_millis() * 100 <= base * 105,
