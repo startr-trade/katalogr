@@ -5,11 +5,15 @@
 //! The corpus is 10,000 synthetic `.tx` symbols under `~/.cache/katalogr-scratch/FEAT-049/` (or
 //! `KATALOGR_SCRATCH`), never `/tmp`, and is removed afterwards.
 
+#[path = "support/server_guard.rs"]
+mod support;
+
 mod bench {
+    use super::support::ServerGuard;
     use std::io::{Read, Write};
     use std::net::{SocketAddr, TcpStream};
     use std::path::{Path, PathBuf};
-    use std::process::{Child, Command, Stdio};
+    use std::process::{Command, Stdio};
     use std::time::{Duration, Instant};
 
     fn cli(dir: &Path, args: &[&str]) -> std::process::Output {
@@ -76,11 +80,9 @@ mod bench {
         std::fs::read_to_string("/proc/loadavg").unwrap_or_default()
     }
 
-    // The caller owns the child and reaps it; the lint cannot follow it out of this function.
-    #[allow(clippy::zombie_processes)]
-    fn serve(repo: &Path, workers: &str) -> (Child, SocketAddr) {
+    fn serve(repo: &Path, workers: &str) -> (ServerGuard, SocketAddr) {
         let log = repo.join("../api.log");
-        let mut child = Command::new(env!("CARGO_BIN_EXE_katalogr"))
+        let child = Command::new(env!("CARGO_BIN_EXE_katalogr"))
             .current_dir(repo)
             .env("KATALOGR_THREADS", "4")
             .args(["api", "--listen", "127.0.0.1:0", "--workers", workers])
@@ -88,6 +90,7 @@ mod bench {
             .stderr(std::fs::File::create(&log).unwrap())
             .spawn()
             .unwrap();
+        let child = ServerGuard::new(child);
         let t = Instant::now();
         loop {
             let text = std::fs::read_to_string(&log).unwrap_or_default();
@@ -96,8 +99,6 @@ mod bench {
                 return (child, rest.lines().next().unwrap().trim().parse().unwrap());
             }
             if t.elapsed() >= Duration::from_secs(60) {
-                let _ = child.kill();
-                let _ = child.wait();
                 panic!("no start: {text}");
             }
             std::thread::sleep(Duration::from_millis(50));
@@ -128,7 +129,7 @@ mod bench {
     fn api_find_stale_ok() {
         let root = scratch();
         let repo = corpus(&root);
-        let (mut child, addr) = serve(&repo, "4");
+        let (_child, addr) = serve(&repo, "4");
         let path = "/api/v1/find?text=s50_50&consistency=stale-ok";
         for _ in 0..20 {
             get(addr, path);
@@ -161,8 +162,6 @@ mod bench {
             api95 - cli50,
             load().trim()
         );
-        let _ = child.kill();
-        let _ = child.wait();
         let _ = std::fs::remove_dir_all(&root);
         assert!(api95 - cli50 <= 30.0, "p95 {api95:.1} vs cli {cli50:.1}");
     }
@@ -173,7 +172,7 @@ mod bench {
     fn api_parallel_readers() {
         let root = scratch();
         let repo = corpus(&root);
-        let (mut child, addr) = serve(&repo, "4");
+        let (_child, addr) = serve(&repo, "4");
         let path = "/api/v1/find?text=s50_50&consistency=stale-ok";
         for _ in 0..20 {
             get(addr, path);
@@ -200,8 +199,6 @@ mod bench {
             four / one,
             load().trim()
         );
-        let _ = child.kill();
-        let _ = child.wait();
         let _ = std::fs::remove_dir_all(&root);
         assert!(four >= 2.0 * one, "{four:.0} vs {one:.0}");
     }
@@ -211,7 +208,7 @@ mod bench {
     #[test]
     #[ignore]
     fn api_binary_size() {
-        let root = scratch();
+        let root = scratch().join("binary-size");
         let target = root.join("size-target");
         let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
         let mut sizes = Vec::new();

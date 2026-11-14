@@ -7,11 +7,15 @@
 //! `KATALOGR_SCRATCH`), never `/tmp`, and is removed afterwards. Each bench prints the load
 //! average beside its result.
 
+#[path = "support/server_guard.rs"]
+mod support;
+
 mod bench {
+    use super::support::ServerGuard;
     use std::io::{Read, Write};
     use std::net::{SocketAddr, TcpStream};
     use std::path::{Path, PathBuf};
-    use std::process::{Child, Command, Stdio};
+    use std::process::{Command, Stdio};
     use std::time::{Duration, Instant};
 
     fn cli(dir: &Path, args: &[&str]) -> std::process::Output {
@@ -98,11 +102,9 @@ mod bench {
         std::fs::read_to_string("/proc/loadavg").unwrap_or_default()
     }
 
-    // The caller owns the child and reaps it; the lint cannot follow it out of this function.
-    #[allow(clippy::zombie_processes)]
-    fn serve(repo: &Path) -> (Child, SocketAddr) {
+    fn serve(repo: &Path) -> (ServerGuard, SocketAddr) {
         let log = repo.join("../serve.log");
-        let mut child = Command::new(env!("CARGO_BIN_EXE_katalogr"))
+        let child = Command::new(env!("CARGO_BIN_EXE_katalogr"))
             .current_dir(repo)
             .env("KATALOGR_THREADS", "4")
             .args(["serve", "--listen", "127.0.0.1:0", "--workers", "4"])
@@ -110,6 +112,7 @@ mod bench {
             .stderr(std::fs::File::create(&log).unwrap())
             .spawn()
             .unwrap();
+        let child = ServerGuard::new(child);
         let t = Instant::now();
         loop {
             let text = std::fs::read_to_string(&log).unwrap_or_default();
@@ -118,8 +121,6 @@ mod bench {
                 return (child, rest.lines().next().unwrap().trim().parse().unwrap());
             }
             if t.elapsed() >= Duration::from_secs(60) {
-                let _ = child.kill();
-                let _ = child.wait();
                 panic!("no start: {text}");
             }
             std::thread::sleep(Duration::from_millis(50));
@@ -162,7 +163,8 @@ mod bench {
     #[test]
     #[ignore]
     fn web_binary_size() {
-        let root = scratch();
+        // Its own folder: the shared corpus the other benches read stays in place (FEAT-126 R-2).
+        let root = scratch().join("binary-size");
         std::fs::create_dir_all(&root).unwrap();
         let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
         let mut sizes = Vec::new();
@@ -206,7 +208,7 @@ mod bench {
     fn web_asset_hit() {
         let root = scratch();
         let (_kx, repo) = corpus(&root);
-        let (mut child, addr) = serve(&repo);
+        let (_child, addr) = serve(&repo);
         timed(addr, "/assets/pele.global.js", 50);
         let v = timed(addr, "/assets/pele.global.js", 1000);
         let p95 = p(&v, 0.95);
@@ -216,8 +218,6 @@ mod bench {
             v[v.len() - 1],
             load().trim()
         );
-        let _ = child.kill();
-        let _ = child.wait();
         let _ = std::fs::remove_dir_all(&root);
         assert!(p95 <= 5.0, "p95 {p95:.2} ms");
     }
@@ -245,7 +245,7 @@ mod bench {
             );
             std::fs::write(dir.join(format!("{id}.json")), body).unwrap();
         }
-        let (mut child, addr) = serve(&repo);
+        let (_child, addr) = serve(&repo);
         timed(addr, "/api/v1/timeline", 3);
         let v = timed(addr, "/api/v1/timeline", 20);
         let body = get(addr, "/api/v1/timeline");
@@ -256,8 +256,6 @@ mod bench {
             p(&v, 0.95),
             load().trim()
         );
-        let _ = child.kill();
-        let _ = child.wait();
         let _ = std::fs::remove_dir_all(&root);
         assert_eq!(points, 1000);
         assert!(med <= 300.0, "median {med:.1} ms");
@@ -271,7 +269,7 @@ mod bench {
     fn web_view_wait() {
         let root = scratch();
         let (_kx, repo) = corpus(&root);
-        let (mut child, addr) = serve(&repo);
+        let (_child, addr) = serve(&repo);
         let wait = "consistency=wait&timeout=10";
         // Warm: the first reads compute and store.
         get(addr, &format!("/api/v1/views/structure?{wait}"));
@@ -296,8 +294,6 @@ mod bench {
                 load().trim()
             );
         }
-        let _ = child.kill();
-        let _ = child.wait();
         let _ = std::fs::remove_dir_all(&root);
         assert!(worst <= limit, "worst p95 {worst:.1} ms over {limit:.1} ms");
     }
