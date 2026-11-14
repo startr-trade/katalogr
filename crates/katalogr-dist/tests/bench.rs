@@ -155,7 +155,7 @@ mod bench {
     #[ignore]
     fn read_position_10k_files() {
         let base = std::env::var("KATALOGR_SCRATCH")
-            .unwrap_or_else(|_| "/home/dev/.cache/katalogr-scratch/FEAT-084".to_string());
+            .unwrap_or_else(|_| format!("{}/.cache/katalogr-scratch/FEAT-084", std::env::var("HOME").unwrap()));
         std::fs::create_dir_all(&base).unwrap();
         let dir = tempfile::tempdir_in(&base).unwrap();
         let root = dir.path();
@@ -210,7 +210,7 @@ mod bench {
         use std::sync::atomic::{AtomicBool, Ordering};
 
         let base = std::env::var("KATALOGR_SCRATCH")
-            .unwrap_or_else(|_| "/home/dev/.cache/katalogr-scratch/FEAT-039".to_string());
+            .unwrap_or_else(|_| format!("{}/.cache/katalogr-scratch/FEAT-039", std::env::var("HOME").unwrap()));
         std::fs::create_dir_all(&base).unwrap();
         let dir = tempfile::tempdir_in(&base).unwrap();
         let root = std::fs::canonicalize(dir.path()).unwrap();
@@ -305,7 +305,7 @@ mod bench {
             return;
         };
         let base = std::env::var("KATALOGR_SCRATCH")
-            .unwrap_or_else(|_| "/home/dev/.cache/katalogr-scratch/FEAT-084".to_string());
+            .unwrap_or_else(|_| format!("{}/.cache/katalogr-scratch/FEAT-084", std::env::var("HOME").unwrap()));
         std::fs::create_dir_all(&base).unwrap();
         let scratch = tempfile::tempdir_in(&base).unwrap();
         let ms = time_position(&root, Path::new(&root), scratch.path());
@@ -751,9 +751,9 @@ mod bench {
 
     // ---- index data without a fragment store (FEAT-094 T12) ----------------------------
     //
-    // Corpus: `KATALOGR_BENCH_ROOTS="core=/path/core,site=/path/site"` names read-only repos
-    // (the polyglot corpus is `core` and `site` under `~/.katalogr-loadtest/clones/polyglot-wasm`,
-    // ts-xl is `vscode` under `~/.katalogr-loadtest/clones/ts-xl`). Unset: a generated Rust tree
+    // Corpus: `KATALOGR_BENCH_ROOTS="a=/path/a,b=/path/b"` names read-only repos (the tier
+    // corpora are checked out under `~/.katalogr-loadtest/clones/<tier>`; their names and paths
+    // stay out of this repository). Unset: a generated Rust tree
     // of 20 crates x 40 modules x 10 functions. Repos are read in place and never written; the
     // kindex and any generated tree live under `~/.cache/katalogr-scratch/FEAT-094/` (or
     // `KATALOGR_SCRATCH`) and are removed when the bench ends.
