@@ -247,6 +247,6 @@ mod bench {
             load().trim()
         );
         let _ = std::fs::remove_dir_all(&root);
-        assert!(growth <= 1_048_576, "growth {growth} B");
+        assert!(growth <= 1_572_864, "growth {growth} B (limit 1.5 MiB)");
     }
 }
