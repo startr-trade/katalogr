@@ -97,3 +97,44 @@ fn quote_in_label_parses() {
         "{svg}"
     );
 }
+
+/// FEAT-125: a narrow, deeply layered DAG (each node feeds the next three) has exponentially many
+/// paths; reachability once enumerated them all. Layout must finish in seconds, even unoptimised.
+#[cfg(test)]
+#[test]
+fn dense_graph_renders_quickly() {
+    let count = 60usize;
+    let id = |i: usize| node_id(&format!("pkg/m{i}"));
+    let mut nodes: Vec<ViewNode> = (0..count)
+        .map(|i| node(&format!("pkg/m{i}"), &format!("module {i}")))
+        .collect();
+    nodes.sort_by(|a, b| a.id.cmp(&b.id));
+    let mut edges = Vec::new();
+    for i in 0..count {
+        for j in i + 1..(i + 4).min(count) {
+            edges.push(ViewEdge {
+                from: id(i),
+                to: id(j),
+                kind: "uses".into(),
+                inferred: false,
+            });
+        }
+    }
+    edges.sort_by(|a, b| (&a.from, &a.to, &a.kind).cmp(&(&b.from, &b.to, &b.kind)));
+    let g = ViewGraph {
+        title: "structure".into(),
+        shown: count as u64,
+        total: count as u64,
+        nodes,
+        edges,
+    };
+    let start = std::time::Instant::now();
+    let svg = to_svg(&g).expect("layout");
+    let took = start.elapsed();
+    println!(
+        "dense_graph_renders_quickly: {} edges in {took:?}",
+        g.edges.len()
+    );
+    assert!(svg.contains("<svg"));
+    assert!(took < std::time::Duration::from_secs(2), "took {took:?}");
+}
