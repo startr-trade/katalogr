@@ -154,8 +154,12 @@ mod bench {
     #[test]
     #[ignore]
     fn read_position_10k_files() {
-        let base = std::env::var("KATALOGR_SCRATCH")
-            .unwrap_or_else(|_| format!("{}/.cache/katalogr-scratch/FEAT-084", std::env::var("HOME").unwrap()));
+        let base = std::env::var("KATALOGR_SCRATCH").unwrap_or_else(|_| {
+            format!(
+                "{}/.cache/katalogr-scratch/FEAT-084",
+                std::env::var("HOME").unwrap()
+            )
+        });
         std::fs::create_dir_all(&base).unwrap();
         let dir = tempfile::tempdir_in(&base).unwrap();
         let root = dir.path();
@@ -209,8 +213,12 @@ mod bench {
         use katalogr_dist::{Katalogr, Overrides, kindex_init, project_init};
         use std::sync::atomic::{AtomicBool, Ordering};
 
-        let base = std::env::var("KATALOGR_SCRATCH")
-            .unwrap_or_else(|_| format!("{}/.cache/katalogr-scratch/FEAT-039", std::env::var("HOME").unwrap()));
+        let base = std::env::var("KATALOGR_SCRATCH").unwrap_or_else(|_| {
+            format!(
+                "{}/.cache/katalogr-scratch/FEAT-039",
+                std::env::var("HOME").unwrap()
+            )
+        });
         std::fs::create_dir_all(&base).unwrap();
         let dir = tempfile::tempdir_in(&base).unwrap();
         let root = std::fs::canonicalize(dir.path()).unwrap();
@@ -304,8 +312,12 @@ mod bench {
             println!("KATALOGR_POSITION_ROOT is not set; skipped");
             return;
         };
-        let base = std::env::var("KATALOGR_SCRATCH")
-            .unwrap_or_else(|_| format!("{}/.cache/katalogr-scratch/FEAT-084", std::env::var("HOME").unwrap()));
+        let base = std::env::var("KATALOGR_SCRATCH").unwrap_or_else(|_| {
+            format!(
+                "{}/.cache/katalogr-scratch/FEAT-084",
+                std::env::var("HOME").unwrap()
+            )
+        });
         std::fs::create_dir_all(&base).unwrap();
         let scratch = tempfile::tempdir_in(&base).unwrap();
         let ms = time_position(&root, Path::new(&root), scratch.path());
