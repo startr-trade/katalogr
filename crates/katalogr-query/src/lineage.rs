@@ -771,7 +771,9 @@ pub fn lineage(
                         Some(old) if !old.reported => true,
                         Some(old) => w.better(&path, old)?,
                     };
-                    if !accept {
+                    if !accept
+                        || (settled.contains_key(&o.to) && descends(&settled, o.parent, o.to))
+                    {
                         continue;
                     }
                     let continues = !info.code && !DOC_LINK_KINDS.contains(&o.kind.as_str());
@@ -873,8 +875,14 @@ pub fn lineage(
             None => None,
         };
         let mut chain = Vec::new();
+        // A better path found later at the same depth can make two nodes each other's parent
+        // on a cyclic graph; the walk of parents visits each node once.
+        let mut on_chain: BTreeSet<Id> = BTreeSet::from([id]);
         let mut at = p.parent;
         while let Some(a) = at {
+            if !on_chain.insert(a) {
+                break;
+            }
             let Some(up) = settled.get(&a) else { break };
             if !seeds.contains(&a) {
                 chain.push(w.name(a)?);
@@ -1114,6 +1122,23 @@ fn leaf_of_name(name: &str) -> String {
         _ => last,
     };
     last.split_once(':').map_or(last, |(_, n)| n).to_string()
+}
+
+/// Whether `node` is `from` or one of its ancestors in the settled paths. Taking a better path to
+/// a settled node through one of its own descendants would make a parent cycle.
+fn descends(settled: &BTreeMap<Id, Path>, from: Option<Id>, node: Id) -> bool {
+    let mut seen: BTreeSet<Id> = BTreeSet::new();
+    let mut at = from;
+    while let Some(a) = at {
+        if a == node {
+            return true;
+        }
+        if !seen.insert(a) {
+            return false;
+        }
+        at = settled.get(&a).and_then(|p| p.parent);
+    }
+    false
 }
 
 /// One level of the walk from the nodes in `wave`: every step they can take.

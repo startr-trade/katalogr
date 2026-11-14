@@ -1150,7 +1150,12 @@ mod bench {
             depth: 3,
             limit: 200,
             per_group: 10,
-            code_kinds: Default::default(),
+            // As the CLI fills it: extension id to its code kinds. The empty map is covered by
+            // `lineage::bounded_on_dense_graph`.
+            code_kinds: std::collections::BTreeMap::from([(
+                "tx".to_string(),
+                std::collections::BTreeSet::from(["fn".to_string()]),
+            )]),
             fold_from: Some(50),
         };
         let read = cache.read().unwrap();
@@ -1169,6 +1174,17 @@ mod bench {
         });
         println!(
             "bench::lineage_symbol_depth_3: {ms} ms, {hits} hits, {partial} partial, load {}",
+            loadavg()
+        );
+        let no_kinds = LineageOptions {
+            code_kinds: Default::default(),
+            ..opts
+        };
+        let ms_none = best_ms(|| {
+            lineage(&read, &subject, &no_kinds).unwrap();
+        });
+        println!(
+            "bench::lineage_symbol_depth_3 (no code kinds): {ms_none} ms, load {}",
             loadavg()
         );
         assert!(hits > 0);

@@ -785,4 +785,71 @@ mod lineage {
                 .all(|w| w[0].contract < w[1].contract)
         );
     }
+
+    /// FEAT-122: a dense call graph (cycles, three callers each) behind a type reached from one
+    /// function, with no code kinds, so every node continues the walk. The answer is bounded by
+    /// `limit`, every chain is a simple path, and the call returns (a parent cycle used to make
+    /// the chain walk run forever and grow memory without bound).
+    #[test]
+    fn bounded_on_dense_graph() {
+        const N: usize = 300;
+        let mut order = None;
+        let (_tmp, cache) = build(|tx| {
+            let names: Vec<String> = (0..N).map(|i| format!("s{i}")).collect();
+            let syms: Vec<(&str, u32, u32)> = names
+                .iter()
+                .enumerate()
+                .map(|(i, n)| (n.as_str(), (i * 10 + 1) as u32, (i * 10 + 10) as u32))
+                .collect();
+            let (_, all) = artifact(tx, R, "src/f0.tx", &syms);
+            for g in 0..N {
+                for k in 0..3 {
+                    let c = (g * 7 + k * 101 + 13) % N;
+                    if c != g {
+                        link(tx, R, "src/f0.tx", all[c], "calls", all[g]);
+                    }
+                }
+            }
+            let ids = artifact_with(
+                tx,
+                R,
+                "src/order.tx",
+                vec![sym(&[("type", "Order")], "type")],
+            );
+            link(tx, R, "src/f0.tx", all[50], "uses-x", ids[0]);
+            order = Some(ids[0]);
+        });
+        let _ = order;
+        let t = subject(&cache, "r:src/order.tx#type:Order");
+        let o = LineageOptions {
+            limit: 20,
+            ..opts()
+        };
+        let (send, recv) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let tx = cache.read().unwrap();
+            let a = lineage(&tx, &t, &o).unwrap();
+            let _ = send.send(a.report);
+        });
+        let r = recv
+            .recv_timeout(std::time::Duration::from_secs(30))
+            .expect("lineage returned within 30 s");
+        let hits: Vec<_> = r
+            .code
+            .iter()
+            .chain(&r.bindings)
+            .flat_map(|g| &g.hits)
+            .collect();
+        assert!(!hits.is_empty() && hits.len() <= 20, "{} hits", hits.len());
+        for h in hits {
+            let distinct: BTreeSet<_> = h.chain.iter().collect();
+            assert_eq!(
+                distinct.len(),
+                h.chain.len(),
+                "chain repeats: {:?}",
+                h.chain
+            );
+            assert!(h.chain.len() <= N);
+        }
+    }
 }
