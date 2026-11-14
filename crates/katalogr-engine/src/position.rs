@@ -141,17 +141,73 @@ pub fn reference_position(
     Ok(state(repo, commit, lines))
 }
 
+/// FEAT-124. The blob ids of the files of plain folders already read by this process, so a
+/// file is read again only when its size or modification time changed. An entry is trusted only
+/// when its mtime is older than the moment it was read by `RACY_NS` (a later write within the
+/// clock's granularity would leave the stat unchanged).
+#[derive(Clone)]
+struct PlainRow {
+    len: u64,
+    mtime_ns: u64,
+    read_ns: u64,
+    blob: String,
+}
+
+type PlainCache = BTreeMap<std::path::PathBuf, BTreeMap<String, PlainRow>>;
+
+fn plain_cache() -> &'static std::sync::Mutex<PlainCache> {
+    static CACHE: std::sync::OnceLock<std::sync::Mutex<PlainCache>> = std::sync::OnceLock::new();
+    CACHE.get_or_init(Default::default)
+}
+
 fn plain_directory(
     repo: &str,
     root: &Path,
     include: &[String],
     exclude: &[String],
 ) -> Result<WorkingState, ScanError> {
+    let mut held = plain_cache()
+        .lock()
+        .map(|mut c| c.remove(root).unwrap_or_default())
+        .unwrap_or_default();
+    let mut next: BTreeMap<String, PlainRow> = BTreeMap::new();
     let mut lines = BTreeMap::new();
     for rel in list_files(root, include, exclude)? {
         let full = root.join(rel.as_str());
-        let bytes = std::fs::read(&full).map_err(|e| io_err(&full, e))?;
-        lines.insert(rel.as_str().as_bytes().to_vec(), Some(git_blob_id(&bytes)));
+        let stat = std::fs::metadata(&full).ok().and_then(|m| {
+            let mtime = m
+                .modified()
+                .ok()?
+                .duration_since(std::time::UNIX_EPOCH)
+                .ok()?;
+            Some((m.len(), mtime.as_nanos() as u64))
+        });
+        let kept = stat.and_then(|(len, mtime_ns)| {
+            held.remove(rel.as_str()).filter(|r| {
+                r.len == len
+                    && r.mtime_ns == mtime_ns
+                    && mtime_ns.saturating_add(RACY_NS) < r.read_ns
+            })
+        });
+        let row = match kept {
+            Some(r) => r,
+            None => {
+                let read_ns = now_ns();
+                let bytes = std::fs::read(&full).map_err(|e| io_err(&full, e))?;
+                let (len, mtime_ns) = stat.unwrap_or((bytes.len() as u64, read_ns));
+                PlainRow {
+                    len,
+                    mtime_ns,
+                    read_ns,
+                    blob: git_blob_id(&bytes),
+                }
+            }
+        };
+        lines.insert(rel.as_str().as_bytes().to_vec(), Some(row.blob.clone()));
+        next.insert(rel.as_str().to_string(), row);
+    }
+    if let Ok(mut c) = plain_cache().lock() {
+        c.insert(root.to_path_buf(), next);
     }
     Ok(state(repo, None, lines))
 }

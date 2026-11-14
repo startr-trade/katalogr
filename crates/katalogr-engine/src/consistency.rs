@@ -101,6 +101,11 @@ pub struct ChangedSet {
     /// True when the set was over the cap and `paths` is empty.
     pub over: bool,
     pub paths: Vec<String>,
+    /// FEAT-124. The raw-bytes blob id of each path in `paths` (`None` when deleted), in the
+    /// same order; empty in a record written before this field existed, which makes every path
+    /// count as changed.
+    #[serde(default)]
+    pub blobs: Vec<Option<String>>,
 }
 
 /// Per-stage times summed over an engine's processing rounds; for benches only.
@@ -827,14 +832,33 @@ impl Engine {
         if old.over || now.changed.len() > CHANGED_CAP {
             return rescan();
         }
+        // FEAT-124. A path in both sets with the same blob id is the same bytes the index was
+        // last brought to, so it needs no event (a plain folder lists every file as changed).
+        let unchanged: BTreeSet<String> = if old.blobs.len() == old.paths.len() {
+            let before: BTreeMap<&str, &Option<String>> = old
+                .paths
+                .iter()
+                .map(String::as_str)
+                .zip(old.blobs.iter())
+                .collect();
+            now.changed
+                .iter()
+                .filter(|(p, b)| before.get(p.as_str()).is_some_and(|o| *o == b))
+                .map(|(p, _)| p.as_str().to_string())
+                .collect()
+        } else {
+            BTreeSet::new()
+        };
         let mut paths: BTreeSet<String> = old.paths.into_iter().collect();
         paths.extend(now.changed.iter().map(|(p, _)| p.as_str().to_string()));
+        paths.retain(|p| !unchanged.contains(p));
         match (&recorded.commit, &now.position.commit) {
             (Some(a), Some(b)) if a != b => {
                 let root = self.roots[repo].as_std_path();
                 match crate::scan::changed_paths(root, &format!("{a}..{b}")) {
                     Ok(changes) => {
                         use crate::scan::PathChange as C;
+                        // The commits differ: every path they differ in is an event.
                         for c in changes {
                             match c {
                                 C::Added(p) | C::Modified(p) | C::Deleted(p) => {
@@ -957,6 +981,7 @@ impl Engine {
                     ChangedSet {
                         over: true,
                         paths: Vec::new(),
+                        blobs: Vec::new(),
                     }
                 } else {
                     ChangedSet {
@@ -966,6 +991,7 @@ impl Engine {
                             .iter()
                             .map(|(p, _)| p.as_str().to_string())
                             .collect(),
+                        blobs: s.changed.iter().map(|(_, b)| b.clone()).collect(),
                     }
                 };
                 let json =

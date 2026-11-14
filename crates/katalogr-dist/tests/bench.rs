@@ -480,7 +480,23 @@ mod bench {
                     EventKind::Changed,
                 ))
                 .unwrap();
-            wait_all(&e);
+            // The window ends at one fresh read of the edited symbol (R-13), not a whole-graph export.
+            let o = QueryOptions {
+                consistency: Consistency::WaitAll,
+                timeout: Duration::from_secs(3600),
+                scope: Scope::Project,
+            };
+            let a = e
+                .with_consistency(&o, |tx| katalogr_query::find(tx, &format!("edited_{n}")))
+                .unwrap();
+            assert!(!a.stale);
+            assert!(
+                a.value
+                    .unwrap()
+                    .iter()
+                    .any(|h| h.name.ends_with(&format!("edited_{n}"))),
+                "edited_{n} not found after the save"
+            );
             // The first run warms caches and is not counted.
             if n > 0 {
                 ms.push(t.elapsed().as_millis());
