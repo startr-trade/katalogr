@@ -99,7 +99,8 @@ fn quote_in_label_parses() {
 }
 
 /// FEAT-125: a narrow, deeply layered DAG (each node feeds the next three) has exponentially many
-/// paths; reachability once enumerated them all. Layout must finish in seconds, even unoptimised.
+/// paths; reachability once enumerated them all. Layout must finish in seconds, even unoptimised,
+/// on a loaded machine.
 #[cfg(test)]
 #[test]
 fn dense_graph_renders_quickly() {
@@ -136,5 +137,7 @@ fn dense_graph_renders_quickly() {
         g.edges.len()
     );
     assert!(svg.contains("<svg"));
-    assert!(took < std::time::Duration::from_secs(2), "took {took:?}");
+    // 1.4 s unloaded in debug; the bug this guards against ran 18 CPU minutes, so the bound
+    // only needs to be far below that, not tight. A loaded machine took 2.1 s (2026-11-14).
+    assert!(took < std::time::Duration::from_secs(30), "took {took:?}");
 }
