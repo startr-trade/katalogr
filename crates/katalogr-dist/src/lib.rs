@@ -1154,10 +1154,22 @@ impl Katalogr {
         let consistency = opts.consistency.unwrap_or(Consistency::WaitAll);
         let queued = events.len();
         let mut report = self.read(&engine, consistency, timeout, queued, warnings)?;
+        let drained_full = full && queued > 0 && report.pending == 0 && !report.stale;
+        drop(engine);
+        // The base follows the default branch's commit, not the disk (FEAT-043 R-1). It writes
+        // into the same cache, so it runs before the compaction below: a rewrite that came first
+        // left the base advance to regrow the file to several times its size (FEAT-123).
+        match self.advance_base(opts) {
+            Ok(adv) => {
+                report.queued += adv.queued;
+                report.warnings.extend(adv.warnings);
+            }
+            Err(e) => report.warnings.push(format!("base advance: {e}")),
+        }
         // FEAT-075 R-6: a full run that drained everything rewrites the cache sorted; any other
         // run does when the file has grown past the policy. Query processes never compact. The
         // engine is the selected context's own (a layer's file, never the base's).
-        let drained_full = full && queued > 0 && report.pending == 0 && !report.stale;
+        let engine = self.engine(Instant::now() + timeout)?;
         let due = drained_full
             || engine
                 .cache()
@@ -1176,16 +1188,6 @@ impl Katalogr {
                     .warnings
                     .push(format!("cache compaction skipped: {e}")),
             }
-        } else {
-            drop(engine);
-        }
-        // The base follows the default branch's commit, not the disk (FEAT-043 R-1).
-        match self.advance_base(opts) {
-            Ok(adv) => {
-                report.queued += adv.queued;
-                report.warnings.extend(adv.warnings);
-            }
-            Err(e) => report.warnings.push(format!("base advance: {e}")),
         }
         Ok(report)
     }
