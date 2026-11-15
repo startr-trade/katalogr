@@ -1,16 +1,23 @@
 //! Reading a checkout's position: `HEAD` plus the CD-2 hash of its uncommitted changes
 //! (FEAT-084; chain decision CD-2 of FEAT-043).
 //!
-//! The hash covers every path whose raw worktree bytes differ from its blob in the `HEAD` tree,
-//! plus every untracked path that is not ignored. Each contributes the line `<path>\0<oid>\n`,
-//! where `oid` is the raw-bytes git blob id or `-` for a deleted path. Lines are sorted by bytes
-//! and hashed with SHA-256. The index and file modes play no part.
+//! The hash covers every path whose worktree bytes, in their repository form, differ from its
+//! blob in the `HEAD` tree, plus every untracked path that is not ignored. Each contributes the
+//! line `<path>\0<oid>\n`, where `oid` is the git blob id of the repository-form bytes or `-` for
+//! a deleted path. Lines are sorted by bytes and hashed with SHA-256. The index and file modes
+//! play no part.
+//!
+//! The repository form (FEAT-141) is what `git add` would store: the to-git conversion of
+//! [`katalogr_store::repo_form::RepoForm`] (`core.autocrlf`, `core.eol`, the `text`, `eol` and
+//! `crlf` attributes). A file whose raw bytes already equal its blob is unchanged without being
+//! converted, so on a checkout with no conversion every id is the raw-bytes id, as before.
 
 use crate::scan::{ScanError, list_files};
 use gix::bstr::{BString, ByteSlice};
 use katalogr_model::RelPath;
 use katalogr_query::PositionRef;
 use katalogr_store::blob::git_blob_id;
+use katalogr_store::repo_form::{RepoForm, settings_key};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
@@ -20,7 +27,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct WorkingState {
     pub position: PositionRef,
-    /// Each uncommitted path with its raw-bytes blob id, or `None` when it is deleted. Sorted by
+    /// Each uncommitted path with its repository-form blob id, or `None` when it is deleted. Sorted by
     /// path. Paths that are not valid [`RelPath`]s count in the hash but are not listed.
     pub changed: Vec<(RelPath, Option<String>)>,
 }
@@ -36,20 +43,48 @@ fn diff_err(e: impl std::fmt::Display) -> ScanError {
     ScanError::Diff(e.to_string())
 }
 
-/// The raw bytes git would store for the path as a blob: the file's bytes, or a symbolic link's
-/// target. `None` when nothing regular is there (missing, a directory, or unreadable as a file).
-fn raw_bytes(root: &Path, rela: &[u8]) -> Option<Vec<u8>> {
+/// The raw bytes at the path: the file's bytes, or a symbolic link's target (with `true`).
+/// `None` when nothing regular is there (missing, a directory, or unreadable as a file).
+fn raw_bytes(root: &Path, rela: &[u8]) -> Option<(Vec<u8>, bool)> {
     let rela = gix::path::from_byte_slice(rela).ok()?;
     let full = root.join(rela);
     let meta = std::fs::symlink_metadata(&full).ok()?;
     if meta.file_type().is_symlink() {
         let target = std::fs::read_link(&full).ok()?;
-        return Some(gix::path::into_bstr(target).ok()?.as_bytes().to_vec());
+        return Some((gix::path::into_bstr(target).ok()?.as_bytes().to_vec(), true));
     }
     if meta.is_file() {
-        return std::fs::read(&full).ok();
+        return std::fs::read(&full).ok().map(|b| (b, false));
     }
     None
+}
+
+/// The blob id git would store for the path: a link's target as it is, a file's bytes in their
+/// repository form. `None` when nothing regular is there.
+fn repo_blob_id(form: &mut RepoForm<'_>, root: &Path, rela: &str) -> Option<String> {
+    let (bytes, link) = raw_bytes(root, rela.as_bytes())?;
+    Some(if link {
+        git_blob_id(&bytes)
+    } else {
+        form.blob_id(rela, &bytes)
+    })
+}
+
+/// The key the stat cache's ids depend on: the conversion settings and the stat of every tracked
+/// `.gitattributes` file.
+fn filter_key(
+    git: &gix::Repository,
+    root: &Path,
+    tracked: &BTreeMap<String, TrackedRow>,
+) -> String {
+    let mut key = settings_key(git);
+    for path in tracked.keys() {
+        if path == ".gitattributes" || path.ends_with("/.gitattributes") {
+            let s = stat_of(&root.join(path)).map(|s| (s.size, s.mtime_ns));
+            key.push_str(&format!("{path}={s:?}\n"));
+        }
+    }
+    key
 }
 
 /// The first, uncached implementation: hashes every tracked file and asks `gix` status for the
@@ -88,11 +123,18 @@ pub fn reference_position(
         Err(_) => None,
     };
 
+    let mut form = RepoForm::new(&git);
     let mut lines: BTreeMap<Vec<u8>, Option<String>> = BTreeMap::new();
     for (path, blob) in &head {
         match raw_bytes(root, path) {
-            Some(bytes) => {
-                let id = git_blob_id(&bytes);
+            Some((bytes, link)) => {
+                let mut id = git_blob_id(&bytes);
+                if &id != blob
+                    && !link
+                    && let Ok(rela) = std::str::from_utf8(path)
+                {
+                    id = form.blob_id(rela, &bytes);
+                }
                 if &id != blob {
                     lines.insert(path.clone(), Some(id));
                 }
@@ -133,8 +175,12 @@ pub fn reference_position(
         if head.contains_key(&path) {
             continue;
         }
-        if let Some(bytes) = raw_bytes(root, &path) {
-            lines.insert(path, Some(git_blob_id(&bytes)));
+        if let Some((bytes, link)) = raw_bytes(root, &path) {
+            let id = match std::str::from_utf8(&path) {
+                Ok(rela) if !link => form.blob_id(rela, &bytes),
+                _ => git_blob_id(&bytes),
+            };
+            lines.insert(path, Some(id));
         }
     }
 
@@ -429,12 +475,12 @@ fn now_ns() -> u64 {
         .map_or(0, |d| d.as_nanos() as u64)
 }
 
-/// The result of comparing one tracked path's raw bytes with its `HEAD` blob.
+/// The result of comparing one tracked path's repository-form bytes with its `HEAD` blob.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[doc(hidden)]
 pub enum Raw {
     Same,
-    /// Differs; the raw-bytes git blob id.
+    /// Differs; the repository-form git blob id.
     Differs(String),
     /// Nothing regular is there.
     Deleted,
@@ -490,6 +536,10 @@ pub struct StatCache {
     pub ignore: Vec<IgnoreInput>,
     pub tracked: BTreeMap<String, TrackedRow>,
     pub dirs: BTreeMap<String, DirRow>,
+    /// FEAT-141. The conversion settings the ids were computed under (see `filter_key`); a
+    /// different key means every file is read again. Absent in older files, which then rebuild.
+    #[serde(default)]
+    pub filter_key: String,
 }
 
 /// Loads the cache; anything unreadable, corrupt or of another version or root is `None`.
@@ -510,9 +560,10 @@ fn store_stat_cache(path: &Path, c: &StatCache) -> std::io::Result<()> {
     Ok(())
 }
 
-fn hash_file(root: &Path, rel: &str) -> Option<String> {
+/// The raw-bytes blob id of the path, and whether it is a symbolic link.
+fn hash_file(root: &Path, rel: &str) -> Option<(String, bool)> {
     HASHED.fetch_add(1, Ordering::Relaxed);
-    raw_bytes(root, rel.as_bytes()).map(|b| git_blob_id(&b))
+    raw_bytes(root, rel.as_bytes()).map(|(b, link)| (git_blob_id(&b), link))
 }
 
 /// Timings of the steps of one cached read, for the benches.
@@ -700,6 +751,16 @@ impl<'a> Reading<'a> {
             }
         }
 
+        // FEAT-141. Ids computed under other conversion settings are read again.
+        let key = filter_key(self.git, self.root, &tracked);
+        let key_same = self.old.as_ref().is_some_and(|c| c.filter_key == key);
+        if !key_same {
+            self.changed = true;
+            for row in tracked.values_mut() {
+                row.stat = None;
+            }
+        }
+
         // Step 2: stat every tracked path; read and hash only what changed or is racy.
         let t = std::time::Instant::now();
         let mut todo: Vec<(String, Option<Stat>)> = Vec::new();
@@ -739,16 +800,23 @@ impl<'a> Reading<'a> {
         {
             use rayon::prelude::*;
             let root = self.root;
-            let results: Vec<(String, Option<Stat>, Option<String>)> = todo
+            let results: Vec<(String, Option<Stat>, Option<(String, bool)>)> = todo
                 .into_par_iter()
                 .map(|(p, st)| {
                     let id = hash_file(root, &p);
                     (p, st, id)
                 })
                 .collect();
-            for (path, st, id) in results {
+            // A file whose raw bytes differ from its blob is compared in its repository form; the
+            // conversion needs the repository, which is not shared across threads.
+            let mut form = RepoForm::new(self.git);
+            for (path, st, raw) in results {
                 self.changed = true;
                 let row = tracked.get_mut(&path).expect("row");
+                let id = match raw {
+                    Some((id, false)) if id != row.blob => repo_blob_id(&mut form, root, &path),
+                    other => other.map(|(id, _)| id),
+                };
                 match id {
                     None => {
                         row.stat = None;
@@ -770,6 +838,7 @@ impl<'a> Reading<'a> {
         // Step 4: untracked files, through the directory table.
         let old = self.old.take();
         let mut walker = Walker::new(self.git, self.root, old.as_ref(), &tracked, old_written)?;
+        walker.rehash = !key_same;
         let t_walk = std::time::Instant::now();
         let hash_before = self.times.hash;
         let (dirs, ignore) = walker.run()?;
@@ -821,6 +890,7 @@ impl<'a> Reading<'a> {
                 ignore,
                 tracked,
                 dirs,
+                filter_key: key,
             };
             // A failed write only costs the next read its savings.
             let _ = store_stat_cache(p, &new);
@@ -846,6 +916,9 @@ struct Walker<'r> {
     dir_stat_time: std::time::Duration,
     hash_time: std::time::Duration,
     changed: bool,
+    /// Every untracked file is read again (the conversion settings changed).
+    rehash: bool,
+    form: RepoForm<'r>,
 }
 
 type WalkOut = (BTreeMap<String, DirRow>, Vec<IgnoreInput>);
@@ -881,6 +954,8 @@ impl<'r> Walker<'r> {
             dir_stat_time: Default::default(),
             hash_time: Default::default(),
             changed: false,
+            rehash: false,
+            form: RepoForm::new(git),
         })
     }
 
@@ -1061,12 +1136,14 @@ impl<'r> Walker<'r> {
                 self.changed = true;
                 continue;
             };
-            let fresh = !f.id.is_empty()
+            let fresh = !self.rehash
+                && !f.id.is_empty()
                 && f.stat == cur
                 && cur.mtime_ns.saturating_add(RACY_NS) < self.old_written;
             if !fresh {
                 let t = std::time::Instant::now();
-                let id = hash_file(self.root(), &rel);
+                HASHED.fetch_add(1, Ordering::Relaxed);
+                let id = repo_blob_id(&mut self.form, self.root, &rel);
                 self.hash_time += t.elapsed();
                 self.changed = true;
                 let Some(id) = id else { continue };
