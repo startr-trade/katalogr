@@ -198,7 +198,10 @@ mod tests {
     fn identity_without_conversion() {
         let d = repo(&[("core.autocrlf", "false")], None);
         assert_eq!(convert(&d, "a.txt", b"a\r\nb\r\n"), b"a\r\nb\r\n");
-        assert_eq!(RepoForm::identity().convert("a.txt", b"a\r\n"), &b"a\r\n"[..]);
+        assert_eq!(
+            RepoForm::identity().convert("a.txt", b"a\r\n"),
+            &b"a\r\n"[..]
+        );
     }
 
     /// FEAT-141. `core.autocrlf=true` and `* text=auto eol=crlf` turn CRLF into LF for text,

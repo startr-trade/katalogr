@@ -566,6 +566,9 @@ fn hash_file(root: &Path, rel: &str) -> Option<(String, bool)> {
     raw_bytes(root, rel.as_bytes()).map(|(b, link)| (git_blob_id(&b), link))
 }
 
+/// One tracked path after step 2's parallel read: its stat and [`hash_file`]'s result.
+type Hashed = (String, Option<Stat>, Option<(String, bool)>);
+
 /// Timings of the steps of one cached read, for the benches.
 #[doc(hidden)]
 #[derive(Clone, Copy, Debug, Default)]
@@ -800,7 +803,7 @@ impl<'a> Reading<'a> {
         {
             use rayon::prelude::*;
             let root = self.root;
-            let results: Vec<(String, Option<Stat>, Option<(String, bool)>)> = todo
+            let results: Vec<Hashed> = todo
                 .into_par_iter()
                 .map(|(p, st)| {
                     let id = hash_file(root, &p);
