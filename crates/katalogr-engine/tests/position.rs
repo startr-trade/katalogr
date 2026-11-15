@@ -238,14 +238,11 @@ mod position {
                 if p.is_dir() {
                     walk(&p, old);
                 }
-                std::fs::File::open(&p).unwrap().set_modified(old).unwrap();
+                crate::support::set_mtime(&p, old);
             }
         }
         walk(root, old);
-        std::fs::File::open(root)
-            .unwrap()
-            .set_modified(old)
-            .unwrap();
+        crate::support::set_mtime(root, old);
     }
 
     fn inc() -> Vec<String> {

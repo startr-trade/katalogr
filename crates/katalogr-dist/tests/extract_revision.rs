@@ -45,7 +45,12 @@ fn files(dir: &Utf8Path) -> Vec<(String, Vec<u8>)> {
     fn walk(base: &Utf8Path, dir: &Utf8Path, out: &mut Vec<(String, Vec<u8>)>) {
         for e in std::fs::read_dir(dir).unwrap().flatten() {
             let p = Utf8PathBuf::from_path_buf(e.path()).unwrap();
-            let rel = p.strip_prefix(base).unwrap().as_str().to_string();
+            // Repo-relative paths are '/'-separated whatever the system's separator: a
+            // backslash here would make the file unroutable and change the digest on Windows.
+            let rel = RelPath::from_path(p.strip_prefix(base).unwrap().as_std_path())
+                .unwrap()
+                .as_str()
+                .to_string();
             if rel == "expected.yaml"
                 || rel.starts_with(".katalogr-profiles")
                 || rel.starts_with("_profiles")

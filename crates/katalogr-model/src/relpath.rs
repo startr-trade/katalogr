@@ -37,6 +37,25 @@ impl RelPath {
         Ok(RelPath(s.to_string()))
     }
 
+    /// The repo-relative form of a relative filesystem path: its components joined with '/',
+    /// whatever the system's separator (on Windows `a\b` becomes `a/b`). A leading `.` is
+    /// dropped. Fails on an absolute path, a drive prefix, a `..` segment or a non-UTF-8
+    /// segment, and on anything [`RelPath::new`] rejects.
+    pub fn from_path(p: &std::path::Path) -> Result<RelPath, NameError> {
+        use std::path::Component;
+        let bad = |why: &str| NameError::BadPath(format!("{why}: {p:?}"));
+        let mut parts = Vec::new();
+        for c in p.components() {
+            match c {
+                Component::Normal(s) => parts.push(s.to_str().ok_or_else(|| bad("not UTF-8"))?),
+                Component::CurDir => {}
+                Component::ParentDir => return Err(bad("'..' segment")),
+                Component::RootDir | Component::Prefix(_) => return Err(bad("not relative")),
+            }
+        }
+        RelPath::new(&parts.join("/"))
+    }
+
     pub fn as_str(&self) -> &str {
         &self.0
     }
@@ -74,6 +93,33 @@ mod tests {
                 matches!(RelPath::new(bad), Err(NameError::BadPath(_))),
                 "{bad:?}"
             );
+        }
+    }
+
+    /// FEAT-082: a path built with the system separator becomes a '/'-separated `RelPath`.
+    #[test]
+    fn from_path_joins_with_slash() {
+        let p = std::path::Path::new("src").join("sub").join("a.rs");
+        assert_eq!(RelPath::from_path(&p).unwrap().as_str(), "src/sub/a.rs");
+        let p = std::path::Path::new(".").join("a").join("b");
+        assert_eq!(RelPath::from_path(&p).unwrap().as_str(), "a/b");
+        for bad in ["/a", "../a", "", "a/../b"] {
+            assert!(
+                RelPath::from_path(std::path::Path::new(bad)).is_err(),
+                "{bad:?}"
+            );
+        }
+    }
+
+    /// FEAT-082: on Windows a backslash is a separator; elsewhere it is part of a name, which a
+    /// `RelPath` cannot hold.
+    #[test]
+    fn from_path_backslash() {
+        let r = RelPath::from_path(std::path::Path::new("g0\\t0.tx"));
+        if cfg!(windows) {
+            assert_eq!(r.unwrap().as_str(), "g0/t0.tx");
+        } else {
+            assert!(matches!(r, Err(NameError::BadPath(_))));
         }
     }
 

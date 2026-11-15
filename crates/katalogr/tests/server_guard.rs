@@ -15,6 +15,7 @@ mod server_guard {
 
     static PID: AtomicU32 = AtomicU32::new(0);
 
+    #[cfg(unix)]
     fn alive(pid: u32) -> bool {
         Command::new("kill")
             .args(["-0", &pid.to_string()])
@@ -22,6 +23,18 @@ mod server_guard {
             .status()
             .unwrap()
             .success()
+    }
+
+    /// Windows has no `kill -0` (the `kill` on a runner's PATH is MSYS's, which takes MSYS
+    /// process ids, not Windows ones); `tasklist` lists the process while it exists.
+    #[cfg(windows)]
+    fn alive(pid: u32) -> bool {
+        let out = Command::new("tasklist")
+            .args(["/FI", &format!("PID eq {pid}"), "/NH", "/FO", "CSV"])
+            .stderr(Stdio::null())
+            .output()
+            .unwrap();
+        String::from_utf8_lossy(&out.stdout).contains(&format!("\"{pid}\""))
     }
 
     #[test]

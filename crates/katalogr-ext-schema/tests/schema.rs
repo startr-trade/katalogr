@@ -821,11 +821,13 @@ mod jsonschema {
                     walk(&p, base, c, out);
                     continue;
                 }
-                let rel = p.strip_prefix(base).unwrap().to_string_lossy().to_string();
+                // Repo-relative paths are '/'-separated whatever the system's separator.
+                let path =
+                    katalogr_model::RelPath::from_path(p.strip_prefix(base).unwrap()).unwrap();
+                let rel = path.as_str().to_string();
                 if rel.starts_with(".katalogr-profiles") {
                     continue;
                 }
-                let path = katalogr_model::RelPath::new(&rel).unwrap();
                 let engine = c.engine();
                 if engine.registry().for_path(&path).is_none() {
                     continue;
