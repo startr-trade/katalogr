@@ -206,7 +206,12 @@ pub fn seed_layer_with_repos(
         }
         tx.commit()?;
         drop(cache);
-        std::fs::File::open(&tmp)
+        // Opened for writing: Windows refuses `FlushFileBuffers` on a read-only handle ("Access is
+        // denied", os error 5), which failed every `index` of a checkout layer in the Windows CI job
+        // of 2026-11-15. Write access does not truncate, and Unix does not mind.
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(&tmp)
             .and_then(|f| f.sync_all())
             .map_err(|e| StoreError::io(&tmp, e))?;
         #[cfg(feature = "failpoints")]

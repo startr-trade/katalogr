@@ -40,10 +40,13 @@ jobs:
         run: |
           v="$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -n1)"
           sh scripts/release-notes-check.sh "v$v"
-      # FEAT-112: the workflow files themselves are linted.
-      - uses: taiki-e/install-action@ab49d3c64680143e184118bed66a46419fc15519 # v2.90.5
-        with:
-          tool: actionlint@1.7.12
+      # FEAT-112: the workflow files themselves are linted. actionlint is a Go tool: install-action
+      # has no manifest entry for 1.7.12 and its cargo-binstall fallback cannot install it, so it is
+      # built from its module, pinned by version and checksummed by the Go checksum database.
+      - name: install actionlint@v1.7.12
+        run: |
+          go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
       - name: actionlint
         run: actionlint -color
 
