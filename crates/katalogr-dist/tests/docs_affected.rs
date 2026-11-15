@@ -19,6 +19,10 @@ mod docs_affected {
                 "user.email=t@t",
                 "-c",
                 "commit.gpgsign=false",
+                // Git for Windows defaults to core.autocrlf=true: a checkout would rewrite the
+                // fixtures with CRLF, and the position (raw bytes) would read them as edited.
+                "-c",
+                "core.autocrlf=false",
             ])
             .args(args)
             .current_dir(dir)

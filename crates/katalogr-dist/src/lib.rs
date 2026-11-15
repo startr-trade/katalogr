@@ -2149,15 +2149,47 @@ pub(crate) fn unknown_root(repo: &str) -> DistError {
 
 fn rel_to_root(root: &Utf8Path, p: &str) -> Result<RelPath, DistError> {
     let given = Utf8Path::new(p);
-    let rel = if given.is_absolute() {
-        given
+    if given.is_absolute() {
+        // The stripped rest carries the system separator; a repo-relative path is '/'-separated.
+        let rest = given
             .strip_prefix(root)
-            .map_err(|_| DistError::usage(format!("{p}: not inside the repo root")))?
-            .as_str()
+            .map_err(|_| DistError::usage(format!("{p}: not inside the repo root")))?;
+        return RelPath::from_path(rest.as_std_path()).map_err(|e| DistError::usage(e.to_string()));
+    }
+    // On Windows a backslash is a separator, so `.\src\a.rs` names `src/a.rs`.
+    let p = if cfg!(windows) {
+        std::borrow::Cow::Owned(p.replace('\\', "/"))
     } else {
-        p.strip_prefix("./").unwrap_or(p)
+        std::borrow::Cow::Borrowed(p)
     };
+    let rel = p.strip_prefix("./").unwrap_or(&p);
     RelPath::new(rel).map_err(|e| DistError::usage(e.to_string()))
+}
+
+#[cfg(test)]
+mod rel_tests {
+    use camino::Utf8PathBuf;
+
+    /// FEAT-082: an absolute path under the root, joined with the system separator, names the
+    /// '/'-separated repo-relative path.
+    #[test]
+    fn absolute_path_becomes_slash_relative() {
+        let root =
+            Utf8PathBuf::from_path_buf(std::env::temp_dir().join("katalogr-rel-root")).unwrap();
+        let file = root.join("sub").join("a.rs");
+        let rel = super::rel_to_root(&root, file.as_str()).unwrap();
+        assert_eq!(rel.as_str(), "sub/a.rs");
+        assert_eq!(
+            super::rel_to_root(&root, "./sub/a.rs").unwrap().as_str(),
+            "sub/a.rs"
+        );
+        let back = super::rel_to_root(&root, ".\\sub\\a.rs");
+        if cfg!(windows) {
+            assert_eq!(back.unwrap().as_str(), "sub/a.rs");
+        } else {
+            assert!(back.is_err());
+        }
+    }
 }
 
 #[cfg(test)]

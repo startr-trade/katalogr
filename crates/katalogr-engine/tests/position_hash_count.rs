@@ -1,5 +1,7 @@
 //! FEAT-084 revision: counting hashes needs a process of its own, since the counter is global.
 
+mod support;
+
 mod position {
     use katalogr_engine::position::{hashed_files, read_position_cached};
     use std::path::Path;
@@ -37,14 +39,10 @@ mod position {
         // Everything is old enough for the cache to trust.
         let old = std::time::SystemTime::now() - std::time::Duration::from_secs(3600);
         for i in 0..30 {
-            let f = std::fs::File::open(r.join(format!("d{}/f{i}.txt", i % 3))).unwrap();
-            f.set_modified(old).unwrap();
+            crate::support::set_mtime(&r.join(format!("d{}/f{i}.txt", i % 3)), old);
         }
         for d in ["", "d0", "d1", "d2"] {
-            std::fs::File::open(r.join(d))
-                .unwrap()
-                .set_modified(old)
-                .unwrap();
+            crate::support::set_mtime(&r.join(d), old);
         }
         let cdir = tempfile::tempdir().unwrap();
         let cache = cdir.path().join("r.stat");

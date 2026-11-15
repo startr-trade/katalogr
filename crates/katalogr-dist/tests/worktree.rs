@@ -15,6 +15,10 @@ mod worktree {
                 "user.email=t@t",
                 "-c",
                 "commit.gpgsign=false",
+                // Git for Windows defaults to core.autocrlf=true: a checkout would rewrite the
+                // fixtures with CRLF, and the position (raw bytes) would read them as edited.
+                "-c",
+                "core.autocrlf=false",
             ])
             .args(args)
             .current_dir(dir)
@@ -37,7 +41,8 @@ mod worktree {
     /// A main checkout with `a.tx` committed and the marker untracked, plus a linked worktree.
     fn world() -> World {
         let tmp = tempfile::tempdir().unwrap();
-        let root = std::fs::canonicalize(tmp.path()).unwrap();
+        // Without Windows' verbatim prefix: git cannot create a worktree at `\\?\C:\...`.
+        let root = katalogr_store::canon::canonicalize(tmp.path()).unwrap();
         let main = root.join("app");
         let wt = root.join("app-wt");
         let kx = root.join("kx");

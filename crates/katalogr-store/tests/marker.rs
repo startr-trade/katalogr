@@ -7,8 +7,11 @@ mod marker {
     use katalogr_store::kindex::ProjectName;
     use katalogr_store::marker::{self, Marker, Overrides};
 
+    /// The canonical form without Windows' verbatim prefix, as the product resolves roots:
+    /// joining `../kx` onto a verbatim path collapses the `..`, so `main/../kx` and
+    /// `wt/../kx` would compare equal.
     fn utf8(p: std::path::PathBuf) -> Utf8PathBuf {
-        Utf8PathBuf::from_path_buf(std::fs::canonicalize(p).unwrap()).unwrap()
+        Utf8PathBuf::from_path_buf(katalogr_store::canon::canonicalize(&p).unwrap()).unwrap()
     }
 
     /// `<tmp>/main` with `.git/` and `.git/worktrees/wt/commondir`; `<tmp>/wt` with a `.git`

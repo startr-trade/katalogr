@@ -855,8 +855,9 @@ pub fn extracted_texts(e: &Engine, work: &Utf8Path) -> BTreeMap<String, Vec<u8>>
             if p.is_dir() {
                 walk(root, &p, e, out);
             } else {
-                let rel = p.strip_prefix(root).unwrap().to_string();
-                let r = RelPath::new(&rel).unwrap();
+                // Repo-relative paths are '/'-separated whatever the system's separator.
+                let r = RelPath::from_path(p.strip_prefix(root).unwrap().as_std_path()).unwrap();
+                let rel = r.as_str().to_string();
                 if e.registry().for_path(&r).is_some() {
                     out.insert(rel.clone(), extract_text(e, "r", &rel));
                 }
@@ -943,4 +944,24 @@ pub fn fresh_index(tmp: &Utf8Path, name: &str, work: &Utf8Path) -> (Utf8PathBuf,
 
 pub fn file_event(path: &str) -> NewEvent {
     NewEvent::file("r", &RelPath::new(path).unwrap(), EventKind::Changed)
+}
+
+/// Sets the modification time of a file or a directory. Windows changes it only through a
+/// handle with write-attribute access (a read-only `File::open` answers "Access is denied"),
+/// and opens a directory only with `FILE_FLAG_BACKUP_SEMANTICS`.
+pub fn set_mtime(p: &std::path::Path, t: std::time::SystemTime) {
+    #[cfg(windows)]
+    let f = {
+        use std::os::windows::fs::OpenOptionsExt;
+        const FILE_WRITE_ATTRIBUTES: u32 = 0x0100;
+        const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
+        std::fs::OpenOptions::new()
+            .access_mode(FILE_WRITE_ATTRIBUTES)
+            .custom_flags(FILE_FLAG_BACKUP_SEMANTICS)
+            .open(p)
+    };
+    #[cfg(not(windows))]
+    let f = std::fs::File::open(p);
+    f.and_then(|f| f.set_modified(t))
+        .unwrap_or_else(|e| panic!("set mtime of {}: {e}", p.display()));
 }

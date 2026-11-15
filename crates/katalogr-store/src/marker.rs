@@ -158,12 +158,17 @@ pub fn main_checkout_of(start: &Utf8Path) -> Option<(Utf8PathBuf, Utf8PathBuf)> 
         } else {
             gitdir.join(common)
         };
-        let common = Utf8PathBuf::from_path_buf(std::fs::canonicalize(&common).ok()?).ok()?;
+        // Without Windows' verbatim prefix: a verbatim root takes `/`-joined repo-relative
+        // paths literally, and `join("..")` on it collapses instead of appending.
+        let common =
+            Utf8PathBuf::from_path_buf(crate::canon::canonicalize(common.as_std_path()).ok()?)
+                .ok()?;
         if common.file_name() != Some(".git") {
             return None; // a bare common directory has no main checkout
         }
         let main = common.parent()?.to_owned();
-        let worktree = Utf8PathBuf::from_path_buf(std::fs::canonicalize(dir).ok()?).ok()?;
+        let worktree =
+            Utf8PathBuf::from_path_buf(crate::canon::canonicalize(dir.as_std_path()).ok()?).ok()?;
         return Some((worktree, main));
     }
     None

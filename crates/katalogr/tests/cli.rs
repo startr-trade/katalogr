@@ -286,7 +286,11 @@ mod cli {
                 if p.is_dir() {
                     walk(root, &p, out);
                 } else {
-                    let rel = p.strip_prefix(root).unwrap().to_string_lossy().to_string();
+                    // '/'-separated, so the key also names the file in a symbol id.
+                    let rel = katalogr_model::RelPath::from_path(p.strip_prefix(root).unwrap())
+                        .unwrap()
+                        .as_str()
+                        .to_string();
                     out.insert(rel, std::fs::read(&p).unwrap());
                 }
             }
