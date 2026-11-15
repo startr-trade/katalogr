@@ -260,8 +260,27 @@ fn run(cli: &Cli) -> Result<ExitCode, DistError> {
     }
 }
 
+/// The stack the CLI runs on. The dispatch in `run` is one `match` over every command, and a
+/// debug build keeps each arm's locals in the same frame, so the frame outgrows the 1 MiB main
+/// thread Windows gives a process (exit `0xC00000FD`, `STATUS_STACK_OVERFLOW`, seen on every
+/// spawned `katalogr` in the Windows CI job of 2026-11-15). Spawned threads already get
+/// `RUST_MIN_STACK` (64 MiB, `.cargo/config.toml`); the main thread does not read it, so the CLI
+/// moves its work onto a thread with the same stack on every platform.
+const MAIN_STACK_BYTES: usize = 64 << 20;
+
 fn main() {
-    let cli = Cli::parse_from(cmd::render::hoist_globals(std::env::args_os().collect()));
-    let code = run(&cli).unwrap_or_else(|e| ExitCode::from_error(&e));
-    std::process::exit(code.code());
+    let worker = std::thread::Builder::new()
+        .name("katalogr-main".into())
+        .stack_size(MAIN_STACK_BYTES)
+        .spawn(|| {
+            let cli = Cli::parse_from(cmd::render::hoist_globals(std::env::args_os().collect()));
+            run(&cli).unwrap_or_else(|e| ExitCode::from_error(&e))
+        })
+        .expect("spawn the katalogr main thread");
+    let code = match worker.join() {
+        Ok(code) => code.code(),
+        // A panic on the worker has already printed its message; keep the process's panic exit code.
+        Err(_) => 101,
+    };
+    std::process::exit(code);
 }
