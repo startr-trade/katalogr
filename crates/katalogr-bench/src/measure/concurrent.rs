@@ -68,7 +68,12 @@ fn worker(
     ws_root: &str,
 ) {
     let mut i = id;
-    while !stop.load(Ordering::Relaxed) {
+    // Every worker answers at least one query, even when the index finished before the worker
+    // started (a fast index on a slow runner published its first round and exited while the
+    // threads were being spawned, so the loop ran zero times: Windows CI 2026-11-15).
+    let mut first = true;
+    while first || !stop.load(Ordering::Relaxed) {
+        first = false;
         let op = &ops[i % ops.len()];
         i += 1;
         let args = op.args();
