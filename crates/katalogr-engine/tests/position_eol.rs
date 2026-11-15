@@ -4,7 +4,9 @@
 //! the same on every OS.
 
 mod position_eol {
-    use katalogr_engine::position::{read_position, read_position_cached, reference_position};
+    use katalogr_engine::position::{
+        load_stat_cache, read_position, read_position_cached, reference_position,
+    };
     use katalogr_engine::scan::changed_hunks;
     use katalogr_store::blob::git_blob_id;
     use std::path::Path;
@@ -267,6 +269,82 @@ mod position_eol {
                 ("a.txt", git_blob_id(b"one\r\nmore\r\n")),
                 ("b.txt", git_blob_id(b"b\r\n")),
             ]
+        );
+    }
+
+    /// Sets the file's mtime an hour back, so a stat cache written now trusts it.
+    fn age(p: &Path) {
+        let old = std::time::SystemTime::now() - std::time::Duration::from_secs(3600);
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(p)
+            .unwrap()
+            .set_modified(old)
+            .unwrap();
+    }
+
+    /// FEAT-141 regression (the Windows `cache_equals_full_hash` failure): under `core.autocrlf`
+    /// a CRLF file's repository form depends on the index (git's `text=auto` rule keeps CRLF when
+    /// the index blob already has it), so staging alone, with the file, attributes and config
+    /// untouched, must re-read a cached conversion. The git that stages ignores the repo's
+    /// `core.autocrlf` (as a Windows runner's system config is read by gix only), so the CRLF
+    /// bytes are staged as they are.
+    #[test]
+    fn staging_crlf_file_rereads_cached_conversion() {
+        let dir = tempfile::tempdir().unwrap();
+        let r = dir.path();
+        git(r, &["init", "-q"]);
+        for (k, v) in [
+            ("user.name", "Test"),
+            ("user.email", "test@example.com"),
+            ("commit.gpgsign", "false"),
+            ("core.autocrlf", "true"),
+        ] {
+            git(r, &["config", k, v]);
+        }
+        put(r, "a.txt", b"one\n");
+        put(r, "b.txt", b"lf only\n");
+        git(r, &["add", "."]);
+        git(r, &["commit", "-q", "-m", "c1"]);
+        let cache = tempfile::tempdir().unwrap();
+        let file = cache.path().join("r.stat");
+        let canon = std::fs::canonicalize(r).unwrap().display().to_string();
+        let cached = || {
+            read_position_cached("r", r, &inc(), &[], Some(&file))
+                .unwrap()
+                .position
+        };
+        let reference = || reference_position("r", r, &inc(), &[]).unwrap().position;
+
+        // An LF checkout never depends on the index: staging alone keeps the cache.
+        put(r, "b.txt", b"lf edit\n");
+        age(&r.join("b.txt"));
+        assert_eq!(cached(), reference());
+        let c = load_stat_cache(&file, &canon).expect("cache written");
+        assert_eq!(c.index_key, None, "LF files never consult the index");
+
+        // The CRLF working file converts to the committed LF blob: clean apart from b.txt.
+        put(r, "a.txt", b"one\r\n");
+        age(&r.join("a.txt"));
+        let before = reference();
+        assert_eq!(cached(), before, "cold");
+        assert_eq!(cached(), before, "warm");
+        assert!(
+            load_stat_cache(&file, &canon).unwrap().index_key.is_some(),
+            "the CRLF conversion consulted the index"
+        );
+
+        // Staged with its CRLF: the index blob now has CRLF, so the file is no longer
+        // normalised and a.txt is dirty, although nothing in the work tree changed.
+        git(r, &["-c", "core.autocrlf=false", "add", "a.txt"]);
+        let after = reference();
+        assert_ne!(after, before, "the index rule changes the form");
+        assert_eq!(cached(), after, "cached after staging");
+        assert_eq!(cached(), after, "cached again");
+        assert_eq!(
+            read_position("r", r, &inc(), &[]).unwrap().position,
+            after,
+            "uncached"
         );
     }
 }
