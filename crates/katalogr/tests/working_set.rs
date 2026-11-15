@@ -47,10 +47,6 @@ mod working_set {
                 "commit.gpgsign=false",
                 "-c",
                 "init.defaultBranch=main",
-                // Git for Windows defaults to core.autocrlf=true: a checkout would rewrite the
-                // fixtures with CRLF, and the position (raw bytes) would read them as edited.
-                "-c",
-                "core.autocrlf=false",
             ])
             .args(args)
             .output()
@@ -407,5 +403,52 @@ mod working_set {
         std::fs::write(f.code.join("b.tx"), "sym fn twin\nsym fn other\n").unwrap();
         let b = json(&f.code, &["search", "twin", "--json"]);
         assert_ne!(id(&a), id(&b));
+    }
+
+    /// Removes every `.tx` file and checks the tree out again, so git writes them with the
+    /// line endings the repository's config and attributes ask for.
+    fn checkout_again(code: &Path) {
+        for e in std::fs::read_dir(code).unwrap().flatten() {
+            let p = e.path();
+            if p.extension().is_some_and(|x| x == "tx") || p.ends_with(".gitattributes") {
+                std::fs::remove_file(p).unwrap();
+            }
+        }
+        git(code, &["checkout", "--", "."]);
+        let a = std::fs::read(code.join("a.tx")).unwrap();
+        assert!(a.windows(2).any(|w| w == b"\r\n"), "a.tx has CRLF");
+    }
+
+    /// FEAT-141 acceptance: a checkout whose files git wrote with CRLF (`core.autocrlf=true`, or
+    /// `.gitattributes` `* text=auto eol=crlf`) has the same working-set tiers as the LF
+    /// checkout: nothing reads as dirty, and the branch tier is unchanged.
+    #[test]
+    fn crlf_checkout_has_lf_tiers() {
+        for attributes in [false, true] {
+            let f = fixture(false);
+            if attributes {
+                std::fs::write(f.code.join(".gitattributes"), "* text=auto eol=crlf\n").unwrap();
+                git(&f.code, &["add", ".gitattributes"]);
+                git(&f.code, &["commit", "-q", "-m", "attributes"]);
+            }
+            git(&f.code, &["checkout", "-q", "-b", "feat/topic"]);
+            std::fs::write(f.code.join("b.tx"), "sym fn twin\nsym fn on_branch\n").unwrap();
+            git(&f.code, &["commit", "-q", "-am", "work on the branch"]);
+            ok(&f.code, &["index", "--full"]);
+            let lf = json(&f.code, &["search", "twin", "--json"]);
+            assert_eq!(lf["working_set"]["branch"], 1, "{lf}");
+            if !attributes {
+                git(&f.code, &["config", "core.autocrlf", "true"]);
+            }
+            checkout_again(&f.code);
+            let crlf = json(&f.code, &["search", "twin", "--json"]);
+            assert_eq!(crlf["working_set"], lf["working_set"], "{crlf}");
+            assert_eq!(crlf["working_set"]["dirty"], 0, "{crlf}");
+            assert_eq!(paths(&crlf), paths(&lf));
+            // A real edit still reads as dirty.
+            std::fs::write(f.code.join("c.tx"), "sym fn twin\r\nsym fn extra\r\n").unwrap();
+            let edited = json(&f.code, &["search", "twin", "--json"]);
+            assert_eq!(edited["working_set"]["dirty"], 1, "{edited}");
+        }
     }
 }

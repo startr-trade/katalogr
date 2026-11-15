@@ -442,8 +442,8 @@ impl ProjectDir {
     }
 
     /// Compares the files people write (`config.yaml`, `format.json`, `profiles/`, `eval/`,
-    /// `audit/`) with the blob in HEAD's tree at the same path (`git_blob_id` of the file bytes
-    /// against the tree entry id). Lists are sorted paths relative to the project directory.
+    /// `audit/`) with the blob in HEAD's tree at the same path (the git blob id of the file's
+    /// bytes in their repository form, [`crate::repo_form::RepoForm`], against the tree entry id). Lists are sorted paths relative to the project directory.
     /// Writes nothing.
     pub fn git_state(&self) -> Result<GitState, StoreError> {
         let git = |e: &dyn std::fmt::Display| StoreError::Git(e.to_string());
@@ -480,11 +480,17 @@ impl ProjectDir {
         }
         on_disk.sort();
         let (mut modified, mut added) = (Vec::new(), Vec::new());
+        let mut form = crate::repo_form::RepoForm::new(&repo);
         for rel in on_disk {
             let file = self.root.join(&rel);
             let bytes = std::fs::read(&file).map_err(|e| StoreError::io(&file, e))?;
-            match in_head.remove(&rel) {
-                Some(id) if id == crate::blob::git_blob_id(&bytes) => {}
+            let held = in_head.remove(&rel);
+            let same = |id: &str, form: &mut crate::repo_form::RepoForm<'_>| {
+                id == crate::blob::git_blob_id(&bytes)
+                    || id == form.blob_id(&format!("projects/{project}/{rel}"), &bytes)
+            };
+            match held {
+                Some(id) if same(&id, &mut form) => {}
                 Some(_) => modified.push(rel),
                 None => added.push(rel),
             }

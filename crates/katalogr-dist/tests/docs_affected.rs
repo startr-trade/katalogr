@@ -19,10 +19,6 @@ mod docs_affected {
                 "user.email=t@t",
                 "-c",
                 "commit.gpgsign=false",
-                // Git for Windows defaults to core.autocrlf=true: a checkout would rewrite the
-                // fixtures with CRLF, and the position (raw bytes) would read them as edited.
-                "-c",
-                "core.autocrlf=false",
             ])
             .args(args)
             .current_dir(dir)
@@ -208,5 +204,37 @@ mod docs_affected {
         assert_eq!(a, b);
         assert_eq!(ra.view_id, rb.view_id);
         assert!(ra.view_id.is_some());
+    }
+
+    /// FEAT-141 acceptance: a checkout whose files git wrote with CRLF (`core.autocrlf=true`, or
+    /// `.gitattributes` `* text=auto eol=crlf`) has no change against `HEAD`, so no document is
+    /// affected; a real edit still affects the linked document.
+    #[test]
+    fn crlf_checkout_affects_nothing() {
+        for attributes in [false, true] {
+            let w = world("main", true);
+            if attributes {
+                std::fs::write(w.app.join(".gitattributes"), "* text=auto eol=crlf\n").unwrap();
+                git(&w.app, &["add", ".gitattributes"]);
+                git(&w.app, &["commit", "-q", "-m", "attributes"]);
+            } else {
+                git(&w.app, &["config", "core.autocrlf", "true"]);
+            }
+            for f in ["code.tx", "doc.tx", ".gitattributes"] {
+                let _ = std::fs::remove_file(w.app.join(f));
+            }
+            git(&w.app, &["checkout", "--", "."]);
+            let code = std::fs::read_to_string(w.app.join("code.tx")).unwrap();
+            assert_eq!(code, CODE.replace('\n', "\r\n"), "checked out with CRLF");
+            let k = open(&w);
+            let (d, _) = found(&k, Some("HEAD"), &Options::default()).unwrap();
+            assert_eq!(d.changed_files, 0, "attributes {attributes}: {d:?}");
+            assert!(d.docs.is_empty(), "{d:?}");
+            touch(&w.app, "code.tx", "sym fn A", "sym  fn A");
+            reindex(&k);
+            let (d, _) = found(&k, Some("HEAD"), &Options::default()).unwrap();
+            assert_eq!(d.changed_files, 1, "attributes {attributes}: {d:?}");
+            assert_eq!(d.docs.len(), 1, "{d:?}");
+        }
     }
 }

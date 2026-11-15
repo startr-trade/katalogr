@@ -157,7 +157,9 @@ pub struct FileChange {
 
 /// Files changed from revision `from` to revision `to`, with the changed line ranges of each
 /// (histogram diff, as `history` does). A `to` of `None` reads the working tree, so uncommitted
-/// changes of tracked files count. Rename tracking is off; output is sorted by path.
+/// changes of tracked files count; a working file is compared in its repository form
+/// ([`katalogr_store::repo_form::RepoForm`], FEAT-141), so line endings git would normalise are
+/// no change. Rename tracking is off; output is sorted by path.
 pub fn changed_hunks(
     repo_root: &std::path::Path,
     from: &str,
@@ -176,13 +178,14 @@ pub fn changed_hunks(
     if to.is_none() {
         paths.extend(dirty_paths(repo_root)?);
     }
+    let mut form = katalogr_store::repo_form::RepoForm::new(&repo);
     let mut out = Vec::new();
     for path in paths {
         let old = blob_at(&from_tree, &path)?;
         let new = match to {
             Some(_) => blob_at(&to_tree, &path)?,
             None => match std::fs::read(repo_root.join(&path)) {
-                Ok(b) => Some(b),
+                Ok(b) => Some(form.convert(&path, &b).into_owned()),
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
                 Err(e) => {
                     return Err(ScanError::Io {

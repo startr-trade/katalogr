@@ -18,6 +18,7 @@ pub mod kindex;
 pub mod marker;
 mod postings;
 pub mod rank;
+pub mod repo_form;
 pub mod shard;
 pub mod snapshot;
 
