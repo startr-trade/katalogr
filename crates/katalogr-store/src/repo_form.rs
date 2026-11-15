@@ -31,6 +31,7 @@ struct Inner {
 pub struct RepoForm<'r> {
     repo: Option<&'r gix::Repository>,
     inner: Option<Option<Inner>>,
+    used_index: bool,
 }
 
 impl<'r> RepoForm<'r> {
@@ -39,6 +40,7 @@ impl<'r> RepoForm<'r> {
         RepoForm {
             repo: Some(repo),
             inner: None,
+            used_index: false,
         }
     }
 
@@ -47,6 +49,7 @@ impl<'r> RepoForm<'r> {
         RepoForm {
             repo: None,
             inner: Some(None),
+            used_index: false,
         }
     }
 
@@ -60,14 +63,22 @@ impl<'r> RepoForm<'r> {
     /// '/'-separated) whose working-tree content is `bytes`. Borrowed when nothing changes; the
     /// raw bytes when the conversion fails. Never call it for a symbolic link's target.
     pub fn convert<'a>(&mut self, rela: &str, bytes: &'a [u8]) -> Cow<'a, [u8]> {
+        let (form, used_index) = self.convert_noting_index(rela, bytes);
+        self.used_index |= used_index;
+        form
+    }
+
+    /// [`RepoForm::convert`], and whether this conversion consulted the index.
+    fn convert_noting_index<'a>(&mut self, rela: &str, bytes: &'a [u8]) -> (Cow<'a, [u8]>, bool) {
         let Some((repo, inner)) = self.inner() else {
-            return Cow::Borrowed(bytes);
+            return (Cow::Borrowed(bytes), false);
         };
         let path = std::path::Path::new(rela);
         let Ok(entry) = inner.stack.at_path(path, None, &repo.objects) else {
-            return Cow::Borrowed(bytes);
+            return (Cow::Borrowed(bytes), false);
         };
         let index = &inner.index;
+        let mut used_index = false;
         let out = inner.pipeline.convert_to_git(
             bytes,
             path,
@@ -76,6 +87,7 @@ impl<'r> RepoForm<'r> {
             },
             &mut |buf| {
                 // `text=auto`: a file whose index blob already has CRLF is not normalised.
+                used_index = true;
                 let Some(e) = index.entry_by_path(rela.into()) else {
                     return Ok(None);
                 };
@@ -89,11 +101,21 @@ impl<'r> RepoForm<'r> {
                     .map(|_| ()))
             },
         );
-        match out {
+        let form = match out {
             Ok(ToGitOutcome::Buffer(b)) => Cow::Owned(b.to_vec()),
             // `Unchanged`, a driver process (never configured here), or a failure: raw bytes.
             _ => Cow::Borrowed(bytes),
-        }
+        };
+        (form, used_index)
+    }
+
+    /// Whether any conversion so far consulted the index. Git's `text=auto` rule (also what
+    /// `core.autocrlf` applies to files with no `text` attribute) keeps CRLF in a file whose index
+    /// blob already has CRLF, so such a file's repository form depends on the index, and changes
+    /// when only the index does (`git add`). It is consulted only for a text file with CRLF under
+    /// an automatic text decision; never for an LF file or with no conversion configured.
+    pub fn used_index(&self) -> bool {
+        self.used_index
     }
 
     /// The git blob id of [`RepoForm::convert`]'s output.
@@ -221,6 +243,28 @@ mod tests {
         let off = repo(&[("core.autocrlf", "true")], Some("*.bat -text\n"));
         assert_eq!(convert(&off, "run.bat", b"a\r\n"), b"a\r\n");
         assert_eq!(convert(&off, "run.txt", b"a\r\n"), b"a\n");
+    }
+
+    /// FEAT-141. The index is consulted only for a CRLF text file under an automatic text
+    /// decision: never for an LF file, a binary, or with no conversion configured.
+    #[test]
+    fn index_consulted_only_for_auto_crlf_text() {
+        let used = |d: &tempfile::TempDir, rela: &str, bytes: &[u8]| {
+            let git = gix::open(d.path()).unwrap();
+            let mut form = RepoForm::new(&git);
+            form.convert(rela, bytes);
+            form.used_index()
+        };
+        let auto = repo(&[("core.autocrlf", "true")], None);
+        assert!(used(&auto, "a.txt", b"a\r\n"));
+        assert!(!used(&auto, "a.txt", b"a\n"));
+        assert!(!used(&auto, "bin.dat", b"\0a\r\n"));
+        let off = repo(&[("core.autocrlf", "false")], None);
+        assert!(!used(&off, "a.txt", b"a\r\n"));
+        // An explicit `text` attribute converts whatever the index holds.
+        let text = repo(&[("core.autocrlf", "true")], Some("* text\n"));
+        assert!(!used(&text, "a.txt", b"a\r\n"));
+        assert!(!RepoForm::identity().used_index());
     }
 
     /// FEAT-141. A driver filter is never run: its path is converted as if it had none.

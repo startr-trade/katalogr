@@ -87,6 +87,26 @@ fn filter_key(
     key
 }
 
+/// The index file as a conversion that consulted it saw it: its size, mtime and trailing
+/// checksum. The checksum catches a rewrite the stat misses; the stat covers `index.skipHash`,
+/// whose checksum is all zeros.
+fn index_fingerprint(git: &gix::Repository) -> String {
+    use std::io::{Read, Seek, SeekFrom};
+    let path = git.index_path();
+    let stat = stat_of(&path).map(|s| (s.size, s.mtime_ns));
+    let len = git.object_hash().len_in_bytes();
+    let mut sum = vec![0u8; len];
+    let read = std::fs::File::open(&path).and_then(|mut f| {
+        f.seek(SeekFrom::End(-(len as i64)))?;
+        f.read_exact(&mut sum)
+    });
+    let sum: String = match read {
+        Ok(()) => sum.iter().map(|b| format!("{b:02x}")).collect(),
+        Err(_) => String::new(),
+    };
+    format!("{stat:?} {sum}")
+}
+
 /// The first, uncached implementation: hashes every tracked file and asks `gix` status for the
 /// untracked ones. Kept as the reference the cached reader is tested against.
 #[doc(hidden)]
@@ -540,6 +560,12 @@ pub struct StatCache {
     /// different key means every file is read again. Absent in older files, which then rebuild.
     #[serde(default)]
     pub filter_key: String,
+    /// FEAT-141. Set when some id in this cache was computed by a conversion that consulted the
+    /// index (git's `text=auto` CRLF rule, see `RepoForm::used_index`): the index fingerprint it
+    /// was computed under (see `index_fingerprint`). A different fingerprint means every file is
+    /// read again. `None`, as for every LF checkout, means staging alone never re-reads.
+    #[serde(default)]
+    pub index_key: Option<String>,
 }
 
 /// Loads the cache; anything unreadable, corrupt or of another version or root is `None`.
@@ -754,9 +780,15 @@ impl<'a> Reading<'a> {
             }
         }
 
-        // FEAT-141. Ids computed under other conversion settings are read again.
+        // FEAT-141. Ids computed under other conversion settings are read again, and so are
+        // ids that depended on an index that has since changed. The fingerprint is taken before
+        // any conversion loads the index, so a later change is seen by the next read.
         let key = filter_key(self.git, self.root, &tracked);
-        let key_same = self.old.as_ref().is_some_and(|c| c.filter_key == key);
+        let index_key = index_fingerprint(self.git);
+        let key_same = self.old.as_ref().is_some_and(|c| {
+            c.filter_key == key && c.index_key.as_ref().is_none_or(|k| *k == index_key)
+        });
+        let mut used_index = key_same && self.old.as_ref().is_some_and(|c| c.index_key.is_some());
         if !key_same {
             self.changed = true;
             for row in tracked.values_mut() {
@@ -835,6 +867,7 @@ impl<'a> Reading<'a> {
                     }
                 }
             }
+            used_index |= form.used_index();
         }
         self.times.hash += t.elapsed();
 
@@ -854,6 +887,7 @@ impl<'a> Reading<'a> {
         if walker.changed {
             self.changed = true;
         }
+        used_index |= walker.form.used_index();
 
         // Step 5: the dirty hash from the rows.
         let mut lines: BTreeMap<Vec<u8>, Option<String>> = BTreeMap::new();
@@ -894,6 +928,7 @@ impl<'a> Reading<'a> {
                 tracked,
                 dirs,
                 filter_key: key,
+                index_key: used_index.then_some(index_key),
             };
             // A failed write only costs the next read its savings.
             let _ = store_stat_cache(p, &new);

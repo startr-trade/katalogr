@@ -261,8 +261,31 @@ mod position {
 
     #[test]
     fn cache_equals_full_hash() {
+        cache_equals_full_hash_with(false);
+    }
+
+    /// FEAT-141. The same random steps with `core.autocrlf=true`, as Git for Windows sets it:
+    /// the conversion is active and a CRLF file's form depends on the index.
+    #[test]
+    fn cache_equals_full_hash_autocrlf() {
+        cache_equals_full_hash_with(true);
+    }
+
+    fn cache_equals_full_hash_with(autocrlf: bool) {
         let d = repo();
         let r = d.path();
+        // katalogr reads `core.autocrlf=true`; the git that stages and commits does not, as on a
+        // Windows runner whose system config only gix reads. A CRLF file is then staged as CRLF,
+        // and git's index rule (`text=auto`: a CRLF blob in the index is not normalised) changes
+        // the file's repository form on staging alone.
+        let mut add_all: Vec<&str> = vec!["add", "-A"];
+        let mut commit: Vec<&str> = vec!["commit", "-q", "--allow-empty", "-m", "step"];
+        if autocrlf {
+            git(r, &["config", "core.autocrlf", "true"]);
+            for args in [&mut add_all, &mut commit] {
+                args.splice(0..0, ["-c", "core.autocrlf=false"]);
+            }
+        }
         let cdir = tempfile::tempdir().unwrap();
         let cache = cdir.path().join("p/r.stat");
         let mut seed = 0x9e37_79b9_7f4a_7c15u64;
@@ -311,12 +334,12 @@ mod position {
                     "nested ignore"
                 }
                 7 => {
-                    git(r, &["add", "-A"]);
+                    git(r, &add_all);
                     "stage"
                 }
                 _ => {
-                    git(r, &["add", "-A"]);
-                    git(r, &["commit", "-q", "--allow-empty", "-m", "step"]);
+                    git(r, &add_all);
+                    git(r, &commit);
                     "commit"
                 }
             };
